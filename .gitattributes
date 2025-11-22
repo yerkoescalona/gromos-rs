@@ -1,0 +1,47 @@
+# Git attributes for consistent line endings and diffs
+
+# Auto detect text files and normalize line endings to LF
+* text=auto eol=lf
+
+# Source code
+*.rs text diff=rust
+*.py text diff=python
+*.toml text
+*.yaml text
+*.yml text
+*.json text
+*.md text
+*.txt text
+
+# Scripts
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Config files
+Makefile text
+.editorconfig text
+.gitignore text
+.gitattributes text
+
+# Documentation
+*.markdown text
+*.mdown text
+*.mkd text
+
+# Binary files
+*.so binary
+*.dylib binary
+*.dll binary
+*.exe binary
+*.whl binary
+*.tar.gz binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Cargo lock files should not be merged
+Cargo.lock merge=binary

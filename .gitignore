@@ -1,0 +1,69 @@
+# Project-specific
+tutorial.zip
+gromos_tutorial/
+gromos_tutorial_livecoms/
+
+# Legacy C++ code (archived)
+md++/
+gromosPlusPlus/
+
+# Rust build artifacts
+target/
+Cargo.lock
+*.profraw
+*.profdata
+
+# Python build artifacts
+*.pyc
+__pycache__/
+*.so
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.venv/
+venv/
+*.pyo
+*.pyd
+.coverage
+htmlcov/
+.ruff_cache/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.vim
+.vimrc
+*.sublime-*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+*.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# CI/CD artifacts
+.coverage.*
+coverage.xml
+test-results/
+

@@ -1,0 +1,78 @@
+# Typos configuration for spell checking
+# Inspired by Polars
+
+[default]
+extend-ignore-re = [
+    # Ignore URLs and paths
+    "https?://[^\\s]+",
+    "file://[^\\s]+",
+    "/[^\\s]*",
+    # Ignore git hashes
+    "[0-9a-f]{7,40}",
+    # Ignore scientific notation
+    "\\d+\\.\\d+e[+-]?\\d+",
+]
+
+[files]
+extend-exclude = [
+    "*.lock",
+    "*.min.js",
+    "*.min.css",
+    "target/",
+    ".git/",
+    ".venv/",
+    "__pycache__/",
+    "node_modules/",
+    "dist/",
+    "build/",
+    "*.so",
+    "*.dylib",
+    "*.dll",
+    "*.whl",
+]
+
+[default.extend-words]
+# Scientific/Technical terms
+GROMOS = "GROMOS"
+gromos = "gromos"
+gromosXX = "gromosXX"
+md = "md"
+MD = "MD"
+REMD = "REMD"
+CUDA = "CUDA"
+PME = "PME"
+FFTW = "FFTW"
+SIMD = "SIMD"
+MPI = "MPI"
+
+# Molecular dynamics terms
+nonbonded = "nonbonded"
+pairlist = "pairlist"
+timestep = "timestep"
+nanosecond = "nanosecond"
+angstrom = "angstrom"
+solvent = "solvent"
+solute = "solute"
+
+# Programming terms
+rustfmt = "rustfmt"
+clippy = "clippy"
+maturin = "maturin"
+pyo3 = "pyo3"
+numpy = "numpy"
+
+# Author names and institutions
+Gunsteren = "Gunsteren"
+Hünenberger = "Hünenberger"
+Riniker = "Riniker"
+Oostenbrink = "Oostenbrink"
+ETH = "ETH"
+
+[type.rust]
+extend-glob = ["*.rs"]
+
+[type.python]
+extend-glob = ["*.py", "*.pyx", "*.pyi"]
+
+[type.markdown]
+extend-glob = ["*.md"]
