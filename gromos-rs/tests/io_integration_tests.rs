@@ -9,8 +9,7 @@
 
 use gromos_rs::configuration::{Box as SimBox, Configuration};
 use gromos_rs::io::{
-    energy, force, imd, trajectory, EnergyFrame, EnergyWriter, ForceWriter, ImdParameters,
-    TrajectoryWriter,
+    imd, EnergyFrame, EnergyWriter, ForceWriter, ImdParameters, TrajectoryWriter,
 };
 use gromos_rs::math::Vec3;
 use std::fs;
@@ -232,14 +231,14 @@ fn test_force_writer_integration() {
         Vec3::new(7.0, 8.0, 9.0),
     ];
 
-    let mut writer = ForceWriter::new(test_file, "Integration test forces")
+    let mut writer = ForceWriter::new(test_file, "Integration test forces", false)
         .expect("Failed to create force writer");
 
     // Write multiple force frames
     for step in 0..3 {
         let time = step as f64 * 0.002;
         writer
-            .write_frame(step, time, &forces)
+            .write_frame(step, time, &forces, None)
             .expect("Failed to write force frame");
     }
 
@@ -268,21 +267,25 @@ fn test_force_writer_detailed() {
     let nonbonded = vec![Vec3::new(0.0, 1.0, 0.0); n_atoms];
     let constraint = vec![Vec3::new(0.0, 0.0, 1.0); n_atoms];
 
+    // Calculate total forces (bonded + nonbonded)
+    let mut total_forces = Vec::with_capacity(n_atoms);
+    for i in 0..n_atoms {
+        total_forces.push(bonded[i] + nonbonded[i]);
+    }
+
     let mut writer =
-        ForceWriter::new(test_file, "Detailed force test").expect("Failed to create force writer");
+        ForceWriter::new(test_file, "Detailed force test", true).expect("Failed to create force writer");
 
     writer
-        .write_frame_detailed(0, 0.0, &bonded, &nonbonded, &constraint)
+        .write_frame(0, 0.0, &total_forces, Some(&constraint))
         .expect("Failed to write detailed frame");
 
     writer.flush().expect("Failed to flush");
 
     // Verify detailed breakdown
     let content = fs::read_to_string(test_file).expect("Failed to read force file");
-    assert!(content.contains("FORCE"));
-    assert!(content.contains("FORCE_BONDED"));
-    assert!(content.contains("FORCE_NONBONDED"));
-    assert!(content.contains("FORCE_CONSTRAINT"));
+    assert!(content.contains("FREEFORCERED"));
+    assert!(content.contains("CONSFORCERED"));
 
     // Cleanup
     fs::remove_file(test_file).ok();
