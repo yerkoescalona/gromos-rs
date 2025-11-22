@@ -1,0 +1,8 @@
+# Clippy configuration for gromosXX
+# Allows scientific naming conventions like kT, deltaG, pH, etc.
+
+# Scientific functions often need many parameters (kT, pH, coordinates, etc.)
+too-many-arguments-threshold = 8
+
+# Allow larger type complexity for scientific data structures
+type-complexity-threshold = 500

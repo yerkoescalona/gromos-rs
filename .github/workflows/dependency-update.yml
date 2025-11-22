@@ -1,0 +1,105 @@
+name: Dependency Update
+
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  update-rust-dependencies:
+    name: Update Rust Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+
+      - name: Update dependencies
+        run: |
+          cargo update
+          cargo upgrade --workspace --incompatible
+
+      - name: Run tests
+        run: |
+          cargo test --workspace --all-features
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: Update Rust dependencies'
+          title: 'chore: Update Rust dependencies'
+          body: |
+            Automated dependency updates for Rust crates.
+
+            Please review the changes and ensure all tests pass.
+          branch: chore/update-rust-deps
+          delete-branch: true
+
+  update-python-dependencies:
+    name: Update Python Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install pip-tools
+
+      - name: Update Python dependencies
+        working-directory: py-gromos
+        run: |
+          # This would update requirements if you have a requirements.in file
+          # pip-compile --upgrade requirements.in
+          echo "Python dependencies are in pyproject.toml"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: Update Python dependencies'
+          title: 'chore: Update Python dependencies'
+          body: |
+            Automated dependency updates for Python packages.
+
+            Please review the changes and ensure all tests pass.
+          branch: chore/update-python-deps
+          delete-branch: true
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit
+        run: cargo audit
+
+      - name: Create issue if vulnerabilities found
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Security vulnerabilities found in dependencies',
+              body: 'The weekly security audit found vulnerabilities. Please check the [Actions run](' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ') for details.',
+              labels: ['security', 'dependencies']
+            })

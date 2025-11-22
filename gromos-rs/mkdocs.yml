@@ -1,0 +1,177 @@
+site_name: GROMOS-RS Documentation
+site_description: High-performance Rust implementation of GROMOS molecular dynamics
+site_author: GROMOS Development Team
+site_url: https://gromos-rs.readthedocs.io
+
+repo_name: yerkoescalona/gromos-rs
+repo_url: https://github.com/yerkoescalona/gromos-rs
+edit_uri: edit/main/gromos-rs/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search:
+      lang: en
+  - mkdocstrings:
+      enabled: true
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_object_full_path: false
+            show_category_heading: true
+            show_if_no_docstring: true
+            inherited_members: true
+            members_order: source
+            separate_signature: true
+            docstring_style: google
+            merge_init_into_class: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables
+  - footnotes
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yerkoescalona/gromos-rs
+    - icon: fontawesome/solid/globe
+      link: https://www.gromos.net
+
+nav:
+  - Home:
+    - Overview: index.md
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quick-start.md
+    - Changelog: changelog.md
+
+  - User Guide:
+    - Introduction: user-guide/introduction.md
+    - Running Simulations: user-guide/running-simulations.md
+    - Input Files: user-guide/input-files.md
+    - Output Files: user-guide/output-files.md
+    - Free Energy Calculations: user-guide/free-energy.md
+    - Enhanced Sampling: user-guide/enhanced-sampling.md
+    - Analysis Tools: user-guide/analysis.md
+
+  - Architecture:
+    - Overview: architecture/overview.md
+    - MD++ Architecture: architecture/mdplusplus.md
+    - GROMOS++ Architecture: architecture/gromosplusplus.md
+    - GROMOS-RS Architecture: architecture/gromos-rs.md
+    - Comparison: architecture/comparison.md
+    - Gap Analysis: architecture/gaps.md
+    - Unification Effort: architecture/unification.md
+
+  - Reference:
+    - Integration Algorithms: reference/integrators.md
+    - Force Field: reference/force-field.md
+    - Constraints: reference/constraints.md
+    - Thermostats & Barostats: reference/thermostats-barostats.md
+    - Advanced Sampling: reference/advanced-sampling.md
+    - File Formats: reference/file-formats.md
+    - Command Line Tools: reference/cli-tools.md
+
+  - API Reference:
+    - Overview: api/overview.md
+    - Rust API (rustdoc): api/rust.md
+    - Core Modules: api/core.md
+    - Integration: api/integration.md
+    - Interactions: api/interactions.md
+    - I/O: api/io.md
+
+  - Development:
+    - Contributing: development/contributing.md
+    - Coding Style Guide: development/coding-style.md
+    - Naming Conventions: development/naming-conventions.md
+    - CI/CD & Testing: development/ci-cd.md
+    - Pre-commit Hooks: development/pre-commit.md
+    - Developer Tools: development/developer-tools.md
+    - Rust for GROMOS-RS: development/rust-for-gromos-rs.md
+    - Tool Development Guide: development/tool-development-guide.md
+    - Building from Source: development/building.md
+    - Testing: development/testing.md
+    - Performance: development/performance.md
+    - Roadmap: development/roadmap.md
+
+  - Migration:
+    - From MD++: migration/from-mdplusplus.md
+    - From GROMOS++: migration/from-gromosplusplus.md
+    - Compatibility: migration/compatibility.md

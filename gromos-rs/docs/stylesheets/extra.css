@@ -1,0 +1,65 @@
+/* Custom styles for GROMOS-RS documentation */
+
+:root {
+    --md-primary-fg-color: #4a9eff;
+    --md-accent-fg-color: #4a9eff;
+}
+
+/* Code blocks */
+.highlight {
+    border-radius: 4px;
+}
+
+/* Admonitions */
+.admonition {
+    border-radius: 4px;
+}
+
+/* Tables */
+table {
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+/* Navigation tabs */
+.md-tabs {
+    background-color: var(--md-primary-fg-color);
+}
+
+/* Custom classes for feature status */
+.status-complete {
+    color: #10b981;
+    font-weight: bold;
+}
+
+.status-partial {
+    color: #f59e0b;
+    font-weight: bold;
+}
+
+.status-missing {
+    color: #ef4444;
+    font-weight: bold;
+}
+
+/* Performance comparison tables */
+.performance-table {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem;
+    border-radius: 8px;
+}
+
+/* Feature coverage cards */
+.feature-card {
+    border: 1px solid var(--md-default-fg-color--lightest);
+    border-radius: 8px;
+    padding: 1rem;
+    margin: 1rem 0;
+    transition: transform 0.2s;
+}
+
+.feature-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}

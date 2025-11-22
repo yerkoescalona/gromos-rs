@@ -1,0 +1,30 @@
+# rustfmt configuration for gromosXX
+# Inspired by Polars
+
+# Import organization
+group_imports = "StdExternalCrate"
+imports_granularity = "Module"
+
+# Code style
+match_block_trailing_comma = true
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# Line width and wrapping
+max_width = 100
+comment_width = 100
+wrap_comments = true
+
+# Function formatting
+fn_single_line = false
+where_single_line = false
+
+# Control flow
+control_brace_style = "AlwaysSameLine"
+
+# Misc
+edition = "2021"
+newline_style = "Unix"
+remove_nested_parens = true
+reorder_imports = true
+reorder_modules = true
