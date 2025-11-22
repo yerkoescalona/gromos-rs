@@ -67,3 +67,10 @@ Desktop.ini
 coverage.xml
 test-results/
 
+# claude
+.claude
+
+# GROMOS
+gromosXX
+gromosPlsPls
+
