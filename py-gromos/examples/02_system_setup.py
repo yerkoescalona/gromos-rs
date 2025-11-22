@@ -48,7 +48,7 @@ print("\n--- Initialize Velocities ---")
 # Simplified: should be mass-weighted for real simulation
 temperature = 300.0  # K
 kb = 0.00831446261815324  # kJ/(mol·K)
-vel_scale = np.sqrt(kb * temperature)  # Simplified, needs mass
+vel_scale = np.float32(np.sqrt(kb * temperature))  # Simplified, needs mass
 velocities = np.random.randn(num_atoms, 3).astype(np.float32) * vel_scale
 state.set_velocities(velocities)
 print(f"Set velocities at T={temperature}K")
