@@ -145,7 +145,7 @@ from .gromos import (
     convert_trajectory,
     convert_energy,
     # Perturbed nonbonded interactions
-    perturbed_lj_crf_interaction as py_perturbed_lj_crf_interaction,
+    py_perturbed_lj_crf_interaction,
 )
 
 # Import MD simulation runners

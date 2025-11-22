@@ -2,17 +2,17 @@
 
 Python bindings for GROMOS-RS molecular dynamics simulations.
 
-!!! warning "Educational Project - Not Functional"
-    **py-gromos cannot currently be built** because gromos-rs has ~140+ compilation errors. This is an educational project demonstrating Rust-Python integration with PyO3.
+⚠️ **Early Development** - This is an educational/research project in early alpha stage.
 
-## Quick Links
+## Features
 
-- **[Documentation](docs/index.md)**: Complete documentation
-- **[Installation](docs/user-guide/installation.md)**: Setup instructions (when functional)
-- **[Quick Start](docs/user-guide/quick-start.md)**: Getting started guide
-- **[API Reference](docs/api/reference.md)**: Complete API documentation
-- **[Python Bindings Tutorial](docs/development/python-bindings-tutorial.md)**: Learn how PyO3 bindings work
-- **[Contributing](docs/development/contributing.md)**: How to contribute
+- Zero-copy NumPy integration for molecular coordinates
+- SIMD-accelerated vector mathematics
+- Pythonic API for MD simulations
+- Advanced sampling methods (EDS, GaMD, REMD)
+- Trajectory analysis tools
+- Integration with GROMOS force field
+- Built on PyO3 for performance
 
 ## Architecture
 
@@ -26,61 +26,130 @@ Python API (py-gromos)
    Rust Core (gromos-rs)
 ```
 
-## Current Status
+## Installation
 
-py-gromos is **not functional** because:
-- gromos-rs has ~140+ compilation errors
-- Bindings cannot be built
-- No code can run
+### Prerequisites
 
-This is an educational project for learning:
-- Rust-Python integration with PyO3
-- Zero-copy NumPy integration
-- Building scientific Python packages backed by Rust
+- Python 3.8+
+- Rust 1.70+ (install from https://rustup.rs)
 
-## Installation (Aspirational)
+### Build
 
 ```bash
-# When functional:
 pip install maturin
 maturin develop --release
 ```
 
-## Example API Design
+## Quick Start
+
+### Basic Vector Operations
 
 ```python
 import gromos
 import numpy as np
 
-# API design (not functional yet)
-v = gromos.Vec3(1.0, 2.0, 3.0)
-print(v.length())
+# Create vectors
+v1 = gromos.Vec3(1.0, 0.0, 0.0)
+v2 = gromos.Vec3(0.0, 1.0, 0.0)
+
+# Vector operations
+v3 = v1 + v2
+dot_product = v1.dot(v2)
+cross_product = v1.cross(v2)
+length = v1.length()
+
+print(f"v1 + v2 = {v3}")
+print(f"v1 · v2 = {dot_product}")
+print(f"v1 × v2 = {cross_product}")
+print(f"|v1| = {length}")
+```
+
+### Running MD Simulations
+
+```python
+from gromos import run_standard_md
+
+# Run a standard MD simulation
+run_standard_md(
+    topology="system.top",
+    coordinates="initial.cnf",
+    parameters="md.imd",
+    output_prefix="production"
+)
+```
+
+### Working with Trajectories
+
+```python
+import gromos
+
+# Load trajectory
+traj = gromos.load_trajectory("trajectory.trc")
+
+# Compute RMSD
+rmsd = traj.rmsd(reference_frame=0)
+
+# Analyze geometry
+bonds = traj.compute_bond_lengths(atom_pairs=[(0, 1), (1, 2)])
+angles = traj.compute_angles(atom_triples=[(0, 1, 2)])
+```
+
+## Examples
+
+Comprehensive examples are available in the `examples/` directory:
+
+- `01_basic_vectors.py` - Vector math and operations
+- `02_system_setup.py` - Creating molecular systems
+- `03_integrators.py` - Time integration methods
+- `06_run_standard_md.py` - Running MD simulations
+- `07_run_gamd.py` - Gaussian accelerated MD
+- `08_run_eds.py` - Enveloping distribution sampling
+- `09_run_remd.py` - Replica exchange MD
+- `11_trajectory_analysis.py` - Analyzing trajectories
+- `16_free_energy_perturbation.py` - FEP calculations
+
+Run examples:
+
+```bash
+python examples/01_basic_vectors.py
 ```
 
 ## Documentation
 
 Full documentation is available in the `docs/` directory:
 
-- **User Guide**: Installation, quick start, learning resources
-- **API Reference**: Complete API documentation
-- **Development**: Contributing and building guides
+- **[User Guide](docs/user-guide/)**: Installation, quick start, tutorials
+- **[API Reference](docs/api/)**: Complete API documentation
+- **[Development](docs/development/)**: Contributing and building guides
 
-Build docs locally:
+Build documentation locally:
 
 ```bash
-pip install mkdocs mkdocs-material
+pip install mkdocs mkdocs-material pymdown-extensions
 mkdocs serve
+```
+
+Then open http://localhost:8000 in your browser.
+
+## Testing
+
+Run the test suite:
+
+```bash
+# Run Python tests
+pytest tests/
+
+# Run Rust tests
+cargo test
 ```
 
 ## License
 
-GPL-2.0 - Same as GROMOS
-
-Copyright (C) 2025 Yerko Escalona
+GPL-2.0 - See LICENSE file for details
 
 ## References
 
-- **GROMOS**: [www.gromos.net](https://www.gromos.net)
-- **Polars**: [github.com/pola-rs/polars](https://github.com/pola-rs/polars)
-- **PyO3**: [pyo3.rs](https://pyo3.rs)
-- **Maturin**: [github.com/PyO3/maturin](https://github.com/PyO3/maturin)
+- **GROMOS**: https://www.gromos.net
+- **gromos-rs**: Core Rust implementation (see `../gromos-rs`)
+- **PyO3**: https://pyo3.rs
+- **Maturin**: https://github.com/PyO3/maturin
