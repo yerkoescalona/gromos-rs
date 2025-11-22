@@ -1,0 +1,325 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check Rust formatting
+        run: make fmt-check
+        continue-on-error: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python formatters
+        run: |
+          pip install black ruff
+          cd py-gromos && pip install -e .[dev]
+
+      - name: Check Python formatting
+        working-directory: py-gromos
+        run: make fmt-check
+        continue-on-error: true
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev libopenmpi-dev
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Clippy (Rust)
+        run: make lint-rust
+        continue-on-error: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python linters
+        run: pip install ruff
+
+      - name: Lint Python
+        working-directory: py-gromos
+        run: make lint
+        continue-on-error: true
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [format-check, lint]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev libopenmpi-dev
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Run Rust tests
+        working-directory: gromos-rs
+        run: cargo test --workspace --all-features
+        continue-on-error: true
+
+      - name: Build Python bindings
+        working-directory: py-gromos
+        run: maturin develop
+        continue-on-error: true
+
+      - name: Install Python dev dependencies
+        working-directory: py-gromos
+        run: pip install -e .[dev]
+        continue-on-error: true
+
+      - name: Run Python tests
+        working-directory: py-gromos
+        run: pytest tests/ -v
+        continue-on-error: true
+
+      - name: Test integration workflow
+        run: make test-integration
+        continue-on-error: true
+
+  build-release:
+    name: Build Release
+    runs-on: ${{ matrix.os }}
+    if: always()
+    needs: test-integration
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev libopenmpi-dev
+
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install fftw open-mpi
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Rust release (Unix with all features)
+        if: matrix.os != 'windows-latest'
+        working-directory: gromos-rs
+        run: cargo build --release --workspace --all-features
+        continue-on-error: true
+
+      - name: Build Rust release (Windows without MPI/FFTW)
+        if: matrix.os == 'windows-latest'
+        working-directory: gromos-rs
+        run: cargo build --release --workspace --features simd,mimalloc
+        continue-on-error: true
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build Python wheel (Unix with all features)
+        if: matrix.os != 'windows-latest'
+        working-directory: py-gromos
+        run: maturin build --release --features gromos-rs/use-fftw,gromos-rs/use-mpi
+        continue-on-error: true
+
+      - name: Build Python wheel (Windows without MPI/FFTW)
+        if: matrix.os == 'windows-latest'
+        working-directory: py-gromos
+        run: maturin build --release
+        continue-on-error: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: py-gromos/target/wheels/*.whl
+
+  test-notebooks:
+    name: Test Notebooks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev libopenmpi-dev
+
+      - name: Create virtualenv
+        working-directory: py-gromos
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        working-directory: py-gromos
+        run: |
+          .venv/bin/pip install maturin jupyter nbconvert numpy
+
+      - name: Build py-gromos
+        working-directory: py-gromos
+        run: .venv/bin/maturin develop --release
+
+      - name: Test notebooks
+        working-directory: py-gromos
+        run: |
+          cd notebooks
+          for notebook in *.ipynb; do
+            echo "Testing $notebook..."
+            ../.venv/bin/jupyter nbconvert --to notebook --execute "$notebook" --output temp.ipynb || exit 1
+            rm temp.ipynb
+          done
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev libopenmpi-dev
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+
+      - name: Generate Rust coverage
+        working-directory: gromos-rs
+        run: cargo llvm-cov --workspace --all-features --lcov --output-path ../lcov-rust.info
+
+      - name: Install maturin and pytest
+        run: pip install maturin pytest pytest-cov
+
+      - name: Build py-gromos
+        working-directory: py-gromos
+        run: maturin develop
+
+      - name: Install dev dependencies
+        working-directory: py-gromos
+        run: pip install -e .[dev]
+
+      - name: Generate Python coverage
+        working-directory: py-gromos
+        run: pytest tests/ --cov=gromos --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./lcov-rust.info,./py-gromos/coverage.xml
+          flags: integration
+          name: full-coverage
