@@ -1,0 +1,41 @@
+[package]
+name = "gromos-forces"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Force calculations for GROMOS-RS molecular dynamics"
+
+[dependencies]
+gromos-core = { workspace = true }
+
+# SIMD and math
+glam = { workspace = true }
+wide = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# FFT for PME electrostatics
+rustfft = { workspace = true }
+fftw = { workspace = true, optional = true }
+num-complex = { workspace = true }
+
+# MPI for distributed PME
+mpi = { workspace = true, optional = true }
+
+# Serialization
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+use-fftw = ["fftw"]
+use-mpi = ["mpi"]
+mpi = ["dep:mpi"]
+gpu = []
+simd = []
+serde = ["dep:serde", "gromos-core/serde"]
+
+[dev-dependencies]
+gromos-io = { workspace = true }
+approx = "0.5"

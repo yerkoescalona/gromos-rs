@@ -1,0 +1,24 @@
+[package]
+name = "gromos-analysis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Analysis tools for GROMOS-RS molecular dynamics"
+
+[dependencies]
+gromos-core = { workspace = true }
+gromos-io = { workspace = true }
+
+# SIMD and math
+glam = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# Serialization
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde", "gromos-core/serde"]

@@ -1,0 +1,28 @@
+[package]
+name = "pyo3-gromos"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Low-level PyO3 bindings for GROMOS-RS molecular dynamics engine"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Core Rust library
+gromos-core = { workspace = true }
+gromos-forces = { workspace = true }
+gromos-integrators = { workspace = true }
+gromos-io = { workspace = true }
+gromos-analysis = { workspace = true }
+
+# Python bindings
+pyo3 = { workspace = true }
+numpy = { workspace = true }
+
+# SIMD and math
+glam = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }

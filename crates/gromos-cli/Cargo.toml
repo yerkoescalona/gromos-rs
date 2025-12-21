@@ -1,0 +1,58 @@
+[package]
+name = "gromos-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Unified CLI for GROMOS-RS molecular dynamics tools"
+
+[[bin]]
+name = "gromos"
+path = "src/main.rs"
+
+[dependencies]
+gromos = { workspace = true }
+gromos-core = { workspace = true }
+gromos-forces = { workspace = true }
+gromos-integrators = { workspace = true }
+gromos-io = { workspace = true }
+gromos-analysis = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# Random number generation
+rand = { workspace = true }
+rand_distr = { workspace = true }
+
+# MPI support (optional)
+mpi = { workspace = true, optional = true }
+
+# CUDA support (optional)
+cudarc = { workspace = true, optional = true }
+
+[features]
+default = ["core-tools"]
+
+# Tool categories for conditional compilation
+core-tools = ["cmd-md", "cmd-minimize", "cmd-rdf", "cmd-rmsd"]
+analysis = ["core-tools", "cmd-hbond", "cmd-gyrate", "cmd-msd"]
+full = ["analysis", "cmd-trjconv", "cmd-editconf"]
+
+# MPI features
+use-mpi = ["mpi", "gromos-forces/use-mpi"]
+use-cuda = ["cudarc"]
+
+# Individual command features
+cmd-md = []
+cmd-minimize = []
+cmd-rdf = []
+cmd-rmsd = []
+cmd-hbond = []
+cmd-gyrate = []
+cmd-msd = []
+cmd-trjconv = []
+cmd-editconf = []
