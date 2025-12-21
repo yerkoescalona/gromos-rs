@@ -1,35 +1,128 @@
 [workspace]
+resolver = "2"
 members = [
-    "gromos-rs",
+    "crates/*",
     "py-gromos",
 ]
-resolver = "2"
+# Exclude py-gromos from default cargo build (Polars pattern)
+# This allows pure-Rust development without maturin/Python dependencies
+default-members = [
+    "crates/*",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 authors = ["GROMOS Developers"]
 license = "GPL-2.0"
+repository = "https://github.com/gromos/gromos-rs"
+rust-version = "1.75"
 
 [workspace.dependencies]
-# Core Rust library
-gromos-rs = { path = "gromos-rs" }
+# ============================================================
+# Internal crates
+# ============================================================
+gromos-core = { path = "crates/gromos-core" }
+gromos-forces = { path = "crates/gromos-forces" }
+gromos-integrators = { path = "crates/gromos-integrators" }
+gromos-io = { path = "crates/gromos-io" }
+gromos-analysis = { path = "crates/gromos-analysis" }
+gromos-cli = { path = "crates/gromos-cli" }
+# Facade crate that re-exports everything
+gromos = { path = "crates/gromos" }
+# PyO3 bindings (low-level)
+pyo3-gromos = { path = "crates/pyo3-gromos" }
 
+# ============================================================
 # SIMD and math
+# ============================================================
 glam = { version = "0.24", features = ["bytemuck"] }
 wide = "0.7"
+nalgebra = "0.33"
 
+# ============================================================
 # Parallelism
+# ============================================================
 rayon = "1.8"
 crossbeam = "0.8"
+mpi = "0.8"
 
+# ============================================================
 # Python bindings
-pyo3 = { version = "0.21", features = ["extension-module", "abi3-py38"] }
+# ============================================================
+pyo3 = { version = "0.21", features = ["extension-module", "abi3-py312"] }
 numpy = "0.21"
 
+# ============================================================
+# Serialization
+# ============================================================
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# ============================================================
+# CLI
+# ============================================================
+clap = { version = "4.5", features = ["derive"] }
+
+# ============================================================
+# FFT for PME electrostatics
+# ============================================================
+rustfft = "6.2"
+fftw = "0.8"
+num-complex = "0.4"
+
+# ============================================================
 # Random number generation
+# ============================================================
 rand = "0.8"
 rand_distr = "0.4"
 
-# Complex numbers for FFT
-num-complex = "0.4"
+# ============================================================
+# I/O and file formats
+# ============================================================
+byteorder = "1.5"
+chrono = "0.4"
+
+# ============================================================
+# Allocators
+# ============================================================
+mimalloc = "0.1"
+
+# ============================================================
+# CUDA for GPU acceleration
+# ============================================================
+cudarc = { version = "0.11", features = ["f16", "cuda-12000"] }
+
+# ============================================================
+# Interop
+# ============================================================
+libc = "0.2"
+
+# ============================================================
+# Testing
+# ============================================================
+criterion = { version = "0.5", features = ["html_reports"] }
+approx = "0.5"
+
+# ============================================================
+# Build profiles
+# ============================================================
+
+[profile.dev]
+debug = 1                        # Line tables only (faster than full debug)
+incremental = true
+
+[profile.dev.build-override]
+opt-level = 3                    # Optimize proc-macros (syn, quote)
+
+[profile.release]
+opt-level = 3
+lto = "thin"                     # Balance: good optimization, reasonable compile
+codegen-units = 1                # Best runtime performance
+strip = "symbols"
+panic = "abort"
+
+[profile.ci]
+inherits = "dev"
+incremental = false              # Disable for CI (better caching)
+debug = 0

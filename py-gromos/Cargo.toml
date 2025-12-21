@@ -11,23 +11,21 @@ name = "gromos"
 crate-type = ["cdylib"]
 
 [dependencies]
-# Core Rust library
-gromos-rs = { workspace = true }
+# PyO3 bindings crate
+pyo3-gromos = { workspace = true }
+
+# Core Rust library (facade crate)
+gromos = { workspace = true }
 
 # Python bindings
 pyo3 = { workspace = true, features = ["extension-module", "abi3-py312"] }
 numpy = { workspace = true }
 
-# SIMD and math (re-export from gromos-rs)
+# SIMD and math
 glam = { workspace = true }
 
 # Parallelism
 rayon = { workspace = true }
-
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
 
 [build-dependencies]
 pyo3-build-config = "0.21"
