@@ -1,0 +1,32 @@
+[package]
+name = "gromos"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "GROMOS-RS molecular dynamics engine - facade crate"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+# Re-export all sub-crates
+gromos-core = { workspace = true }
+gromos-forces = { workspace = true }
+gromos-integrators = { workspace = true }
+gromos-io = { workspace = true }
+gromos-analysis = { workspace = true }
+
+# Optional features passed through
+mpi = { workspace = true, optional = true }
+cudarc = { workspace = true, optional = true }
+mimalloc = { workspace = true, optional = true }
+
+[features]
+default = ["simd"]
+simd = []
+use-fftw = ["gromos-forces/use-fftw"]
+use-mpi = ["mpi", "gromos-forces/use-mpi"]
+use-cuda = ["cudarc"]
+mimalloc = ["dep:mimalloc"]
+serde = ["gromos-core/serde", "gromos-forces/serde", "gromos-io/serde"]
