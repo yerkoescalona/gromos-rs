@@ -105,9 +105,9 @@ fn write_g96_from_pdb(path: &str, title: &str, pdb: &PDBStructure) -> Result<(),
                 residue.name,
                 atom.name,
                 atom_counter,
-                atom.coord.x as f64,
-                atom.coord.y as f64,
-                atom.coord.z as f64
+                atom.coord.x,
+                atom.coord.y,
+                atom.coord.z
             )
             .map_err(|e| format!("Write error: {}", e))?;
             atom_counter += 1;

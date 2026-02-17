@@ -136,7 +136,7 @@ impl StandardPairlistAlgorithm {
             for j in (i + 1)..n_chargegroups {
                 // Calculate distance between chargegroup centers
                 let r = periodicity.nearest_image(cg_centers[i], cg_centers[j]);
-                let dist2 = r.length_squared() as f64;
+                let dist2 = r.length_squared();
 
                 // Check if within cutoff
                 let in_short = dist2 < cutoff2_short;
@@ -187,7 +187,7 @@ impl StandardPairlistAlgorithm {
 
                 // Calculate distance
                 let r = periodicity.nearest_image(conf.current().pos[i], conf.current().pos[j]);
-                let dist2 = r.length_squared() as f64;
+                let dist2 = r.length_squared();
 
                 // Add to appropriate pairlist
                 if dist2 < cutoff2_short {
@@ -206,7 +206,7 @@ impl StandardPairlistAlgorithm {
 ///
 /// Uses spatial decomposition into grid cells for O(N) scaling instead of O(N²).
 pub struct GridCellPairlistAlgorithm {
-    pub cell_size: f32,
+    pub cell_size: f64,
     cells: Vec<Vec<usize>>, // cells[cell_idx] = list of atoms
     grid_dim: [usize; 3],
 }
@@ -215,7 +215,7 @@ impl GridCellPairlistAlgorithm {
     /// Create grid-based pairlist algorithm
     ///
     /// `cell_size` should be at least cutoff + skin
-    pub fn new(cell_size: f32) -> Self {
+    pub fn new(cell_size: f64) -> Self {
         Self {
             cell_size,
             cells: Vec::new(),
@@ -363,7 +363,7 @@ impl GridCellPairlistAlgorithm {
 
                 // Calculate distance
                 let r = periodicity.nearest_image(conf.current().pos[i], conf.current().pos[j]);
-                let dist2 = r.length_squared() as f64;
+                let dist2 = r.length_squared();
 
                 // Add to appropriate pairlist
                 if dist2 < cutoff2_short {
@@ -415,7 +415,7 @@ impl ParallelPairlistAlgorithm {
                     }
 
                     let r = periodicity.nearest_image(conf.current().pos[i], conf.current().pos[j]);
-                    let dist2 = r.length_squared() as f64;
+                    let dist2 = r.length_squared();
 
                     if dist2 < cutoff2_short {
                         local_pairs.push((i, j, true)); // true = short range
@@ -556,7 +556,7 @@ mod tests {
 
         // Place atoms randomly in box
         for (i, pos) in conf.current_mut().pos.iter_mut().enumerate() {
-            *pos = Vec3::new((i as f32 % 5.0), ((i / 5) as f32 % 5.0), 0.0);
+            *pos = Vec3::new((i % 5.0), ((i / 5) % 5.0), 0.0);
         }
 
         let mut pairlist = PairlistContainer::new(1.5, 2.5, 0.2);

@@ -66,7 +66,7 @@ fn main() {
 
                     for i in 0..n_atoms {
                         // Simplified: q along x-direction
-                        let phase = q * frame.positions[i].x as f64;
+                        let phase = q * frame.positions[i].x;
                         sum_real += phase.cos();
                         sum_imag += phase.sin();
                     }

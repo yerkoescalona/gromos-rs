@@ -407,13 +407,13 @@ impl TrajectoryReader {
             if parts.len() >= 7 {
                 // Format: atom_num RES ATOM serial x y z
                 let x = parts[4]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid x coordinate: {}", e)))?;
                 let y = parts[5]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid y coordinate: {}", e)))?;
                 let z = parts[6]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid z coordinate: {}", e)))?;
                 positions.push(Vec3::new(x, y, z));
             }
@@ -453,13 +453,13 @@ impl TrajectoryReader {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 7 {
                 let vx = parts[4]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid vx velocity: {}", e)))?;
                 let vy = parts[5]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid vy velocity: {}", e)))?;
                 let vz = parts[6]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid vz velocity: {}", e)))?;
                 velocities.push(Vec3::new(vx, vy, vz));
             }
@@ -499,13 +499,13 @@ impl TrajectoryReader {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 7 {
                 let fx = parts[4]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid fx force: {}", e)))?;
                 let fy = parts[5]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid fy force: {}", e)))?;
                 let fz = parts[6]
-                    .parse::<f32>()
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid fz force: {}", e)))?;
                 forces.push(Vec3::new(fx, fy, fz));
             }
@@ -580,13 +580,13 @@ impl TrajectoryReader {
         }
 
         let lx = parts[0]
-            .parse::<f32>()
+            .parse::<f64>()
             .map_err(|e| IoError::FormatError(format!("Invalid box x: {}", e)))?;
         let ly = parts[1]
-            .parse::<f32>()
+            .parse::<f64>()
             .map_err(|e| IoError::FormatError(format!("Invalid box y: {}", e)))?;
         let lz = parts[2]
-            .parse::<f32>()
+            .parse::<f64>()
             .map_err(|e| IoError::FormatError(format!("Invalid box z: {}", e)))?;
 
         buffer.clear();

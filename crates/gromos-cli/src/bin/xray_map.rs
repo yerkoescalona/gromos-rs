@@ -54,9 +54,9 @@ fn main() {
     loop {
         match traj.read_frame() {
             Ok(Some(frame)) => {
-                let grid_spacing_x = frame.box_dims.x / grid_size as f32;
-                let grid_spacing_y = frame.box_dims.y / grid_size as f32;
-                let grid_spacing_z = frame.box_dims.z / grid_size as f32;
+                let grid_spacing_x = frame.box_dims.x / grid_size as f64;
+                let grid_spacing_y = frame.box_dims.y / grid_size as f64;
+                let grid_spacing_z = frame.box_dims.z / grid_size as f64;
 
                 for pos in &frame.positions {
                     let ix = ((pos.x / grid_spacing_x) as usize).min(grid_size - 1);

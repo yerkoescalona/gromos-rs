@@ -138,7 +138,7 @@ impl LECoordinate {
     fn calculate_distance(&mut self, conf: &Configuration) -> f64 {
         let r1 = conf.current().pos[self.atoms[0]];
         let r2 = conf.current().pos[self.atoms[1]];
-        let r = (r2 - r1).length() as f64;
+        let r = (r2 - r1).length();
         self.value = r;
         r
     }
@@ -151,7 +151,7 @@ impl LECoordinate {
         let v1 = r1 - r2;
         let v2 = r3 - r2;
         let cos_theta = (v1.dot(v2) / (v1.length() * v2.length())).clamp(-1.0, 1.0);
-        let angle = (cos_theta as f64).acos();
+        let angle = (cos_theta).acos();
         self.value = angle;
         angle
     }
@@ -170,7 +170,7 @@ impl LECoordinate {
         let n2 = b2.cross(b3);
 
         let cos_phi = (n1.dot(n2) / (n1.length() * n2.length())).clamp(-1.0, 1.0);
-        let mut phi = (cos_phi as f64).acos();
+        let mut phi = (cos_phi).acos();
 
         // Determine sign
         if b1.dot(n2) < 0.0 {
@@ -187,7 +187,7 @@ impl LECoordinate {
             let r = conf.current().pos[atom_idx];
             let r_ref = self.reference_positions[i];
             let diff = r - r_ref;
-            sum_sq += diff.length_squared() as f64;
+            sum_sq += diff.length_squared();
         }
         let rmsd = (sum_sq / self.atoms.len() as f64).sqrt();
         self.value = rmsd;
@@ -200,14 +200,14 @@ impl LECoordinate {
         for &atom_idx in &self.atoms {
             com += conf.current().pos[atom_idx];
         }
-        com /= self.atoms.len() as f32;
+        com /= self.atoms.len() as f64;
 
         // Radius of gyration
         let mut sum_sq = 0.0;
         for &atom_idx in &self.atoms {
             let r = conf.current().pos[atom_idx];
             let diff = r - com;
-            sum_sq += diff.length_squared() as f64;
+            sum_sq += diff.length_squared();
         }
         let rgyr = (sum_sq / self.atoms.len() as f64).sqrt();
         self.value = rgyr;
@@ -486,7 +486,7 @@ impl Umbrella {
         // For RMSD: Gradient involves all atoms
 
         // Placeholder: Apply force equally to all involved atoms
-        let force_per_atom = (coord.force / coord.atoms.len() as f64) as f32;
+        let force_per_atom = (coord.force / coord.atoms.len() as f64);
         for &atom_idx in &coord.atoms {
             // This is a simplification - proper implementation needs chain rule
             conf.current_mut().force[atom_idx].x += force_per_atom;

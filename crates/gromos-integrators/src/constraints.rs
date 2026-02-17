@@ -131,7 +131,7 @@ pub fn shake(
 
             // Current distance vector
             let r_ij = conf.current().pos[j] - conf.current().pos[i];
-            let r_current_sq = (r_ij.dot(r_ij) as f64);
+            let r_current_sq = (r_ij.dot(r_ij));
 
             if r_current_sq < 1e-20 {
                 continue; // Avoid division by zero
@@ -152,7 +152,7 @@ pub fn shake(
 
             // Old distance vector (for velocity correction)
             let r_ij_old = conf.old().pos[j] - conf.old().pos[i];
-            let r_ij_dot_r_ij_old = r_ij.dot(r_ij_old) as f64;
+            let r_ij_dot_r_ij_old = r_ij.dot(r_ij_old);
 
             // Mass weighting
             let inv_mass_i = topo.inverse_mass[i];
@@ -176,8 +176,8 @@ pub fn shake(
             // Position corrections
             // Δr_i = -λ * (1/m_i) * r_ij_old
             // Δr_j = +λ * (1/m_j) * r_ij_old
-            let delta_i = r_ij_old * ((-lambda * inv_mass_i) as f32);
-            let delta_j = r_ij_old * ((lambda * inv_mass_j) as f32);
+            let delta_i = r_ij_old * ((-lambda * inv_mass_i));
+            let delta_j = r_ij_old * ((lambda * inv_mass_j));
 
             // Apply position corrections
             conf.current_mut().pos[i] += delta_i;
@@ -279,7 +279,7 @@ pub fn perturbed_shake(
 
             // Current distance vector
             let r_ij = conf.current().pos[j] - conf.current().pos[i];
-            let r_current_sq = r_ij.dot(r_ij) as f64;
+            let r_current_sq = r_ij.dot(r_ij);
 
             if r_current_sq < 1e-20 {
                 continue; // Avoid division by zero
@@ -299,7 +299,7 @@ pub fn perturbed_shake(
 
             // Old distance vector (for velocity correction)
             let r_ij_old = conf.old().pos[j] - conf.old().pos[i];
-            let r_ij_dot_r_ij_old = r_ij.dot(r_ij_old) as f64;
+            let r_ij_dot_r_ij_old = r_ij.dot(r_ij_old);
 
             // Mass weighting
             let inv_mass_i = topo.inverse_mass[i];
@@ -320,15 +320,15 @@ pub fn perturbed_shake(
             let lambda_constr = diff / denominator;
 
             // Position corrections
-            let delta_i = r_ij_old * ((-lambda_constr * inv_mass_i) as f32);
-            let delta_j = r_ij_old * ((lambda_constr * inv_mass_j) as f32);
+            let delta_i = r_ij_old * ((-lambda_constr * inv_mass_i));
+            let delta_j = r_ij_old * ((lambda_constr * inv_mass_j));
 
             conf.current_mut().pos[i] += delta_i;
             conf.current_mut().pos[j] += delta_j;
 
             // Store constraint force for virial calculation
             // F_constraint = λ · r_old / dt²
-            let constraint_force = r_ij_old * (lambda_constr / dt_sq) as f32;
+            let constraint_force = r_ij_old * (lambda_constr / dt_sq);
 
             // Accumulate to frame-level constraint forces if available
             // (In production, these would be stored in Configuration)
@@ -401,9 +401,9 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
 
             // Center of mass
             let m_total = m_o + 2.0 * m_h;
-            let r_com = (r_o * m_o as f32 + r_h1 * m_h as f32 + r_h2 * m_h as f32) / m_total as f32;
-            let r_com_old = (r_o_old * m_o as f32 + r_h1_old * m_h as f32 + r_h2_old * m_h as f32)
-                / m_total as f32;
+            let r_com = (r_o * m_o + r_h1 * m_h + r_h2 * m_h) / m_total;
+            let r_com_old = (r_o_old * m_o + r_h1_old * m_h + r_h2_old * m_h)
+                / m_total;
 
             // Vectors from COM
             let s_o = r_o - r_com;
@@ -422,30 +422,30 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
 
             // O-H1 constraint
             let r_oh1 = r_h1 - r_o;
-            let d_current = r_oh1.length() as f64;
+            let d_current = r_oh1.length();
             if (d_current - d_oh).abs() > 1e-6 {
                 let correction = (d_oh - d_current) / d_current;
-                let delta = r_oh1 * (correction * 0.5) as f32;
+                let delta = r_oh1 * (correction * 0.5);
                 conf.current_mut().pos[h1_idx] += delta;
-                conf.current_mut().pos[o_idx] -= delta * (m_h / m_o) as f32;
+                conf.current_mut().pos[o_idx] -= delta * (m_h / m_o);
             }
 
             // O-H2 constraint
             let r_oh2 = r_h2 - r_o;
-            let d_current = r_oh2.length() as f64;
+            let d_current = r_oh2.length();
             if (d_current - d_oh).abs() > 1e-6 {
                 let correction = (d_oh - d_current) / d_current;
-                let delta = r_oh2 * (correction * 0.5) as f32;
+                let delta = r_oh2 * (correction * 0.5);
                 conf.current_mut().pos[h2_idx] += delta;
-                conf.current_mut().pos[o_idx] -= delta * (m_h / m_o) as f32;
+                conf.current_mut().pos[o_idx] -= delta * (m_h / m_o);
             }
 
             // H1-H2 constraint
             let r_h1h2 = r_h2 - r_h1;
-            let d_current = r_h1h2.length() as f64;
+            let d_current = r_h1h2.length();
             if (d_current - d_hh).abs() > 1e-6 {
                 let correction = (d_hh - d_current) / d_current;
-                let delta = r_h1h2 * (correction * 0.5) as f32;
+                let delta = r_h1h2 * (correction * 0.5);
                 conf.current_mut().pos[h2_idx] += delta;
                 conf.current_mut().pos[h1_idx] -= delta;
             }
@@ -581,14 +581,14 @@ pub fn lincs(
     for &bond_idx in constraint_indices {
         let bond = &topo.solute.bonds[bond_idx];
         let r_ij = conf.old().pos[bond.j] - conf.old().pos[bond.i];
-        let r_length = r_ij.length() as f64;
+        let r_length = r_ij.length();
 
         if r_length < 1e-10 {
             b_vectors.push(Vec3::new(0.0, 0.0, 0.0));
             continue;
         }
 
-        let b = r_ij / r_length as f32;
+        let b = r_ij / r_length;
         b_vectors.push(b);
     }
 
@@ -603,7 +603,7 @@ pub fn lincs(
         let constraint_length = topo.bond_parameters[bond.bond_type].r0;
 
         // rhs = sdiag * (B · r - r0)
-        let projection = b_vectors[idx].dot(r_ij) as f64;
+        let projection = b_vectors[idx].dot(r_ij);
         rhs[0][idx] = lincs_data.sdiag[idx] * (projection - constraint_length);
         sol[idx] = rhs[0][idx];
     }
@@ -636,8 +636,8 @@ pub fn lincs(
 
         // Update positions: move atoms to satisfy constraints
         // When bond is too long (sol > 0), we need to bring atoms closer
-        conf.current_mut().pos[bond.i] += b_vectors[idx] * (correction * inv_mass_i) as f32;
-        conf.current_mut().pos[bond.j] -= b_vectors[idx] * (correction * inv_mass_j) as f32;
+        conf.current_mut().pos[bond.i] += b_vectors[idx] * (correction * inv_mass_i);
+        conf.current_mut().pos[bond.j] -= b_vectors[idx] * (correction * inv_mass_j);
     }
 
     // Rotational lengthening correction
@@ -649,7 +649,7 @@ pub fn lincs(
         let r_ij = conf.current().pos[bond.j] - conf.current().pos[bond.i];
         let constraint_length = topo.bond_parameters[bond.bond_type].r0;
 
-        let r_sq = (r_ij.dot(r_ij) as f64);
+        let r_sq = (r_ij.dot(r_ij));
         let target_sq = 2.0 * constraint_length * constraint_length;
 
         // Compute correction to bring |r|² back to r₀²
@@ -688,8 +688,8 @@ pub fn lincs(
 
         let correction = lincs_data.sdiag[idx] * sol[idx];
 
-        conf.current_mut().pos[bond.i] += b_vectors[idx] * (correction * inv_mass_i) as f32;
-        conf.current_mut().pos[bond.j] -= b_vectors[idx] * (correction * inv_mass_j) as f32;
+        conf.current_mut().pos[bond.i] += b_vectors[idx] * (correction * inv_mass_i);
+        conf.current_mut().pos[bond.j] -= b_vectors[idx] * (correction * inv_mass_j);
     }
 
     // Compute final error
@@ -699,7 +699,7 @@ pub fn lincs(
         let r_ij = conf.current().pos[bond.j] - conf.current().pos[bond.i];
         let constraint_length = topo.bond_parameters[bond.bond_type].r0;
 
-        let r_current = r_ij.length() as f64;
+        let r_current = r_ij.length();
         let error = ((r_current - constraint_length) / constraint_length).abs();
 
         if error > max_error {
@@ -829,13 +829,13 @@ pub fn remove_com_motion(
         // Calculate COM velocity: v_com = Σ(m_i * v_i) / M_total
         let mut com_vel = Vec3::ZERO;
         for i in 0..num_atoms {
-            com_vel += conf.current().vel[i] * topo.mass[i] as f32;
+            com_vel += conf.current().vel[i] * topo.mass[i];
         }
-        com_vel /= total_mass as f32;
+        com_vel /= total_mass;
         com.com_velocity = com_vel;
 
         // Translational kinetic energy: E_kin = 0.5 * M_total * |v_com|²
-        com.ekin_trans = 0.5 * total_mass * (com_vel.dot(com_vel) as f64);
+        com.ekin_trans = 0.5 * total_mass * (com_vel.dot(com_vel));
 
         // Remove translational motion: v_i -= v_com
         for i in 0..num_atoms {
@@ -862,10 +862,10 @@ pub fn remove_com_motion(
         // This ensures COM position and velocities are at the same time point
         let mut com_pos = Vec3::ZERO;
         for i in 0..num_atoms {
-            let pos_at_vel_time = conf.current().pos[i] - conf.current().vel[i] * (0.5 * dt as f32);
-            com_pos += pos_at_vel_time * topo.mass[i] as f32;
+            let pos_at_vel_time = conf.current().pos[i] - conf.current().vel[i] * (0.5 * dt);
+            com_pos += pos_at_vel_time * topo.mass[i];
         }
-        com_pos /= total_mass as f32;
+        com_pos /= total_mass;
         com.com_position = com_pos;
 
         // Calculate angular momentum: L = Σ m_i * (r_i - r_com) × (v_i - v_com)
@@ -876,15 +876,15 @@ pub fn remove_com_motion(
             // Calculate COM velocity if not already done
             let mut v = Vec3::ZERO;
             for i in 0..num_atoms {
-                v += conf.current().vel[i] * topo.mass[i] as f32;
+                v += conf.current().vel[i] * topo.mass[i];
             }
-            v / total_mass as f32
+            v / total_mass
         };
 
         for i in 0..num_atoms {
-            let r_rel = conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt as f32);
+            let r_rel = conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt);
             let v_rel = conf.current().vel[i] - com_vel;
-            ang_mom += r_rel.cross(v_rel) * topo.mass[i] as f32;
+            ang_mom += r_rel.cross(v_rel) * topo.mass[i];
         }
         com.angular_momentum = ang_mom;
 
@@ -892,8 +892,8 @@ pub fn remove_com_motion(
         let mut inertia = Mat3::ZERO;
 
         for i in 0..num_atoms {
-            let r = conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt as f32);
-            let m = topo.mass[i] as f32;
+            let r = conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt);
+            let m = topo.mass[i];
             let r_sq = r.dot(r);
 
             // Diagonal elements: I[α,α] = m * (r² - r_α²)
@@ -923,12 +923,12 @@ pub fn remove_com_motion(
             com.angular_velocity = ang_vel;
 
             // Rotational kinetic energy: E_rot = 0.5 * ω · L
-            com.ekin_rot = 0.5 * (ang_vel.dot(ang_mom) as f64);
+            com.ekin_rot = 0.5 * (ang_vel.dot(ang_mom));
 
             // Remove rotational motion: v_i -= ω × (r_i - r_com)
             for i in 0..num_atoms {
                 let r_rel =
-                    conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt as f32);
+                    conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt);
                 let v_rot = ang_vel.cross(r_rel);
                 conf.current_mut().vel[i] -= v_rot;
             }
@@ -1029,15 +1029,15 @@ pub fn angle_constraints(
             let r12 = conf.current().pos[i] - conf.current().pos[j];
             let r32 = conf.current().pos[k] - conf.current().pos[j];
 
-            let d12 = r12.length() as f64;
-            let d32 = r32.length() as f64;
+            let d12 = r12.length();
+            let d32 = r32.length();
 
             if d12 < 1e-10 || d32 < 1e-10 {
                 continue; // Avoid division by zero
             }
 
             // Current angle: θ = acos(r12 · r32 / (|r12| |r32|))
-            let dot_product = (r12.dot(r32) as f64) / (d12 * d32);
+            let dot_product = (r12.dot(r32)) / (d12 * d32);
             let dot_product = dot_product.clamp(-1.0, 1.0); // Numerical safety
             let theta = dot_product.acos();
 
@@ -1059,13 +1059,13 @@ pub fn angle_constraints(
 
             // Auxiliary vectors (eq. 18 from paper)
             // a123 = (d12² * r32 - (r12·r32) * r12) / (d12³ * d32)
-            let dot_12_32 = r12_old.dot(r32_old) as f64;
-            let a123 = (r32_old * (d12 * d12) as f32 - r12_old * dot_12_32 as f32)
-                / (d12 * d12 * d12 * d32) as f32;
+            let dot_12_32 = r12_old.dot(r32_old);
+            let a123 = (r32_old * (d12 * d12) - r12_old * dot_12_32)
+                / (d12 * d12 * d12 * d32);
 
             // a321 = (d32² * r12 - (r12·r32) * r32) / (d12 * d32³)
-            let a321 = (r12_old * (d32 * d32) as f32 - r32_old * dot_12_32 as f32)
-                / (d12 * d32 * d32 * d32) as f32;
+            let a321 = (r12_old * (d32 * d32) - r32_old * dot_12_32)
+                / (d12 * d32 * d32 * d32);
 
             // Masses
             let m1 = topo.mass[i];
@@ -1074,16 +1074,16 @@ pub fn angle_constraints(
 
             // Mass-weighted vectors (eq. 28)
             // b123 = a123/m1 + (a123 + a321)/m2
-            let b123 = a123 / m1 as f32 + (a123 + a321) / m2 as f32;
+            let b123 = a123 / m1 + (a123 + a321) / m2;
 
             // b321 = a321/m3 + (a123 + a321)/m2
-            let b321 = a321 / m3 as f32 + (a123 + a321) / m2 as f32;
+            let b321 = a321 / m3 + (a123 + a321) / m2;
 
             // Constants for Lagrange multiplier calculation
-            let c1 = r12_old.dot(r32_old) as f64; // eq. 39
-            let c2 = (r12_old.dot(b321) + r32_old.dot(b123)) as f64; // eq. 39
+            let c1 = r12_old.dot(r32_old); // eq. 39
+            let c2 = (r12_old.dot(b321) + r32_old.dot(b123)); // eq. 39
             let c3 = d12 * d32; // eq. 40
-            let c4 = (d12 / d32 * r32_old.dot(b321) as f64 + d32 / d12 * r12_old.dot(b123) as f64); // eq. 41
+            let c4 = (d12 / d32 * r32_old.dot(b321) + d32 / d12 * r12_old.dot(b123)); // eq. 41
 
             // Lagrange multiplier (eq. 43)
             // λ/dt² = (c1 - c3*cos(θ0)) / (c2 - c4*cos(θ0))
@@ -1100,9 +1100,9 @@ pub fn angle_constraints(
             // pos(i) -= (λ/dt²) * a123 / m1
             // pos(j) += (λ/dt²) * (a123 + a321) / m2
             // pos(k) -= (λ/dt²) * a321 / m3
-            conf.current_mut().pos[i] -= a123 * (lambda_over_dt_sq / m1) as f32;
-            conf.current_mut().pos[j] += (a123 + a321) * (lambda_over_dt_sq / m2) as f32;
-            conf.current_mut().pos[k] -= a321 * (lambda_over_dt_sq / m3) as f32;
+            conf.current_mut().pos[i] -= a123 * (lambda_over_dt_sq / m1);
+            conf.current_mut().pos[j] += (a123 + a321) * (lambda_over_dt_sq / m2);
+            conf.current_mut().pos[k] -= a321 * (lambda_over_dt_sq / m3);
         }
     }
 
@@ -1162,15 +1162,15 @@ pub fn perturbed_angle_constraints(
             let r12 = conf.current().pos[i] - conf.current().pos[j];
             let r32 = conf.current().pos[k] - conf.current().pos[j];
 
-            let d12 = r12.length() as f64;
-            let d32 = r32.length() as f64;
+            let d12 = r12.length();
+            let d32 = r32.length();
 
             if d12 < 1e-10 || d32 < 1e-10 {
                 continue;
             }
 
             // Current angle
-            let dot_product = (r12.dot(r32) as f64) / (d12 * d32);
+            let dot_product = (r12.dot(r32)) / (d12 * d32);
             let dot_product = dot_product.clamp(-1.0, 1.0);
             let theta = dot_product.acos();
 
@@ -1191,11 +1191,11 @@ pub fn perturbed_angle_constraints(
             let r32_old = conf.old().pos[k] - conf.old().pos[j];
 
             // Auxiliary vectors
-            let dot_12_32 = r12_old.dot(r32_old) as f64;
-            let a123 = (r32_old * (d12 * d12) as f32 - r12_old * dot_12_32 as f32)
-                / (d12 * d12 * d12 * d32) as f32;
-            let a321 = (r12_old * (d32 * d32) as f32 - r32_old * dot_12_32 as f32)
-                / (d12 * d32 * d32 * d32) as f32;
+            let dot_12_32 = r12_old.dot(r32_old);
+            let a123 = (r32_old * (d12 * d12) - r12_old * dot_12_32)
+                / (d12 * d12 * d12 * d32);
+            let a321 = (r12_old * (d32 * d32) - r32_old * dot_12_32)
+                / (d12 * d32 * d32 * d32);
 
             // Masses
             let m1 = topo.mass[i];
@@ -1203,14 +1203,14 @@ pub fn perturbed_angle_constraints(
             let m3 = topo.mass[k];
 
             // Mass-weighted vectors
-            let b123 = a123 / m1 as f32 + (a123 + a321) / m2 as f32;
-            let b321 = a321 / m3 as f32 + (a123 + a321) / m2 as f32;
+            let b123 = a123 / m1 + (a123 + a321) / m2;
+            let b321 = a321 / m3 + (a123 + a321) / m2;
 
             // Lagrange multiplier constants
-            let c1 = r12_old.dot(r32_old) as f64;
-            let c2 = (r12_old.dot(b321) + r32_old.dot(b123)) as f64;
+            let c1 = r12_old.dot(r32_old);
+            let c2 = (r12_old.dot(b321) + r32_old.dot(b123));
             let c3 = d12 * d32;
-            let c4 = (d12 / d32 * r32_old.dot(b321) as f64 + d32 / d12 * r12_old.dot(b123) as f64);
+            let c4 = (d12 / d32 * r32_old.dot(b321) + d32 / d12 * r12_old.dot(b123));
 
             let numerator = c1 - c3 * theta0.cos();
             let denominator = c2 - c4 * theta0.cos();
@@ -1222,9 +1222,9 @@ pub fn perturbed_angle_constraints(
             let lambda_over_dt_sq = numerator / denominator;
 
             // Position updates
-            conf.current_mut().pos[i] -= a123 * (lambda_over_dt_sq / m1) as f32;
-            conf.current_mut().pos[j] += (a123 + a321) * (lambda_over_dt_sq / m2) as f32;
-            conf.current_mut().pos[k] -= a321 * (lambda_over_dt_sq / m3) as f32;
+            conf.current_mut().pos[i] -= a123 * (lambda_over_dt_sq / m1);
+            conf.current_mut().pos[j] += (a123 + a321) * (lambda_over_dt_sq / m2);
+            conf.current_mut().pos[k] -= a321 * (lambda_over_dt_sq / m3);
 
             // Energy derivative for FEP (eq. 48)
             // ∂H/∂λ = λ_deriv * (λ/dt²) * sin(θ₀) * (θ_B - θ_A)
@@ -1390,7 +1390,7 @@ mod tests {
 
         // Check that constraint is satisfied
         let r = conf.current().pos[1] - conf.current().pos[0];
-        let distance = r.length() as f64;
+        let distance = r.length();
 
         println!(
             "LINCS result: converged={}, max_error={}, distance={}",
@@ -1503,8 +1503,8 @@ mod tests {
         let r01 = conf.current().pos[1] - conf.current().pos[0];
         let r02 = conf.current().pos[2] - conf.current().pos[0];
 
-        let dist01 = r01.length() as f64;
-        let dist02 = r02.length() as f64;
+        let dist01 = r01.length();
+        let dist02 = r02.length();
 
         assert!(
             (dist01 - 0.1).abs() < 1e-3,

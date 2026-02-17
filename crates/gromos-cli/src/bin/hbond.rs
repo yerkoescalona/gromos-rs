@@ -37,8 +37,8 @@ fn print_usage() {
 #[derive(Debug)]
 struct HbondArgs {
     traj_file: String,
-    distance_cutoff: f32, // nm
-    angle_cutoff: f32,    // degrees
+    distance_cutoff: f64, // nm
+    angle_cutoff: f64,    // degrees
     output_file: String,
 }
 
@@ -115,13 +115,13 @@ struct HydrogenBond {
 #[derive(Debug)]
 struct HbondStats {
     count: usize,
-    avg_distance: f32,
-    avg_angle: f32,
-    occupancy: f32, // fraction of frames where H-bond present
+    avg_distance: f64,
+    avg_angle: f64,
+    occupancy: f64, // fraction of frames where H-bond present
 }
 
 /// Calculate angle between three points (in degrees)
-fn calculate_angle(p1: Vec3, p2: Vec3, p3: Vec3) -> f32 {
+fn calculate_angle(p1: Vec3, p2: Vec3, p3: Vec3) -> f64 {
     let v1 = (p1 - p2).normalize();
     let v2 = (p3 - p2).normalize();
     let dot = v1.dot(v2).clamp(-1.0, 1.0);
@@ -132,9 +132,9 @@ fn calculate_angle(p1: Vec3, p2: Vec3, p3: Vec3) -> f32 {
 /// This is a simplified version - a full implementation would use topology info
 fn find_hydrogen_bonds(
     positions: &[Vec3],
-    distance_cutoff: f32,
-    angle_cutoff: f32,
-) -> Vec<(HydrogenBond, f32, f32)> {
+    distance_cutoff: f64,
+    angle_cutoff: f64,
+) -> Vec<(HydrogenBond, f64, f64)> {
     let mut hbonds = Vec::new();
     let n_atoms = positions.len();
 
@@ -225,7 +225,7 @@ fn main() {
     println!("  Analyzing hydrogen bonds...");
 
     let mut frame_count = 0;
-    let mut hbond_stats: HashMap<HydrogenBond, Vec<(f32, f32)>> = HashMap::new();
+    let mut hbond_stats: HashMap<HydrogenBond, Vec<(f64, f64)>> = HashMap::new();
     let mut total_hbonds_per_frame = Vec::new();
 
     loop {
@@ -268,9 +268,9 @@ fn main() {
     let mut stats = Vec::new();
     for (hbond, data) in &hbond_stats {
         let count = data.len();
-        let avg_dist = data.iter().map(|(d, _)| d).sum::<f32>() / count as f32;
-        let avg_angle = data.iter().map(|(_, a)| a).sum::<f32>() / count as f32;
-        let occupancy = count as f32 / frame_count as f32;
+        let avg_dist = data.iter().map(|(d, _)| d).sum::<f64>() / count as f64;
+        let avg_angle = data.iter().map(|(_, a)| a).sum::<f64>() / count as f64;
+        let occupancy = count as f64 / frame_count as f64;
 
         stats.push((
             hbond.clone(),
@@ -329,7 +329,7 @@ fn main() {
     writeln!(
         output,
         "# Average H-bonds per frame: {:.2}",
-        total_hbonds_per_frame.iter().sum::<usize>() as f32 / frame_count as f32
+        total_hbonds_per_frame.iter().sum::<usize>() / frame_count
     )
     .unwrap();
 
@@ -337,7 +337,7 @@ fn main() {
     println!("  Total unique H-bonds: {}", stats.len());
     println!(
         "  Average H-bonds/frame: {:.2}",
-        total_hbonds_per_frame.iter().sum::<usize>() as f32 / frame_count as f32
+        total_hbonds_per_frame.iter().sum::<usize>() / frame_count
     );
 
     if !stats.is_empty() {

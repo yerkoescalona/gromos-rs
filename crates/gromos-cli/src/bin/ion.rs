@@ -68,7 +68,7 @@ fn main() {
                 let ion_pos = frame.positions[ion_idx];
 
                 // Count coordination (atoms within 0.35 nm)
-                let cutoff = 0.35f32;
+                let cutoff = 0.35f64;
                 let cutoff_sq = cutoff * cutoff;
                 let mut coordination = 0;
 

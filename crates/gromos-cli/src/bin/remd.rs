@@ -57,9 +57,9 @@ fn read_coordinates(path: &str) -> Result<(Vec<Vec3>, Vec3), String> {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 3 {
                 if let (Ok(x), Ok(y), Ok(z)) = (
-                    parts[0].parse::<f32>(),
-                    parts[1].parse::<f32>(),
-                    parts[2].parse::<f32>(),
+                    parts[0].parse::<f64>(),
+                    parts[1].parse::<f64>(),
+                    parts[2].parse::<f64>(),
                 ) {
                     positions.push(Vec3::new(x, y, z));
                 }
@@ -70,9 +70,9 @@ fn read_coordinates(path: &str) -> Result<(Vec<Vec3>, Vec3), String> {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 3 {
                 if let (Ok(x), Ok(y), Ok(z)) = (
-                    parts[0].parse::<f32>(),
-                    parts[1].parse::<f32>(),
-                    parts[2].parse::<f32>(),
+                    parts[0].parse::<f64>(),
+                    parts[1].parse::<f64>(),
+                    parts[2].parse::<f64>(),
                 ) {
                     box_dims = Vec3::new(x, y, z);
                 }

@@ -19,7 +19,7 @@ fn main() {
 
     let mut topo_file = None;
     let mut traj_file = None;
-    let mut probe_radius = 0.14f32; // 1.4 Å
+    let mut probe_radius = 0.14f64; // 1.4 Å
 
     let mut i = 1;
     while i < args.len() {
@@ -54,12 +54,12 @@ fn main() {
     println!("# Time (ps)    SASA (nm²)");
 
     // Default atomic radii (Hasel)
-    let default_radius = 0.15f32;
+    let default_radius = 0.15f64;
 
     loop {
         match traj.read_frame() {
             Ok(Some(frame)) => {
-                let mut total_sasa = 0.0f32;
+                let mut total_sasa = 0.0f64;
 
                 // Hasel approximation: pi * sum(p_i * r_i²)
                 // where p_i is atomic accessibility parameter
@@ -84,12 +84,12 @@ fn main() {
 
                     // Accessibility parameter (decreases with neighbors)
                     let p_i = if neighbors > 0 {
-                        1.0 / (1.0 + 0.1 * neighbors as f32)
+                        1.0 / (1.0 + 0.1 * neighbors as f64)
                     } else {
                         1.0
                     };
 
-                    total_sasa += std::f32::consts::PI * p_i * r_i * r_i;
+                    total_sasa += std::f64::consts::PI * p_i * r_i * r_i;
                 }
 
                 println!("{:12.4} {:12.4}", frame.time, total_sasa);

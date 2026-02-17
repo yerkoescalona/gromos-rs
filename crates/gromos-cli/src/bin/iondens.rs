@@ -51,8 +51,8 @@ fn main() {
     let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
 
     let num_atoms = topo.mass.len();
-    let max_dist = 2.0f32; // nm
-    let bin_width = max_dist / n_bins as f32;
+    let max_dist = 2.0f64; // nm
+    let bin_width = max_dist / n_bins as f64;
 
     let mut histogram = vec![0usize; n_bins];
     let mut n_frames = 0;
@@ -93,12 +93,12 @@ fn main() {
     println!("# Distance (nm)    Density");
 
     for (idx, &count) in histogram.iter().enumerate() {
-        let r = (idx as f32 + 0.5) * bin_width;
+        let r = (idx as f64 + 0.5) * bin_width;
         let volume = 4.0 / 3.0
-            * std::f32::consts::PI
+            * std::f64::consts::PI
             * ((r + bin_width / 2.0).powi(3) - (r - bin_width / 2.0).powi(3));
         let density = if volume > 0.0 && n_frames > 0 {
-            count as f32 / (volume * n_frames as f32)
+            count as f64 / (volume * n_frames as f64)
         } else {
             0.0
         };

@@ -19,7 +19,7 @@ fn main() {
 
     let mut topo_file = None;
     let mut traj_file = None;
-    let mut probe_radius = 0.14f32; // Default water probe 1.4 Å = 0.14 nm
+    let mut probe_radius = 0.14f64; // Default water probe 1.4 Å = 0.14 nm
 
     let mut i = 1;
     while i < args.len() {
@@ -52,7 +52,7 @@ fn main() {
     eprintln!("# Atoms: {}", num_atoms);
 
     // Default VDW radii (approximate, in nm)
-    let default_radius = 0.15f32;
+    let default_radius = 0.15f64;
 
     println!("# Time (ps)    SASA (nm²)    SASA_per_atom (nm²)");
 
@@ -60,11 +60,11 @@ fn main() {
         match traj.read_frame() {
             Ok(Some(frame)) => {
                 // Simple approximate SASA: sum of exposed sphere areas
-                let mut total_sasa = 0.0f32;
+                let mut total_sasa = 0.0f64;
 
                 for i in 0..num_atoms {
                     let radius_i = default_radius + probe_radius;
-                    let mut exposed_area = 4.0 * std::f32::consts::PI * radius_i * radius_i;
+                    let mut exposed_area = 4.0 * std::f64::consts::PI * radius_i * radius_i;
 
                     // Check overlap with other atoms
                     let mut n_neighbors = 0;
@@ -86,14 +86,14 @@ fn main() {
 
                     // Simple reduction based on neighbors
                     if n_neighbors > 0 {
-                        let reduction = (n_neighbors as f32 * 0.1).min(0.9);
+                        let reduction = (n_neighbors as f64 * 0.1).min(0.9);
                         exposed_area *= 1.0 - reduction;
                     }
 
                     total_sasa += exposed_area;
                 }
 
-                let sasa_per_atom = total_sasa / (num_atoms as f32);
+                let sasa_per_atom = total_sasa / num_atoms as f64;
 
                 println!(
                     "{:12.4} {:12.4} {:18.6}",

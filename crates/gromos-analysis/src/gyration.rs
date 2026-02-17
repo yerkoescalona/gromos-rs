@@ -16,15 +16,15 @@ pub fn calculate_gyration_radius(positions: &[Vec3], masses: &[f64]) -> f64 {
         .zip(masses.iter())
         .fold(Vec3::ZERO, |acc, (p, m)| {
             Vec3::new(
-                acc.x + (p.x as f64 * m) as f32,
-                acc.y + (p.y as f64 * m) as f32,
-                acc.z + (p.z as f64 * m) as f32,
+                acc.x + p.x * m,
+                acc.y + p.y * m,
+                acc.z + p.z * m,
             )
         });
     let com = Vec3::new(
-        (com.x as f64 / total_mass) as f32,
-        (com.y as f64 / total_mass) as f32,
-        (com.z as f64 / total_mass) as f32,
+        com.x / total_mass,
+        com.y / total_mass,
+        com.z / total_mass,
     );
 
     // Calculate Rg^2
@@ -35,7 +35,7 @@ pub fn calculate_gyration_radius(positions: &[Vec3], masses: &[f64]) -> f64 {
             let dx = p.x - com.x;
             let dy = p.y - com.y;
             let dz = p.z - com.z;
-            m * (dx * dx + dy * dy + dz * dz) as f64
+            m * (dx * dx + dy * dy + dz * dz)
         })
         .sum::<f64>() / total_mass;
 

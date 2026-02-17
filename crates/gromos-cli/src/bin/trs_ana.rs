@@ -92,12 +92,12 @@ impl CoordinateStats {
             }
         }
         for mean_pos in &mut mean_positions {
-            *mean_pos = *mean_pos / n_frames as f32;
+            *mean_pos = *mean_pos / n_frames as f64;
         }
 
         // Calculate overall mean
         let overall_mean =
-            mean_positions.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / n_atoms as f32;
+            mean_positions.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / n_atoms as f64;
 
         // Calculate standard deviation
         let mut variance = Vec3::ZERO;
@@ -109,12 +109,12 @@ impl CoordinateStats {
                 variance.z += diff.z * diff.z;
             }
         }
-        variance = variance / (n_frames * n_atoms) as f32;
+        variance = variance / (n_frames as f64 * n_atoms as f64);
         let std_dev = Vec3::new(variance.x.sqrt(), variance.y.sqrt(), variance.z.sqrt());
 
         // Find min and max
-        let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
-        let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let mut min = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut max = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
 
         for frame_positions in positions {
             for pos in frame_positions {
@@ -140,17 +140,17 @@ fn calculate_center_of_mass(positions: &[Vec3]) -> Vec3 {
     if positions.is_empty() {
         return Vec3::ZERO;
     }
-    positions.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / positions.len() as f32
+    positions.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / positions.len() as f64
 }
 
-fn calculate_radius_of_gyration(positions: &[Vec3], com: Vec3) -> f32 {
+fn calculate_radius_of_gyration(positions: &[Vec3], com: Vec3) -> f64 {
     if positions.is_empty() {
         return 0.0;
     }
 
-    let sum_sq_dist: f32 = positions.iter().map(|p| (*p - com).length_squared()).sum();
+    let sum_sq_dist: f64 = positions.iter().map(|p| (*p - com).length_squared()).sum();
 
-    (sum_sq_dist / positions.len() as f32).sqrt()
+    (sum_sq_dist / positions.len() as f64).sqrt()
 }
 
 fn main() {
@@ -229,7 +229,7 @@ fn main() {
 
     // Box dimensions statistics
     let box_dims: Vec<Vec3> = frames.iter().map(|f| f.box_dims).collect();
-    let box_mean = box_dims.iter().fold(Vec3::ZERO, |acc, b| acc + *b) / n_frames as f32;
+    let box_mean = box_dims.iter().fold(Vec3::ZERO, |acc, b| acc + *b) / n_frames as f64;
 
     let box_variance = box_dims
         .iter()
@@ -238,7 +238,7 @@ fn main() {
             Vec3::new(diff.x * diff.x, diff.y * diff.y, diff.z * diff.z)
         })
         .fold(Vec3::ZERO, |acc, v| acc + v)
-        / n_frames as f32;
+        / n_frames as f64;
 
     let box_std = Vec3::new(
         box_variance.x.sqrt(),
@@ -304,11 +304,11 @@ fn main() {
         rgys.push(rgy);
     }
 
-    let rgy_mean = rgys.iter().sum::<f32>() / rgys.len() as f32;
-    let rgy_variance = rgys.iter().map(|r| (r - rgy_mean).powi(2)).sum::<f32>() / rgys.len() as f32;
+    let rgy_mean = rgys.iter().sum::<f64>() / rgys.len() as f64;
+    let rgy_variance = rgys.iter().map(|r| (r - rgy_mean).powi(2)).sum::<f64>() / rgys.len() as f64;
     let rgy_std = rgy_variance.sqrt();
-    let rgy_min = rgys.iter().cloned().fold(f32::INFINITY, f32::min);
-    let rgy_max = rgys.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let rgy_min = rgys.iter().cloned().fold(f64::INFINITY, f64::min);
+    let rgy_max = rgys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
     println!("  Radius of gyration:");
     println!("    Mean:  {:.4} ± {:.4} nm", rgy_mean, rgy_std);
@@ -321,7 +321,7 @@ fn main() {
         println!("Velocity information:");
         println!("  Velocities: Present in trajectory");
 
-        let mut max_vel = 0.0f32;
+        let mut max_vel = 0.0f64;
         for frame in &frames {
             if let Some(ref vels) = frame.velocities {
                 for vel in vels {
@@ -344,7 +344,7 @@ fn main() {
         println!("Force information:");
         println!("  Forces: Present in trajectory");
 
-        let mut max_force = 0.0f32;
+        let mut max_force = 0.0f64;
         for frame in &frames {
             if let Some(ref forces) = frame.forces {
                 for force in forces {

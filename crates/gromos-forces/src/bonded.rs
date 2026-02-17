@@ -126,7 +126,7 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
 
         let params = &topo.bond_parameters[bond.bond_type];
         let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let r = r_vec.length() as f64;
+        let r = r_vec.length();
 
         if r < 1e-10 {
             // Avoid division by zero
@@ -143,7 +143,7 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
         let f_magnitude = params.k_harmonic * dr2 * r;
 
         // Force vector: F = -f_magnitude * r_vec/r
-        let force = r_vec * (-f_magnitude as f32 / r as f32);
+        let force = r_vec * (-f_magnitude / r);
 
         result.energy += energy;
         result.forces[bond.i] += force;
@@ -167,7 +167,7 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
 
         let params = &topo.bond_parameters[bond.bond_type];
         let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let r = r_vec.length() as f64;
+        let r = r_vec.length();
 
         if r < 1e-10 {
             continue;
@@ -179,7 +179,7 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
 
         // Force: F = -k * (r - r0) * r_vec/r
         let f_magnitude = params.k_harmonic * dr;
-        let force = r_vec * (-f_magnitude as f32 / r as f32);
+        let force = r_vec * (-f_magnitude / r);
 
         result.energy += energy;
         result.forces[bond.i] += force;
@@ -215,7 +215,7 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
         }
 
         let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let r = r_vec.length() as f64;
+        let r = r_vec.length();
 
         if r < 1e-10 {
             // Avoid division by zero
@@ -239,8 +239,8 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
             let f_magnitude = -2.0 * k * diff3;
 
             // Force vector: F = f_magnitude * direction
-            let direction = r_vec / (r as f32);
-            let force = direction * (f_magnitude as f32);
+            let direction = r_vec / (r);
+            let force = direction * (f_magnitude);
 
             result.energy += energy;
             result.forces[bond.i] += force;
@@ -269,15 +269,15 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
         let r_ij = conf.current().pos[angle.j] - conf.current().pos[angle.i];
         let r_kj = conf.current().pos[angle.j] - conf.current().pos[angle.k];
 
-        let len_ij = r_ij.length() as f64;
-        let len_kj = r_kj.length() as f64;
+        let len_ij = r_ij.length();
+        let len_kj = r_kj.length();
 
         if len_ij < 1e-10 || len_kj < 1e-10 {
             continue;
         }
 
         // cos(θ) = r_ij · r_kj / (|r_ij| |r_kj|)
-        let cos_theta = (r_ij.dot(r_kj) / (len_ij * len_kj) as f32).clamp(-1.0, 1.0) as f64;
+        let cos_theta = (r_ij.dot(r_kj) / (len_ij * len_kj)).clamp(-1.0, 1.0);
         let cos_theta0 = params.theta0.cos();
 
         // Energy: V = (1/2) * k * (cos(θ) - cos(θ0))^2
@@ -298,13 +298,13 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
 
         // Force on atom i
         let dcos_dri =
-            r_kj * (inv_len_prod as f32) - r_ij * ((cos_theta * inv_len_ij * inv_len_ij) as f32);
-        let f_i = dcos_dri * (-dV_dcos as f32);
+            r_kj * (inv_len_prod) - r_ij * ((cos_theta * inv_len_ij * inv_len_ij));
+        let f_i = dcos_dri * (-dV_dcos);
 
         // Force on atom k
         let dcos_drk =
-            r_ij * (inv_len_prod as f32) - r_kj * ((cos_theta * inv_len_kj * inv_len_kj) as f32);
-        let f_k = dcos_drk * (-dV_dcos as f32);
+            r_ij * (inv_len_prod) - r_kj * ((cos_theta * inv_len_kj * inv_len_kj));
+        let f_k = dcos_drk * (-dV_dcos);
 
         // Force on atom j (central atom): F_j = -(F_i + F_k)
         let f_j = -(f_i + f_k);
@@ -345,15 +345,15 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
         let r_ij = conf.current().pos[angle.j] - conf.current().pos[angle.i];
         let r_kj = conf.current().pos[angle.j] - conf.current().pos[angle.k];
 
-        let d_ij = r_ij.length() as f64;
-        let d_kj = r_kj.length() as f64;
+        let d_ij = r_ij.length();
+        let d_kj = r_kj.length();
 
         if d_ij < EPSILON || d_kj < EPSILON {
             continue; // Avoid division by zero
         }
 
         // Calculate angle θ using dot product
-        let cos_theta = (r_ij.dot(r_kj) / (d_ij * d_kj) as f32).clamp(-1.0, 1.0) as f64;
+        let cos_theta = (r_ij.dot(r_kj) / (d_ij * d_kj)).clamp(-1.0, 1.0);
         let theta = cos_theta.acos();
         let sin_theta = theta.sin();
 
@@ -399,11 +399,11 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
         // fk = kk * (r_ij/d_ij - cos(θ) * r_kj/d_kj)
         // fj = -(fi + fk)  [force conservation]
 
-        let unit_ij = r_ij / d_ij as f32;
-        let unit_kj = r_kj / d_kj as f32;
+        let unit_ij = r_ij / d_ij;
+        let unit_kj = r_kj / d_kj;
 
-        let f_i = (unit_kj - unit_ij * cos_theta as f32) * k_i as f32;
-        let f_k = (unit_ij - unit_kj * cos_theta as f32) * k_k as f32;
+        let f_i = (unit_kj - unit_ij * cos_theta) * k_i;
+        let f_k = (unit_ij - unit_kj * cos_theta) * k_k;
         let f_j = -(f_i + f_k); // Force conservation
 
         result.energy += energy;
@@ -456,15 +456,15 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
         let r_im = r_ij - r_kj * f_rim;
         let r_ln = r_kj * f_rln - r_kl;
 
-        let d_im = r_im.length() as f64;
-        let d_ln = r_ln.length() as f64;
+        let d_im = r_im.length();
+        let d_ln = r_ln.length();
 
         if d_im < 1e-10 || d_ln < 1e-10 {
             continue;
         }
 
         // Calculate cos(φ)
-        let cos_phi = (r_im.dot(r_ln) / (d_im * d_ln) as f32).clamp(-1.0, 1.0) as f64;
+        let cos_phi = (r_im.dot(r_ln) / (d_im * d_ln)).clamp(-1.0, 1.0);
 
         // Calculate cos(m*φ) and d[cos(m*φ)]/d[cos(φ)] using Chebyshev polynomials
         let (cos_m_phi, d_cos_m_phi) = match params.m {
@@ -502,9 +502,9 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
         let k_j1 = f_rim - 1.0;
         let k_j2 = f_rln;
 
-        let f_i = r_ln * (k_i / d_ln) as f32 - r_im * (k_i * cos_phi / d_im) as f32;
-        let f_l = r_im * (k_l / d_im) as f32 - r_ln * (k_l * cos_phi / d_ln) as f32;
-        let f_j = f_i * k_j1 as f32 - f_l * k_j2 as f32;
+        let f_i = r_ln * (k_i / d_ln) - r_im * (k_i * cos_phi / d_im);
+        let f_l = r_im * (k_l / d_im) - r_ln * (k_l * cos_phi / d_ln);
+        let f_j = f_i * k_j1 - f_l * k_j2;
         let f_k = -(f_i + f_j + f_l);
 
         result.energy += energy;
@@ -549,17 +549,17 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
         let d_mj2 = r_mj.dot(r_mj);
         let d_nk2 = r_nk.dot(r_nk);
 
-        let d_kj = (d_kj2 as f64).sqrt();
-        let d_mj = (d_mj2 as f64).sqrt();
-        let d_nk = (d_nk2 as f64).sqrt();
+        let d_kj = (d_kj2).sqrt();
+        let d_mj = (d_mj2).sqrt();
+        let d_nk = (d_nk2).sqrt();
 
         if d_mj < 1e-10 || d_nk < 1e-10 {
             continue;
         }
 
         // Calculate improper angle ζ
-        let acs = (r_mj.dot(r_nk) / (d_mj * d_nk) as f32).clamp(-1.0, 1.0);
-        let mut zeta = (acs as f64).acos();
+        let acs = (r_mj.dot(r_nk) / (d_mj * d_nk)).clamp(-1.0, 1.0);
+        let mut zeta = (acs).acos();
 
         // Determine sign
         let ip = r_ij.dot(r_nk);
@@ -588,21 +588,21 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
         if d_mj2 < (1.0e-10 * d_kj2) {
             k_i = 0.0;
         } else {
-            k_i = k_i / d_mj2 as f64;
+            k_i = k_i / d_mj2;
         }
 
         if d_nk2 < (1.0e-10 * d_kj2) {
             k_l = 0.0;
         } else {
-            k_l = k_l / d_nk2 as f64;
+            k_l = k_l / d_nk2;
         }
 
-        let k_j1 = (r_ij.dot(r_kj) / d_kj2) as f64 - 1.0;
-        let k_j2 = (r_kl.dot(r_kj) / d_kj2) as f64;
+        let k_j1 = (r_ij.dot(r_kj) / d_kj2) - 1.0;
+        let k_j2 = (r_kl.dot(r_kj) / d_kj2);
 
-        let f_i = r_mj * k_i as f32;
-        let f_l = r_nk * k_l as f32;
-        let f_j = f_i * k_j1 as f32 - f_l * k_j2 as f32;
+        let f_i = r_mj * k_i;
+        let f_l = r_nk * k_l;
+        let f_j = f_i * k_j1 - f_l * k_j2;
         let f_k = -(f_i + f_j + f_l);
 
         result.energy += energy;
@@ -644,7 +644,7 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         let d_kj2 = r_kj.dot(r_kj);
         let d_mj2 = r_mj.dot(r_mj);
         let d_nk2 = r_nk.dot(r_nk);
-        let d_kj = (d_kj2 as f64).sqrt();
+        let d_kj = (d_kj2).sqrt();
 
         if d_kj < 1e-10 {
             continue;
@@ -657,15 +657,15 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         let r_im = r_ij - r_kj * f_rim;
         let r_ln = r_kj * f_rln - r_kl;
 
-        let d_im = r_im.length() as f64;
-        let d_ln = r_ln.length() as f64;
+        let d_im = r_im.length();
+        let d_ln = r_ln.length();
 
         if d_im < 1e-10 || d_ln < 1e-10 {
             continue;
         }
 
         // Calculate dihedral angle φ
-        let cos_phi = (r_im.dot(r_ln) / (d_im * d_ln) as f32).clamp(-1.0, 1.0) as f64;
+        let cos_phi = (r_im.dot(r_ln) / (d_im * d_ln)).clamp(-1.0, 1.0);
         let mut phi = cos_phi.acos();
 
         // Determine sign of angle
@@ -688,18 +688,18 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         let mut f_i = Vec3::ZERO;
         let mut f_l = Vec3::ZERO;
 
-        if d_mj2 > 1e-10 * d_kj2 as f32 {
-            f_i = r_mj * (k_i * d_kj / d_mj2 as f64) as f32;
+        if d_mj2 > 1e-10 * d_kj2 {
+            f_i = r_mj * (k_i * d_kj / d_mj2);
         }
 
-        if d_nk2 > 1e-10 * d_kj2 as f32 {
-            f_l = r_nk * (k_l * d_kj / d_nk2 as f64) as f32;
+        if d_nk2 > 1e-10 * d_kj2 {
+            f_l = r_nk * (k_l * d_kj / d_nk2);
         }
 
         // Forces on j and k from chain rule
         let k_j1 = f_rim - 1.0;
         let k_j2 = f_rln;
-        let f_j = f_i * k_j1 as f32 - f_l * k_j2 as f32;
+        let f_j = f_i * k_j1 - f_l * k_j2;
         let f_k = -(f_i + f_j + f_l);
 
         result.energy += energy;
@@ -757,14 +757,14 @@ pub fn calculate_crossdihedral_forces(topo: &Topology, conf: &Configuration) -> 
         let r_am = r_ab - r_cb * f_ram;
         let r_dn = r_cb * f_rdn - r_cd;
 
-        let d_am = r_am.length() as f64;
-        let d_dn = r_dn.length() as f64;
+        let d_am = r_am.length();
+        let d_dn = r_dn.length();
 
         if d_am < 1e-10 || d_dn < 1e-10 {
             continue;
         }
 
-        let cos_phi = (r_am.dot(r_dn) / (d_am * d_dn) as f32).clamp(-1.0, 1.0) as f64;
+        let cos_phi = (r_am.dot(r_dn) / (d_am * d_dn)).clamp(-1.0, 1.0);
         let mut phi = cos_phi.acos();
 
         let sign_phi = r_ab.dot(r_nc);
@@ -786,14 +786,14 @@ pub fn calculate_crossdihedral_forces(topo: &Topology, conf: &Configuration) -> 
         let r_em = r_ef - r_gf * f_rem;
         let r_gn = r_gf * f_rgn - r_gh;
 
-        let d_em = r_em.length() as f64;
-        let d_gn = r_gn.length() as f64;
+        let d_em = r_em.length();
+        let d_gn = r_gn.length();
 
         if d_em < 1e-10 || d_gn < 1e-10 {
             continue;
         }
 
-        let cos_psi = (r_em.dot(r_gn) / (d_em * d_gn) as f32).clamp(-1.0, 1.0) as f64;
+        let cos_psi = (r_em.dot(r_gn) / (d_em * d_gn)).clamp(-1.0, 1.0);
         let mut psi = cos_psi.acos();
 
         let sign_psi = r_ef.dot(r_ng);
@@ -817,41 +817,41 @@ pub fn calculate_crossdihedral_forces(topo: &Topology, conf: &Configuration) -> 
         let d_nc2 = r_nc.dot(r_nc);
         let d_ng2 = r_ng.dot(r_ng);
 
-        let d_cb = (d_cb2 as f64).sqrt();
-        let d_gf = (d_gf2 as f64).sqrt();
+        let d_cb = (d_cb2).sqrt();
+        let d_gf = (d_gf2).sqrt();
 
         // Forces on first dihedral (a, b, c, d)
         let mut f_a = Vec3::ZERO;
         let mut f_d = Vec3::ZERO;
 
-        if d_mb2 > 1e-10 * d_cb2 as f32 {
-            f_a = r_mb * (k * d_cb / d_mb2 as f64) as f32;
+        if d_mb2 > 1e-10 * d_cb2 {
+            f_a = r_mb * (k * d_cb / d_mb2);
         }
 
-        if d_nc2 > 1e-10 * d_cb2 as f32 {
-            f_d = r_nc * (-k * d_cb / d_nc2 as f64) as f32;
+        if d_nc2 > 1e-10 * d_cb2 {
+            f_d = r_nc * (-k * d_cb / d_nc2);
         }
 
         let k_b1 = f_ram - 1.0;
         let k_b2 = f_rdn;
-        let f_b = f_a * k_b1 as f32 - f_d * k_b2 as f32;
+        let f_b = f_a * k_b1 - f_d * k_b2;
         let f_c = -(f_a + f_b + f_d);
 
         // Forces on second dihedral (e, f, g, h)
         let mut f_e = Vec3::ZERO;
         let mut f_h = Vec3::ZERO;
 
-        if d_mf2 > 1e-10 * d_gf2 as f32 {
-            f_e = r_mf * (k * d_gf / d_mf2 as f64) as f32;
+        if d_mf2 > 1e-10 * d_gf2 {
+            f_e = r_mf * (k * d_gf / d_mf2);
         }
 
-        if d_ng2 > 1e-10 * d_gf2 as f32 {
-            f_h = r_ng * (-k * d_gf / d_ng2 as f64) as f32;
+        if d_ng2 > 1e-10 * d_gf2 {
+            f_h = r_ng * (-k * d_gf / d_ng2);
         }
 
         let k_f1 = f_rem - 1.0;
         let k_f2 = f_rgn;
-        let f_f = f_e * k_f1 as f32 - f_h * k_f2 as f32;
+        let f_f = f_e * k_f1 - f_h * k_f2;
         let f_g = -(f_e + f_f + f_h);
 
         // Add energy and forces
@@ -938,7 +938,7 @@ pub fn calculate_perturbed_bond_forces(
 
         // Compute bond vector and distance
         let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let r_sq = (r_vec.length_squared() as f64).max(1e-10);
+        let r_sq = (r_vec.length_squared()).max(1e-10);
         let r = r_sq.sqrt();
 
         // Displacement from equilibrium
@@ -949,7 +949,7 @@ pub fn calculate_perturbed_bond_forces(
 
         // Force magnitude: |F| = K * (r - r0)
         let force_mag = k * diff / r;
-        let force = r_vec * (force_mag as f32);
+        let force = r_vec * (force_mag);
 
         result.forces[bond.i] -= force;
         result.forces[bond.j] += force;
@@ -1007,14 +1007,14 @@ pub fn calculate_perturbed_angle_forces(
         let r_ij = conf.current().pos[j] - conf.current().pos[i];
         let r_kj = conf.current().pos[j] - conf.current().pos[k_atom];
 
-        let r_ij_len_sq = (r_ij.length_squared() as f64).max(1e-10);
-        let r_kj_len_sq = (r_kj.length_squared() as f64).max(1e-10);
+        let r_ij_len_sq = (r_ij.length_squared()).max(1e-10);
+        let r_kj_len_sq = (r_kj.length_squared()).max(1e-10);
 
         let r_ij_len = r_ij_len_sq.sqrt();
         let r_kj_len = r_kj_len_sq.sqrt();
 
         // Calculate angle using dot product
-        let cos_theta = (r_ij.dot(r_kj) as f64) / (r_ij_len * r_kj_len);
+        let cos_theta = (r_ij.dot(r_kj)) / (r_ij_len * r_kj_len);
         let cos_theta = cos_theta.clamp(-1.0, 1.0);
         let theta = cos_theta.acos();
 
@@ -1029,11 +1029,11 @@ pub fn calculate_perturbed_angle_forces(
         let force_mag = -k * diff / sin_theta;
 
         // Force on atom i
-        let f_i_term = (r_kj * (cos_theta as f32) - r_ij) * ((force_mag / r_ij_len) as f32);
+        let f_i_term = (r_kj * (cos_theta) - r_ij) * ((force_mag / r_ij_len));
         result.forces[i] += f_i_term;
 
         // Force on atom k
-        let f_k_term = (r_ij * (cos_theta as f32) - r_kj) * ((force_mag / r_kj_len) as f32);
+        let f_k_term = (r_ij * (cos_theta) - r_kj) * ((force_mag / r_kj_len));
         result.forces[k_atom] += f_k_term;
 
         // Force on atom j (conservation)
@@ -1083,7 +1083,7 @@ pub fn calculate_perturbed_dihedral_forces(
         // Lambda-interpolated parameters
         let k = (1.0 - lambda) * params_a.k + lambda * params_b.k;
         let pd = (1.0 - lambda) * params_a.pd + lambda * params_b.pd;
-        let m = params_a.m; // Multiplicity (should be same for A and B)
+        let m = params_a.m as f64; // Multiplicity (should be same for A and B)
 
         // Get atom indices
         let i = dihedral.i;
@@ -1100,8 +1100,8 @@ pub fn calculate_perturbed_dihedral_forces(
         let m_vec = r_ij.cross(r_kj);
         let n_vec = r_kj.cross(r_kl);
 
-        let m_len_sq = m_vec.length_squared() as f64;
-        let n_len_sq = n_vec.length_squared() as f64;
+        let m_len_sq = m_vec.length_squared();
+        let n_len_sq = n_vec.length_squared();
 
         if m_len_sq < 1e-20 || n_len_sq < 1e-20 {
             continue; // Degenerate dihedral
@@ -1111,8 +1111,8 @@ pub fn calculate_perturbed_dihedral_forces(
         let n_len = n_len_sq.sqrt();
 
         // Calculate dihedral angle
-        let r_kj_len = r_kj.length() as f64;
-        let cos_phi = (m_vec.dot(n_vec) as f64) / (m_len * n_len);
+        let r_kj_len = r_kj.length();
+        let cos_phi = (m_vec.dot(n_vec)) / (m_len * n_len);
         let cos_phi = cos_phi.clamp(-1.0, 1.0);
 
         // Get sign from scalar triple product
@@ -1120,34 +1120,34 @@ pub fn calculate_perturbed_dihedral_forces(
         let phi = sign * cos_phi.acos();
 
         // Compute energy: V = K * (1 + cos(m*φ - δ))
-        let argument = (m as f64) * phi - pd;
+        let argument = m * phi - pd;
         let energy = k * (1.0 + argument.cos());
 
         // Force magnitude: -dV/dφ = K * m * sin(m*φ - δ)
-        let force_magnitude = k * (m as f64) * argument.sin();
+        let force_magnitude = k * m * argument.sin();
 
         // Apply forces (using standard dihedral force derivatives)
         let f_factor = force_magnitude / r_kj_len;
 
         // Forces on atoms i and l (perpendicular to planes)
-        let f_i = m_vec * ((f_factor / m_len) as f32);
-        let f_l = n_vec * ((-f_factor / n_len) as f32);
+        let f_i = m_vec * ((f_factor / m_len));
+        let f_l = n_vec * ((-f_factor / n_len));
 
         result.forces[i] += f_i;
         result.forces[l] += f_l;
 
         // Forces on atoms j and k (derived from torque balance)
-        let r_ij_len = r_ij.length() as f64;
-        let r_kl_len = r_kl.length() as f64;
+        let r_ij_len = r_ij.length();
+        let r_kl_len = r_kl.length();
 
-        let dot_ij_kj = r_ij.dot(r_kj) as f64;
-        let dot_kl_kj = r_kl.dot(r_kj) as f64;
+        let dot_ij_kj = r_ij.dot(r_kj);
+        let dot_kl_kj = r_kl.dot(r_kj);
 
         let f_j_factor = dot_ij_kj / (r_kj_len * r_kj_len);
         let f_k_factor = dot_kl_kj / (r_kj_len * r_kj_len);
 
-        let f_j = f_i * (f_j_factor as f32 - 1.0);
-        let f_k = f_l * (f_k_factor as f32 - 1.0);
+        let f_j = f_i * (f_j_factor - 1.0);
+        let f_k = f_l * (f_k_factor - 1.0);
 
         result.forces[j] += f_j;
         result.forces[k_atom] += f_k;
@@ -1847,7 +1847,7 @@ mod tests {
             "Force should be attractive (negative x)"
         );
         assert!(
-            (result.forces[0].length() as f64 - expected_force_mag).abs() < 1e-5,
+            (result.forces[0].length() - expected_force_mag).abs() < 1e-5,
             "Force magnitude mismatch: got {}, expected {}",
             result.forces[0].length(),
             expected_force_mag
@@ -2948,7 +2948,7 @@ mod tests {
 
         let n_lambda = 11;
         for i in 0..n_lambda {
-            let lambda = i as f64 / (n_lambda - 1) as f64;
+            let lambda = i / (n_lambda - 1);
             let lambda_ctrl = LambdaController::new().with_lambda(lambda);
             let result = calculate_perturbed_angle_forces(&topo, &conf, &lambda_ctrl);
             println!(

@@ -38,7 +38,7 @@ fn main() {
     }
 
     // Read NOE restraints
-    let mut noe_pairs: Vec<(usize, usize, f32)> = Vec::new();
+    let mut noe_pairs: Vec<(usize, usize, f64)> = Vec::new();
 
     if let Some(path) = noe_file {
         if let Ok(file) = File::open(&path) {
@@ -50,7 +50,7 @@ fn main() {
                         if let (Ok(i), Ok(j), Ok(target)) = (
                             parts[0].parse::<usize>(),
                             parts[1].parse::<usize>(),
-                            parts[2].parse::<f32>(),
+                            parts[2].parse::<f64>(),
                         ) {
                             noe_pairs.push((i - 1, j - 1, target));
                         }
@@ -77,8 +77,8 @@ fn main() {
         match traj.read_frame() {
             Ok(Some(frame)) => {
                 let mut violations = 0;
-                let mut max_viol = 0.0f32;
-                let mut total_viol = 0.0f32;
+                let mut max_viol = 0.0f64;
+                let mut total_viol = 0.0f64;
 
                 for &(i, j, target) in &noe_pairs {
                     if i < frame.positions.len() && j < frame.positions.len() {
@@ -97,7 +97,7 @@ fn main() {
                 }
 
                 let avg_viol = if violations > 0 {
-                    total_viol / violations as f32
+                    total_viol / violations as f64
                 } else {
                     0.0
                 };

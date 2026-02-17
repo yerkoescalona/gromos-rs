@@ -39,3 +39,8 @@ serde = ["dep:serde", "gromos-core/serde"]
 [dev-dependencies]
 gromos-io = { workspace = true }
 approx = "0.5"
+criterion = { workspace = true }
+
+[[bench]]
+name = "nonbonded_bench"
+harness = false

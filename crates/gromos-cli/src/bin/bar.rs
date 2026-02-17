@@ -16,14 +16,14 @@ fn fermi(x: f64) -> f64 {
 }
 
 fn bar_iteration(dw_fwd: &[f64], dw_bwd: &[f64], beta: f64, c: f64) -> f64 {
-    let n_fwd = dw_fwd.len() as f64;
-    let n_bwd = dw_bwd.len() as f64;
+    let n_fwd = dw_fwd.len();
+    let n_bwd = dw_bwd.len();
 
     let sum_fwd: f64 = dw_fwd.iter().map(|&dw| fermi(beta * (dw - c))).sum();
 
     let sum_bwd: f64 = dw_bwd.iter().map(|&dw| fermi(-beta * (dw + c))).sum();
 
-    c + (1.0 / beta) * ((n_fwd / n_bwd) * (sum_bwd / sum_fwd)).ln()
+    c + (1.0 / beta) * ((n_fwd as f64 / n_bwd as f64) * (sum_bwd / sum_fwd)).ln()
 }
 
 fn main() {

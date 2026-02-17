@@ -133,7 +133,7 @@ fn calc_center_of_geometry(positions: &[Vec3], atom_selection: &[usize]) -> Vec3
     for &idx in atom_selection {
         cog = cog + positions[idx];
     }
-    cog / (atom_selection.len() as f32)
+    cog / (atom_selection.len() as f64)
 }
 
 /// Calculate dipole moment
@@ -156,15 +156,15 @@ fn calc_dipole(
 
     for &idx in atom_selection {
         let r = positions[idx] - origin;
-        let q = charges[idx] as f32;
+        let q = charges[idx];
         dipole = dipole + r * q;
         net_charge += charges[idx];
     }
 
     // Convert to f64 for magnitude calculation
-    let dipole_x = dipole.x as f64;
-    let dipole_y = dipole.y as f64;
-    let dipole_z = dipole.z as f64;
+    let dipole_x = dipole.x;
+    let dipole_y = dipole.y;
+    let dipole_z = dipole.z;
 
     // Calculate magnitude in e·nm
     let magnitude_enm = (dipole_x * dipole_x + dipole_y * dipole_y + dipole_z * dipole_z).sqrt();
@@ -270,9 +270,9 @@ fn main() {
                 );
 
                 // Convert components to Debye
-                let mu_x = dipole_vec.x as f64 * ENM_TO_DEBYE;
-                let mu_y = dipole_vec.y as f64 * ENM_TO_DEBYE;
-                let mu_z = dipole_vec.z as f64 * ENM_TO_DEBYE;
+                let mu_x = dipole_vec.x * ENM_TO_DEBYE;
+                let mu_y = dipole_vec.y * ENM_TO_DEBYE;
+                let mu_z = dipole_vec.z * ENM_TO_DEBYE;
 
                 println!(
                     "{:12.6}{:12.6}{:12.6}{:12.6}{:12.6}{:10.6}",

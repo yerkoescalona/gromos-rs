@@ -453,9 +453,9 @@ fn read_coordinates(path: &str) -> Result<(Vec<Vec3>, Vec3), String> {
                 // Try parsing last 3 elements as coordinates
                 let len = parts.len();
                 if let (Ok(x), Ok(y), Ok(z)) = (
-                    parts[len - 3].parse::<f32>(),
-                    parts[len - 2].parse::<f32>(),
-                    parts[len - 1].parse::<f32>(),
+                    parts[len - 3].parse::<f64>(),
+                    parts[len - 2].parse::<f64>(),
+                    parts[len - 1].parse::<f64>(),
                 ) {
                     positions.push(Vec3::new(x, y, z));
                 }
@@ -466,9 +466,9 @@ fn read_coordinates(path: &str) -> Result<(Vec<Vec3>, Vec3), String> {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 3 {
                 if let (Ok(x), Ok(y), Ok(z)) = (
-                    parts[0].parse::<f32>(),
-                    parts[1].parse::<f32>(),
-                    parts[2].parse::<f32>(),
+                    parts[0].parse::<f64>(),
+                    parts[1].parse::<f64>(),
+                    parts[2].parse::<f64>(),
                 ) {
                     box_dims = Vec3::new(x, y, z);
                 }
@@ -1011,15 +1011,15 @@ fn main() {
             .map(|&(i, j)| (i as u32, j as u32))
             .collect();
 
-        // Convert charge from Vec<f64> to Vec<f32> for compatibility
-        let charges_f32: Vec<f32> = topo.charge.iter().map(|&q| q as f32).collect();
+        // Convert charge from Vec<f64> to Vec<f64> for compatibility
+        let charges_f64: Vec<f64> = topo.charge.iter().map(|&q| q).collect();
 
         // Convert iac from Vec<usize> to Vec<u32> for compatibility
         let iac_u32: Vec<u32> = topo.iac.iter().map(|&i| i as u32).collect();
 
         lj_crf_innerloop(
             &conf.current().pos,
-            &charges_f32,
+            &charges_f64,
             &iac_u32,
             &pairlist_short,
             &lj_params,
@@ -1037,19 +1037,19 @@ fn main() {
         // Update virial for barostat
         virial = Mat3 {
             x_axis: Vec3::new(
-                nonbonded_storage.virial[0][0] as f32,
-                nonbonded_storage.virial[0][1] as f32,
-                nonbonded_storage.virial[0][2] as f32,
+                nonbonded_storage.virial[0][0],
+                nonbonded_storage.virial[0][1],
+                nonbonded_storage.virial[0][2],
             ),
             y_axis: Vec3::new(
-                nonbonded_storage.virial[1][0] as f32,
-                nonbonded_storage.virial[1][1] as f32,
-                nonbonded_storage.virial[1][2] as f32,
+                nonbonded_storage.virial[1][0],
+                nonbonded_storage.virial[1][1],
+                nonbonded_storage.virial[1][2],
             ),
             z_axis: Vec3::new(
-                nonbonded_storage.virial[2][0] as f32,
-                nonbonded_storage.virial[2][1] as f32,
-                nonbonded_storage.virial[2][2] as f32,
+                nonbonded_storage.virial[2][0],
+                nonbonded_storage.virial[2][1],
+                nonbonded_storage.virial[2][2],
             ),
         };
 

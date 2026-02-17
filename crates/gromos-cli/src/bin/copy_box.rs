@@ -69,9 +69,9 @@ fn main() {
             Ok(Some(frame)) => {
                 let box_dims = frame.box_dims;
                 let new_box = Vec3::new(
-                    box_dims.x * nx as f32,
-                    box_dims.y * ny as f32,
-                    box_dims.z * nz as f32,
+                    box_dims.x * nx as f64,
+                    box_dims.y * ny as f64,
+                    box_dims.z * nz as f64,
                 );
 
                 println!("POSITION");
@@ -81,9 +81,9 @@ fn main() {
                     for iy in 0..ny {
                         for iz in 0..nz {
                             let offset = Vec3::new(
-                                ix as f32 * box_dims.x,
-                                iy as f32 * box_dims.y,
-                                iz as f32 * box_dims.z,
+                                ix as f64 * box_dims.x,
+                                iy as f64 * box_dims.y,
+                                iz as f64 * box_dims.z,
                             );
 
                             for pos in &frame.positions {

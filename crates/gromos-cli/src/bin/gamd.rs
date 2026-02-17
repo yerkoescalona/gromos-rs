@@ -325,13 +325,13 @@ fn read_coordinates(filename: &str) -> Result<Vec<Vec3>, String> {
         if in_position_block && !trimmed.is_empty() {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 6 {
-                let x: f32 = parts[3]
+                let x: f64 = parts[3]
                     .parse()
                     .map_err(|_| format!("Invalid x coordinate: {}", parts[3]))?;
-                let y: f32 = parts[4]
+                let y: f64 = parts[4]
                     .parse()
                     .map_err(|_| format!("Invalid y coordinate: {}", parts[4]))?;
-                let z: f32 = parts[5]
+                let z: f64 = parts[5]
                     .parse()
                     .map_err(|_| format!("Invalid z coordinate: {}", parts[5]))?;
 

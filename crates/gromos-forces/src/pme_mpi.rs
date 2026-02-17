@@ -363,9 +363,9 @@ mod mpi_impl {
 
             for (atom_idx, (&pos, &charge)) in positions.iter().zip(charges.iter()).enumerate() {
                 // Convert position to grid coordinates (fractional)
-                let fx = pos.x as f64 / box_size[0] * nx as f64;
-                let fy = pos.y as f64 / box_size[1] * ny as f64;
-                let fz = pos.z as f64 / box_size[2] * nz as f64;
+                let fx = pos.x / box_size[0] * nx;
+                let fy = pos.y / box_size[1] * ny;
+                let fz = pos.z / box_size[2] * nz;
 
                 // Grid cell indices (nearest grid point)
                 let gx = fx.floor() as isize;
@@ -383,15 +383,15 @@ mod mpi_impl {
                     }
 
                     let local_ix = ix - self.local_x_start;
-                    let wx = self.bspline_weight(fx - gx as f64, dx, order);
+                    let wx = self.bspline_weight(fx - gx, dx, order);
 
                     for dy in 0..order {
                         let iy = ((gy + dy as isize - order as isize / 2) as usize) % ny;
-                        let wy = self.bspline_weight(fy - gy as f64, dy, order);
+                        let wy = self.bspline_weight(fy - gy, dy, order);
 
                         for dz in 0..order {
                             let iz = ((gz + dz as isize - order as isize / 2) as usize) % nz;
-                            let wz = self.bspline_weight(fz - gz as f64, dz, order);
+                            let wz = self.bspline_weight(fz - gz, dz, order);
 
                             let weight = wx * wy * wz;
                             let grid_idx = local_ix * ny * nz + iy * nz + iz;
@@ -411,7 +411,7 @@ mod mpi_impl {
             match order {
                 4 => {
                     // Cubic B-spline (order 4)
-                    let t = u - i as f64 + order as f64 / 2.0 - 0.5;
+                    let t = u - i + order / 2.0 - 0.5;
                     if t < 0.0 || t > 4.0 {
                         0.0
                     } else if t < 1.0 {
@@ -426,7 +426,7 @@ mod mpi_impl {
                 },
                 _ => {
                     // Default: linear interpolation
-                    (1.0 - (u - i as f64).abs()).max(0.0)
+                    (1.0 - (u - i).abs()).max(0.0)
                 },
             }
         }
@@ -534,9 +534,9 @@ mod mpi_impl {
             } = self.params;
 
             for (atom_idx, (&pos, &charge)) in positions.iter().zip(charges.iter()).enumerate() {
-                let fx = pos.x as f64 / box_size[0] * nx as f64;
-                let fy = pos.y as f64 / box_size[1] * ny as f64;
-                let fz = pos.z as f64 / box_size[2] * nz as f64;
+                let fx = pos.x / box_size[0] * nx;
+                let fy = pos.y / box_size[1] * ny;
+                let fz = pos.z / box_size[2] * nz;
 
                 let gx = fx.floor() as isize;
                 let gy = fy.floor() as isize;
@@ -553,15 +553,15 @@ mod mpi_impl {
                     }
 
                     let local_ix = ix - self.local_x_start;
-                    let wx = self.bspline_weight(fx - gx as f64, dx, order);
+                    let wx = self.bspline_weight(fx - gx, dx, order);
 
                     for dy in 0..order {
                         let iy = ((gy + dy as isize - order as isize / 2) as usize) % ny;
-                        let wy = self.bspline_weight(fy - gy as f64, dy, order);
+                        let wy = self.bspline_weight(fy - gy, dy, order);
 
                         for dz in 0..order {
                             let iz = ((gz + dz as isize - order as isize / 2) as usize) % nz;
-                            let wz = self.bspline_weight(fz - gz as f64, dz, order);
+                            let wz = self.bspline_weight(fz - gz, dz, order);
 
                             let weight = wx * wy * wz;
                             let grid_idx = local_ix * ny * nz + iy * nz + iz;
@@ -570,7 +570,7 @@ mod mpi_impl {
                             // Force = -gradient of potential
                             // Simplified: use grid value directly
                             let grid_value = self.charge_grid[grid_idx];
-                            force.x += charge * weight * grid_value as f32;
+                            force.x += charge * weight * grid_value;
                         }
                     }
                 }
@@ -588,7 +588,7 @@ mod mpi_impl {
             for k in 0..n {
                 let mut sum = 0.0;
                 for j in 0..order {
-                    let arg = 2.0 * std::f64::consts::PI * k as f64 * j as f64 / n as f64;
+                    let arg = 2.0 * std::f64::consts::PI * k * j / n;
                     sum += arg.cos();
                 }
                 moduli[k] = sum;
@@ -643,9 +643,9 @@ mod mpi_impl {
         /// Get k-vector component (with proper wrapping for FFT)
         fn get_kvector_component(i: usize, n: usize) -> f64 {
             if i <= n / 2 {
-                i as f64
+                i
             } else {
-                (i as isize - n as isize) as f64
+                (i as isize - n as isize)
             }
         }
 

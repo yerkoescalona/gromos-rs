@@ -46,11 +46,11 @@ fn main() {
         match traj.read_frame() {
             Ok(Some(frame)) => {
                 let value = match property {
-                    "box_x" => frame.box_dims.x as f64,
-                    "box_y" => frame.box_dims.y as f64,
-                    "box_z" => frame.box_dims.z as f64,
+                    "box_x" => frame.box_dims.x,
+                    "box_y" => frame.box_dims.y,
+                    "box_z" => frame.box_dims.z,
                     "natoms" => frame.positions.len() as f64,
-                    _ => (frame.box_dims.x * frame.box_dims.y * frame.box_dims.z) as f64,
+                    _ => (frame.box_dims.x * frame.box_dims.y * frame.box_dims.z),
                 };
 
                 values.push(value);

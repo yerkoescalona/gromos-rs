@@ -202,14 +202,14 @@ impl Replica {
                 .collect();
 
             // Convert charge from Vec<f64> to Vec<f32> for compatibility
-            let charges_f32: Vec<f32> = topology.charge.iter().map(|&q| q as f32).collect();
+            
 
             // Convert iac from Vec<usize> to Vec<u32> for compatibility
             let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();
 
             lj_crf_innerloop_parallel(
                 &self.configuration.current().pos,
-                &charges_f32,
+                &topology.charge,
                 &iac_u32,
                 &pairlist_short,
                 &lj_params,
@@ -227,7 +227,7 @@ impl Replica {
                 .collect();
 
             // Convert charge from Vec<f64> to Vec<f32> for compatibility
-            let charges_f32: Vec<f32> = topology.charge.iter().map(|&q| q as f32).collect();
+            
 
             // Convert iac from Vec<usize> to Vec<u32> for compatibility
             let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();
@@ -235,7 +235,7 @@ impl Replica {
             let mut storage = ForceStorage::new(topology.num_atoms());
             lj_crf_innerloop(
                 &self.configuration.current().pos,
-                &charges_f32,
+                &topology.charge,
                 &iac_u32,
                 &pairlist_short,
                 &lj_params,
@@ -355,7 +355,7 @@ impl Replica {
 
             // Scale velocities
             for vel in self.configuration.current_mut().vel.iter_mut() {
-                *vel = *vel * scale_factor as f32;
+                *vel = *vel * scale_factor;
             }
 
             // Recalculate kinetic energy

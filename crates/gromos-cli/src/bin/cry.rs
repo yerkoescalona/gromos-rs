@@ -84,7 +84,7 @@ fn main() {
         match traj.read_frame() {
             Ok(Some(frame)) => {
                 let n_atoms = frame.positions.len();
-                let box_volume = (frame.box_dims.x * frame.box_dims.y * frame.box_dims.z) as f64;
+                let box_volume = (frame.box_dims.x * frame.box_dims.y * frame.box_dims.z);
 
                 // Estimate density (assuming average atomic mass ~12 g/mol)
                 let avg_mass = 12.0; // g/mol

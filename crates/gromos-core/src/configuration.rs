@@ -34,7 +34,7 @@ impl Box {
     }
 
     /// Create rectangular box with dimensions (lx, ly, lz)
-    pub fn rectangular(lx: f32, ly: f32, lz: f32) -> Self {
+    pub fn rectangular(lx: f64, ly: f64, lz: f64) -> Self {
         let vectors = Mat3::from_cols(
             Vec3::new(lx, 0.0, 0.0),
             Vec3::new(0.0, ly, 0.0),
@@ -66,7 +66,7 @@ impl Box {
     /// Get box volume
     pub fn volume(&self) -> f64 {
         // Volume = determinant of box matrix
-        self.vectors.determinant() as f64
+        self.vectors.determinant()
     }
 
     /// Get box dimensions (for rectangular box)
@@ -249,7 +249,7 @@ impl State {
             .vel
             .iter()
             .zip(masses.iter())
-            .map(|(v, &m)| 0.5 * m * (v.length_squared() as f64))
+            .map(|(v, &m)| 0.5 * m * v.length_squared())
             .sum();
     }
 
@@ -262,7 +262,7 @@ impl State {
         for (group_idx, group) in temperature_groups.iter().enumerate() {
             self.energies.kinetic_energy[group_idx] = group
                 .iter()
-                .map(|&i| 0.5 * masses[i] * (self.vel[i].length_squared() as f64))
+                .map(|&i| 0.5 * masses[i] * self.vel[i].length_squared())
                 .sum();
         }
 
@@ -284,9 +284,9 @@ impl State {
     /// P = (2*KE - Virial) / (3*V)
     pub fn pressure(&self) -> f64 {
         let volume = self.box_config.volume();
-        let virial_trace = self.virial_tensor.x_axis.x as f64
-            + self.virial_tensor.y_axis.y as f64
-            + self.virial_tensor.z_axis.z as f64;
+        let virial_trace = self.virial_tensor.x_axis.x
+            + self.virial_tensor.y_axis.y
+            + self.virial_tensor.z_axis.z;
 
         (2.0 * self.energies.kinetic_total - virial_trace) / (3.0 * volume)
     }

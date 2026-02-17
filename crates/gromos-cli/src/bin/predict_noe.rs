@@ -19,7 +19,7 @@ fn main() {
 
     let mut topo_file = None;
     let mut traj_file = None;
-    let mut cutoff = 0.5f32; // nm
+    let mut cutoff = 0.5f64; // nm
 
     let mut i = 1;
     while i < args.len() {
@@ -53,7 +53,7 @@ fn main() {
     let cutoff_sq = cutoff * cutoff;
 
     // Collect distances
-    let mut pair_distances: std::collections::HashMap<(usize, usize), Vec<f32>> =
+    let mut pair_distances: std::collections::HashMap<(usize, usize), Vec<f64>> =
         std::collections::HashMap::new();
 
     loop {
@@ -86,10 +86,10 @@ fn main() {
     // Calculate NOE predictions
     for ((i, j), distances) in &pair_distances {
         if !distances.is_empty() {
-            let avg_r: f32 = distances.iter().sum::<f32>() / distances.len() as f32;
+            let avg_r: f64 = distances.iter().sum::<f64>() / distances.len() as f64;
             let avg_r_minus_6: f64 = distances
                 .iter()
-                .map(|&r| (1.0 / (r as f64).powi(6)))
+                .map(|&r| (1.0 / (r).powi(6)))
                 .sum::<f64>()
                 / distances.len() as f64;
 

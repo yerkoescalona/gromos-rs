@@ -16,9 +16,9 @@ fn main() {
     }
 
     let mut _solute_file = None;
-    let mut box_x = 5.0f32;
-    let mut box_y = 5.0f32;
-    let mut box_z = 5.0f32;
+    let mut box_x = 5.0f64;
+    let mut box_y = 5.0f64;
+    let mut box_z = 5.0f64;
     let mut density = 1000.0f64; // kg/m³
 
     let mut i = 1;
@@ -45,7 +45,7 @@ fn main() {
         i += 1;
     }
 
-    let volume = (box_x * box_y * box_z) as f64; // nm³
+    let volume = (box_x * box_y * box_z); // nm³
     let volume_m3 = volume * 1e-27; // Convert to m³
     let total_mass_kg = density * volume_m3;
 
@@ -68,9 +68,9 @@ fn main() {
 
     // Simple grid placement
     let n_side = (n_molecules as f64).cbrt().ceil() as usize;
-    let spacing_x = box_x / n_side as f32;
-    let spacing_y = box_y / n_side as f32;
-    let spacing_z = box_z / n_side as f32;
+    let spacing_x = box_x / n_side as f64;
+    let spacing_y = box_y / n_side as f64;
+    let spacing_z = box_z / n_side as f64;
 
     let mut count = 0;
     for ix in 0..n_side {
@@ -80,9 +80,9 @@ fn main() {
                     break;
                 }
 
-                let x = (ix as f32 + 0.5) * spacing_x;
-                let y = (iy as f32 + 0.5) * spacing_y;
-                let z = (iz as f32 + 0.5) * spacing_z;
+                let x = (ix as f64 + 0.5) * spacing_x;
+                let y = (iy as f64 + 0.5) * spacing_y;
+                let z = (iz as f64 + 0.5) * spacing_z;
 
                 // Place 3-atom molecule (e.g., water)
                 println!("{:15.9} {:15.9} {:15.9}", x, y, z);

@@ -190,12 +190,12 @@ impl PolarizationCalculator {
             // Update induced dipoles: μ_i = α_i * E_total
             let mut max_change: f64 = 0.0;
             for i in 0..n_atoms {
-                let alpha = self.polarizabilities[i].alpha as f32;
+                let alpha = self.polarizabilities[i].alpha;
                 let e_total = self.states[i].electric_field;
                 let new_dipole = e_total * alpha;
 
                 let change = (new_dipole - old_dipoles[i]).length();
-                max_change = max_change.max(change as f64);
+                max_change = max_change.max(change);
 
                 self.states[i].induced_dipole = new_dipole;
             }
@@ -214,7 +214,7 @@ impl PolarizationCalculator {
         // 3. Calculate polarization energy: E_pol = -0.5 * Σ μ · E
         let mut energy = 0.0;
         for state in &self.states {
-            energy -= 0.5 * state.induced_dipole.dot(state.electric_field) as f64;
+            energy -= 0.5 * state.induced_dipole.dot(state.electric_field);
         }
 
         // 4. Calculate forces (dipole-charge and dipole-dipole interactions)
@@ -246,11 +246,11 @@ impl PolarizationCalculator {
                 let r_ij = pos_i - pos_j;
                 let r = r_ij.length();
 
-                if r > self.cutoff as f32 {
+                if r > self.cutoff {
                     continue;
                 }
 
-                let q_j = topo.charge[j] as f32;
+                let q_j = topo.charge[j];
                 let r3 = r * r * r;
                 field += r_ij * (q_j / r3);
             }
@@ -277,7 +277,7 @@ impl PolarizationCalculator {
 
                 let pos_j = conf.current().pos[j];
                 let r_ij = pos_i - pos_j;
-                let r = r_ij.length() as f64;
+                let r = r_ij.length();
 
                 if r > self.cutoff {
                     continue;
@@ -295,9 +295,9 @@ impl PolarizationCalculator {
                 };
 
                 // Dipole field tensor contribution
-                let dot_prod = (r_ij.dot(mu_j) as f64) / r5;
-                let term1 = r_ij * (3.0 * dot_prod * damping) as f32;
-                let term2 = mu_j * (damping / r3) as f32;
+                let dot_prod = (r_ij.dot(mu_j)) / r5;
+                let term1 = r_ij * (3.0 * dot_prod * damping);
+                let term2 = mu_j * (damping / r3);
 
                 field_ind += term1 - term2;
             }
@@ -350,8 +350,8 @@ impl PolarizationCalculator {
             }
 
             let pos_atom = conf.current().pos[i];
-            let q_drude = self.polarizabilities[i].drude_charge as f32;
-            let k = self.polarizabilities[i].drude_k as f32;
+            let q_drude = self.polarizabilities[i].drude_charge;
+            let k = self.polarizabilities[i].drude_k;
 
             // Get Drude particle position (or initialize)
             let pos_drude = self.states[i].drude_position.unwrap_or(pos_atom);
@@ -367,11 +367,11 @@ impl PolarizationCalculator {
                 let r_ij = pos_drude - pos_j;
                 let r = r_ij.length();
 
-                if r < 1e-6 || r > self.cutoff as f32 {
+                if r < 1e-6 || r > self.cutoff {
                     continue;
                 }
 
-                let q_j = topo.charge[j] as f32;
+                let q_j = topo.charge[j];
                 field += r_ij * (q_j / (r * r * r));
             }
 
@@ -382,7 +382,7 @@ impl PolarizationCalculator {
 
             // Spring energy
             let spring_energy = 0.5 * k * displacement.length_squared();
-            energy += spring_energy as f64;
+            energy += spring_energy;
 
             // Update state
             self.states[i].drude_position = Some(new_drude_pos);
@@ -419,12 +419,12 @@ impl PolarizationCalculator {
             if let Some(drude_pos) = state.drude_position {
                 let drude_vel = state.drude_velocity.unwrap_or(Vec3::ZERO);
                 let drude_force = state.drude_force.unwrap_or(Vec3::ZERO);
-                let mass = self.polarizabilities[i].drude_mass as f32;
+                let mass = self.polarizabilities[i].drude_mass;
 
                 // Velocity Verlet
                 let accel = drude_force / mass;
-                let new_vel = drude_vel + accel * (dt as f32);
-                let new_pos = drude_pos + new_vel * (dt as f32);
+                let new_vel = drude_vel + accel * (dt);
+                let new_pos = drude_pos + new_vel * (dt);
 
                 state.drude_velocity = Some(new_vel);
                 state.drude_position = Some(new_pos);

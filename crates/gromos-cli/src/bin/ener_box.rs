@@ -9,7 +9,7 @@ use gromos::io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
 
-const COULOMB_CONST: f32 = 138.9354859;
+const COULOMB_CONST: f64 = 138.9354859;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -63,9 +63,9 @@ fn main() {
     loop {
         match traj.read_frame() {
             Ok(Some(frame)) => {
-                let dx = frame.box_dims.x / nx as f32;
-                let dy = frame.box_dims.y / ny as f32;
-                let dz = frame.box_dims.z / nz as f32;
+                let dx = frame.box_dims.x / nx as f64;
+                let dy = frame.box_dims.y / ny as f64;
+                let dz = frame.box_dims.z / nz as f64;
 
                 for (idx, pos) in frame.positions.iter().enumerate() {
                     let ix = ((pos.x / dx) as usize).min(nx - 1);
@@ -75,13 +75,13 @@ fn main() {
 
                     // Simple energy estimate
                     let q = if idx < topo.charge.len() {
-                        topo.charge[idx] as f32
+                        topo.charge[idx]
                     } else {
                         0.0
                     };
 
                     let e_self = COULOMB_CONST * q * q / 0.1; // Self energy term
-                    region_energies[region_idx] += e_self as f64;
+                    region_energies[region_idx] += e_self;
                 }
 
                 n_frames += 1;

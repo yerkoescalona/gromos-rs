@@ -202,7 +202,7 @@ impl ChargeGroup {
 
         let sum: Vec3 = self.atoms.iter().map(|&i| positions[i]).sum();
 
-        sum / self.atoms.len() as f32
+        sum / self.atoms.len() as f64
     }
 }
 

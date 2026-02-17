@@ -97,7 +97,7 @@ impl PDBAtom {
             .map_err(|e| format!("Invalid Z coordinate: {}", e))?;
 
         // Convert from Angstrom to nanometers
-        let coord = Vec3::new((x * 0.1) as f32, (y * 0.1) as f32, (z * 0.1) as f32);
+        let coord = Vec3::new(x * 0.1, y * 0.1, z * 0.1);
 
         // Parse occupancy (columns 55-60)
         let occupancy = if line.len() >= 60 {
@@ -143,9 +143,9 @@ impl PDBAtom {
         let record = if use_hetatm { "HETATM" } else { "ATOM  " };
 
         // Convert coordinates back to Angstroms
-        let x = (self.coord.x as f64) * 10.0;
-        let y = (self.coord.y as f64) * 10.0;
-        let z = (self.coord.z as f64) * 10.0;
+        let x = (self.coord.x) * 10.0;
+        let y = (self.coord.y) * 10.0;
+        let z = (self.coord.z) * 10.0;
 
         format!(
             "{:6}{:5} {:^4} {:3} {:1}{:4}    {:8.3}{:8.3}{:8.3}{:6.2}{:6.2}          {:>2}",

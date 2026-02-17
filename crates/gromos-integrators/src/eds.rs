@@ -342,7 +342,7 @@ impl EDSParameters {
         // Apply weighted forces from all states
         for (state, &prob) in self.states.iter().zip(probabilities.iter()) {
             for (i, &state_force) in state.forces.iter().enumerate() {
-                configuration.current_mut().force[i] += state_force * prob as f32;
+                configuration.current_mut().force[i] += state_force * prob;
             }
         }
     }
@@ -365,19 +365,19 @@ impl EDSParameters {
         // Convert to Mat3 and assign (Mat3 is column-major)
         configuration.current_mut().virial_tensor = gromos_core::math::Mat3::from_cols(
             Vec3::new(
-                virial_sum[0][0] as f32,
-                virial_sum[1][0] as f32,
-                virial_sum[2][0] as f32,
+                virial_sum[0][0],
+                virial_sum[1][0],
+                virial_sum[2][0],
             ),
             Vec3::new(
-                virial_sum[0][1] as f32,
-                virial_sum[1][1] as f32,
-                virial_sum[2][1] as f32,
+                virial_sum[0][1],
+                virial_sum[1][1],
+                virial_sum[2][1],
             ),
             Vec3::new(
-                virial_sum[0][2] as f32,
-                virial_sum[1][2] as f32,
-                virial_sum[2][2] as f32,
+                virial_sum[0][2],
+                virial_sum[1][2],
+                virial_sum[2][2],
             ),
         );
     }
@@ -496,7 +496,7 @@ impl AEDSParameters {
         // Scale by acceleration factor if in acceleration region
         if factor < 1.0 {
             for force in configuration.current_mut().force.iter_mut() {
-                *force = *force * factor as f32;
+                *force = *force * factor;
             }
         }
     }
@@ -762,13 +762,13 @@ impl EDSRunner {
             .collect();
 
         // Convert charge and iac
-        let charges_f32: Vec<f32> = topology.charge.iter().map(|&q| q as f32).collect();
+        
         let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();
 
         let nonbonded_storage = if self.parallel_forces {
             lj_crf_innerloop_parallel(
                 &configuration.current().pos,
-                &charges_f32,
+                &topology.charge,
                 &iac_u32,
                 &pairlist_short,
                 &lj_params,
@@ -780,7 +780,7 @@ impl EDSRunner {
             let mut storage = ForceStorage::new(n_atoms);
             lj_crf_innerloop(
                 &configuration.current().pos,
-                &charges_f32,
+                &topology.charge,
                 &iac_u32,
                 &pairlist_short,
                 &lj_params,

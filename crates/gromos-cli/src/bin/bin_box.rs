@@ -59,9 +59,9 @@ fn main() {
         match traj.read_frame() {
             Ok(Some(frame)) => {
                 let box_dims = frame.box_dims;
-                let dx = box_dims.x / nx as f32;
-                let dy = box_dims.y / ny as f32;
-                let dz = box_dims.z / nz as f32;
+                let dx = box_dims.x / nx as f64;
+                let dy = box_dims.y / ny as f64;
+                let dz = box_dims.z / nz as f64;
 
                 // Count atoms in each bin
                 let mut bins = vec![vec![vec![0; nz]; ny]; nx];

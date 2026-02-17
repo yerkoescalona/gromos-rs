@@ -19,7 +19,7 @@ fn main() {
 
     let mut topo_file = None;
     let mut traj_file = None;
-    let mut tolerance = 0.001f32; // nm
+    let mut tolerance = 0.001f64; // nm
 
     let mut i = 1;
     while i < args.len() {
@@ -55,8 +55,8 @@ fn main() {
         match traj.read_frame() {
             Ok(Some(frame)) => {
                 let mut violations = 0;
-                let mut max_error = 0.0f32;
-                let mut total_error = 0.0f32;
+                let mut max_error = 0.0f64;
+                let mut total_error = 0.0f64;
                 let mut bond_count = 0;
 
                 for bond in &topo.solute.bonds {
@@ -69,7 +69,7 @@ fn main() {
                         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
                         // Assume target bond length is 0.1 nm (C-C bond)
-                        let target = 0.1f32;
+                        let target = 0.1f64;
                         let error = (dist - target).abs();
 
                         if error > tolerance {
@@ -83,7 +83,7 @@ fn main() {
                 }
 
                 let avg_error = if bond_count > 0 {
-                    total_error / bond_count as f32
+                    total_error / bond_count as f64
                 } else {
                     0.0
                 };

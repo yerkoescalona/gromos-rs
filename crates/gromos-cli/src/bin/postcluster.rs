@@ -91,7 +91,7 @@ fn main() {
                         if frame_idx < assignments.len() {
                             let cluster_id = assignments[frame_idx];
                             if cluster_id < n_clusters {
-                                cluster_times[cluster_id].push(frame.time as f64);
+                                cluster_times[cluster_id].push(frame.time);
                             }
                         }
                         frame_idx += 1;

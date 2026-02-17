@@ -239,7 +239,7 @@ pub fn validate_coordinates(positions: &[Vec3], box_dims: Option<Vec3>) -> Valid
     }
 
     // Check distances between consecutive atoms (catch overlaps)
-    let mut min_dist = f32::MAX;
+    let mut min_dist = f64::MAX;
     let mut min_pair = (0, 0);
     for i in 0..positions.len() {
         for j in (i + 1)..positions.len().min(i + 100) {

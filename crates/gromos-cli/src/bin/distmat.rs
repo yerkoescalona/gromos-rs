@@ -67,7 +67,7 @@ fn main() {
                         let dz = frame.positions[idx_i].z - frame.positions[idx_j].z;
                         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
-                        dist_sums[i][j] += dist as f64;
+                        dist_sums[i][j] += dist;
                     }
                 }
 

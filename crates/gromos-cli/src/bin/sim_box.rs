@@ -72,8 +72,8 @@ struct SimBoxArgs {
     pbc: char,
     pos: String,
     solvent: String,
-    minwall: Vec<f32>,
-    thresh: f32,
+    minwall: Vec<f64>,
+    thresh: f64,
     use_boxsize: bool,
 }
 
@@ -143,7 +143,7 @@ fn parse_args(args: Vec<String>) -> Result<SimBoxArgs, String> {
                         i -= 1;
                         break;
                     }
-                    let val: f32 = args[i]
+                    let val: f64 = args[i]
                         .parse()
                         .map_err(|_| format!("Invalid @minwall value: {}", args[i]))?;
                     sb_args.minwall.push(val);
@@ -230,13 +230,13 @@ fn read_coords_with_box(path: &str) -> Result<(Vec<Vec3>, Option<Vec3>), String>
             let coords = &line[24..];
             let parts: Vec<&str> = coords.split_whitespace().collect();
             if parts.len() >= 3 {
-                let x: f32 = parts[0]
+                let x: f64 = parts[0]
                     .parse()
                     .map_err(|_| format!("Invalid x coordinate: {}", parts[0]))?;
-                let y: f32 = parts[1]
+                let y: f64 = parts[1]
                     .parse()
                     .map_err(|_| format!("Invalid y coordinate: {}", parts[1]))?;
-                let z: f32 = parts[2]
+                let z: f64 = parts[2]
                     .parse()
                     .map_err(|_| format!("Invalid z coordinate: {}", parts[2]))?;
                 positions.push(Vec3::new(x, y, z));
@@ -244,13 +244,13 @@ fn read_coords_with_box(path: &str) -> Result<(Vec<Vec3>, Option<Vec3>), String>
         } else if in_box {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 3 {
-                let lx: f32 = parts[0]
+                let lx: f64 = parts[0]
                     .parse()
                     .map_err(|_| format!("Invalid box x: {}", parts[0]))?;
-                let ly: f32 = parts[1]
+                let ly: f64 = parts[1]
                     .parse()
                     .map_err(|_| format!("Invalid box y: {}", parts[1]))?;
-                let lz: f32 = parts[2]
+                let lz: f64 = parts[2]
                     .parse()
                     .map_err(|_| format!("Invalid box z: {}", parts[2]))?;
                 box_dims = Some(Vec3::new(lx, ly, lz));
@@ -271,7 +271,7 @@ fn calc_cog(positions: &[Vec3]) -> Vec3 {
     for pos in positions {
         cog = cog + *pos;
     }
-    cog / positions.len() as f32
+    cog / positions.len() as f64
 }
 
 /// Shift all positions by a vector
@@ -442,17 +442,17 @@ fn main() {
     let half_box = target_box * 0.5;
 
     // Center the replicated grid
-    let start_x = -((nx as f32 - 1.0) * 0.5 * solvent_box.x);
-    let start_y = -((ny as f32 - 1.0) * 0.5 * solvent_box.y);
-    let start_z = -((nz as f32 - 1.0) * 0.5 * solvent_box.z);
+    let start_x = -((nx as f64 - 1.0) * 0.5 * solvent_box.x);
+    let start_y = -((ny as f64 - 1.0) * 0.5 * solvent_box.y);
+    let start_z = -((nz as f64 - 1.0) * 0.5 * solvent_box.z);
 
     for ix in 0..nx {
         for iy in 0..ny {
             for iz in 0..nz {
                 let shift = Vec3::new(
-                    start_x + ix as f32 * solvent_box.x,
-                    start_y + iy as f32 * solvent_box.y,
-                    start_z + iz as f32 * solvent_box.z,
+                    start_x + ix as f64 * solvent_box.x,
+                    start_y + iy as f64 * solvent_box.y,
+                    start_z + iz as f64 * solvent_box.z,
                 );
                 for pos in &solvent_pos_orig {
                     all_solvent.push(*pos + shift);
@@ -493,7 +493,7 @@ fn main() {
         }
 
         // Check minimum distance to solute atoms
-        let mut min_dist2 = f32::MAX;
+        let mut min_dist2 = f64::MAX;
         for solute_atom in &solute_pos {
             let dx = mol_cog.x - solute_atom.x;
             let dy = mol_cog.y - solute_atom.y;

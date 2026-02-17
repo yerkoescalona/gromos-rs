@@ -19,7 +19,7 @@ fn main() {
 
     let mut topo_file = None;
     let mut traj_file = None;
-    let mut cutoff = 0.6f32; // Default 6 Å = 0.6 nm
+    let mut cutoff = 0.6f64; // Default 6 Å = 0.6 nm
 
     let mut i = 1;
     while i < args.len() {
@@ -72,7 +72,7 @@ fn main() {
                     }
                 }
 
-                let avg_contacts = (2.0 * total_contacts as f32) / (num_atoms as f32);
+                let avg_contacts = (2.0 * total_contacts as f64) / (num_atoms as f64);
 
                 println!(
                     "{:12.4} {:15.4} {:18}",

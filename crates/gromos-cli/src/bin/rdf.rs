@@ -57,7 +57,7 @@ struct RdfArgs {
     group1_spec: String,
     group2_spec: String,
     output_file: String,
-    rmax: f32,
+    rmax: f64,
     bins: usize,
     skip: usize,
     every: usize,
@@ -195,12 +195,12 @@ fn calculate_rdf(
     traj_reader: &mut TrajectoryReader,
     group1: &[usize],
     group2: &[usize],
-    rmax: f32,
+    rmax: f64,
     bins: usize,
     skip: usize,
     every: usize,
-) -> Result<(Vec<f32>, Vec<f64>), String> {
-    let dr = rmax / bins as f32;
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let dr = rmax / bins as f64;
     let mut histogram = vec![0u64; bins];
 
     log_info!("Calculating RDF with {} bins, dr = {:.6} nm", bins, dr);
@@ -223,7 +223,7 @@ fn calculate_rdf(
 
     let mut progress = ProgressBar::new(total_frames);
     let mut frames_used = 0;
-    let mut avg_volume = 0.0f32;
+    let mut avg_volume = 0.0f64;
 
     // Process frames
     for (frame_idx, frame) in all_frames.iter().enumerate() {
@@ -295,13 +295,13 @@ fn calculate_rdf(
     }
 
     // Calculate average volume
-    avg_volume /= frames_used as f32;
+    avg_volume /= frames_used as f64;
     log_debug!("Average box volume: {:.3} nm³", avg_volume);
 
     // Calculate density (number of particles per unit volume)
-    let n1 = group1.len() as f64;
-    let n2 = group2.len() as f64;
-    let density = n2 / avg_volume as f64;
+    let n1 = group1.len();
+    let n2 = group2.len();
+    let density = n2 as f64 / avg_volume;
 
     log_debug!("Number density: {:.6} particles/nm³", density);
 
@@ -310,19 +310,19 @@ fn calculate_rdf(
     let mut g_r = Vec::with_capacity(bins);
 
     for i in 0..bins {
-        let r = (i as f32 + 0.5) * dr;
+        let r = (i as f64 + 0.5) * dr;
         r_values.push(r);
 
         // Volume of spherical shell
-        let r_inner = i as f32 * dr;
-        let r_outer = (i + 1) as f32 * dr;
-        let shell_volume = (4.0 / 3.0) * std::f32::consts::PI * (r_outer.powi(3) - r_inner.powi(3));
+        let r_inner = i as f64 * dr;
+        let r_outer = (i + 1) as f64 * dr;
+        let shell_volume = (4.0 / 3.0) * std::f64::consts::PI * (r_outer.powi(3) - r_inner.powi(3));
 
         // Expected number of particles in ideal gas
-        let n_ideal = density * shell_volume as f64;
+        let n_ideal = density * shell_volume;
 
         // Normalize
-        let n_observed = histogram[i] as f64 / (frames_used as f64 * n1);
+        let n_observed = histogram[i] as f64 / (frames_used as f64 * n1 as f64);
         let g = if n_ideal > 0.0 {
             n_observed / n_ideal
         } else {

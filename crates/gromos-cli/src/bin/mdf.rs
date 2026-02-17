@@ -47,8 +47,8 @@ fn main() {
     eprintln!("# Bins: {}", n_bins);
 
     let mut histogram = vec![0usize; n_bins];
-    let mut min_coord = f32::MAX;
-    let mut max_coord = f32::MIN;
+    let mut min_coord = f64::MAX;
+    let mut max_coord = f64::MIN;
 
     // First pass: determine range
     let mut all_coords = Vec::new();
@@ -72,7 +72,7 @@ fn main() {
     }
 
     let range = max_coord - min_coord;
-    let bin_width = range / n_bins as f32;
+    let bin_width = range / n_bins as f64;
 
     // Build histogram
     for &coord_val in &all_coords {
@@ -85,12 +85,12 @@ fn main() {
     println!("# Coordinate    Count    PMF (kJ/mol)");
 
     let kb_t = 2.5; // kJ/mol at 300K
-    let max_count = *histogram.iter().max().unwrap_or(&1) as f32;
+    let max_count = *histogram.iter().max().unwrap_or(&1);
 
     for (idx, &count) in histogram.iter().enumerate() {
-        let coord_val = min_coord + (idx as f32 + 0.5) * bin_width;
+        let coord_val = min_coord + (idx as f64 + 0.5) * bin_width;
         let pmf = if count > 0 {
-            -kb_t * ((count as f32) / max_count).ln()
+            -kb_t * (count as f64 / max_count as f64).ln()
         } else {
             0.0
         };

@@ -67,7 +67,7 @@ mod enabled {
         // Calculate geometric temperature distribution
         let temperatures: Vec<f64> = (0..size)
             .map(|i| {
-                let frac = if size > 1 { i as f64 / (size - 1) as f64 } else { 0.0 };
+                let frac = if size > 1 { i / (size - 1) } else { 0.0 };
                 args.temp_min * (args.temp_max / args.temp_min).powf(frac)
             })
             .collect();
@@ -145,7 +145,7 @@ mod enabled {
             let exchanged = controller.attempt_exchange(&world, cycle * args.exchange_freq);
 
             if rank == 0 && !args.quiet && (cycle + 1) % 10 == 0 {
-                let progress = ((cycle + 1) as f64 / num_exchanges as f64) * 100.0;
+                let progress = ((cycle + 1) / num_exchanges) * 100.0;
                 println!("Progress: {:.1}% ({}/{} exchanges)", progress, cycle + 1, num_exchanges);
             }
 

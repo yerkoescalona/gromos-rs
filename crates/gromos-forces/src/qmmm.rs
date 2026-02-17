@@ -161,7 +161,7 @@ impl LinkAtom {
     pub fn update_position(&mut self, conf: &Configuration) {
         let r_qm = conf.current().pos[self.qm_atom];
         let r_mm = conf.current().pos[self.mm_atom];
-        self.position = r_qm + (r_mm - r_qm) * (self.bond_ratio as f32);
+        self.position = r_qm + (r_mm - r_qm) * (self.bond_ratio);
     }
 }
 
@@ -424,9 +424,9 @@ impl XTBEngine {
                 let fz: f64 = parts[2].parse().unwrap_or(0.0);
                 // Convert Hartree/Bohr to kJ/mol/nm
                 forces.push(Vec3::new(
-                    (fx * 49614.75) as f32,
-                    (fy * 49614.75) as f32,
-                    (fz * 49614.75) as f32,
+                    (fx * 49614.75),
+                    (fy * 49614.75),
+                    (fz * 49614.75),
                 ));
             }
         }
@@ -553,7 +553,7 @@ impl QMMMCalculator {
         for &atom_idx in &self.qm_region.atoms {
             qm_com += conf.current().pos[atom_idx];
         }
-        qm_com /= self.qm_region.atoms.len() as f32;
+        qm_com /= self.qm_region.atoms.len() as f64;
 
         // Collect MM charges
         for i in 0..topo.num_atoms() {
@@ -565,7 +565,7 @@ impl QMMMCalculator {
             let pos = conf.current().pos[i];
             let dist = (pos - qm_com).length();
 
-            if dist < self.mm_cutoff as f32 {
+            if dist < self.mm_cutoff {
                 let charge = topo.charge[i];
                 mm_charges.push((pos, charge));
             }
@@ -587,7 +587,7 @@ impl QMMMCalculator {
             }
 
             let f_link = qm_result.forces[link_force_idx];
-            let g = link.bond_ratio as f32;
+            let g = link.bond_ratio;
 
             conf.current_mut().force[link.qm_atom] += f_link * (1.0 - g);
             conf.current_mut().force[link.mm_atom] += f_link * g;
