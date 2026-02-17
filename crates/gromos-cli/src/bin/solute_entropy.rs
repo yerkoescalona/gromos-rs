@@ -75,9 +75,9 @@ fn main() {
         let mut mean_z = 0.0f64;
 
         for frame_pos in &all_positions {
-            mean_x += frame_pos[atom_idx].x as f64;
-            mean_y += frame_pos[atom_idx].y as f64;
-            mean_z += frame_pos[atom_idx].z as f64;
+            mean_x += frame_pos[atom_idx].x;
+            mean_y += frame_pos[atom_idx].y;
+            mean_z += frame_pos[atom_idx].z;
         }
 
         mean_x /= n_frames as f64;
@@ -86,9 +86,9 @@ fn main() {
 
         let mut variance = 0.0f64;
         for frame_pos in &all_positions {
-            let dx = frame_pos[atom_idx].x as f64 - mean_x;
-            let dy = frame_pos[atom_idx].y as f64 - mean_y;
-            let dz = frame_pos[atom_idx].z as f64 - mean_z;
+            let dx = frame_pos[atom_idx].x - mean_x;
+            let dy = frame_pos[atom_idx].y - mean_y;
+            let dz = frame_pos[atom_idx].z - mean_z;
             variance += dx * dx + dy * dy + dz * dz;
         }
 

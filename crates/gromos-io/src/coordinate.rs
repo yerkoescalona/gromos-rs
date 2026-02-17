@@ -84,13 +84,13 @@ pub fn read_coordinate_file<P: AsRef<Path>>(
             let parts: Vec<&str> = coords.split_whitespace().collect();
 
             if parts.len() >= 3 {
-                let x: f32 = parts[0].parse().map_err(|_| {
+                let x: f64 = parts[0].parse().map_err(|_| {
                     IoError::ParseError(format!("Invalid x coordinate: {}", parts[0]))
                 })?;
-                let y: f32 = parts[1].parse().map_err(|_| {
+                let y: f64 = parts[1].parse().map_err(|_| {
                     IoError::ParseError(format!("Invalid y coordinate: {}", parts[1]))
                 })?;
-                let z: f32 = parts[2].parse().map_err(|_| {
+                let z: f64 = parts[2].parse().map_err(|_| {
                     IoError::ParseError(format!("Invalid z coordinate: {}", parts[2]))
                 })?;
 
@@ -106,13 +106,13 @@ pub fn read_coordinate_file<P: AsRef<Path>>(
             let parts: Vec<&str> = coords.split_whitespace().collect();
 
             if parts.len() >= 3 {
-                let vx: f32 = parts[0]
+                let vx: f64 = parts[0]
                     .parse()
                     .map_err(|_| IoError::ParseError(format!("Invalid vx: {}", parts[0])))?;
-                let vy: f32 = parts[1]
+                let vy: f64 = parts[1]
                     .parse()
                     .map_err(|_| IoError::ParseError(format!("Invalid vy: {}", parts[1])))?;
-                let vz: f32 = parts[2]
+                let vz: f64 = parts[2]
                     .parse()
                     .map_err(|_| IoError::ParseError(format!("Invalid vz: {}", parts[2])))?;
 
@@ -122,13 +122,13 @@ pub fn read_coordinate_file<P: AsRef<Path>>(
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
             if parts.len() >= 3 {
-                let lx: f32 = parts[0]
+                let lx: f64 = parts[0]
                     .parse()
                     .map_err(|_| IoError::ParseError(format!("Invalid box x: {}", parts[0])))?;
-                let ly: f32 = parts[1]
+                let ly: f64 = parts[1]
                     .parse()
                     .map_err(|_| IoError::ParseError(format!("Invalid box y: {}", parts[1])))?;
-                let lz: f32 = parts[2]
+                let lz: f64 = parts[2]
                     .parse()
                     .map_err(|_| IoError::ParseError(format!("Invalid box z: {}", parts[2])))?;
 
@@ -173,28 +173,79 @@ pub fn read_coordinate_file<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    /// Minimal 4-atom GROMOS .conf content (cg16-style).
+    /// Position lines: first 24 chars are residue/atom metadata, then x y z.
+    const CG16_CONF: &str = "\
+TITLE
+  4-atom test system (cg16)
+END
+POSITION
+    1 RES    C         1   4.197156491  0.505921049  2.679733124
+    1 RES    H         2   4.300000000  0.600000000  2.700000000
+    1 RES    H         3   4.100000000  0.400000000  2.650000000
+    1 RES    H         4   4.200000000  0.500000000  2.800000000
+END
+BOX
+  10.0  10.0  10.0
+END
+";
+
+    fn write_tmp(content: &str, suffix: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("gromos_test_{suffix}.tmp"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
 
     #[test]
     fn test_parse_cg16() {
-        // Test with actual GROMOS file
-        let result = read_coordinate_file("../md++/src/check/data/cg16.conf", 1, 1);
+        let path = write_tmp(CG16_CONF, "cg16_conf");
+        let conf = read_coordinate_file(&path, 1, 1).expect("Failed to parse inline conf");
 
-        if let Ok(conf) = result {
-            println!("Loaded {} atoms", conf.current().pos.len());
-            assert_eq!(conf.current().pos.len(), 4);
+        assert_eq!(conf.current().pos.len(), 4);
 
-            // Check first atom position
-            let pos0 = conf.current().pos[0];
-            println!("Atom 0: ({}, {}, {})", pos0.x, pos0.y, pos0.z);
-            assert!((pos0.x - 4.197156491).abs() < 1e-6);
-            assert!((pos0.y - 0.505921049).abs() < 1e-6);
-            assert!((pos0.z - 2.679733124).abs() < 1e-6);
+        let pos0 = conf.current().pos[0];
+        assert!((pos0.x - 4.197156491_f32).abs() < 1e-5);
+        assert!((pos0.y - 0.505921049_f32).abs() < 1e-5);
+        assert!((pos0.z - 2.679733124_f32).abs() < 1e-5);
 
-            // Check box
-            let box_dims = conf.current().box_config.dimensions();
-            assert!((box_dims.x - 10.0).abs() < 1e-6);
-        } else {
-            println!("Could not load file (may not exist in test environment)");
-        }
+        let box_dims = conf.current().box_config.dimensions();
+        assert!((box_dims.x - 10.0_f32).abs() < 1e-5);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_parse_missing_file_returns_error() {
+        let result = read_coordinate_file("/nonexistent/path/file.conf", 1, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_conf_with_velocities() {
+        let content = "\
+TITLE
+  test
+END
+POSITION
+    1 RES    C         1   1.000000000  2.000000000  3.000000000
+END
+VELOCITY
+    1 RES    C         1   0.010000000  0.020000000  0.030000000
+END
+BOX
+  5.0  5.0  5.0
+END
+";
+        let path = write_tmp(content, "conf_vel");
+        let conf = read_coordinate_file(&path, 1, 1).expect("Failed to parse conf with velocities");
+
+        assert_eq!(conf.current().pos.len(), 1);
+        assert_eq!(conf.current().vel.len(), 1);
+        assert!((conf.current().vel[0].x - 0.01_f32).abs() < 1e-5);
+
+        std::fs::remove_file(path).ok();
     }
 }

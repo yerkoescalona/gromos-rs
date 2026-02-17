@@ -9,7 +9,7 @@ use gromos::io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
 
-fn calc_angle(pos1: (f32, f32, f32), pos2: (f32, f32, f32), pos3: (f32, f32, f32)) -> f32 {
+fn calc_angle(pos1: (f64, f64, f64), pos2: (f64, f64, f64), pos3: (f64, f64, f64)) -> f64 {
     let v1x = pos1.0 - pos2.0;
     let v1y = pos1.1 - pos2.1;
     let v1z = pos1.2 - pos2.2;
@@ -94,7 +94,7 @@ fn main() {
                         );
 
                         let angle_val = calc_angle(pos1, pos2, pos3);
-                        angle_sums[idx] += angle_val as f64;
+                        angle_sums[idx] += angle_val;
                     }
                 }
 

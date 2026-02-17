@@ -9,7 +9,7 @@ use gromos::io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
 
-fn calc_hbond_energy(r_on: f32, r_oh: f32, r_cn: f32, r_ch: f32) -> f32 {
+fn calc_hbond_energy(r_on: f64, r_oh: f64, r_cn: f64, r_ch: f64) -> f64 {
     // Simplified H-bond energy in kcal/mol
     let q1q2 = 0.42 * 0.20;
     let f = 332.0; // Coulomb constant
@@ -83,19 +83,19 @@ fn main() {
                     }
                 }
 
-                let total = structure.len() as f32;
-                let helix_count = structure.iter().filter(|&&c| c == 'H').count() as f32;
-                let sheet_count = structure.iter().filter(|&&c| c == 'E').count() as f32;
-                let turn_count = structure.iter().filter(|&&c| c == 'T').count() as f32;
-                let coil_count = structure.iter().filter(|&&c| c == 'C').count() as f32;
+                let total = structure.len();
+                let helix_count = structure.iter().filter(|&&c| c == 'H').count();
+                let sheet_count = structure.iter().filter(|&&c| c == 'E').count();
+                let turn_count = structure.iter().filter(|&&c| c == 'T').count();
+                let coil_count = structure.iter().filter(|&&c| c == 'C').count();
 
                 println!(
                     "{:12.4} {:8.2} {:9.2} {:8.2} {:8.2}",
                     frame.time,
-                    100.0 * helix_count / total,
-                    100.0 * sheet_count / total,
-                    100.0 * turn_count / total,
-                    100.0 * coil_count / total
+                    100.0 * helix_count as f64 / total as f64,
+                    100.0 * sheet_count as f64 / total as f64,
+                    100.0 * turn_count as f64 / total as f64,
+                    100.0 * coil_count as f64 / total as f64
                 );
             },
             Ok(None) => break,

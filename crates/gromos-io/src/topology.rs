@@ -755,31 +755,95 @@ pub fn write_topology_file<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    /// Minimal 4-atom GROMOS topology (cg16-style).
+    /// SOLUTEATOM format: ATNM MRES PANM IAC MASS CG CGC INE IEXCL...
+    const CG16_TOPO: &str = "\
+TITLE
+  4-atom test topology (cg16)
+END
+SOLUTEATOM
+# ATNM MRES PANM IAC   MASS      CG   CGC INE IEXCL
+4
+    1    1   C     6  62.000000  0.000000  0  2  2  3
+    2    1   H     1  12.000000  0.000000  0  1  1
+    3    1   H     1  12.000000  0.000000  0  1  1
+    4    1   H     1  12.000000  0.000000  0  0
+END
+BONDSTRETCHTYPE
+# CB        CHB       B0
+1
+  1000.000  500.000   0.150
+END
+BOND
+# IB  JB  ICB
+3
+  1   2   1
+  2   3   1
+  3   4   1
+END
+BONDANGLEBENDTYPE
+# CT        CHT       T0
+1
+   50.000  100.000  109.500
+END
+BONDANGLE
+# IT  JT  KT  ICT
+2
+  1   2   3   1
+  2   3   4   1
+END
+";
+
+    fn write_tmp(content: &str, suffix: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("gromos_test_{suffix}.tmp"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
 
     #[test]
     fn test_parse_cg16_topology() {
-        let result = read_topology_file("../md++/src/check/data/cg16.topo");
+        let path = write_tmp(CG16_TOPO, "cg16_topo");
+        let parsed = read_topology_file(&path).expect("Failed to parse inline topology");
 
-        if let Ok(parsed) = result {
-            println!("Loaded topology with {} atoms", parsed.n_atoms);
-            assert_eq!(parsed.n_atoms, 4);
-            assert_eq!(parsed.bonds.len(), 3);
-            assert_eq!(parsed.angles.len(), 2);
+        assert_eq!(parsed.n_atoms, 4);
+        assert_eq!(parsed.bonds.len(), 3);
+        assert_eq!(parsed.angles.len(), 2);
 
-            // Check first atom
-            assert_eq!(parsed.iac[0], 6); // Type C
-            assert!((parsed.masses[0] - 62.0).abs() < 1e-6);
-            assert!((parsed.charges[0] - 0.0).abs() < 1e-6);
+        // First atom: IAC=6, mass=62.0, charge=0.0
+        assert_eq!(parsed.iac[0], 6);
+        assert!((parsed.masses[0] - 62.0).abs() < 1e-6);
+        assert!((parsed.charges[0] - 0.0).abs() < 1e-6);
 
-            // Check first bond (atoms 1-2, type 1 in file = 0-1, type 0 in code)
-            assert_eq!(parsed.bonds[0], (0, 1, 0));
+        // First bond: atoms 1-2 in file → 0-1 (0-indexed), type 1 → 0
+        assert_eq!(parsed.bonds[0], (0, 1, 0));
 
-            println!(
-                "First bond type: k_harm={}, r0={}",
-                parsed.bond_parameters[0].k_harmonic, parsed.bond_parameters[0].r0
-            );
-        } else {
-            println!("Could not load file (may not exist in test environment)");
+        // Bond parameters
+        assert!((parsed.bond_parameters[0].k_harmonic - 500.0).abs() < 1e-6);
+        assert!((parsed.bond_parameters[0].r0 - 0.15).abs() < 1e-6);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_parse_missing_topology_returns_error() {
+        let result = read_topology_file("/nonexistent/path/file.topo");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_topology_bonds_are_zero_indexed() {
+        let path = write_tmp(CG16_TOPO, "cg16_topo_idx");
+        let parsed = read_topology_file(&path).unwrap();
+
+        // All bond indices must be 0-indexed (< n_atoms)
+        for (i, j, _t) in &parsed.bonds {
+            assert!(*i < parsed.n_atoms);
+            assert!(*j < parsed.n_atoms);
         }
+
+        std::fs::remove_file(path).ok();
     }
 }

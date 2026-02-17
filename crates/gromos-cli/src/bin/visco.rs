@@ -56,7 +56,7 @@ fn main() {
 
                 // Simple estimate based on density
                 let n_atoms = frame.positions.len();
-                let density = n_atoms as f64 / volume as f64;
+                let density = n_atoms as f64 / volume;
 
                 // Rough estimate: viscosity ~ sqrt(T) * density
                 let visco_estimate = density * (temperature as f64).sqrt() * 0.1;

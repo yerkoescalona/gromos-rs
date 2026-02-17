@@ -39,7 +39,7 @@ impl PositionRestraint {
         let displacement =
             periodicity.nearest_image(self.reference_pos, conf.current().pos[self.atom]);
 
-        let dist_sq = displacement.length_squared() as f64;
+        let dist_sq = displacement.length_squared();
         let dist = (dist_sq).sqrt();
 
         // Energy: 0.5 * k * r²
@@ -47,7 +47,7 @@ impl PositionRestraint {
 
         // Force: F = -k * (r - r0) = -k * displacement
         let force_magnitude = -self.force_constant;
-        let force = displacement * (force_magnitude as f32);
+        let force = displacement * (force_magnitude);
 
         conf.current_mut().force[self.atom] += force;
 
@@ -156,7 +156,7 @@ impl DistanceRestraint {
             conf.current().pos[self.atom_i],
         );
 
-        let mut distance = r_vec.length() as f64;
+        let mut distance = r_vec.length();
 
         // Time averaging (NOE r⁻³ averaging)
         if let (Some(tau), Some(avg_dist)) = (self.tau, self.time_averaged_distance) {
@@ -202,7 +202,7 @@ impl DistanceRestraint {
 
         // Apply force along bond direction
         if distance > 1e-10 {
-            let force = r_vec * ((force_magnitude / distance) as f32);
+            let force = r_vec * ((force_magnitude / distance));
             conf.current_mut().force[self.atom_i] -= force;
             conf.current_mut().force[self.atom_j] += force;
         }
@@ -308,15 +308,15 @@ impl AngleRestraint {
             conf.current().pos[self.atom_k],
         );
 
-        let r_ij_len = r_ij.length() as f64;
-        let r_kj_len = r_kj.length() as f64;
+        let r_ij_len = r_ij.length();
+        let r_kj_len = r_kj.length();
 
         if r_ij_len < 1e-10 || r_kj_len < 1e-10 {
             return 0.0; // Degenerate angle
         }
 
         // Calculate angle using dot product: cos(θ) = r_ij · r_kj / (|r_ij| |r_kj|)
-        let cos_theta = (r_ij.dot(r_kj) as f64) / (r_ij_len * r_kj_len);
+        let cos_theta = (r_ij.dot(r_kj)) / (r_ij_len * r_kj_len);
         let cos_theta = cos_theta.clamp(-1.0, 1.0); // Numerical safety
         let theta = cos_theta.acos();
 
@@ -338,11 +338,11 @@ impl AngleRestraint {
         let f_factor = force_magnitude / sin_theta;
 
         // Force on atom i
-        let f_i_term = (r_kj * (cos_theta as f32) - r_ij) * ((f_factor / r_ij_len) as f32);
+        let f_i_term = (r_kj * (cos_theta) - r_ij) * ((f_factor / r_ij_len));
         conf.current_mut().force[self.atom_i] += f_i_term;
 
         // Force on atom k
-        let f_k_term = (r_ij * (cos_theta as f32) - r_kj) * ((f_factor / r_kj_len) as f32);
+        let f_k_term = (r_ij * (cos_theta) - r_kj) * ((f_factor / r_kj_len));
         conf.current_mut().force[self.atom_k] += f_k_term;
 
         // Force on atom j (conservation)
@@ -477,8 +477,8 @@ impl DihedralRestraint {
         let m = r_ij.cross(r_kj);
         let n = r_kj.cross(r_kl);
 
-        let m_len_sq = m.length_squared() as f64;
-        let n_len_sq = n.length_squared() as f64;
+        let m_len_sq = m.length_squared();
+        let n_len_sq = n.length_squared();
 
         if m_len_sq < 1e-20 || n_len_sq < 1e-20 {
             return 0.0; // Degenerate dihedral
@@ -488,8 +488,8 @@ impl DihedralRestraint {
         let n_len = n_len_sq.sqrt();
 
         // Calculate dihedral angle
-        let r_kj_len = r_kj.length() as f64;
-        let cos_phi = (m.dot(n) as f64) / (m_len * n_len);
+        let r_kj_len = r_kj.length();
+        let cos_phi = (m.dot(n)) / (m_len * n_len);
         let cos_phi = cos_phi.clamp(-1.0, 1.0);
 
         // Get sign from scalar triple product
@@ -509,24 +509,24 @@ impl DihedralRestraint {
         let f_factor = force_magnitude / r_kj_len;
 
         // Forces on atoms i and l (perpendicular to planes)
-        let f_i = m * ((f_factor / m_len) as f32);
-        let f_l = n * ((-f_factor / n_len) as f32);
+        let f_i = m * ((f_factor / m_len));
+        let f_l = n * ((-f_factor / n_len));
 
         conf.current_mut().force[self.atom_i] += f_i;
         conf.current_mut().force[self.atom_l] += f_l;
 
         // Forces on atoms j and k (derived from torque balance)
-        let r_ij_len = r_ij.length() as f64;
-        let r_kl_len = r_kl.length() as f64;
+        let r_ij_len = r_ij.length();
+        let r_kl_len = r_kl.length();
 
-        let dot_ij_kj = r_ij.dot(r_kj) as f64;
-        let dot_kl_kj = r_kl.dot(r_kj) as f64;
+        let dot_ij_kj = r_ij.dot(r_kj);
+        let dot_kl_kj = r_kl.dot(r_kj);
 
         let f_j_factor = dot_ij_kj / (r_kj_len * r_kj_len);
         let f_k_factor = dot_kl_kj / (r_kj_len * r_kj_len);
 
-        let f_j = f_i * (f_j_factor as f32 - 1.0);
-        let f_k = f_l * (f_k_factor as f32 - 1.0);
+        let f_j = f_i * (f_j_factor - 1.0);
+        let f_k = f_l * (f_k_factor - 1.0);
 
         conf.current_mut().force[self.atom_j] += f_j;
         conf.current_mut().force[self.atom_k] += f_k;
@@ -782,7 +782,7 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(1.0, 0.0, 0.0);
         conf.current_mut().pos[2] = Vec3::new(2.0, 0.0, 0.0);
-        conf.current_mut().pos[3] = Vec3::new(2.0 + angle.cos() as f32, angle.sin() as f32, 0.0);
+        conf.current_mut().pos[3] = Vec3::new(2.0 + angle.cos(), angle.sin(), 0.0);
 
         // Restrain to +170 degrees (should recognize as close due to periodicity)
         let restraint = DihedralRestraint::from_degrees(0, 1, 2, 3, 170.0, 100.0);
@@ -833,7 +833,7 @@ mod tests {
 
         // Set up multiple trans dihedrals
         for i in 0..8 {
-            conf.current_mut().pos[i] = Vec3::new(i as f32, 0.0, 0.0);
+            conf.current_mut().pos[i] = Vec3::new(i, 0.0, 0.0);
         }
 
         let mut restraints = DihedralRestraints::new();
@@ -1026,8 +1026,8 @@ impl JValueRestraint {
         // Alternative stable dihedral calculation
         let frim = rij.dot(rkj) / dkj2;
         let frln = rkl.dot(rkj) / dkj2;
-        let rim = rij - rkj * (frim as f32);
-        let rln = rkj * (frln as f32) - rkl;
+        let rim = rij - rkj * (frim);
+        let rln = rkj * (frln) - rkl;
 
         let dim = rim.length();
         let dln = rln.length();
@@ -1037,7 +1037,7 @@ impl JValueRestraint {
         }
 
         let cos_phi = (rim.dot(rln) / (dim * dln)).clamp(-1.0, 1.0);
-        let mut phi = (cos_phi as f64).acos();
+        let mut phi = (cos_phi).acos();
 
         // Determine sign of dihedral
         if rij.dot(rnk) < 0.0 {
@@ -1084,13 +1084,13 @@ impl JValueRestraint {
 
         // Calculate force derivatives dphi/dr for each atom
         let dkj = dkj2.sqrt();
-        let dphi_dri = rmj * ((dkj / dmj2) as f32);
-        let dphi_drl = rnk * (-(dkj / dnk2) as f32);
-        let dphi_drj = dphi_dri * ((frim - 1.0) as f32) - dphi_drl * (frln as f32);
+        let dphi_dri = rmj * ((dkj / dmj2));
+        let dphi_drl = rnk * (-(dkj / dnk2));
+        let dphi_drj = dphi_dri * ((frim - 1.0)) - dphi_drl * (frln);
         let dphi_drk = -(dphi_dri + dphi_drj + dphi_drl);
 
         // Apply forces: F = -dV/dφ * dφ/dr
-        let dv_dphi_f32 = dv_dphi as f32;
+        let dv_dphi_f32 = dv_dphi;
         conf.current_mut().force[self.i] -= dphi_dri * dv_dphi_f32;
         conf.current_mut().force[self.j] -= dphi_drj * dv_dphi_f32;
         conf.current_mut().force[self.k_atom] -= dphi_drk * dv_dphi_f32;
@@ -1283,9 +1283,9 @@ impl RDCRestraint {
 
         // Normalize to unit vector
         let n = rij / r;
-        let nx = n.x as f64;
-        let ny = n.y as f64;
-        let nz = n.z as f64;
+        let nx = n.x;
+        let ny = n.y;
+        let nz = n.z;
 
         // Unpack Saupe matrix (Sxx, Syy, Szz, Sxy, Sxz)
         let sxx = self.saupe_matrix[0];
@@ -1340,14 +1340,14 @@ impl RDCRestraint {
         let dv_dp2 = dv_dd * dd_dp2 * memory_decay;
 
         // dn/dr accounting for normalization: dn/dr = (I - n⊗n)/r
-        let factor = (dv_dp2 / r as f64) as f32;
+        let factor = (dv_dp2 / r);
 
         let grad_x =
-            ((dp2_dnx - nx * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz)) as f32) * factor;
+            ((dp2_dnx - nx * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz))) * factor;
         let grad_y =
-            ((dp2_dny - ny * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz)) as f32) * factor;
+            ((dp2_dny - ny * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz))) * factor;
         let grad_z =
-            ((dp2_dnz - nz * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz)) as f32) * factor;
+            ((dp2_dnz - nz * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz))) * factor;
 
         let force_vec = Vec3::new(grad_x, grad_y, grad_z);
 

@@ -9,7 +9,7 @@ use gromos::io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
 
-const COULOMB_CONST: f32 = 138.9354859; // kJ/(mol·nm·e²)
+const COULOMB_CONST: f64 = 138.9354859; // kJ/(mol·nm·e²)
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -69,8 +69,8 @@ fn main() {
     loop {
         match traj.read_frame() {
             Ok(Some(frame)) => {
-                let mut e_elec = 0.0f32;
-                let mut e_vdw = 0.0f32;
+                let mut e_elec = 0.0f64;
+                let mut e_vdw = 0.0f64;
 
                 for i in g1_start..g1_end.min(frame.positions.len()) {
                     for j in g2_start..g2_end.min(frame.positions.len()) {
@@ -81,13 +81,13 @@ fn main() {
 
                         if dist > 0.01 {
                             // Electrostatic
-                            let qi = topo.charge[i] as f32;
-                            let qj = topo.charge[j] as f32;
+                            let qi = topo.charge[i];
+                            let qj = topo.charge[j];
                             e_elec += COULOMB_CONST * qi * qj / dist;
 
                             // VDW (simple LJ)
-                            let sigma = 0.3f32;
-                            let epsilon = 1.0f32;
+                            let sigma = 0.3f64;
+                            let epsilon = 1.0f64;
                             let sr = sigma / dist;
                             let sr6 = sr.powi(6);
                             let sr12 = sr6 * sr6;

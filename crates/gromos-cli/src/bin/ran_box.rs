@@ -8,14 +8,14 @@ use gromos::io::topology::{build_topology, read_topology_file};
 use std::env;
 use std::process;
 
-fn lcg_random(state: &mut u64) -> f32 {
+fn lcg_random(state: &mut u64) -> f64 {
     // Linear congruential generator
     const A: u64 = 1103515245;
     const C: u64 = 12345;
     const M: u64 = 2u64.pow(31);
 
     *state = (A.wrapping_mul(*state).wrapping_add(C)) % M;
-    (*state as f32) / (M as f32)
+    *state as f64 / M as f64
 }
 
 fn main() {
@@ -27,9 +27,9 @@ fn main() {
     }
 
     let mut topo_file = None;
-    let mut box_x = 3.0f32;
-    let mut box_y = 3.0f32;
-    let mut box_z = 3.0f32;
+    let mut box_x = 3.0f64;
+    let mut box_y = 3.0f64;
+    let mut box_z = 3.0f64;
     let mut seed = 12345u64;
 
     let mut i = 1;

@@ -62,14 +62,14 @@ fn main() {
 
                 for (idx, pos) in frame.positions.iter().enumerate() {
                     if idx < topo.charge.len() {
-                        let charge = topo.charge[idx] as f32;
+                        let charge = topo.charge[idx];
                         dipole = dipole + *pos * charge;
                     }
                 }
 
                 let dipole_magnitude =
                     (dipole.x * dipole.x + dipole.y * dipole.y + dipole.z * dipole.z).sqrt();
-                dipole_moments.push(dipole_magnitude as f64);
+                dipole_moments.push(dipole_magnitude);
             },
             Ok(None) => break,
             Err(_) => break,

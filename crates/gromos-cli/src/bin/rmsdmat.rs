@@ -10,8 +10,8 @@ use gromos::math::Vec3;
 use std::env;
 use std::process;
 
-fn calc_rmsd(pos1: &[Vec3], pos2: &[Vec3]) -> f32 {
-    let mut sum_sq = 0.0f32;
+fn calc_rmsd(pos1: &[Vec3], pos2: &[Vec3]) -> f64 {
+    let mut sum_sq = 0.0f64;
     let n = pos1.len().min(pos2.len());
 
     for i in 0..n {
@@ -21,7 +21,7 @@ fn calc_rmsd(pos1: &[Vec3], pos2: &[Vec3]) -> f32 {
         sum_sq += dx * dx + dy * dy + dz * dz;
     }
 
-    (sum_sq / n as f32).sqrt()
+    (sum_sq / n as f64).sqrt()
 }
 
 fn main() {

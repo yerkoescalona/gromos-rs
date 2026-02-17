@@ -474,7 +474,7 @@ mod tests {
         let prob = if delta_negative < 0.0 {
             1.0
         } else {
-            (-delta_negative as f64).exp()
+            (-delta_negative).exp()
         };
         assert_eq!(prob, 1.0);
 
@@ -483,7 +483,7 @@ mod tests {
         let prob = if delta_positive < 0.0 {
             1.0
         } else {
-            (-delta_positive as f64).exp()
+            (-delta_positive).exp()
         };
         assert!((prob - (-2.0_f64).exp()).abs() < 1e-10);
     }

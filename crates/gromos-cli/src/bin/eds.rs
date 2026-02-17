@@ -295,13 +295,13 @@ fn read_coordinates(filename: &str) -> Result<Vec<Vec3>, String> {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if parts.len() >= 6 {
                 // G96 format: resnum resname atomname atomnum x y z
-                let x: f32 = parts[3]
+                let x: f64 = parts[3]
                     .parse()
                     .map_err(|_| format!("Invalid x coordinate: {}", parts[3]))?;
-                let y: f32 = parts[4]
+                let y: f64 = parts[4]
                     .parse()
                     .map_err(|_| format!("Invalid y coordinate: {}", parts[4]))?;
-                let z: f32 = parts[5]
+                let z: f64 = parts[5]
                     .parse()
                     .map_err(|_| format!("Invalid z coordinate: {}", parts[5]))?;
 
@@ -478,12 +478,12 @@ fn main() -> Result<(), String> {
     println!("  Total round trips: {}", round_trips);
     println!("  State visit counts:");
     for (i, &count) in visit_counts.iter().enumerate() {
-        let fraction = count as f64 / args.total_steps as f64;
+        let fraction = count / args.total_steps;
         println!(
             "    State {}: {} visits ({:.2}%)",
             i,
             count,
-            fraction * 100.0
+            fraction as f64 * 100.0
         );
     }
 

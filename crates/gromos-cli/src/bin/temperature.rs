@@ -58,7 +58,7 @@ fn main() {
                 if let Some(ref velocities) = frame.velocities {
                     for (i, vel) in velocities.iter().enumerate() {
                         if i < topo.mass.len() {
-                            let v_sq = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) as f64;
+                            let v_sq = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
                             ke += 0.5 * topo.mass[i] * v_sq;
                         }
                     }
@@ -66,7 +66,7 @@ fn main() {
                     // Use positions as velocities (for position trajectories)
                     for (i, pos) in frame.positions.iter().enumerate() {
                         if i < topo.mass.len() {
-                            let v_sq = (pos.x * pos.x + pos.y * pos.y + pos.z * pos.z) as f64;
+                            let v_sq = (pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
                             ke += 0.5 * topo.mass[i] * v_sq;
                         }
                     }

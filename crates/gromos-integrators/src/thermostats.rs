@@ -93,7 +93,7 @@ pub fn berendsen_thermostat(
     for i in 0..num_atoms {
         let v = conf.current().vel[i];
         let m = topo.mass[i];
-        kinetic_energy += 0.5 * m * (v.dot(v) as f64);
+        kinetic_energy += 0.5 * m * (v.dot(v));
     }
 
     // Temperature from kinetic energy
@@ -114,7 +114,7 @@ pub fn berendsen_thermostat(
 
     // Scale all velocities
     for i in 0..num_atoms {
-        conf.current_mut().vel[i] *= lambda as f32;
+        conf.current_mut().vel[i] *= lambda;
     }
 }
 
@@ -146,7 +146,7 @@ pub fn nose_hoover_thermostat(
     for i in 0..num_atoms {
         let v = conf.current().vel[i];
         let m = topo.mass[i];
-        kinetic_energy += 0.5 * m * (v.dot(v) as f64);
+        kinetic_energy += 0.5 * m * (v.dot(v));
     }
 
     let n_dof = (3 * num_atoms) as f64;
@@ -167,7 +167,7 @@ pub fn nose_hoover_thermostat(
     let friction_factor = (-params.xi * dt).exp();
 
     for i in 0..num_atoms {
-        conf.current_mut().vel[i] *= friction_factor as f32;
+        conf.current_mut().vel[i] *= friction_factor;
     }
 }
 
@@ -222,9 +222,9 @@ pub fn andersen_thermostat(
             let z2 = (-2.0 * u2.ln()).sqrt() * (2.0 * std::f64::consts::PI * u1).cos();
 
             conf.current_mut().vel[i] = Vec3::new(
-                (sigma * z0) as f32,
-                (sigma * z1) as f32,
-                (sigma * z2) as f32,
+                (sigma * z0),
+                (sigma * z1),
+                (sigma * z2),
             );
         }
     }

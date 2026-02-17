@@ -41,7 +41,7 @@ mod enabled {
 
         /// Box size (nm)
         #[arg(long, default_value_t = 5.0)]
-        box_size: f32,
+        box_size: f64,
 
         /// Print detailed timing for each step
         #[arg(long)]
@@ -58,7 +58,7 @@ mod enabled {
 
     fn create_test_system(
         n_atoms: usize,
-        box_size: f32,
+        box_size: f64,
     ) -> (topology::Topology, configuration::Configuration) {
         use math::Vec3;
 
@@ -87,14 +87,14 @@ mod enabled {
         let mut rng = rand::thread_rng();
         for i in 0..n_atoms {
             conf.current_mut().pos[i] = Vec3::new(
-                rng.gen::<f32>() * box_size,
-                rng.gen::<f32>() * box_size,
-                rng.gen::<f32>() * box_size,
+                rng.gen::<f64>() * box_size,
+                rng.gen::<f64>() * box_size,
+                rng.gen::<f64>() * box_size,
             );
             conf.current_mut().vel[i] = Vec3::new(
-                rng.gen::<f32>() - 0.5,
-                rng.gen::<f32>() - 0.5,
-                rng.gen::<f32>() - 0.5,
+                rng.gen::<f64>() - 0.5,
+                rng.gen::<f64>() - 0.5,
+                rng.gen::<f64>() - 0.5,
             );
         }
 
@@ -112,10 +112,10 @@ mod enabled {
         n_atoms: usize,
         cutoff: f64,
         positions: &[math::Vec3],
-        box_size: f32,
+        box_size: f64,
     ) -> Vec<(u32, u32)> {
         let mut pairlist = Vec::new();
-        let cutoff_sq = (cutoff * cutoff) as f32;
+        let cutoff_sq = (cutoff * cutoff);
 
         // Simple all-pairs with cutoff check
         for i in 0..n_atoms {
@@ -208,9 +208,9 @@ mod enabled {
             total_energy = energy;
 
             // Apply forces (simple integration)
-            let dt: f32 = 0.001;
+            let dt: f64 = 0.001;
             for i in 0..args.atoms {
-                let inv_mass = topo.inverse_mass[i] as f32;
+                let inv_mass = topo.inverse_mass[i];
                 conf.current_mut().vel[i] += forces[i] * (inv_mass * dt);
                 conf.current_mut().pos[i] += conf.current().vel[i] * dt;
             }
@@ -226,7 +226,7 @@ mod enabled {
         // Print results
         if mpi_control.is_master() {
             let time_s = elapsed.as_secs_f64();
-            let time_per_step_ms = time_s * 1000.0 / args.steps as f64;
+            let time_per_step_ms = time_s * 1000.0 / args.steps;
 
             if args.csv {
                 println!(

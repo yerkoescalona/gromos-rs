@@ -21,9 +21,9 @@ fn read_reference(filename: &str) -> Vec<Vec3> {
                 let parts: Vec<&str> = line_str.split_whitespace().collect();
                 if parts.len() >= 3 {
                     if let (Ok(x), Ok(y), Ok(z)) = (
-                        parts[0].parse::<f32>(),
-                        parts[1].parse::<f32>(),
-                        parts[2].parse::<f32>(),
+                        parts[0].parse::<f64>(),
+                        parts[1].parse::<f64>(),
+                        parts[2].parse::<f64>(),
                     ) {
                         positions.push(Vec3::new(x, y, z));
                     }
@@ -40,7 +40,7 @@ fn calc_centroid(positions: &[Vec3]) -> Vec3 {
     for pos in positions {
         sum = sum + *pos;
     }
-    sum / (positions.len() as f32)
+    sum / (positions.len() as f64)
 }
 
 fn main() {

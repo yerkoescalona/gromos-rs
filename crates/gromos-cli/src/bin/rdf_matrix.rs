@@ -20,7 +20,7 @@ fn main() {
     let mut topo_file = None;
     let mut traj_file = None;
     let mut n_bins = 100;
-    let mut r_max = 1.5f32; // nm
+    let mut r_max = 1.5f64; // nm
 
     let mut i = 1;
     while i < args.len() {
@@ -57,7 +57,7 @@ fn main() {
     eprintln!("# Bins: {}", n_bins);
     eprintln!("# r_max: {} nm", r_max);
 
-    let bin_width = r_max / n_bins as f32;
+    let bin_width = r_max / n_bins as f64;
     let mut histograms = vec![vec![0usize; n_bins]; n_atoms];
     let mut n_frames = 0;
 
@@ -92,7 +92,7 @@ fn main() {
     println!("# r (nm)    RDF (averaged over all pairs)");
 
     for bin in 0..n_bins {
-        let r = (bin as f32 + 0.5) * bin_width;
+        let r = (bin as f64 + 0.5) * bin_width;
         let total_count: usize = histograms.iter().map(|h| h[bin]).sum();
         let avg_count = total_count as f64 / n_atoms as f64;
 

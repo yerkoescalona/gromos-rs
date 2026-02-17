@@ -27,7 +27,7 @@
 //!
 //! // Write frames during simulation
 //! for step in 0..10000 {
-//!     let time = step as f64 * 0.002; // 2 fs timestep
+//!     let time = step * 0.002; // 2 fs timestep
 //!     writer.write_frame(step, time, &config)?;
 //! }
 //!
@@ -129,7 +129,7 @@ pub struct DcdWriter {
     frame_count: usize,
     first_timestep: usize,
     save_frequency: usize,
-    timestep: f32,
+    timestep: f64,
     header_written: bool,
 }
 
@@ -155,7 +155,7 @@ impl DcdWriter {
             frame_count: 0,
             first_timestep: 0,
             save_frequency: 1,
-            timestep: 0.002, // 2 fs default
+            timestep: 0.002_f64, // 2 fs default
             header_written: false,
         })
     }
@@ -172,7 +172,7 @@ impl DcdWriter {
 
         // Estimate timestep from first frame
         if time > 0.0 {
-            self.timestep = (time / first_step.max(1) as f64) as f32;
+            self.timestep = time / first_step.max(1) as f64;
         }
 
         // Block 1: Header block (84 bytes)
@@ -202,8 +202,8 @@ impl DcdWriter {
         // Number of fixed atoms (0 = none)
         self.writer.write_i32::<LittleEndian>(0)?;
 
-        // Timestep (single precision)
-        self.writer.write_f32::<LittleEndian>(self.timestep)?;
+        // Timestep (single precision on disk)
+        self.writer.write_f32::<LittleEndian>(self.timestep as f32)?;
 
         // Unit cell flag (1 = present, we always include it)
         self.writer.write_i32::<LittleEndian>(1)?;
@@ -260,12 +260,12 @@ impl DcdWriter {
         let dims = state.box_config.dimensions();
 
         self.writer.write_i32::<LittleEndian>(48)?; // Block size (6 * 8 bytes)
-        self.writer.write_f64::<LittleEndian>(dims.x as f64)?; // a
+        self.writer.write_f64::<LittleEndian>(dims.x)?; // a
         self.writer.write_f64::<LittleEndian>(90.0)?; // gamma (degrees)
-        self.writer.write_f64::<LittleEndian>(dims.y as f64)?; // b
+        self.writer.write_f64::<LittleEndian>(dims.y)?; // b
         self.writer.write_f64::<LittleEndian>(90.0)?; // beta (degrees)
         self.writer.write_f64::<LittleEndian>(90.0)?; // alpha (degrees)
-        self.writer.write_f64::<LittleEndian>(dims.z as f64)?; // c
+        self.writer.write_f64::<LittleEndian>(dims.z)?; // c
         self.writer.write_i32::<LittleEndian>(48)?; // Block size (end marker)
 
         // Write X coordinates
@@ -372,7 +372,7 @@ pub struct DcdReader {
     reader: BufReader<File>,
     n_frames: usize,
     n_atoms: usize,
-    timestep: f32,
+    timestep: f64,
     frames_read: usize,
     header_size: u64,
 }
@@ -397,7 +397,7 @@ impl DcdReader {
     }
 
     /// Read DCD header
-    fn read_header(reader: &mut BufReader<File>) -> Result<(usize, usize, f32, u64), IoError> {
+    fn read_header(reader: &mut BufReader<File>) -> Result<(usize, usize, f64, u64), IoError> {
         // Block 1: Header block
         let block_size = reader.read_i32::<LittleEndian>()?;
         if block_size != 84 {
@@ -424,8 +424,8 @@ impl DcdReader {
             reader.read_i32::<LittleEndian>()?;
         }
 
-        // Timestep
-        let timestep = reader.read_f32::<LittleEndian>()?;
+        // Timestep (stored as f32 on disk, convert to f64)
+        let timestep = reader.read_f32::<LittleEndian>()? as f64;
 
         // Skip remaining header fields (9 ints)
         for _ in 0..9 {
@@ -486,9 +486,9 @@ impl BinaryTrajectoryReader for DcdReader {
         self.reader.read_i32::<LittleEndian>()?; // End marker
 
         let box_dims = Vec3::new(
-            (a / 10.0) as f32, // Angstrom to nm
-            (b / 10.0) as f32,
-            (c / 10.0) as f32,
+            a / 10.0, // Angstrom to nm
+            b / 10.0,
+            c / 10.0,
         );
 
         // Read X coordinates
@@ -524,10 +524,10 @@ impl BinaryTrajectoryReader for DcdReader {
 
         // Convert to Vec3 (Angstrom to nm)
         let positions: Vec<Vec3> = (0..self.n_atoms)
-            .map(|i| Vec3::new(x_coords[i] / 10.0, y_coords[i] / 10.0, z_coords[i] / 10.0))
+            .map(|i| Vec3::new(x_coords[i] as f64 / 10.0, y_coords[i] as f64 / 10.0, z_coords[i] as f64 / 10.0))
             .collect();
 
-        let time = (self.frames_read as f32 * self.timestep) as f64;
+        let time = self.frames_read as f64 * self.timestep;
         let step = self.frames_read;
 
         self.frames_read += 1;
@@ -585,7 +585,7 @@ mod tests {
         // Create test configuration
         let mut config = Configuration::new(10, 1, 1);
         config.current_mut().pos = (0..10)
-            .map(|i| Vec3::new(i as f32 * 0.1, i as f32 * 0.2, i as f32 * 0.3))
+            .map(|i| Vec3::new(i * 0.1, i * 0.2, i * 0.3))
             .collect();
         config.current_mut().box_config = SimBox::rectangular(3.0, 3.0, 3.0);
 
@@ -594,7 +594,7 @@ mod tests {
             let mut writer = DcdWriter::new(temp_file, "Test trajectory").unwrap();
             for step in 0..5 {
                 writer
-                    .write_frame(step, step as f64 * 0.002, &config)
+                    .write_frame(step, step * 0.002, &config)
                     .unwrap();
             }
             writer.finish().unwrap();

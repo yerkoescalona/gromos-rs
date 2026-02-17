@@ -7,13 +7,13 @@
 use std::env;
 use std::process;
 
-fn lcg_random(state: &mut u64) -> f32 {
+fn lcg_random(state: &mut u64) -> f64 {
     const A: u64 = 1103515245;
     const C: u64 = 12345;
     const M: u64 = 2u64.pow(31);
 
     *state = (A.wrapping_mul(*state).wrapping_add(C)) % M;
-    (*state as f32) / (M as f32)
+    *state as f64 / M as f64
 }
 
 fn main() {
@@ -26,9 +26,9 @@ fn main() {
 
     let mut _solute_file = None;
     let mut _solvent_file = None;
-    let mut box_x = 5.0f32;
-    let mut box_y = 5.0f32;
-    let mut box_z = 5.0f32;
+    let mut box_x = 5.0f64;
+    let mut box_y = 5.0f64;
+    let mut box_z = 5.0f64;
     let mut n_solvent = 1000;
     let mut seed = 12345u64;
 

@@ -86,7 +86,7 @@ pub fn berendsen_barostat(
     // Pressure from virial (simplified)
     // P = Tr(virial) / (3 * V)
     // Full calculation would include kinetic term
-    let virial_trace = virial.x_axis.x as f64 + virial.y_axis.y as f64 + virial.z_axis.z as f64;
+    let virial_trace = virial.x_axis.x + virial.y_axis.y + virial.z_axis.z;
     let current_pressure = virial_trace / (3.0 * volume);
 
     // Berendsen scaling factor
@@ -101,15 +101,15 @@ pub fn berendsen_barostat(
 
         // Scale box dimensions
         let box_vectors = conf.current().box_config.vectors;
-        let scaled_x = box_vectors.x_axis * scaling_factor as f32;
-        let scaled_y = box_vectors.y_axis * scaling_factor as f32;
-        let scaled_z = box_vectors.z_axis * scaling_factor as f32;
+        let scaled_x = box_vectors.x_axis * scaling_factor;
+        let scaled_y = box_vectors.y_axis * scaling_factor;
+        let scaled_z = box_vectors.z_axis * scaling_factor;
         conf.current_mut().box_config.vectors = Mat3::from_cols(scaled_x, scaled_y, scaled_z);
         conf.current_mut().box_config.inv_vectors = conf.current_mut().box_config.vectors.inverse();
 
         // Scale atomic positions
         for pos in conf.current_mut().pos.iter_mut() {
-            *pos *= scaling_factor as f32;
+            *pos *= scaling_factor;
         }
     } else {
         // Anisotropic scaling (different factors for each dimension)
@@ -118,7 +118,7 @@ pub fn berendsen_barostat(
         let scaling_factor = (1.0 - beta * pressure_diff).cbrt();
 
         for pos in conf.current_mut().pos.iter_mut() {
-            *pos *= scaling_factor as f32;
+            *pos *= scaling_factor;
         }
     }
 }
@@ -166,7 +166,7 @@ pub fn parrinello_rahman_barostat(
     }
 
     // Calculate pressure from virial
-    let virial_trace = virial.x_axis.x as f64 + virial.y_axis.y as f64 + virial.z_axis.z as f64;
+    let virial_trace = virial.x_axis.x + virial.y_axis.y + virial.z_axis.z;
     let current_pressure = virial_trace / (3.0 * volume);
 
     // Simplified scaling (similar to Berendsen for now)
@@ -176,7 +176,7 @@ pub fn parrinello_rahman_barostat(
 
     // Scale positions and box
     for pos in conf.current_mut().pos.iter_mut() {
-        *pos *= scaling_factor as f32;
+        *pos *= scaling_factor;
     }
 
     // Note: Full PR barostat would update box matrix derivatives
@@ -197,7 +197,7 @@ pub fn parrinello_rahman_barostat(
 /// - 3x3 virial tensor
 pub fn calculate_virial(positions: &[Vec3], forces: &[Vec3]) -> Mat3 {
     // Initialize virial components
-    let mut vir = [[0.0f32; 3]; 3];
+    let mut vir = [[0.0f64; 3]; 3];
 
     for i in 0..positions.len().min(forces.len()) {
         let r = positions[i];

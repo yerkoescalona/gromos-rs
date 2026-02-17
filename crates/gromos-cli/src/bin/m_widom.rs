@@ -10,15 +10,15 @@ use std::env;
 use std::process;
 
 const K_B: f64 = 0.00831446; // kJ/(mol·K)
-const COULOMB_CONST: f32 = 138.9354859; // kJ/(mol·nm·e²)
+const COULOMB_CONST: f64 = 138.9354859; // kJ/(mol·nm·e²)
 
 fn calc_insertion_energy(
-    insert_pos: (f32, f32, f32),
-    positions: &[(f32, f32, f32)],
+    insert_pos: (f64, f64, f64),
+    positions: &[(f64, f64, f64)],
     charges: &[f64],
 ) -> f64 {
     let mut energy = 0.0f64;
-    let insert_charge = 1.0f32; // Test particle charge
+    let insert_charge = 1.0f64; // Test particle charge
 
     for (i, &(x, y, z)) in positions.iter().enumerate() {
         let dx = insert_pos.0 - x;
@@ -27,16 +27,16 @@ fn calc_insertion_energy(
         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
         if dist > 0.01 {
-            let q = charges.get(i).copied().unwrap_or(0.0) as f32;
-            energy += (COULOMB_CONST * insert_charge * q / dist) as f64;
+            let q = charges.get(i).copied().unwrap_or(0.0);
+            energy += (COULOMB_CONST * insert_charge * q / dist);
 
             // Simple LJ
-            let sigma = 0.3f32;
-            let epsilon = 1.0f32;
+            let sigma = 0.3f64;
+            let epsilon = 1.0f64;
             let sr = sigma / dist;
             let sr6 = sr.powi(6);
             let sr12 = sr6 * sr6;
-            energy += (4.0 * epsilon * (sr12 - sr6)) as f64;
+            energy += (4.0 * epsilon * (sr12 - sr6));
         }
     }
 
@@ -97,16 +97,16 @@ fn main() {
     loop {
         match traj.read_frame() {
             Ok(Some(frame)) => {
-                let positions: Vec<(f32, f32, f32)> =
+                let positions: Vec<(f64, f64, f64)> =
                     frame.positions.iter().map(|p| (p.x, p.y, p.z)).collect();
 
                 let mut frame_exp_u = 0.0f64;
 
                 for _ in 0..n_insertions {
                     // Random insertion point
-                    let x = (n_frames as f32 * 0.123).fract() * frame.box_dims.x;
-                    let y = (n_frames as f32 * 0.456).fract() * frame.box_dims.y;
-                    let z = (n_frames as f32 * 0.789).fract() * frame.box_dims.z;
+                    let x = (n_frames as f64 * 0.123).fract() * frame.box_dims.x;
+                    let y = (n_frames as f64 * 0.456).fract() * frame.box_dims.y;
+                    let z = (n_frames as f64 * 0.789).fract() * frame.box_dims.z;
 
                     let u = calc_insertion_energy((x, y, z), &positions, &topo.charge);
                     frame_exp_u += (-beta * u).exp();

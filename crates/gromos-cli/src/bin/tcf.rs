@@ -52,10 +52,10 @@ fn main() {
         match traj.read_frame() {
             Ok(Some(frame)) => {
                 // For simplicity, use center of mass position
-                let mut com_x = 0.0f32;
-                let mut com_y = 0.0f32;
-                let mut com_z = 0.0f32;
-                let n = frame.positions.len() as f32;
+                let mut com_x = 0.0f64;
+                let mut com_y = 0.0f64;
+                let mut com_z = 0.0f64;
+                let n = frame.positions.len() as f64;
 
                 for pos in &frame.positions {
                     com_x += pos.x;
@@ -83,13 +83,13 @@ fn main() {
     // Calculate autocorrelation
     for lag in 0..max_lag.min(n_frames / 2) {
         let mut correlation = 0.0f64;
-        let mut count = 0;
+        let mut count = 0usize;
 
         for i in 0..(n_frames - lag) {
             let (x0, y0, z0) = frame_data[i];
             let (x1, y1, z1) = frame_data[i + lag];
 
-            correlation += (x0 * x1 + y0 * y1 + z0 * z1) as f64;
+            correlation += x0 * x1 + y0 * y1 + z0 * z1;
             count += 1;
         }
 

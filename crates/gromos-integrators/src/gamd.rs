@@ -400,7 +400,7 @@ impl GamdParameters {
                     // Apply boost: F_boost = F_orig * k(E - V)
                     for i in 0..n_atoms {
                         configuration.current_mut().force[i] +=
-                            dihedral_forces[i] * prefactor as f32;
+                            dihedral_forces[i] * prefactor;
                     }
                 }
             },
@@ -414,7 +414,7 @@ impl GamdParameters {
                     // Apply boost to all forces
                     for i in 0..n_atoms {
                         configuration.current_mut().force[i] +=
-                            (dihedral_forces[i] + total_forces[i]) * prefactor as f32;
+                            (dihedral_forces[i] + total_forces[i]) * prefactor;
                     }
                 }
             },
@@ -430,7 +430,7 @@ impl GamdParameters {
 
                     for i in 0..n_atoms {
                         configuration.current_mut().force[i] +=
-                            total_forces[i] * prefactor_tot as f32;
+                            total_forces[i] * prefactor_tot;
                     }
                 }
 
@@ -442,7 +442,7 @@ impl GamdParameters {
 
                     for i in 0..n_atoms {
                         configuration.current_mut().force[i] +=
-                            dihedral_forces[i] * prefactor_dih as f32;
+                            dihedral_forces[i] * prefactor_dih;
                     }
                 }
             },
@@ -595,13 +595,13 @@ impl GamdRunner {
             .collect();
 
         // Convert charge and iac
-        let charges_f32: Vec<f32> = topology.charge.iter().map(|&q| q as f32).collect();
+        
         let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();
 
         let nonbonded_storage = if self.parallel_forces {
             lj_crf_innerloop_parallel(
                 &configuration.current().pos,
-                &charges_f32,
+                &topology.charge,
                 &iac_u32,
                 &pairlist_short,
                 &lj_params,
@@ -613,7 +613,7 @@ impl GamdRunner {
             let mut storage = ForceStorage::new(n_atoms);
             lj_crf_innerloop(
                 &configuration.current().pos,
-                &charges_f32,
+                &topology.charge,
                 &iac_u32,
                 &pairlist_short,
                 &lj_params,
@@ -772,7 +772,7 @@ mod tests {
 
         let mut stats = GamdStatistics::new();
         for i in 0..100 {
-            stats.update(-100.0 + i as f64);
+            stats.update(-100.0 + i);
         }
 
         if let Some((k0, k, e)) = params.calculate_parameters(&stats, 1.0) {
@@ -796,7 +796,7 @@ mod tests {
 
         let mut stats = GamdStatistics::new();
         for i in 0..100 {
-            stats.update(-100.0 + i as f64);
+            stats.update(-100.0 + i);
         }
 
         if let Some((k0, k, e)) = params.calculate_parameters(&stats, 1.0) {
@@ -840,7 +840,7 @@ mod tests {
 
         // Check forces were modified
         let prefactor = 0.01 * (100.0 - 90.0);
-        let expected_force = 1.0 + 1.0 * prefactor as f32;
+        let expected_force = 1.0 + 1.0 * prefactor;
         assert!((config.current().force[0].x - expected_force).abs() < 1e-5);
     }
 

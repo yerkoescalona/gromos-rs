@@ -23,7 +23,7 @@ pub fn calculate_msd(trajectory: &[Vec<Vec3>], tau: usize) -> f64 {
         }
     }
 
-    (msd as f64) / (n_frames * n_atoms) as f64
+    (msd) / (n_frames as f64 * n_atoms as f64)
 }
 
 /// Calculate diffusion coefficient from MSD

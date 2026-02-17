@@ -153,7 +153,7 @@ fn calculate_rmsf(
     atom_selection: Option<&[usize]>,
     skip: usize,
     every: usize,
-) -> Result<(Vec<usize>, Vec<f32>), String> {
+) -> Result<(Vec<usize>, Vec<f64>), String> {
     log_info!("Calculating RMSF");
 
     // Read all frames
@@ -229,11 +229,11 @@ fn calculate_rmsf(
 
     // Normalize averages
     for pos in &mut avg_pos {
-        *pos = *pos / frames_used as f32;
+        *pos = *pos / frames_used as f64;
     }
 
     // Second pass: Calculate fluctuations
-    let mut rmsf = vec![0.0f32; atoms.len()];
+    let mut rmsf = vec![0.0f64; atoms.len()];
 
     progress = ProgressBar::new(total_frames);
     log_debug!("Pass 2: Calculating fluctuations");
@@ -257,7 +257,7 @@ fn calculate_rmsf(
 
     // Calculate RMSF = sqrt(<deviation^2>)
     for fluct in &mut rmsf {
-        *fluct = (*fluct / frames_used as f32).sqrt();
+        *fluct = (*fluct / frames_used as f64).sqrt();
     }
 
     Ok((atoms, rmsf))
@@ -377,9 +377,9 @@ fn main() {
     writer.flush().unwrap();
 
     // Calculate statistics
-    let avg_rmsf = rmsf.iter().sum::<f32>() / rmsf.len() as f32;
-    let max_rmsf = rmsf.iter().cloned().fold(0.0f32, f32::max);
-    let min_rmsf = rmsf.iter().cloned().fold(f32::MAX, f32::min);
+    let avg_rmsf = rmsf.iter().sum::<f64>() / rmsf.len() as f64;
+    let max_rmsf = rmsf.iter().cloned().fold(0.0f64, f64::max);
+    let min_rmsf = rmsf.iter().cloned().fold(f64::MAX, f64::min);
 
     let max_idx = rmsf
         .iter()

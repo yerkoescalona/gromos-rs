@@ -198,7 +198,7 @@ pub fn reaction_field_interaction(
     q_j: f64,
     rf: &ReactionFieldParameters,
 ) -> (Vec3, f64) {
-    let r2 = r_vec.length_squared() as f64;
+    let r2 = r_vec.length_squared();
 
     if r2 < 1e-10 {
         return (Vec3::ZERO, 0.0);
@@ -217,7 +217,7 @@ pub fn reaction_field_interaction(
     let force_mag = q_prod * (inv_r3 - 2.0 * rf.crf_2cut3i);
 
     // Force vector: F = force_mag * r_vec (pointing from i to j)
-    let force = r_vec * (force_mag as f32);
+    let force = r_vec * (force_mag);
 
     (force, energy)
 }
@@ -331,7 +331,7 @@ pub fn pme_real_space_interaction(
     q_j: f64,
     pme: &PMEParameters,
 ) -> (Vec3, f64) {
-    let r2 = r_vec.length_squared() as f64;
+    let r2 = r_vec.length_squared();
 
     if r2 < 1e-10 || r2 > pme.cutoff * pme.cutoff {
         return (Vec3::ZERO, 0.0);
@@ -356,7 +356,7 @@ pub fn pme_real_space_interaction(
     let force_mag =
         q_prod * inv_r * (erfc_alpha_r / r2 + 2.0 * pme.alpha * INV_SQRT_PI * exp_term / r);
 
-    let force = r_vec * (force_mag as f32);
+    let force = r_vec * (force_mag);
 
     (force, energy)
 }
@@ -421,9 +421,9 @@ fn assign_charges_to_grid(
     let mut grid = vec![vec![vec![0.0; grid_z]; grid_y]; grid_x];
 
     // Box dimensions
-    let box_x = box_vectors.x_axis.x as f64;
-    let box_y = box_vectors.y_axis.y as f64;
-    let box_z = box_vectors.z_axis.z as f64;
+    let box_x = box_vectors.x_axis.x;
+    let box_y = box_vectors.y_axis.y;
+    let box_z = box_vectors.z_axis.z;
 
     // Grid spacing
     let h_x = box_x / grid_x as f64;
@@ -434,9 +434,9 @@ fn assign_charges_to_grid(
         let charge = charges[i];
 
         // Fractional coordinates on grid
-        let u_x = (pos.x as f64 / h_x) % grid_x as f64;
-        let u_y = (pos.y as f64 / h_y) % grid_y as f64;
-        let u_z = (pos.z as f64 / h_z) % grid_z as f64;
+        let u_x = (pos.x / h_x) % grid_x as f64;
+        let u_y = (pos.y / h_y) % grid_y as f64;
+        let u_z = (pos.z / h_z) % grid_z as f64;
 
         // Nearest grid point (for even spline order, use grid center)
         let k_x = if spline_order % 2 == 0 {
@@ -597,7 +597,7 @@ fn fft_3d_forward(
     nz: usize,
 ) -> Vec<Vec<Vec<Complex64>>> {
     // FFTW3 implementation (fastest)
-    let mut input: Vec<f64> = Vec::with_capacity(nx * ny * nz);
+    let mut input: Vec<f64> = Vec::with_capacity(nx * ny as f64 * nz as f64);
     for i in 0..nx {
         for j in 0..ny {
             for k in 0..nz {
@@ -607,7 +607,7 @@ fn fft_3d_forward(
     }
 
     // Create FFTW plan and execute
-    let mut output = vec![c64::new(0.0, 0.0); nx * ny * (nz / 2 + 1)];
+    let mut output = vec![c64::new(0.0, 0.0); nx * ny as f64 * (nz / 2 + 1)];
     let mut plan: R2CPlan64 = R2CPlan::aligned(&[nx, ny, nz], Flag::MEASURE).unwrap();
     plan.r2c(&mut input, &mut output).unwrap();
 
@@ -708,7 +708,7 @@ fn fft_3d_inverse(
     nz: usize,
 ) -> Vec<Vec<Vec<f64>>> {
     // Convert to FFTW format
-    let mut input: Vec<c64> = Vec::with_capacity(nx * ny * (nz / 2 + 1));
+    let mut input: Vec<c64> = Vec::with_capacity(nx * ny as f64 * (nz / 2 + 1));
     for i in 0..nx {
         for j in 0..ny {
             for k in 0..(nz / 2 + 1) {
@@ -718,12 +718,12 @@ fn fft_3d_inverse(
     }
 
     // Execute inverse FFT
-    let mut output = vec![0.0; nx * ny * nz];
+    let mut output = vec![0.0; nx * ny as f64 * nz as f64];
     let mut plan: C2RPlan64 = C2RPlan::aligned(&[nx, ny, nz], Flag::MEASURE).unwrap();
     plan.c2r(&mut input, &mut output).unwrap();
 
     // Normalize and convert to 3D grid
-    let norm = 1.0 / (nx * ny * nz) as f64;
+    let norm = 1.0 / (nx * ny as f64 * nz as f64);
     let mut real_grid = vec![vec![vec![0.0; nz]; ny]; nx];
     let mut idx = 0;
     for i in 0..nx {
@@ -792,7 +792,7 @@ fn fft_3d_inverse(
     }
 
     // Extract real part and normalize
-    let norm = 1.0 / (nx * ny * nz) as f64;
+    let norm = 1.0 / (nx as f64 * ny as f64 * nz as f64);
     grid.into_iter()
         .map(|plane| {
             plane
@@ -843,10 +843,10 @@ pub fn pme_reciprocal_space(
     let mut fourier_grid = fft_3d_forward(charge_grid, pme.grid_x, pme.grid_y, pme.grid_z);
 
     // 3. Apply influence function and compute reciprocal energy
-    let volume = box_vectors.determinant() as f64;
-    let box_x = box_vectors.x_axis.x as f64;
-    let box_y = box_vectors.y_axis.y as f64;
-    let box_z = box_vectors.z_axis.z as f64;
+    let volume = box_vectors.determinant();
+    let box_x = box_vectors.x_axis.x;
+    let box_y = box_vectors.y_axis.y;
+    let box_z = box_vectors.z_axis.z;
 
     let mut reciprocal_energy = 0.0;
     let nz_half = pme.grid_z / 2 + 1;
@@ -911,9 +911,9 @@ fn interpolate_forces_from_grid(
     let mut forces = vec![Vec3::ZERO; positions.len()];
 
     // Box dimensions
-    let box_x = box_vectors.x_axis.x as f64;
-    let box_y = box_vectors.y_axis.y as f64;
-    let box_z = box_vectors.z_axis.z as f64;
+    let box_x = box_vectors.x_axis.x;
+    let box_y = box_vectors.y_axis.y;
+    let box_z = box_vectors.z_axis.z;
 
     // Grid spacing
     let h_x = box_x / grid_x as f64;
@@ -924,9 +924,9 @@ fn interpolate_forces_from_grid(
         let charge = charges[i];
 
         // Fractional coordinates on grid
-        let u_x = (pos.x as f64 / h_x) % grid_x as f64;
-        let u_y = (pos.y as f64 / h_y) % grid_y as f64;
-        let u_z = (pos.z as f64 / h_z) % grid_z as f64;
+        let u_x = (pos.x / h_x) % grid_x as f64;
+        let u_y = (pos.y / h_y) % grid_y as f64;
+        let u_z = (pos.z / h_z) % grid_z as f64;
 
         // Nearest grid point
         let k_x = if spline_order % 2 == 0 {
@@ -981,7 +981,7 @@ fn interpolate_forces_from_grid(
             }
         }
 
-        forces[i] = Vec3::new(force_x as f32, force_y as f32, force_z as f32);
+        forces[i] = Vec3::new(force_x, force_y, force_z);
     }
 
     forces

@@ -129,25 +129,25 @@ fn calc_center_of_mass(positions: &[Vec3], masses: &[f64], atom_selection: &[usi
     let mut total_mass = 0.0;
 
     for &idx in atom_selection {
-        com = com + positions[idx] * (masses[idx] as f32);
+        com = com + positions[idx] * (masses[idx]);
         total_mass += masses[idx];
     }
 
     if total_mass > 0.0 {
-        com = com / (total_mass as f32);
+        com = com / (total_mass);
     }
 
     com
 }
 
 /// Calculate unweighted radius of gyration
-fn calc_rgyr_unweighted(positions: &[Vec3], atom_selection: &[usize]) -> f32 {
+fn calc_rgyr_unweighted(positions: &[Vec3], atom_selection: &[usize]) -> f64 {
     // Calculate geometric center
     let mut center = Vec3::ZERO;
     for &idx in atom_selection {
         center = center + positions[idx];
     }
-    center = center / atom_selection.len() as f32;
+    center = center / atom_selection.len() as f64;
 
     // Calculate Rg²
     let mut rg_squared = 0.0;
@@ -156,12 +156,12 @@ fn calc_rgyr_unweighted(positions: &[Vec3], atom_selection: &[usize]) -> f32 {
         rg_squared += diff.dot(diff);
     }
 
-    rg_squared /= atom_selection.len() as f32;
+    rg_squared /= atom_selection.len() as f64;
     rg_squared.sqrt()
 }
 
 /// Calculate mass-weighted radius of gyration
-fn calc_rgyr_mass_weighted(positions: &[Vec3], masses: &[f64], atom_selection: &[usize]) -> f32 {
+fn calc_rgyr_mass_weighted(positions: &[Vec3], masses: &[f64], atom_selection: &[usize]) -> f64 {
     // Calculate center of mass
     let com = calc_center_of_mass(positions, masses, atom_selection);
 
@@ -171,7 +171,7 @@ fn calc_rgyr_mass_weighted(positions: &[Vec3], masses: &[f64], atom_selection: &
 
     for &idx in atom_selection {
         let diff = positions[idx] - com;
-        rg_squared += masses[idx] * (diff.dot(diff) as f64);
+        rg_squared += masses[idx] * (diff.dot(diff));
         total_mass += masses[idx];
     }
 
@@ -179,7 +179,7 @@ fn calc_rgyr_mass_weighted(positions: &[Vec3], masses: &[f64], atom_selection: &
         rg_squared /= total_mass;
     }
 
-    (rg_squared.sqrt() as f32)
+    rg_squared.sqrt()
 }
 
 fn main() {

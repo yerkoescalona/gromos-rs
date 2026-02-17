@@ -275,7 +275,7 @@ fn calculate_msd(
                 let r0 = all_positions[t0][atom_local_idx];
                 let r1 = all_positions[t1][atom_local_idx];
                 let dr = r1 - r0;
-                msd += dr.length_squared() as f64;
+                msd += dr.length_squared();
                 n_samples += 1;
             }
         }

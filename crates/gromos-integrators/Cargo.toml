@@ -27,3 +27,10 @@ serde = { workspace = true, optional = true }
 default = []
 serde = ["dep:serde", "gromos-core/serde"]
 mpi = []
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "thermostat_bench"
+harness = false

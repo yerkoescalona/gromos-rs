@@ -54,10 +54,10 @@ impl G96Writer {
             let atomname = format!("AT{}", i + 1);
             let atomnum = i + 1;
 
-            // Convert f32 to f64 for formatting
-            let x = pos.x as f64;
-            let y = pos.y as f64;
-            let z = pos.z as f64;
+            // Position values are already f64
+            let x = pos.x;
+            let y = pos.y;
+            let z = pos.z;
 
             writeln!(
                 self.writer,
@@ -76,9 +76,9 @@ impl G96Writer {
         writeln!(self.writer, "VELOCITY").map_err(|e| format!("Write error: {}", e))?;
 
         for vel in velocities {
-            let vx = vel.x as f64;
-            let vy = vel.y as f64;
-            let vz = vel.z as f64;
+            let vx = vel.x;
+            let vy = vel.y;
+            let vz = vel.z;
 
             writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", vx, vy, vz)
                 .map_err(|e| format!("Write error: {}", e))?;
@@ -92,9 +92,9 @@ impl G96Writer {
     pub fn write_box(&mut self, box_dims: Vec3) -> Result<(), String> {
         writeln!(self.writer, "BOX").map_err(|e| format!("Write error: {}", e))?;
 
-        let x = box_dims.x as f64;
-        let y = box_dims.y as f64;
-        let z = box_dims.z as f64;
+        let x = box_dims.x;
+        let y = box_dims.y;
+        let z = box_dims.z;
 
         writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", x, y, z)
             .map_err(|e| format!("Write error: {}", e))?;

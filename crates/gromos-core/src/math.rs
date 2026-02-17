@@ -1,12 +1,12 @@
 //! Mathematical primitives for molecular dynamics
 
-use glam::{Mat3A, Vec3A};
+use glam::{DMat3, DVec3};
 
-/// 3D vector with SIMD acceleration (16-byte aligned)
-pub type Vec3 = Vec3A;
+/// 3D vector - double precision (f64) for accurate MD simulation
+pub type Vec3 = DVec3;
 
-/// 3x3 matrix with SIMD acceleration
-pub type Mat3 = Mat3A;
+/// 3x3 matrix - double precision (f64)
+pub type Mat3 = DMat3;
 
 /// Boundary condition types for periodic systems
 pub trait BoundaryCondition: Send + Sync {

@@ -146,7 +146,7 @@ impl LambdaController {
         if self.lambda_exponent == 1 {
             1.0
         } else {
-            (self.lambda_exponent as f64) * self.lambda.powi(self.lambda_exponent - 1)
+            (self.lambda_exponent) as f64 * self.lambda.powi(self.lambda_exponent - 1)
         }
     }
 }

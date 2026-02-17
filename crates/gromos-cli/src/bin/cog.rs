@@ -57,14 +57,14 @@ fn main() {
 
                     for (i, pos) in frame.positions.iter().enumerate() {
                         if i < topo.mass.len() {
-                            let mass = topo.mass[i] as f32;
+                            let mass = topo.mass[i];
                             com = com + *pos * mass;
                             total_mass += topo.mass[i];
                         }
                     }
 
                     if total_mass > 0.0 {
-                        com = com / (total_mass as f32);
+                        com = com / (total_mass);
                     }
                     com
                 } else {
@@ -73,7 +73,7 @@ fn main() {
                     for pos in &frame.positions {
                         cog = cog + *pos;
                     }
-                    cog = cog / frame.positions.len() as f32;
+                    cog = cog / frame.positions.len() as f64;
                     cog
                 };
 

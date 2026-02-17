@@ -128,7 +128,7 @@ impl BinaryEnergyWriter {
 
     /// Write an energy frame
     pub fn write_frame(&mut self, frame: &EnergyFrame) -> Result<(), IoError> {
-        // Write all energy values as f64
+        // Write all energy values
         self.writer.write_f64::<LittleEndian>(frame.time)?;
         self.writer.write_f64::<LittleEndian>(frame.kinetic)?;
         self.writer.write_f64::<LittleEndian>(frame.potential)?;
@@ -351,7 +351,7 @@ mod tests {
 
             for i in 0..100 {
                 let mut frame =
-                    EnergyFrame::new(i as f64 * 0.002, 100.0 + i as f64, -200.0 - i as f64, 300.0);
+                    EnergyFrame::new(i * 0.002, 100.0 + i, -200.0 - i, 300.0);
                 frame.bond = -50.0;
                 frame.lj = -100.0;
                 writer.write_frame(&frame).unwrap();

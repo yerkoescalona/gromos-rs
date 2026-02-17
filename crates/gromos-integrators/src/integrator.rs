@@ -51,7 +51,6 @@ impl LeapFrog {
 impl Integrator for LeapFrog {
     fn step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
         let n_atoms = topo.num_atoms();
-        let dt_f32 = dt as f32;
 
         // Step 1: Update velocities v(t+dt/2) = v(t-dt/2) + F(t)/m * dt
         if self.parallel {
@@ -63,13 +62,13 @@ impl Integrator for LeapFrog {
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(i, vel_new)| {
-                    let accel = old_force[i] * (topo.inverse_mass[i] as f32);
-                    *vel_new = old_vel[i] + accel * dt_f32;
+                    let accel = old_force[i] * topo.inverse_mass[i];
+                    *vel_new = old_vel[i] + accel * dt;
                 });
         } else {
             for i in 0..n_atoms {
-                let accel = conf.old().force[i] * (topo.inverse_mass[i] as f32);
-                conf.current_mut().vel[i] = conf.old().vel[i] + accel * dt_f32;
+                let accel = conf.old().force[i] * topo.inverse_mass[i];
+                conf.current_mut().vel[i] = conf.old().vel[i] + accel * dt;
             }
         }
 
@@ -87,11 +86,11 @@ impl Integrator for LeapFrog {
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(i, pos_new)| {
-                    *pos_new = old_pos[i] + old_vel[i] * dt_f32;
+                    *pos_new = old_pos[i] + old_vel[i] * dt;
                 });
         } else {
             for i in 0..n_atoms {
-                conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().vel[i] * dt_f32;
+                conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().vel[i] * dt;
             }
         }
 
@@ -129,7 +128,6 @@ impl VelocityVerlet {
 impl Integrator for VelocityVerlet {
     fn step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
         let n_atoms = topo.num_atoms();
-        let dt_f32 = dt as f32;
 
         if self.saved_accelerations.len() != n_atoms {
             self.saved_accelerations.resize(n_atoms, Vec3::ZERO);
@@ -137,21 +135,21 @@ impl Integrator for VelocityVerlet {
 
         // Step 1: Update positions and save accelerations
         for i in 0..n_atoms {
-            let accel = conf.old().force[i] * (topo.inverse_mass[i] as f32);
+            let accel = conf.old().force[i] * topo.inverse_mass[i];
             self.saved_accelerations[i] = accel;
 
             conf.current_mut().pos[i] =
-                conf.old().pos[i] + conf.old().vel[i] * dt_f32 + accel * (0.5 * dt_f32 * dt_f32);
+                conf.old().pos[i] + conf.old().vel[i] * dt + accel * (0.5 * dt * dt);
 
-            conf.current_mut().vel[i] = conf.old().vel[i] + accel * (0.5 * dt_f32);
+            conf.current_mut().vel[i] = conf.old().vel[i] + accel * (0.5 * dt);
         }
 
         conf.exchange_state();
 
         // Step 2: Complete velocity update (after force calculation)
         for i in 0..n_atoms {
-            let accel_new = conf.current().force[i] * (topo.inverse_mass[i] as f32);
-            conf.current_mut().vel[i] += accel_new * (0.5 * dt_f32);
+            let accel_new = conf.current().force[i] * topo.inverse_mass[i];
+            conf.current_mut().vel[i] += accel_new * (0.5 * dt);
         }
 
         conf.current_mut().clear_forces();
@@ -270,9 +268,9 @@ impl SteepestDescent {
     fn apply_force_limit(&self, forces: &mut [Vec3]) {
         if self.force_limit > 0.0 {
             for force in forces.iter_mut() {
-                let magnitude = force.length() as f64;
+                let magnitude = force.length();
                 if magnitude > self.force_limit {
-                    *force *= (self.force_limit / magnitude) as f32;
+                    *force *= (self.force_limit / magnitude);
                 }
             }
         }
@@ -283,9 +281,9 @@ impl SteepestDescent {
         let f_squared: f64 = forces
             .iter()
             .map(|f| {
-                let fx = f.x as f64;
-                let fy = f.y as f64;
-                let fz = f.z as f64;
+                let fx = f.x;
+                let fy = f.y;
+                let fz = f.z;
                 fx * fx + fy * fy + fz * fz
             })
             .sum();
@@ -342,7 +340,7 @@ impl Integrator for SteepestDescent {
         conf.exchange_state();
 
         // Update positions: r_new = r_old + step_size * f_norm * force_old
-        let step_scale = (self.step_size * f_norm) as f32;
+        let step_scale = (self.step_size * f_norm);
 
         for i in 0..n_atoms {
             conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().force[i] * step_scale;
@@ -572,7 +570,7 @@ impl Integrator for StochasticDynamics {
 
         // Step 1: Update velocities with Langevin dynamics
         // v(t+dt/2) = c1*v(t) + c2*F(t)/m + c3*ξ₁ + c4*ξ₂
-        let dt_f32 = dt as f32;
+        let dt = dt;
 
         for i in 0..n_atoms {
             let coeff = self.coefficients[i];
@@ -580,22 +578,22 @@ impl Integrator for StochasticDynamics {
             let inv_mass = topo.inverse_mass[i];
 
             // Deterministic terms
-            let v_damped = conf.old().vel[i] * (coeff.c1 as f32);
-            let v_force = conf.old().force[i] * (inv_mass as f32) * (coeff.c2 as f32);
+            let v_damped = conf.old().vel[i] * (coeff.c1);
+            let v_force = conf.old().force[i] * (inv_mass) * (coeff.c2);
 
             // Random terms (Gaussian noise)
-            let xi1_x = normal.sample(&mut rng) as f32;
-            let xi1_y = normal.sample(&mut rng) as f32;
-            let xi1_z = normal.sample(&mut rng) as f32;
+            let xi1_x = normal.sample(&mut rng);
+            let xi1_y = normal.sample(&mut rng);
+            let xi1_z = normal.sample(&mut rng);
             let xi1 = Vec3::new(xi1_x, xi1_y, xi1_z);
 
-            let xi2_x = normal.sample(&mut rng) as f32;
-            let xi2_y = normal.sample(&mut rng) as f32;
-            let xi2_z = normal.sample(&mut rng) as f32;
+            let xi2_x = normal.sample(&mut rng);
+            let xi2_y = normal.sample(&mut rng);
+            let xi2_z = normal.sample(&mut rng);
             let xi2 = Vec3::new(xi2_x, xi2_y, xi2_z);
 
-            let v_random1 = xi1 * (coeff.c3 as f32);
-            let v_random2 = xi2 * (coeff.c4 as f32);
+            let v_random1 = xi1 * (coeff.c3);
+            let v_random2 = xi2 * (coeff.c4);
 
             // Combined velocity update
             conf.current_mut().vel[i] = v_damped + v_force + v_random1 + v_random2;
@@ -608,7 +606,7 @@ impl Integrator for StochasticDynamics {
         // r(t+dt) = r(t) + c5*v(t+dt/2)*dt
         for i in 0..n_atoms {
             let coeff = self.coefficients[i];
-            let pos_update = conf.old().vel[i] * dt_f32 * (coeff.c5 as f32) * (coeff.c6 as f32);
+            let pos_update = conf.old().vel[i] * dt * (coeff.c5) * (coeff.c6);
             conf.current_mut().pos[i] = conf.old().pos[i] + pos_update;
         }
 
@@ -655,7 +653,7 @@ impl BerendsenThermostat {
             .sqrt();
 
         for vel in &mut conf.current_mut().vel {
-            *vel *= lambda as f32;
+            *vel *= lambda;
         }
 
         conf.current_mut().calculate_kinetic_energy(&topo.mass);
@@ -733,7 +731,7 @@ impl ScaledLeapFrog {
 impl Integrator for ScaledLeapFrog {
     fn step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
         let n_atoms = topo.num_atoms();
-        let dt_f32 = dt as f32;
+        let dt = dt;
 
         // Ensure force_scales vector matches topology
         if self.force_scales.len() != n_atoms {
@@ -752,15 +750,15 @@ impl Integrator for ScaledLeapFrog {
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(i, vel_new)| {
-                    let scale = scales[i] as f32;
-                    let accel = old_force[i] * (topo.inverse_mass[i] as f32);
-                    *vel_new = old_vel[i] + scale * accel * dt_f32;
+                    let scale = scales[i];
+                    let accel = old_force[i] * (topo.inverse_mass[i]);
+                    *vel_new = old_vel[i] + scale * accel * dt;
                 });
         } else {
             for i in 0..n_atoms {
-                let scale = self.force_scales[i] as f32;
-                let accel = conf.old().force[i] * (topo.inverse_mass[i] as f32);
-                conf.current_mut().vel[i] = conf.old().vel[i] + scale * accel * dt_f32;
+                let scale = self.force_scales[i];
+                let accel = conf.old().force[i] * (topo.inverse_mass[i]);
+                conf.current_mut().vel[i] = conf.old().vel[i] + scale * accel * dt;
             }
         }
 
@@ -777,11 +775,11 @@ impl Integrator for ScaledLeapFrog {
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(i, pos_new)| {
-                    *pos_new = old_pos[i] + old_vel[i] * dt_f32;
+                    *pos_new = old_pos[i] + old_vel[i] * dt;
                 });
         } else {
             for i in 0..n_atoms {
-                conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().vel[i] * dt_f32;
+                conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().vel[i] * dt;
             }
         }
 
@@ -981,8 +979,8 @@ impl ConjugateGradient {
                 // β = |f_new|² / |f_old|²
                 let mut f_new_sq = 0.0;
                 for i in 0..n_atoms {
-                    f_old_sq += self.old_forces[i].length_squared() as f64;
-                    f_new_sq += current_forces[i].length_squared() as f64;
+                    f_old_sq += self.old_forces[i].length_squared();
+                    f_new_sq += current_forces[i].length_squared();
                 }
                 numerator = f_new_sq;
             },
@@ -990,8 +988,8 @@ impl ConjugateGradient {
                 // β = ⟨f_new, f_new - f_old⟩ / |f_old|²
                 for i in 0..n_atoms {
                     let f_diff = current_forces[i] - self.old_forces[i];
-                    numerator += current_forces[i].dot(f_diff) as f64;
-                    f_old_sq += self.old_forces[i].length_squared() as f64;
+                    numerator += current_forces[i].dot(f_diff);
+                    f_old_sq += self.old_forces[i].length_squared();
                 }
             },
         }
@@ -1017,13 +1015,13 @@ impl ConjugateGradient {
             // Steepest descent: p = f
             for i in 0..n_atoms {
                 self.search_directions[i] = forces[i];
-                slope += forces[i].length_squared() as f64;
+                slope += forces[i].length_squared();
             }
         } else {
             // Conjugate direction: p = f + β·p_old
             for i in 0..n_atoms {
-                self.search_directions[i] = forces[i] + self.search_directions[i] * (beta as f32);
-                slope += self.search_directions[i].dot(forces[i]) as f64;
+                self.search_directions[i] = forces[i] + self.search_directions[i] * (beta);
+                slope += self.search_directions[i].dot(forces[i]);
             }
         }
 
@@ -1034,9 +1032,9 @@ impl ConjugateGradient {
     fn apply_force_limit(&self, forces: &mut [Vec3]) {
         if self.force_limit > 0.0 {
             for force in forces.iter_mut() {
-                let magnitude = force.length() as f64;
+                let magnitude = force.length();
                 if magnitude > self.force_limit {
-                    *force *= (self.force_limit / magnitude) as f32;
+                    *force *= (self.force_limit / magnitude);
                 }
             }
         }
@@ -1048,7 +1046,7 @@ impl ConjugateGradient {
         let mut f_max = 0.0_f64;
 
         for force in forces {
-            let f_sq = force.length_squared() as f64;
+            let f_sq = force.length_squared();
             f_sq_sum += f_sq;
             f_max = f_max.max(f_sq);
         }
@@ -1109,7 +1107,7 @@ impl Integrator for ConjugateGradient {
         let p_squared: f64 = self
             .search_directions
             .iter()
-            .map(|p| p.length_squared() as f64)
+            .map(|p| p.length_squared())
             .sum();
 
         if p_squared < 1e-15 {
@@ -1137,7 +1135,7 @@ impl Integrator for ConjugateGradient {
             // Calculate positions at B
             for i in 0..n_atoms {
                 conf.current_mut().pos[i] =
-                    conf.old().pos[i] + self.search_directions[i] * (b as f32);
+                    conf.old().pos[i] + self.search_directions[i] * (b);
             }
 
             // Energy at B would need force calculation - for now we'll approximate
@@ -1147,7 +1145,7 @@ impl Integrator for ConjugateGradient {
             // Calculate slope at B: ⟨p, f_B⟩
             slope_b = 0.0;
             for i in 0..n_atoms {
-                slope_b += self.search_directions[i].dot(conf.current().force[i]) as f64;
+                slope_b += self.search_directions[i].dot(conf.current().force[i]);
             }
 
             // Accept B if slope is negative or energy increased
@@ -1191,7 +1189,7 @@ impl Integrator for ConjugateGradient {
 
         // Update positions to X
         for i in 0..n_atoms {
-            conf.current_mut().pos[i] = conf.old().pos[i] + self.search_directions[i] * (x as f32);
+            conf.current_mut().pos[i] = conf.old().pos[i] + self.search_directions[i] * (x);
         }
 
         // Update statistics
@@ -1325,21 +1323,21 @@ impl LatticeShiftTracker {
             // X dimension
             let shift_x = (pos.x / box_x + 0.5).floor() as i32;
             if shift_x != 0 {
-                pos.x -= shift_x as f32 * box_x;
+                pos.x -= shift_x as f64 * box_x;
                 conf.lattice_shifts[i][0] += shift_x;
             }
 
             // Y dimension
             let shift_y = (pos.y / box_y + 0.5).floor() as i32;
             if shift_y != 0 {
-                pos.y -= shift_y as f32 * box_y;
+                pos.y -= shift_y as f64 * box_y;
                 conf.lattice_shifts[i][1] += shift_y;
             }
 
             // Z dimension
             let shift_z = (pos.z / box_z + 0.5).floor() as i32;
             if shift_z != 0 {
-                pos.z -= shift_z as f32 * box_z;
+                pos.z -= shift_z as f64 * box_z;
                 conf.lattice_shifts[i][2] += shift_z;
             }
 
@@ -1371,9 +1369,9 @@ impl LatticeShiftTracker {
 
             // Wrap position if needed
             if shift_x != 0 || shift_y != 0 || shift_z != 0 {
-                let shift_vec = box_vectors.x_axis * (shift_x as f32)
-                    + box_vectors.y_axis * (shift_y as f32)
-                    + box_vectors.z_axis * (shift_z as f32);
+                let shift_vec = box_vectors.x_axis * (shift_x as f64)
+                    + box_vectors.y_axis * (shift_y as f64)
+                    + box_vectors.z_axis * (shift_z as f64);
 
                 let new_pos = pos - shift_vec;
                 conf.current_mut().pos[i] = new_pos;
@@ -1411,9 +1409,9 @@ impl LatticeShiftTracker {
         let shifts = conf.lattice_shifts[atom_idx];
         let box_vectors = &conf.current().box_config.vectors;
 
-        pos + box_vectors.x_axis * (shifts[0] as f32)
-            + box_vectors.y_axis * (shifts[1] as f32)
-            + box_vectors.z_axis * (shifts[2] as f32)
+        pos + box_vectors.x_axis * (shifts[0] as f64)
+            + box_vectors.y_axis * (shifts[1] as f64)
+            + box_vectors.z_axis * (shifts[2] as f64)
     }
 
     /// Calculate mean squared displacement using unwrapped coordinates
@@ -1431,7 +1429,7 @@ impl LatticeShiftTracker {
             let r0 = self.unwrapped_position(conf_initial, i);
             let r1 = self.unwrapped_position(conf_current, i);
             let dr = r1 - r0;
-            msd += dr.length_squared() as f64;
+            msd += dr.length_squared();
         }
 
         msd / n_atoms as f64
@@ -1510,13 +1508,13 @@ mod tests {
 
         // Initialize velocities in both current and old states
         for (i, vel) in conf.current_mut().vel.iter_mut().enumerate() {
-            *vel = Vec3::new((i as f32) * 0.1, 0.0, 0.0);
+            *vel = Vec3::new((i) * 0.1, 0.0, 0.0);
         }
         
         // Prepare old state as well (LeapFrog uses both)
         conf.exchange_state();
         for (i, vel) in conf.current_mut().vel.iter_mut().enumerate() {
-            *vel = Vec3::new((i as f32) * 0.1, 0.0, 0.0);
+            *vel = Vec3::new((i) * 0.1, 0.0, 0.0);
         }
 
         // In LeapFrog, after step() the velocities end up in old() due to internal exchange

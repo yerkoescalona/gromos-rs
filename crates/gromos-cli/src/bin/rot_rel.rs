@@ -97,11 +97,11 @@ fn main() {
 
             // C1(t) = <v(0)·v(t)>
             let dot = v0.x * vt.x + v0.y * vt.y + v0.z * vt.z;
-            c1 += dot as f64;
+            c1 += dot;
 
             // P2(t) = <(3*cos²θ - 1)/2>
             let p2 = 0.5 * (3.0 * dot * dot - 1.0);
-            c2 += p2 as f64;
+            c2 += p2;
 
             count += 1;
         }

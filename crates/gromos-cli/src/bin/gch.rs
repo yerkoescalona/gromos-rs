@@ -37,7 +37,7 @@ fn main() {
         i += 1;
     }
 
-    let mut constraints: Vec<(usize, usize, f32)> = Vec::new();
+    let mut constraints: Vec<(usize, usize, f64)> = Vec::new();
 
     if let Some(path) = const_file {
         if let Ok(file) = File::open(&path) {
@@ -49,7 +49,7 @@ fn main() {
                         if let (Ok(i), Ok(j), Ok(d)) = (
                             parts[0].parse::<usize>(),
                             parts[1].parse::<usize>(),
-                            parts[2].parse::<f32>(),
+                            parts[2].parse::<f64>(),
                         ) {
                             constraints.push((i - 1, j - 1, d));
                         }

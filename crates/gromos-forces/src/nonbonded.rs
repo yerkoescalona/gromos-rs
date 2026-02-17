@@ -68,7 +68,7 @@ pub fn lj_crf_interaction(
     q_prod: f64,
     crf: &CRFParameters,
 ) -> (f64, f64, f64) {
-    let r2 = r.length_squared() as f64;
+    let r2 = r.length_squared();
 
     // Early exit for zero distance (should not happen, but safety)
     if r2 < 1e-10 {
@@ -107,7 +107,7 @@ pub fn lj_crf_interaction_simd_x4(
     use wide::f64x4;
 
     // Convert to SIMD vectors
-    let r2_array: [f64; 4] = r.map(|v| v.length_squared() as f64);
+    let r2_array: [f64; 4] = r.map(|v| v.length_squared());
     let r2 = f64x4::from(r2_array);
 
     let inv_r2 = f64x4::splat(1.0) / r2;
@@ -145,7 +145,7 @@ pub fn lj_crf_interaction_simd_x4(
 /// Processes pairlist and accumulates forces, energies, and virial.
 pub fn lj_crf_innerloop<BC: BoundaryCondition>(
     positions: &[Vec3],
-    charges: &[f32],
+    charges: &[f64],
     iac: &[u32], // Integer atom codes (atom types)
     pairlist: &[(u32, u32)],
     lj_params: &[Vec<LJParameters>],
@@ -170,13 +170,13 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
         let type_j = iac[j] as usize;
         let lj = lj_params[type_i][type_j];
 
-        let q_prod = (charges[i] * charges[j]) as f64;
+        let q_prod = charges[i] * charges[j];
 
         // Calculate interaction
         let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
 
         // Accumulate forces
-        let force = r * f_mag as f32;
+        let force = r * f_mag;
         storage.forces[i] += force;
         storage.forces[j] -= force;
 
@@ -187,7 +187,7 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
         // Accumulate virial (for pressure calculation)
         for a in 0..3 {
             for b in 0..3 {
-                storage.virial[a][b] += r[b] as f64 * force[a] as f64;
+                storage.virial[a][b] += r[b] * force[a];
             }
         }
     }
@@ -196,7 +196,7 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
 /// Parallel version of innerloop using Rayon
 pub fn lj_crf_innerloop_parallel<BC: BoundaryCondition>(
     positions: &[Vec3],
-    charges: &[f32],
+    charges: &[f64],
     iac: &[u32],
     pairlist: &[(u32, u32)],
     lj_params: &[Vec<LJParameters>],
@@ -221,11 +221,11 @@ pub fn lj_crf_innerloop_parallel<BC: BoundaryCondition>(
                 let type_i = iac[i] as usize;
                 let type_j = iac[j] as usize;
                 let lj = lj_params[type_i][type_j];
-                let q_prod = (charges[i] * charges[j]) as f64;
+                let q_prod = charges[i] * charges[j];
 
                 let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
 
-                let force = r * f_mag as f32;
+                let force = r * f_mag;
                 local_storage.forces[i] += force;
                 local_storage.forces[j] -= force;
 
@@ -234,7 +234,7 @@ pub fn lj_crf_innerloop_parallel<BC: BoundaryCondition>(
 
                 for a in 0..3 {
                     for b in 0..3 {
-                        local_storage.virial[a][b] += r[b] as f64 * force[a] as f64;
+                        local_storage.virial[a][b] += r[b] * force[a];
                     }
                 }
             }
@@ -394,7 +394,7 @@ pub fn perturbed_lj_crf_interaction(
 ) -> (f64, f64, f64, f64, f64) {
     const FOUR_PI_EPS_I: f64 = 138.9354859; // kJ mol⁻¹ nm e⁻²
 
-    let r2 = r.length_squared() as f64;
+    let r2 = r.length_squared();
 
     // Early exit for zero distance
     if r2 < 1e-10 {
@@ -1050,7 +1050,7 @@ pub mod mpi_nonbonded {
         lj_params: &[Vec<LJParameters>],
         crf: &CRFParameters,
         periodicity: &BC,
-        box_matrix: &mut [f32; 9],
+        box_matrix: &mut [f64; 9],
         lambda: &mut f64,
     ) -> ForceStorage {
         let mpi_master = MpiNonbondedMaster::new(mpi_control.clone());
@@ -1082,14 +1082,11 @@ pub mod mpi_nonbonded {
         let (pair_start, pair_end) = mpi_master.calculate_pair_range(pairlist.len());
         let local_pairlist = &pairlist[pair_start..pair_end];
 
-        // Convert charges from f64 to f32 for computation
-        let charges_f32: Vec<f32> = charges.iter().map(|&c| c as f32).collect();
-
         // Calculate local forces using serial innerloop
         let mut local_storage = ForceStorage::new(n_atoms);
         lj_crf_innerloop(
             positions,
-            &charges_f32,
+            charges,
             iac,
             local_pairlist,
             lj_params,

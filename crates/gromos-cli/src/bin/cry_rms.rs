@@ -21,9 +21,9 @@ fn read_reference(filename: &str) -> Vec<Vec3> {
                 let parts: Vec<&str> = line_str.split_whitespace().collect();
                 if parts.len() >= 3 {
                     if let (Ok(x), Ok(y), Ok(z)) = (
-                        parts[0].parse::<f32>(),
-                        parts[1].parse::<f32>(),
-                        parts[2].parse::<f32>(),
+                        parts[0].parse::<f64>(),
+                        parts[1].parse::<f64>(),
+                        parts[2].parse::<f64>(),
                     ) {
                         positions.push(Vec3::new(x, y, z));
                     }
@@ -35,8 +35,8 @@ fn read_reference(filename: &str) -> Vec<Vec3> {
     positions
 }
 
-fn calc_rmsd(pos1: &[Vec3], pos2: &[Vec3]) -> f32 {
-    let mut sum_sq = 0.0f32;
+fn calc_rmsd(pos1: &[Vec3], pos2: &[Vec3]) -> f64 {
+    let mut sum_sq = 0.0f64;
     let n = pos1.len().min(pos2.len());
 
     for i in 0..n {
@@ -46,7 +46,7 @@ fn calc_rmsd(pos1: &[Vec3], pos2: &[Vec3]) -> f32 {
         sum_sq += dx * dx + dy * dy + dz * dz;
     }
 
-    (sum_sq / n as f32).sqrt()
+    (sum_sq / n as f64).sqrt()
 }
 
 fn main() {

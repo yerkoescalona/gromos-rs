@@ -109,7 +109,7 @@ fn parse_args(args: Vec<String>) -> Result<RmsdArgs, String> {
     })
 }
 
-fn calculate_rmsd(pos1: &[Vec3], pos2: &[Vec3], atom_indices: &[usize]) -> f32 {
+fn calculate_rmsd(pos1: &[Vec3], pos2: &[Vec3], atom_indices: &[usize]) -> f64 {
     let indices = if atom_indices.is_empty() {
         // Use all atoms
         (0..pos1.len()).collect::<Vec<_>>()
@@ -122,7 +122,7 @@ fn calculate_rmsd(pos1: &[Vec3], pos2: &[Vec3], atom_indices: &[usize]) -> f32 {
         return 0.0;
     }
 
-    let mut sum_sq = 0.0f32;
+    let mut sum_sq = 0.0f64;
     for &i in &indices {
         if i >= pos1.len() || i >= pos2.len() {
             continue;
@@ -131,7 +131,7 @@ fn calculate_rmsd(pos1: &[Vec3], pos2: &[Vec3], atom_indices: &[usize]) -> f32 {
         sum_sq += diff.length_squared();
     }
 
-    (sum_sq / n as f32).sqrt()
+    (sum_sq / n as f64).sqrt()
 }
 
 fn translate_to_origin(positions: &mut [Vec3], atom_indices: &[usize]) -> Vec3 {
@@ -148,7 +148,7 @@ fn translate_to_origin(positions: &mut [Vec3], atom_indices: &[usize]) -> Vec3 {
             com = com + positions[i];
         }
     }
-    com = com / indices.len() as f32;
+    com = com / indices.len() as f64;
 
     // Translate all positions
     for pos in positions.iter_mut() {
@@ -181,8 +181,8 @@ fn simple_rotation_fit(mobile: &mut [Vec3], reference: &[Vec3], atom_indices: &[
         }
     }
 
-    mobile_com = mobile_com / indices.len() as f32;
-    ref_com = ref_com / indices.len() as f32;
+    mobile_com = mobile_com / indices.len() as f64;
+    ref_com = ref_com / indices.len() as f64;
 
     // Center both structures
     for pos in mobile.iter_mut() {

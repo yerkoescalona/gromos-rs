@@ -143,17 +143,17 @@ impl VirtualAtom {
         for (i, &parent_idx) in self.parent_atoms.iter().enumerate() {
             let mass = self.masses[i];
             total_mass += mass;
-            com += conf.current().pos[parent_idx] * (mass as f32);
+            com += conf.current().pos[parent_idx] * (mass);
         }
 
-        com / (total_mass as f32)
+        com / (total_mass)
     }
 
     /// Type 2: Linear interpolation
     fn construct_linear(&self, conf: &Configuration) -> Vec3 {
         let r1 = conf.current().pos[self.parent_atoms[0]];
         let r2 = conf.current().pos[self.parent_atoms[1]];
-        let a = self.parameters[0] as f32;
+        let a = self.parameters[0];
 
         r1 + (r2 - r1) * a
     }
@@ -163,8 +163,8 @@ impl VirtualAtom {
         let r1 = conf.current().pos[self.parent_atoms[0]];
         let r2 = conf.current().pos[self.parent_atoms[1]];
         let r3 = conf.current().pos[self.parent_atoms[2]];
-        let a = self.parameters[0] as f32;
-        let b = self.parameters[1] as f32;
+        let a = self.parameters[0];
+        let b = self.parameters[1];
 
         r1 + (r2 - r1) * a + (r3 - r1) * b
     }
@@ -198,22 +198,22 @@ impl VirtualAtom {
         let total_mass: f64 = self.masses.iter().sum();
 
         for (i, &parent_idx) in self.parent_atoms.iter().enumerate() {
-            let weight = (self.masses[i] / total_mass) as f32;
+            let weight = (self.masses[i] / total_mass);
             conf.current_mut().force[parent_idx] += force_on_virt * weight;
         }
     }
 
     /// Type 2: Redistribute linear force
     fn redistribute_linear(&self, force_on_virt: Vec3, conf: &mut Configuration) {
-        let a = self.parameters[0] as f32;
+        let a = self.parameters[0];
         conf.current_mut().force[self.parent_atoms[0]] += force_on_virt * (1.0 - a);
         conf.current_mut().force[self.parent_atoms[1]] += force_on_virt * a;
     }
 
     /// Type 3: Redistribute planar force
     fn redistribute_planar(&self, force_on_virt: Vec3, conf: &mut Configuration) {
-        let a = self.parameters[0] as f32;
-        let b = self.parameters[1] as f32;
+        let a = self.parameters[0];
+        let b = self.parameters[1];
 
         conf.current_mut().force[self.parent_atoms[0]] += force_on_virt * (1.0 - a - b);
         conf.current_mut().force[self.parent_atoms[1]] += force_on_virt * a;
@@ -311,16 +311,16 @@ impl VirtualAtomsManager {
         for (i, &parent_idx) in virt.parent_atoms.iter().enumerate() {
             let mass = virt.masses[i];
             total_mass += mass;
-            com_vel += conf.current().vel[parent_idx] * (mass as f32);
+            com_vel += conf.current().vel[parent_idx] * (mass);
         }
 
-        com_vel / (total_mass as f32)
+        com_vel / (total_mass)
     }
 
     fn construct_linear_velocity(&self, virt: &VirtualAtom, conf: &Configuration) -> Vec3 {
         let v1 = conf.current().vel[virt.parent_atoms[0]];
         let v2 = conf.current().vel[virt.parent_atoms[1]];
-        let a = virt.parameters[0] as f32;
+        let a = virt.parameters[0];
 
         v1 * (1.0 - a) + v2 * a
     }
@@ -329,8 +329,8 @@ impl VirtualAtomsManager {
         let v1 = conf.current().vel[virt.parent_atoms[0]];
         let v2 = conf.current().vel[virt.parent_atoms[1]];
         let v3 = conf.current().vel[virt.parent_atoms[2]];
-        let a = virt.parameters[0] as f32;
-        let b = virt.parameters[1] as f32;
+        let a = virt.parameters[0];
+        let b = virt.parameters[1];
 
         v1 * (1.0 - a - b) + v2 * a + v3 * b
     }

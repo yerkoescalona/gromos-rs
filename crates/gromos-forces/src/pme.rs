@@ -54,9 +54,9 @@ impl Pme {
 
         for (pos, &charge) in positions.iter().zip(charges.iter()) {
             // Convert position to grid coordinates
-            let gx = (pos.x as f64 / box_size[0]) * self.grid_size[0] as f64;
-            let gy = (pos.y as f64 / box_size[1]) * self.grid_size[1] as f64;
-            let gz = (pos.z as f64 / box_size[2]) * self.grid_size[2] as f64;
+            let gx = (pos.x / box_size[0]) * self.grid_size[0] as f64;
+            let gy = (pos.y / box_size[1]) * self.grid_size[1] as f64;
+            let gz = (pos.z / box_size[2]) * self.grid_size[2] as f64;
 
             // B-spline spreading (simplified - 1st order)
             let ix = gx as usize % self.grid_size[0];
@@ -86,13 +86,13 @@ impl Pme {
                     }
 
                     // Wave vectors
-                    let mx = if kx <= self.grid_size[0] / 2 { kx as f64 } else { kx as f64 - self.grid_size[0] as f64 };
-                    let my = if ky <= self.grid_size[1] / 2 { ky as f64 } else { ky as f64 - self.grid_size[1] as f64 };
-                    let mz = if kz <= self.grid_size[2] / 2 { kz as f64 } else { kz as f64 - self.grid_size[2] as f64 };
+                    let mx = if kx <= self.grid_size[0] / 2 { kx } else { kx - self.grid_size[0] };
+                    let my = if ky <= self.grid_size[1] / 2 { ky } else { ky - self.grid_size[1] };
+                    let mz = if kz <= self.grid_size[2] / 2 { kz } else { kz - self.grid_size[2] };
 
-                    let kx_real = 2.0 * std::f64::consts::PI * mx / box_size[0];
-                    let ky_real = 2.0 * std::f64::consts::PI * my / box_size[1];
-                    let kz_real = 2.0 * std::f64::consts::PI * mz / box_size[2];
+                    let kx_real = 2.0 * std::f64::consts::PI * mx as f64 / box_size[0];
+                    let ky_real = 2.0 * std::f64::consts::PI * my as f64 / box_size[1];
+                    let kz_real = 2.0 * std::f64::consts::PI * mz as f64 / box_size[2];
 
                     let k2 = kx_real * kx_real + ky_real * ky_real + kz_real * kz_real;
                     
@@ -144,7 +144,7 @@ mod tests {
         let mut sum = 0.0;
         let dx = 0.01;
         let mut x = 0.0;
-        while x < order as f64 {
+        while x < order {
             sum += bspline(order, x) * dx;
             x += dx;
         }

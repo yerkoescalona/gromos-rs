@@ -59,19 +59,19 @@ fn main() {
                     "density" => {
                         let volume = frame.box_dims.x * frame.box_dims.y * frame.box_dims.z;
                         if volume > 0.0 {
-                            (frame.positions.len() as f64) / (volume as f64)
+                            frame.positions.len() as f64 / volume
                         } else {
                             0.0
                         }
                     },
                     _ => {
                         // volume
-                        (frame.box_dims.x * frame.box_dims.y * frame.box_dims.z) as f64
+                        (frame.box_dims.x * frame.box_dims.y * frame.box_dims.z)
                     },
                 };
 
                 values.push(value);
-                times.push(frame.time as f64);
+                times.push(frame.time);
             },
             Ok(None) => break,
             Err(_) => break,
