@@ -6,16 +6,23 @@
 use gromos::{
     io::topology::{build_topology, read_topology_file},
     io::trajectory::TrajectoryReader,
-    log_debug, log_info,
-    logging::{set_log_level, LogLevel, ProgressBar},
     math::Vec3,
     selection::AtomSelection,
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::process;
+
+fn new_progress_bar(total: usize) -> ProgressBar {
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(ProgressStyle::with_template(
+        "  [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta})"
+    ).unwrap());
+    pb
+}
 
 fn print_usage() {
     eprintln!("rdf - Radial Distribution Function Calculator");
@@ -203,31 +210,31 @@ fn calculate_rdf(
     let dr = rmax / bins as f64;
     let mut histogram = vec![0u64; bins];
 
-    log_info!("Calculating RDF with {} bins, dr = {:.6} nm", bins, dr);
-    log_debug!("Group 1: {} atoms", group1.len());
-    log_debug!("Group 2: {} atoms", group2.len());
+    log::info!("Calculating RDF with {} bins, dr = {:.6} nm", bins, dr);
+    log::debug!("Group 1: {} atoms", group1.len());
+    log::debug!("Group 2: {} atoms", group2.len());
 
     // Read all frames
-    log_info!("Reading all frames from trajectory");
+    log::info!("Reading all frames from trajectory");
     let all_frames = traj_reader
         .read_all_frames()
         .map_err(|e| format!("Failed to read frames: {}", e))?;
 
     let total_frames = all_frames.len();
-    log_info!("Total frames in trajectory: {}", total_frames);
-    log_info!(
+    log::info!("Total frames in trajectory: {}", total_frames);
+    log::info!(
         "Skipping first {} frames, using every {} frame",
         skip,
         every
     );
 
-    let mut progress = ProgressBar::new(total_frames);
+    let progress = new_progress_bar(total_frames);
     let mut frames_used = 0;
     let mut avg_volume = 0.0f64;
 
     // Process frames
     for (frame_idx, frame) in all_frames.iter().enumerate() {
-        progress.update(frame_idx + 1);
+        progress.set_position((frame_idx + 1) as u64);
 
         // Skip frames
         if frame_idx < skip {
@@ -239,7 +246,7 @@ fn calculate_rdf(
             continue;
         }
 
-        log_debug!(
+        log::debug!(
             "Processing frame {} (time = {:.3} ps)",
             frame_idx,
             frame.time
@@ -288,7 +295,7 @@ fn calculate_rdf(
         frames_used += 1;
     }
 
-    log_info!("Processed {} frames", frames_used);
+    log::info!("Processed {} frames", frames_used);
 
     if frames_used == 0 {
         return Err("No frames were processed".to_string());
@@ -296,14 +303,14 @@ fn calculate_rdf(
 
     // Calculate average volume
     avg_volume /= frames_used as f64;
-    log_debug!("Average box volume: {:.3} nm³", avg_volume);
+    log::debug!("Average box volume: {:.3} nm³", avg_volume);
 
     // Calculate density (number of particles per unit volume)
     let n1 = group1.len();
     let n2 = group2.len();
     let density = n2 as f64 / avg_volume;
 
-    log_debug!("Number density: {:.6} particles/nm³", density);
+    log::debug!("Number density: {:.6} particles/nm³", density);
 
     // Normalize histogram to g(r)
     let mut r_values = Vec::with_capacity(bins);
@@ -354,12 +361,9 @@ fn main() {
     };
 
     // Set up logging
-    let log_level = if rdf_args.verbose > 0 {
-        LogLevel::Debug
-    } else {
-        LogLevel::Info
-    };
-    set_log_level(log_level);
+    let filter = if rdf_args.verbose > 0 { "debug" } else { "info" };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
+        .init();
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║              RDF - Radial Distribution Function             ║");
@@ -367,7 +371,7 @@ fn main() {
     println!();
 
     // Read topology
-    log_info!("Reading topology: {}", rdf_args.topo_file);
+    log::info!("Reading topology: {}", rdf_args.topo_file);
     let blocks = match read_topology_file(&rdf_args.topo_file) {
         Ok(blocks) => blocks,
         Err(e) => {
@@ -377,7 +381,7 @@ fn main() {
     };
 
     let topo = build_topology(blocks);
-    log_info!("  Total atoms: {}", topo.num_atoms());
+    log::info!("  Total atoms: {}", topo.num_atoms());
 
     // Parse atom selections using AtomSelection (GROMOS++ compatible)
     let group1 = match AtomSelection::from_string(&rdf_args.group1_spec, &topo) {
@@ -402,10 +406,10 @@ fn main() {
         },
     };
 
-    log_info!("  Group 1: {} atoms", group1.len());
-    log_info!("  Group 2: {} atoms", group2.len());
+    log::info!("  Group 1: {} atoms", group1.len());
+    log::info!("  Group 2: {} atoms", group2.len());
 
-    log_info!("Reading trajectory: {}", rdf_args.traj_file);
+    log::info!("Reading trajectory: {}", rdf_args.traj_file);
 
     let mut traj_reader = match TrajectoryReader::new(&rdf_args.traj_file) {
         Ok(reader) => reader,
@@ -422,7 +426,7 @@ fn main() {
     println!("Output:  {}", rdf_args.output_file);
     println!();
 
-    log_info!("Calculating RDF...");
+    log::info!("Calculating RDF...");
 
     let (r_values, g_r) = match calculate_rdf(
         &mut traj_reader,
@@ -441,7 +445,7 @@ fn main() {
     };
 
     // Write output
-    log_info!("Writing output to: {}", rdf_args.output_file);
+    log::info!("Writing output to: {}", rdf_args.output_file);
 
     let file = match File::create(&rdf_args.output_file) {
         Ok(f) => f,
@@ -491,5 +495,5 @@ fn main() {
     println!("Output written to: {}", rdf_args.output_file);
     println!();
 
-    log_info!("RDF calculation complete");
+    log::info!("RDF calculation complete");
 }

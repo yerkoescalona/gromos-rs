@@ -87,10 +87,6 @@ pub use gromos_integrators::remd;
 pub use gromos_integrators::replica;
 pub use gromos_integrators::fep;
 
-// Logging (re-export the macros)
-pub use gromos_core::logging;
-pub use gromos_core::{log_debug, log_info, log_warn, log_error};
-
 // Validation
 pub use gromos_core::validation;
 

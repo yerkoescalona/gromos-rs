@@ -10,7 +10,6 @@ use gromos::{
     configuration::{Box as SimBox, Configuration},
     integrator::{Integrator, LeapFrog},
     io::topology::{build_topology, read_topology_file},
-    logging::{set_log_level, LogLevel},
     math::Vec3,
     remd::{ExchangeScheme, ExchangeType, ReplicaController},
     replica::{Replica, ReplicaInfo},
@@ -375,12 +374,13 @@ fn main() {
     };
 
     // Set log level
-    let log_level = match args.verbose {
-        0 => LogLevel::Warn,
-        1 => LogLevel::Info,
-        _ => LogLevel::Debug,
+    let filter = match args.verbose {
+        0 => "warn",
+        1 => "info",
+        _ => "debug",
     };
-    set_log_level(log_level);
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
+        .init();
 
     println!("=== GROMOS-RS Replica Exchange MD ===");
     println!("Topology: {}", args.topo_file);

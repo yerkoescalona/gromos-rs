@@ -6,15 +6,22 @@
 use gromos::{
     io::topology::{build_topology, read_topology_file},
     io::trajectory::TrajectoryReader,
-    log_debug, log_info,
-    logging::{set_log_level, LogLevel, ProgressBar},
     math::Vec3,
     selection::AtomSelection,
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::process;
+
+fn new_progress_bar(total: usize) -> ProgressBar {
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(ProgressStyle::with_template(
+        "  [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta})"
+    ).unwrap());
+    pb
+}
 
 fn print_usage() {
     eprintln!("rmsf - Root Mean Square Fluctuation Calculator");
@@ -154,10 +161,10 @@ fn calculate_rmsf(
     skip: usize,
     every: usize,
 ) -> Result<(Vec<usize>, Vec<f64>), String> {
-    log_info!("Calculating RMSF");
+    log::info!("Calculating RMSF");
 
     // Read all frames
-    log_info!("Reading all frames from trajectory");
+    log::info!("Reading all frames from trajectory");
     let all_frames = traj_reader
         .read_all_frames()
         .map_err(|e| format!("Failed to read frames: {}", e))?;
@@ -168,8 +175,8 @@ fn calculate_rmsf(
 
     let total_frames = all_frames.len();
     let n_atoms = all_frames[0].positions.len();
-    log_info!("Total frames in trajectory: {}", total_frames);
-    log_debug!("Number of atoms: {}", n_atoms);
+    log::info!("Total frames in trajectory: {}", total_frames);
+    log::debug!("Number of atoms: {}", n_atoms);
 
     // Determine which atoms to analyze
     let atoms: Vec<usize> = match atom_selection {
@@ -189,8 +196,8 @@ fn calculate_rmsf(
         None => (0..n_atoms).collect(),
     };
 
-    log_info!("Analyzing {} atoms", atoms.len());
-    log_info!(
+    log::info!("Analyzing {} atoms", atoms.len());
+    log::info!(
         "Skipping first {} frames, using every {} frame",
         skip,
         every
@@ -200,11 +207,11 @@ fn calculate_rmsf(
     let mut avg_pos = vec![Vec3::ZERO; atoms.len()];
     let mut frames_used = 0;
 
-    let mut progress = ProgressBar::new(total_frames);
-    log_debug!("Pass 1: Calculating average positions");
+    let progress = new_progress_bar(total_frames);
+    log::debug!("Pass 1: Calculating average positions");
 
     for (frame_idx, frame) in all_frames.iter().enumerate() {
-        progress.update(frame_idx + 1);
+        progress.set_position((frame_idx + 1) as u64);
 
         if frame_idx < skip {
             continue;
@@ -225,7 +232,7 @@ fn calculate_rmsf(
         return Err("No frames were processed".to_string());
     }
 
-    log_info!("Processed {} frames", frames_used);
+    log::info!("Processed {} frames", frames_used);
 
     // Normalize averages
     for pos in &mut avg_pos {
@@ -235,11 +242,11 @@ fn calculate_rmsf(
     // Second pass: Calculate fluctuations
     let mut rmsf = vec![0.0f64; atoms.len()];
 
-    progress = ProgressBar::new(total_frames);
-    log_debug!("Pass 2: Calculating fluctuations");
+    let progress = new_progress_bar(total_frames);
+    log::debug!("Pass 2: Calculating fluctuations");
 
     for (frame_idx, frame) in all_frames.iter().enumerate() {
-        progress.update(frame_idx + 1);
+        progress.set_position((frame_idx + 1) as u64);
 
         if frame_idx < skip {
             continue;
@@ -281,12 +288,9 @@ fn main() {
         },
     };
 
-    let log_level = if rmsf_args.verbose > 0 {
-        LogLevel::Debug
-    } else {
-        LogLevel::Info
-    };
-    set_log_level(log_level);
+    let filter = if rmsf_args.verbose > 0 { "debug" } else { "info" };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
+        .init();
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║              RMSF - Root Mean Square Fluctuation             ║");
@@ -294,7 +298,7 @@ fn main() {
     println!();
 
     // Read topology
-    log_info!("Reading topology: {}", rmsf_args.topo_file);
+    log::info!("Reading topology: {}", rmsf_args.topo_file);
     let blocks = match read_topology_file(&rmsf_args.topo_file) {
         Ok(blocks) => blocks,
         Err(e) => {
@@ -304,7 +308,7 @@ fn main() {
     };
 
     let topo = build_topology(blocks);
-    log_info!("  Total atoms: {}", topo.num_atoms());
+    log::info!("  Total atoms: {}", topo.num_atoms());
 
     // Parse atom selection using AtomSelection (GROMOS++ compatible)
     let atom_selection = match AtomSelection::from_string(&rmsf_args.atom_spec, &topo) {
@@ -318,9 +322,9 @@ fn main() {
         },
     };
 
-    log_info!("  Selected atoms: {}", atom_selection.len());
+    log::info!("  Selected atoms: {}", atom_selection.len());
 
-    log_info!("Reading trajectory: {}", rmsf_args.traj_file);
+    log::info!("Reading trajectory: {}", rmsf_args.traj_file);
 
     let mut traj_reader = match TrajectoryReader::new(&rmsf_args.traj_file) {
         Ok(reader) => reader,
@@ -334,7 +338,7 @@ fn main() {
     println!("Output:    {}", rmsf_args.output_file);
     println!();
 
-    log_info!("Calculating RMSF...");
+    log::info!("Calculating RMSF...");
 
     let (atoms, rmsf) = match calculate_rmsf(
         &mut traj_reader,
@@ -350,7 +354,7 @@ fn main() {
     };
 
     // Write output
-    log_info!("Writing output to: {}", rmsf_args.output_file);
+    log::info!("Writing output to: {}", rmsf_args.output_file);
 
     let file = match File::create(&rmsf_args.output_file) {
         Ok(f) => f,
@@ -401,5 +405,5 @@ fn main() {
     println!("Output written to: {}", rmsf_args.output_file);
     println!();
 
-    log_info!("RMSF calculation complete");
+    log::info!("RMSF calculation complete");
 }

@@ -6,15 +6,22 @@
 use gromos::{
     io::topology::{build_topology, read_topology_file},
     io::trajectory::TrajectoryReader,
-    log_debug, log_info,
-    logging::{set_log_level, LogLevel, ProgressBar},
     math::Vec3,
     selection::AtomSelection,
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::process;
+
+fn new_progress_bar(total: usize) -> ProgressBar {
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(ProgressStyle::with_template(
+        "  [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta})"
+    ).unwrap());
+    pb
+}
 
 fn print_usage() {
     eprintln!("diffus - Diffusion Coefficient Calculator");
@@ -182,10 +189,10 @@ fn calculate_msd(
     skip: usize,
     every: usize,
 ) -> Result<(Vec<f64>, Vec<f64>), String> {
-    log_info!("Calculating Mean Square Displacement (MSD)");
+    log::info!("Calculating Mean Square Displacement (MSD)");
 
     // Read all frames
-    log_info!("Reading all frames from trajectory");
+    log::info!("Reading all frames from trajectory");
     let all_frames = traj_reader
         .read_all_frames()
         .map_err(|e| format!("Failed to read frames: {}", e))?;
@@ -196,7 +203,7 @@ fn calculate_msd(
 
     let total_frames = all_frames.len();
     let n_atoms = all_frames[0].positions.len();
-    log_info!("Total frames in trajectory: {}", total_frames);
+    log::info!("Total frames in trajectory: {}", total_frames);
 
     let atoms: Vec<usize> = match atom_selection {
         Some(sel) => {
@@ -214,8 +221,8 @@ fn calculate_msd(
         None => (0..n_atoms).collect(),
     };
 
-    log_info!("Analyzing {} atoms", atoms.len());
-    log_info!(
+    log::info!("Analyzing {} atoms", atoms.len());
+    log::info!(
         "Skipping first {} frames, using every {} frame",
         skip,
         every
@@ -225,11 +232,11 @@ fn calculate_msd(
     let mut all_positions: Vec<Vec<Vec3>> = Vec::new();
     let mut times: Vec<f64> = Vec::new();
 
-    let mut progress = ProgressBar::new(total_frames);
-    log_debug!("Extracting selected atom positions");
+    let progress = new_progress_bar(total_frames);
+    log::debug!("Extracting selected atom positions");
 
     for (frame_idx, frame) in all_frames.iter().enumerate() {
-        progress.update(frame_idx + 1);
+        progress.set_position((frame_idx + 1) as u64);
 
         if frame_idx < skip {
             continue;
@@ -250,17 +257,17 @@ fn calculate_msd(
         return Err("Need at least 2 frames to calculate MSD".to_string());
     }
 
-    log_info!("Loaded {} frames", n_frames);
+    log::info!("Loaded {} frames", n_frames);
 
     // Calculate MSD for each time interval
     let mut msd_times: Vec<f64> = Vec::new();
     let mut msd_values: Vec<f64> = Vec::new();
 
-    log_debug!("Calculating MSD for all time intervals");
-    let mut progress = ProgressBar::new(n_frames);
+    log::debug!("Calculating MSD for all time intervals");
+    let progress = new_progress_bar(n_frames);
 
     for dt_idx in 0..n_frames {
-        progress.update(dt_idx + 1);
+        progress.set_position((dt_idx + 1) as u64);
 
         let dt = times[dt_idx] - times[0];
         let mut msd = 0.0f64;
@@ -285,7 +292,7 @@ fn calculate_msd(
         msd_times.push(dt);
         msd_values.push(msd);
 
-        log_debug!("MSD at t={:.3} ps: {:.6} nm²", dt, msd);
+        log::debug!("MSD at t={:.3} ps: {:.6} nm²", dt, msd);
     }
 
     Ok((msd_times, msd_values))
@@ -334,12 +341,9 @@ fn main() {
         },
     };
 
-    let log_level = if diffus_args.verbose > 0 {
-        LogLevel::Debug
-    } else {
-        LogLevel::Info
-    };
-    set_log_level(log_level);
+    let filter = if diffus_args.verbose > 0 { "debug" } else { "info" };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
+        .init();
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║              Diffusion Coefficient Calculator                ║");
@@ -347,7 +351,7 @@ fn main() {
     println!();
 
     // Read topology
-    log_info!("Reading topology: {}", diffus_args.topo_file);
+    log::info!("Reading topology: {}", diffus_args.topo_file);
     let blocks = match read_topology_file(&diffus_args.topo_file) {
         Ok(blocks) => blocks,
         Err(e) => {
@@ -357,7 +361,7 @@ fn main() {
     };
 
     let topo = build_topology(blocks);
-    log_info!("  Total atoms: {}", topo.num_atoms());
+    log::info!("  Total atoms: {}", topo.num_atoms());
 
     // Parse atom selection using AtomSelection (GROMOS++ compatible)
     let atom_selection = match AtomSelection::from_string(&diffus_args.atom_spec, &topo) {
@@ -371,9 +375,9 @@ fn main() {
         },
     };
 
-    log_info!("  Selected atoms: {}", atom_selection.len());
+    log::info!("  Selected atoms: {}", atom_selection.len());
 
-    log_info!("Reading trajectory: {}", diffus_args.traj_file);
+    log::info!("Reading trajectory: {}", diffus_args.traj_file);
 
     let mut traj_reader = match TrajectoryReader::new(&diffus_args.traj_file) {
         Ok(reader) => reader,
@@ -387,7 +391,7 @@ fn main() {
     println!("Output:    {}", diffus_args.output_file);
     println!();
 
-    log_info!("Calculating MSD...");
+    log::info!("Calculating MSD...");
 
     let (times, msd) = match calculate_msd(
         &mut traj_reader,
@@ -403,7 +407,7 @@ fn main() {
     };
 
     // Write MSD output
-    log_info!("Writing MSD to: {}", diffus_args.output_file);
+    log::info!("Writing MSD to: {}", diffus_args.output_file);
 
     let file = match File::create(&diffus_args.output_file) {
         Ok(f) => f,
@@ -470,5 +474,5 @@ fn main() {
     println!("MSD data written to: {}", diffus_args.output_file);
     println!();
 
-    log_info!("Diffusion calculation complete");
+    log::info!("Diffusion calculation complete");
 }

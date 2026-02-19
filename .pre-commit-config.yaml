@@ -44,21 +44,24 @@ repos:
         types: [rust]
         pass_filenames: false
 
-  # Python formatting with black
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
+  # Python formatting and linting with ruff
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.12
     hooks:
-      - id: black
+      - id: ruff-format
         files: ^py-gromos/
         args: [--line-length=100]
-
-  # Python linting with ruff
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.15
-    hooks:
       - id: ruff
         files: ^py-gromos/
         args: [--fix, --exit-non-zero-on-fix]
+
+  # Conventional commits
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert]
 
   # Spell checking
   - repo: https://github.com/crate-ci/typos

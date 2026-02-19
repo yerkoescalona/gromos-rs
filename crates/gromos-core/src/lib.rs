@@ -34,7 +34,6 @@ pub mod topology;
 pub mod configuration;
 pub mod pairlist;
 pub mod selection;
-pub mod logging;
 pub mod validation;
 
 // FFI for C bindings (feature-gated)

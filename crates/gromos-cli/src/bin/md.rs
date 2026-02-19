@@ -22,8 +22,6 @@ use gromos::{
         trajectory::TrajectoryWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
-    log_debug, log_error, log_info, log_warn,
-    logging::{set_log_level, start_timer, LogLevel, Timer},
     math::{Mat3, Rectangular, Vec3},
     pairlist::{PairlistContainer, StandardPairlistAlgorithm},
     validation::{
@@ -33,6 +31,22 @@ use gromos::{
 use std::env;
 use std::process;
 use std::time::Instant;
+
+/// Simple drop-timer that logs elapsed time at debug level.
+struct Timer {
+    name: &'static str,
+    start: Instant,
+}
+impl Timer {
+    fn new(name: &'static str) -> Self {
+        Self { name, start: Instant::now() }
+    }
+}
+impl Drop for Timer {
+    fn drop(&mut self) {
+        log::debug!("{} took {:.3} ms", self.name, self.start.elapsed().as_secs_f64() * 1000.0);
+    }
+}
 
 fn print_usage() {
     eprintln!("md - Molecular Dynamics simulation");
@@ -503,13 +517,12 @@ fn main() {
     };
 
     // Set up logging
-    let log_level = match md_args.verbose {
-        0 => LogLevel::Info,
-        1 => LogLevel::Debug,
-        _ => LogLevel::Debug,
+    let filter = match md_args.verbose {
+        0 => "info",
+        _ => "debug",
     };
-    set_log_level(log_level);
-    start_timer();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
+        .init();
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                   GROMOS-RS MD Engine                        ║");
@@ -517,24 +530,24 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
 
-    log_info!("GROMOS-RS MD simulation starting");
-    log_debug!("Verbose level: {}", md_args.verbose);
+    log::info!("GROMOS-RS MD simulation starting");
+    log::debug!("Verbose level: {}", md_args.verbose);
 
     // Load topology
     println!("Loading topology: {}", md_args.topo_file);
-    log_debug!("Reading topology file: {}", md_args.topo_file);
+    log::debug!("Reading topology file: {}", md_args.topo_file);
     let _timer = Timer::new("Topology loading");
 
     let topo_data = match read_topology_file(&md_args.topo_file) {
         Ok(data) => data,
         Err(e) => {
-            log_error!("Failed to read topology: {}", e);
+            log::error!("Failed to read topology: {}", e);
             eprintln!("Error reading topology: {}", e);
             process::exit(1);
         },
     };
 
-    log_debug!("Building topology data structures");
+    log::debug!("Building topology data structures");
     let topo = build_topology(topo_data);
 
     println!("  Atoms: {}", topo.num_atoms());
@@ -544,32 +557,32 @@ fn main() {
     println!();
 
     // Validate topology
-    log_debug!("Validating topology");
+    log::debug!("Validating topology");
     let topo_validation = validate_topology(&topo);
     if topo_validation.has_errors() {
         topo_validation.print();
         topo_validation.print_summary();
         if topo_validation.has_fatal() {
-            log_error!("Fatal errors in topology - cannot continue");
+            log::error!("Fatal errors in topology - cannot continue");
             process::exit(1);
         }
-        log_warn!("Topology has errors, but continuing");
+        log::warn!("Topology has errors, but continuing");
     } else if !topo_validation.warnings.is_empty() {
         topo_validation.print();
-        log_debug!("{} warnings in topology", topo_validation.warnings.len());
+        log::debug!("{} warnings in topology", topo_validation.warnings.len());
     } else {
-        log_debug!("Topology validation passed");
+        log::debug!("Topology validation passed");
     }
 
     // Load coordinates
     println!("Loading coordinates: {}", md_args.conf_file);
-    log_debug!("Reading coordinate file: {}", md_args.conf_file);
+    log::debug!("Reading coordinate file: {}", md_args.conf_file);
     let _timer = Timer::new("Coordinate loading");
 
     let (positions, box_dims) = match read_coordinates(&md_args.conf_file) {
         Ok(data) => data,
         Err(e) => {
-            log_error!("Failed to read coordinates: {}", e);
+            log::error!("Failed to read coordinates: {}", e);
             eprintln!("Error reading coordinates: {}", e);
             process::exit(1);
         },
@@ -583,7 +596,7 @@ fn main() {
     println!();
 
     if positions.len() != topo.num_atoms() {
-        log_error!(
+        log::error!(
             "Atom count mismatch: topology={}, coordinates={}",
             topo.num_atoms(),
             positions.len()
@@ -598,11 +611,11 @@ fn main() {
 
     // Parse input file for GAMD/EDS blocks if provided
     let gamd_block = if let Some(ref input_file) = md_args.input_file {
-        log_debug!("Parsing input file for GAMD block: {}", input_file);
+        log::debug!("Parsing input file for GAMD block: {}", input_file);
         match GamdBlock::parse_file(input_file) {
             Ok(block) => block,
             Err(e) => {
-                log_warn!("Failed to parse GAMD block: {}", e);
+                log::warn!("Failed to parse GAMD block: {}", e);
                 None
             },
         }
@@ -611,11 +624,11 @@ fn main() {
     };
 
     let eds_block = if let Some(ref input_file) = md_args.input_file {
-        log_debug!("Parsing input file for EDS block: {}", input_file);
+        log::debug!("Parsing input file for EDS block: {}", input_file);
         match EdsBlock::parse_file(input_file) {
             Ok(block) => block,
             Err(e) => {
-                log_warn!("Failed to parse EDS block: {}", e);
+                log::warn!("Failed to parse EDS block: {}", e);
                 None
             },
         }
@@ -657,7 +670,7 @@ fn main() {
 
     // Check for conflicting modes
     if gamd_block.is_some() && eds_block.is_some() {
-        log_error!("Cannot enable both GAMD and EDS simultaneously");
+        log::error!("Cannot enable both GAMD and EDS simultaneously");
         eprintln!("Error: Both GAMD and EDS blocks found in input file");
         eprintln!("       These methods cannot be used together in the same simulation");
         process::exit(1);
@@ -665,33 +678,33 @@ fn main() {
 
     // Create GAMD parameters if enabled
     let mut gamd_params = gamd_block.as_ref().map(|block| {
-        log_info!("Creating GAMD parameters from input block");
+        log::info!("Creating GAMD parameters from input block");
         block.to_parameters()
     });
 
     // Validate coordinates
-    log_debug!("Validating coordinates");
+    log::debug!("Validating coordinates");
     let coord_validation = validate_coordinates(&positions, Some(box_dims));
     if coord_validation.has_errors() {
         coord_validation.print();
         coord_validation.print_summary();
         if coord_validation.has_fatal() {
-            log_error!("Fatal errors in coordinates - cannot continue");
+            log::error!("Fatal errors in coordinates - cannot continue");
             process::exit(1);
         }
-        log_warn!("Coordinates have errors, but continuing");
+        log::warn!("Coordinates have errors, but continuing");
     } else if !coord_validation.warnings.is_empty() {
         coord_validation.print();
-        log_debug!(
+        log::debug!(
             "{} warnings in coordinates",
             coord_validation.warnings.len()
         );
     } else {
-        log_debug!("Coordinate validation passed");
+        log::debug!("Coordinate validation passed");
     }
 
     // Create configuration
-    log_debug!("Creating configuration");
+    log::debug!("Creating configuration");
     let mut conf = Configuration::new(topo.num_atoms(), 1, 1);
     conf.current_mut().pos = positions.clone();
     conf.current_mut().vel = vec![Vec3::ZERO; topo.num_atoms()]; // Zero initial velocities
@@ -700,12 +713,12 @@ fn main() {
 
     // Create EDS parameters if enabled (now that we have num_atoms)
     let mut eds_params = if let Some(ref block) = eds_block {
-        log_info!("Creating EDS parameters from input block");
+        log::info!("Creating EDS parameters from input block");
         if block.search_enabled {
             match block.to_aeds_parameters(topo.num_atoms()) {
                 Ok(aeds) => Some(aeds),
                 Err(e) => {
-                    log_error!("Failed to create AEDS parameters: {}", e);
+                    log::error!("Failed to create AEDS parameters: {}", e);
                     eprintln!("Error: Failed to create AEDS parameters: {}", e);
                     process::exit(1);
                 },
@@ -717,7 +730,7 @@ fn main() {
                     Some(gromos::eds::AEDSParameters::new(eds, 0.0, 0.0, false))
                 },
                 Err(e) => {
-                    log_error!("Failed to create EDS parameters: {}", e);
+                    log::error!("Failed to create EDS parameters: {}", e);
                     eprintln!("Error: Failed to create EDS parameters: {}", e);
                     process::exit(1);
                 },
@@ -728,24 +741,24 @@ fn main() {
     };
 
     // Validate configuration
-    log_debug!("Validating configuration (topology + coordinates)");
+    log::debug!("Validating configuration (topology + coordinates)");
     let conf_validation = validate_configuration(&topo, &conf);
     if conf_validation.has_errors() {
         conf_validation.print();
         conf_validation.print_summary();
         if conf_validation.has_fatal() {
-            log_error!("Fatal errors in configuration - cannot continue");
+            log::error!("Fatal errors in configuration - cannot continue");
             process::exit(1);
         }
-        log_warn!("Configuration has errors, but continuing");
+        log::warn!("Configuration has errors, but continuing");
     } else if !conf_validation.warnings.is_empty() {
         conf_validation.print();
-        log_debug!(
+        log::debug!(
             "{} warnings in configuration",
             conf_validation.warnings.len()
         );
     } else {
-        log_debug!("Configuration validation passed");
+        log::debug!("Configuration validation passed");
     }
 
     // Setup integrator
@@ -761,22 +774,22 @@ fn main() {
     println!("  RF kappa:    {:.3} nm^-1", md_args.rf_kappa);
     println!();
 
-    log_debug!("Calculating CRF parameters");
+    log::debug!("Calculating CRF parameters");
     let crf_params = calculate_crf_parameters(
         md_args.cutoff,
         md_args.epsilon,
         md_args.rf_epsilon,
         md_args.rf_kappa,
     );
-    log_debug!(
+    log::debug!(
         "CRF parameters: crf_2cut3i={:.6}, crf_cut3i={:.6}",
         crf_params.crf_2cut3i,
         crf_params.crf_cut3i
     );
 
-    log_debug!("Converting LJ parameter matrix");
+    log::debug!("Converting LJ parameter matrix");
     let lj_params = convert_lj_parameters(&topo);
-    log_debug!(
+    log::debug!(
         "LJ parameter matrix: {}x{} atom types",
         lj_params.len(),
         if lj_params.is_empty() {
@@ -786,14 +799,14 @@ fn main() {
         }
     );
 
-    log_debug!("Initializing pairlist");
+    log::debug!("Initializing pairlist");
     let mut pairlist = PairlistContainer::new(
         md_args.cutoff, // short range cutoff
         md_args.cutoff, // long range cutoff (same for now)
         0.0,            // skin (no extra distance)
     );
     pairlist.update_frequency = md_args.pairlist_update;
-    log_debug!(
+    log::debug!(
         "Pairlist update frequency: {} steps",
         pairlist.update_frequency
     );
@@ -802,7 +815,7 @@ fn main() {
     let periodicity = Rectangular::new(box_dims);
 
     // Initial pairlist generation
-    log_debug!("Generating initial pairlist");
+    log::debug!("Generating initial pairlist");
     pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
     println!("  Initial pairlist: {} pairs", pairlist.total_pairs());
     println!();
@@ -969,7 +982,7 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
 
-    log_info!(
+    log::info!(
         "Starting MD simulation: {} steps, dt={} ps",
         md_args.n_steps,
         md_args.dt
@@ -982,17 +995,17 @@ fn main() {
     for step in 0..=md_args.n_steps {
         let time = step as f64 * md_args.dt;
 
-        log_debug!("Step {}: time = {:.6} ps", step, time);
+        log::debug!("Step {}: time = {:.6} ps", step, time);
 
         // Virial tensor for barostat (will be updated by nonbonded forces)
         let mut virial = Mat3::ZERO;
 
         // Update pairlist if needed
         if pairlist.needs_update() {
-            log_debug!("Updating pairlist at step {}", step);
+            log::debug!("Updating pairlist at step {}", step);
             let _pl_timer = Timer::new("Pairlist update");
             pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
-            log_debug!("Pairlist updated: {} pairs", pairlist.total_pairs());
+            log::debug!("Pairlist updated: {} pairs", pairlist.total_pairs());
         }
         pairlist.step();
 
@@ -1001,7 +1014,7 @@ fn main() {
         let bonded_result = calculate_bonded_forces(&topo, &conf, true);
 
         // Calculate nonbonded forces (LJ + CRF)
-        log_debug!("Calculating nonbonded forces");
+        log::debug!("Calculating nonbonded forces");
         let mut nonbonded_storage = ForceStorage::new(topo.num_atoms());
 
         // Convert pairlist to (u32, u32) format
@@ -1028,7 +1041,7 @@ fn main() {
             &mut nonbonded_storage,
         );
 
-        log_debug!(
+        log::debug!(
             "Nonbonded energies: LJ={:.4}, CRF={:.4}",
             nonbonded_storage.e_lj,
             nonbonded_storage.e_crf
@@ -1102,7 +1115,7 @@ fn main() {
             // Add boost to potential energy
             conf.current_mut().energies.potential_total += boost;
 
-            log_debug!(
+            log::debug!(
                 "GAMD boost applied: ΔV={:.4}, V_new={:.4}",
                 boost,
                 conf.current().energies.potential_total
@@ -1111,7 +1124,7 @@ fn main() {
             // Write GaMD statistics
             if let Some(ref mut writer) = gamd_stats_writer {
                 if let Err(e) = writer.write_frame(step, dihedral_energy, total_potential, gamd) {
-                    log_warn!("Failed to write GaMD stats at step {}: {}", step, e);
+                    log::warn!("Failed to write GaMD stats at step {}: {}", step, e);
                 }
             }
 
@@ -1121,7 +1134,7 @@ fn main() {
                 let boost_dih = 0.0;
                 let boost_pot = boost;
                 if let Err(e) = writer.write_frame(step, time, boost, boost_dih, boost_pot) {
-                    log_warn!("Failed to write GaMD boost at step {}: {}", step, e);
+                    log::warn!("Failed to write GaMD boost at step {}: {}", step, e);
                 }
             }
         }
@@ -1151,7 +1164,7 @@ fn main() {
                 gromos::eds::EDSForm::SingleS => eds.calculate_reference_energy_single_s(),
                 gromos::eds::EDSForm::MultiS => eds.calculate_reference_energy_multi_s(),
                 gromos::eds::EDSForm::PairS => {
-                    log_warn!("PairS EDS form not yet fully implemented");
+                    log::warn!("PairS EDS form not yet fully implemented");
                     eds.calculate_reference_energy_single_s();
                 },
             }
@@ -1162,7 +1175,7 @@ fn main() {
             // Replace potential energy with reference energy
             conf.current_mut().energies.potential_total = eds.reference_energy;
 
-            log_debug!(
+            log::debug!(
                 "EDS applied: V_R={:.4}, original V={:.4}",
                 eds.reference_energy,
                 current_potential
@@ -1171,20 +1184,20 @@ fn main() {
             // Update AEDS parameters if search enabled
             if aeds.search_enabled {
                 // TODO: Implement AEDS parameter updates
-                log_debug!("AEDS search mode active");
+                log::debug!("AEDS search mode active");
             }
 
             // Write EDS statistics
             if let Some(ref mut writer) = eds_stats_writer {
                 if let Err(e) = writer.write_frame(step, eds) {
-                    log_warn!("Failed to write EDS stats at step {}: {}", step, e);
+                    log::warn!("Failed to write EDS stats at step {}: {}", step, e);
                 }
             }
 
             // Write EDS reference energy
             if let Some(ref mut writer) = eds_vr_writer {
                 if let Err(e) = writer.write_frame(step, time, eds.reference_energy) {
-                    log_warn!("Failed to write EDS V_R at step {}: {}", step, e);
+                    log::warn!("Failed to write EDS V_R at step {}: {}", step, e);
                 }
             }
         }
@@ -1200,7 +1213,7 @@ fn main() {
         );
         if ene_validation.has_errors() && md_args.verbose > 0 {
             ene_validation.print();
-            log_warn!("Energy validation failed at step {}", step);
+            log::warn!("Energy validation failed at step {}", step);
         }
 
         // Store energy for drift check
@@ -1215,7 +1228,7 @@ fn main() {
             println!("Step {:6}  Time: {:8.3} ps  E_pot: {:12.4}  E_kin: {:12.4}  E_tot: {:12.4}  T: {:6.1} K",
                 step, time, state.energies.potential_total, state.energies.kinetic_total,
                 state.energies.total(), temp);
-            log_debug!(
+            log::debug!(
                 "  Bond: {:.4}  LJ: {:.4}  CRF: {:.4}",
                 state.energies.bond_total,
                 state.energies.lj_total,
@@ -1273,12 +1286,12 @@ fn main() {
 
             // Apply SHAKE constraints to satisfy bond length constraints
             if let Some(ref params) = shake_params {
-                log_debug!("Applying SHAKE constraints");
+                log::debug!("Applying SHAKE constraints");
                 let _shake_timer = Timer::new("SHAKE constraints");
                 let shake_result = shake(&topo, &mut conf, md_args.dt, params);
 
                 if !shake_result.converged {
-                    log_warn!(
+                    log::warn!(
                         "SHAKE did not converge at step {}: {} iterations, error={:.6}",
                         step,
                         shake_result.iterations,
@@ -1286,7 +1299,7 @@ fn main() {
                     );
                 }
 
-                log_debug!(
+                log::debug!(
                     "SHAKE converged in {} iterations, error={:.6}",
                     shake_result.iterations,
                     shake_result.max_error
@@ -1295,14 +1308,14 @@ fn main() {
 
             // Apply thermostat to control temperature
             if let Some(ref params) = thermostat_params {
-                log_debug!("Applying Berendsen thermostat");
+                log::debug!("Applying Berendsen thermostat");
                 let _thermo_timer = Timer::new("Thermostat");
                 berendsen_thermostat(&topo, &mut conf, md_args.dt, params);
             }
 
             // Apply barostat to control pressure
             if let Some(ref params) = barostat_params {
-                log_debug!("Applying Berendsen barostat");
+                log::debug!("Applying Berendsen barostat");
                 let _baro_timer = Timer::new("Barostat");
 
                 // Use virial from nonbonded calculations
@@ -1311,75 +1324,75 @@ fn main() {
         }
     }
 
-    log_info!("MD loop completed - {} steps", md_args.n_steps);
+    log::info!("MD loop completed - {} steps", md_args.n_steps);
 
     // Check energy drift
-    log_debug!("Checking energy drift over trajectory");
+    log::debug!("Checking energy drift over trajectory");
     use gromos::validation::check_energy_drift;
     let drift_report = check_energy_drift(&energy_history);
     if drift_report.has_errors() || !drift_report.warnings.is_empty() {
         drift_report.print();
         drift_report.print_summary();
     } else {
-        log_debug!("Energy drift check passed");
+        log::debug!("Energy drift check passed");
     }
 
     // Finalize output files
-    log_debug!("Finalizing output files");
+    log::debug!("Finalizing output files");
     if let Err(e) = traj_writer.flush() {
-        log_error!("Failed to flush trajectory: {}", e);
+        log::error!("Failed to flush trajectory: {}", e);
         eprintln!("Error flushing trajectory: {}", e);
     } else {
-        log_debug!("Trajectory file finalized: {}", md_args.traj_file);
+        log::debug!("Trajectory file finalized: {}", md_args.traj_file);
     }
 
     if let Err(e) = ene_writer.finalize() {
-        log_error!("Failed to finalize energy file: {}", e);
+        log::error!("Failed to finalize energy file: {}", e);
         eprintln!("Error finalizing energy file: {}", e);
     } else {
-        log_debug!("Energy file finalized: {}", md_args.ene_file);
+        log::debug!("Energy file finalized: {}", md_args.ene_file);
     }
 
     // Finalize GaMD writers if enabled
     if let Some(ref mut writer) = gamd_stats_writer {
         if let Err(e) = writer.finalize() {
-            log_error!("Failed to finalize GaMD stats file: {}", e);
+            log::error!("Failed to finalize GaMD stats file: {}", e);
             eprintln!("Error finalizing GaMD stats file: {}", e);
         } else {
-            log_debug!("GaMD stats file finalized");
+            log::debug!("GaMD stats file finalized");
         }
     }
 
     if let Some(ref mut writer) = gamd_boost_writer {
         if let Err(e) = writer.finalize() {
-            log_error!("Failed to finalize GaMD boost file: {}", e);
+            log::error!("Failed to finalize GaMD boost file: {}", e);
             eprintln!("Error finalizing GaMD boost file: {}", e);
         } else {
-            log_debug!("GaMD boost file finalized");
+            log::debug!("GaMD boost file finalized");
         }
     }
 
     // Finalize EDS writers if enabled
     if let Some(ref mut writer) = eds_stats_writer {
         if let Err(e) = writer.finalize() {
-            log_error!("Failed to finalize EDS stats file: {}", e);
+            log::error!("Failed to finalize EDS stats file: {}", e);
             eprintln!("Error finalizing EDS stats file: {}", e);
         } else {
-            log_debug!("EDS stats file finalized");
+            log::debug!("EDS stats file finalized");
         }
     }
 
     if let Some(ref mut writer) = eds_vr_writer {
         if let Err(e) = writer.finalize() {
-            log_error!("Failed to finalize EDS V_R file: {}", e);
+            log::error!("Failed to finalize EDS V_R file: {}", e);
             eprintln!("Error finalizing EDS V_R file: {}", e);
         } else {
-            log_debug!("EDS V_R file finalized");
+            log::debug!("EDS V_R file finalized");
         }
     }
 
     let elapsed = start_time.elapsed();
-    log_info!("Simulation wall time: {:.2} s", elapsed.as_secs_f64());
+    log::info!("Simulation wall time: {:.2} s", elapsed.as_secs_f64());
 
     println!();
     println!("╔══════════════════════════════════════════════════════════════╗");
