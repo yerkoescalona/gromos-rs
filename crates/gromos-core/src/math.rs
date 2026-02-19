@@ -10,7 +10,7 @@ pub type Mat3 = DMat3;
 
 /// Boundary condition types for periodic systems
 pub trait BoundaryCondition: Send + Sync {
-    /// Calculate nearest image vector between two positions
+    /// Calculate nearest image vector from j to i (r = ri - rj)
     fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3;
 
     /// Apply periodic boundary conditions to a position
@@ -24,7 +24,7 @@ pub struct Vacuum;
 impl BoundaryCondition for Vacuum {
     #[inline(always)]
     fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
-        rj - ri
+        ri - rj
     }
 
     #[inline(always)]
@@ -54,7 +54,7 @@ impl Rectangular {
 impl BoundaryCondition for Rectangular {
     #[inline(always)]
     fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
-        let mut r = rj - ri;
+        let mut r = ri - rj;
 
         // Apply minimum image convention
         // Branchless version using SIMD
@@ -88,7 +88,7 @@ impl Triclinic {
 impl BoundaryCondition for Triclinic {
     #[inline(always)]
     fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
-        let r = rj - ri;
+        let r = ri - rj;
 
         // Transform to fractional coordinates
         let frac = self.inv_box_matrix * r;

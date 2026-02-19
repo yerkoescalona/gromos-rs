@@ -10,6 +10,9 @@ description = "File I/O for GROMOS-RS molecular dynamics"
 gromos-core = { workspace = true }
 gromos-integrators = { workspace = true }
 
+# Logging
+log = { workspace = true }
+
 # Binary I/O
 byteorder = { workspace = true }
 chrono = { workspace = true }

@@ -18,6 +18,13 @@ gromos-integrators = { workspace = true }
 gromos-io = { workspace = true }
 gromos-analysis = { workspace = true }
 
+# Logging
+log = { workspace = true }
+env_logger = { workspace = true }
+
+# Progress bars
+indicatif = { workspace = true }
+
 # CLI
 clap = { workspace = true }
 

@@ -73,16 +73,16 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
             "BONDSTRETCHTYPE" => {
                 parse_bond_types(&mut lines, &mut bond_parameters)?;
             },
-            "BOND" => {
+            "BOND" | "BONDH" => {
                 parse_bonds(&mut lines, &mut bonds)?;
             },
             "BONDANGLEBENDTYPE" => {
                 parse_angle_types(&mut lines, &mut angle_parameters)?;
             },
-            "BONDANGLE" => {
+            "BONDANGLE" | "BONDANGLEH" => {
                 parse_angles(&mut lines, &mut angles)?;
             },
-            "CGPARAMETERS" => {
+            "CGPARAMETERS" | "LJPARAMETERS" => {
                 parse_lj_parameters(&mut lines, &mut lj_parameters)?;
             },
             "TEMPERATUREGROUPS" => {
@@ -533,15 +533,22 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
 
     topo.angle_parameters = parsed.angle_parameters;
 
-    // Build LJ parameter matrix
-    let n_types = topo.iac.iter().max().unwrap_or(&0) + 1;
+    // Build LJ parameter matrix (1-indexed: lj_parameters[iac][jac])
+    // IAC values in topology files are 1-based, so matrix size is max_iac + 1
+    let max_iac = topo.iac.iter().max().copied().unwrap_or(0);
+    let n_types = max_iac + 1;
     topo.lj_parameters = vec![vec![LJParameters::default(); n_types]; n_types];
 
     for ((iac, jac), params) in parsed.lj_parameters {
-        if iac > 0 && jac > 0 && iac <= n_types && jac <= n_types {
-            topo.lj_parameters[iac - 1][jac - 1] = params;
+        if iac < n_types && jac < n_types {
+            topo.lj_parameters[iac][jac] = params;
+            topo.lj_parameters[jac][iac] = params; // Symmetric
+            log::debug!("LJ params[{}][{}]: c6={:.6e}, c12={:.6e}", iac, jac, params.c6, params.c12);
         }
     }
+
+    log::debug!("Built topology: {} atoms, {} atom types, LJ matrix {}x{}",
+        topo.num_atoms(), n_types, n_types, n_types);
 
     topo
 }

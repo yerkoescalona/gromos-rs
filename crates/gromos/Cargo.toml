@@ -30,3 +30,6 @@ use-mpi = ["mpi", "gromos-forces/use-mpi"]
 use-cuda = ["cudarc"]
 mimalloc = ["dep:mimalloc"]
 serde = ["gromos-core/serde", "gromos-forces/serde", "gromos-io/serde"]
+
+[dev-dependencies]
+env_logger = { workspace = true }

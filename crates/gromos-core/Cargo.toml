@@ -11,6 +11,9 @@ description = "Core types and math primitives for GROMOS-RS molecular dynamics"
 glam = { workspace = true }
 wide = { workspace = true }
 
+# Logging
+log = { workspace = true }
+
 # Parallelism
 rayon = { workspace = true }
 

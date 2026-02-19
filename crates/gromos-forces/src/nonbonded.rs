@@ -11,13 +11,16 @@ pub struct LJParameters {
     pub c12: f64, // LJ C12 coefficient (repulsion)
 }
 
+/// Coulomb constant: 1/(4*pi*eps0) in GROMOS units [kJ*nm/(mol*e^2)]
+pub const FOUR_PI_EPS_I: f64 = 138.9354;
+
 /// Coulomb Reaction Field parameters
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct CRFParameters {
-    pub crf_cut: f64,    // Cutoff distance (nm)
-    pub crf_2cut3i: f64, // crf / (2 * cutoff^3) for force
-    pub crf_cut3i: f64,  // (1 - crf/2) / cutoff for energy
+    pub crf_cut: f64,    // (1 - crf/2) / cutoff  (energy shift constant)
+    pub crf_2cut3i: f64, // crf / (2 * cutoff^3)  (energy quadratic term)
+    pub crf_cut3i: f64,  // crf / cutoff^3         (force correction term)
 }
 
 /// Storage for forces and energies
@@ -85,9 +88,11 @@ pub fn lj_crf_interaction(
     let f_lj = (12.0 * c12 * inv_r6 - 6.0 * c6) * inv_r6 * inv_r2;
 
     // Coulomb Reaction Field
+    // E_crf = q * (1/r - crf_2cut3i * r² - crf_cut)
+    // F_crf = q * (1/r³ + crf_cut3i)
     let inv_r = inv_r2.sqrt();
-    let e_crf = q_prod * (inv_r + crf.crf_2cut3i * r2 - crf.crf_cut3i);
-    let f_crf = q_prod * (inv_r * inv_r2 - 2.0 * crf.crf_2cut3i);
+    let e_crf = q_prod * (inv_r - crf.crf_2cut3i * r2 - crf.crf_cut);
+    let f_crf = q_prod * (inv_r * inv_r2 + crf.crf_cut3i);
 
     let force_magnitude = f_lj + f_crf;
 
@@ -126,8 +131,8 @@ pub fn lj_crf_interaction_simd_x4(
     let inv_r = inv_r2.sqrt();
 
     let e_crf =
-        q_prod_vec * (inv_r + f64x4::splat(crf.crf_2cut3i) * r2 - f64x4::splat(crf.crf_cut3i));
-    let f_crf = q_prod_vec * (inv_r * inv_r2 - f64x4::splat(2.0 * crf.crf_2cut3i));
+        q_prod_vec * (inv_r - f64x4::splat(crf.crf_2cut3i) * r2 - f64x4::splat(crf.crf_cut));
+    let f_crf = q_prod_vec * (inv_r * inv_r2 + f64x4::splat(crf.crf_cut3i));
 
     let force = f_lj + f_crf;
 
@@ -170,7 +175,7 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
         let type_j = iac[j] as usize;
         let lj = lj_params[type_i][type_j];
 
-        let q_prod = charges[i] * charges[j];
+        let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
 
         // Calculate interaction
         let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
@@ -221,7 +226,7 @@ pub fn lj_crf_innerloop_parallel<BC: BoundaryCondition>(
                 let type_i = iac[i] as usize;
                 let type_j = iac[j] as usize;
                 let lj = lj_params[type_i][type_j];
-                let q_prod = charges[i] * charges[j];
+                let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
 
                 let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
 
