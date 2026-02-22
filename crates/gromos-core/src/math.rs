@@ -136,6 +136,26 @@ impl Periodicity {
     }
 }
 
+impl BoundaryCondition for Periodicity {
+    #[inline]
+    fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
+        match self {
+            Periodicity::Vacuum(bc) => bc.nearest_image(ri, rj),
+            Periodicity::Rectangular(bc) => bc.nearest_image(ri, rj),
+            Periodicity::Triclinic(bc) => bc.nearest_image(ri, rj),
+        }
+    }
+
+    #[inline]
+    fn put_into_box(&self, pos: Vec3) -> Vec3 {
+        match self {
+            Periodicity::Vacuum(bc) => bc.put_into_box(pos),
+            Periodicity::Rectangular(bc) => bc.put_into_box(pos),
+            Periodicity::Triclinic(bc) => bc.put_into_box(pos),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

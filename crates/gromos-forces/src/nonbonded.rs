@@ -11,6 +11,12 @@ pub struct LJParameters {
     pub c12: f64, // LJ C12 coefficient (repulsion)
 }
 
+impl From<&gromos_core::topology::LJParameters> for LJParameters {
+    fn from(p: &gromos_core::topology::LJParameters) -> Self {
+        Self { c6: p.c6, c12: p.c12 }
+    }
+}
+
 /// Coulomb constant: 1/(4*pi*eps0) in GROMOS units [kJ*nm/(mol*e^2)]
 pub const FOUR_PI_EPS_I: f64 = 138.9354;
 
@@ -21,6 +27,77 @@ pub struct CRFParameters {
     pub crf_cut: f64,    // (1 - crf/2) / cutoff  (energy shift constant)
     pub crf_2cut3i: f64, // crf / (2 * cutoff^3)  (energy quadratic term)
     pub crf_cut3i: f64,  // crf / cutoff^3         (force correction term)
+}
+
+impl CRFParameters {
+    /// Calculate CRF parameters from physical constants.
+    ///
+    /// # Arguments
+    /// * `cutoff` - Nonbonded cutoff distance in nm
+    /// * `epsilon` - Dielectric permittivity inside the cutoff
+    /// * `rf_epsilon` - Dielectric permittivity outside the cutoff (reaction field)
+    /// * `rf_kappa` - Debye-Hückel screening parameter in nm⁻¹
+    pub fn new(cutoff: f64, epsilon: f64, rf_epsilon: f64, rf_kappa: f64) -> Self {
+        let kappa_cut = rf_kappa * cutoff;
+        let kappa_cut2 = kappa_cut * kappa_cut;
+
+        let crf = (2.0 * (epsilon - rf_epsilon) * (1.0 + kappa_cut)
+            - rf_epsilon * kappa_cut2)
+            / ((epsilon + 2.0 * rf_epsilon) * (1.0 + kappa_cut)
+                + rf_epsilon * kappa_cut2);
+
+        let cut3i = 1.0 / (cutoff * cutoff * cutoff);
+        let crf_cut3i = crf * cut3i;
+        let crf_2cut3i = crf_cut3i / 2.0;
+        let crf_cut = (1.0 - crf / 2.0) / cutoff;
+
+        Self {
+            crf_cut,
+            crf_2cut3i,
+            crf_cut3i,
+        }
+    }
+}
+
+/// Calculate reaction-field self-energy and excluded-pair corrections.
+///
+/// In GROMOS, excluded atom pairs (bonded neighbours) are removed from the
+/// pairlist but still contribute a reaction-field correction.  This function
+/// computes both the atomic self-term and the excluded-pair term.
+///
+/// # Arguments
+/// * `charges` - Per-atom partial charges
+/// * `exclusions` - Per-atom sets of excluded partner indices
+/// * `positions` - Current atomic positions
+/// * `crf` - CRF parameters
+/// * `boundary` - Boundary condition for nearest-image calculation
+pub fn rf_excluded_corrections<BC: BoundaryCondition>(
+    charges: &[f64],
+    exclusions: &[std::collections::HashSet<usize>],
+    positions: &[Vec3],
+    crf: &CRFParameters,
+    boundary: &BC,
+) -> f64 {
+    let mut energy = 0.0_f64;
+
+    // Self term: -0.5 * qi^2 * FPEPSI * crf_cut  for each atom
+    for &q in charges.iter() {
+        energy += -0.5 * q * q * FOUR_PI_EPS_I * crf.crf_cut;
+    }
+
+    // Excluded pair term: qi*qj * FPEPSI * (-crf_2cut3i * r_ij^2 - crf_cut)
+    for i in 0..charges.len() {
+        for &j in exclusions[i].iter() {
+            if j > i {
+                let r = boundary.nearest_image(positions[i], positions[j]);
+                let r2 = r.length_squared();
+                let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
+                energy += q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
+            }
+        }
+    }
+
+    energy
 }
 
 /// Storage for forces and energies
