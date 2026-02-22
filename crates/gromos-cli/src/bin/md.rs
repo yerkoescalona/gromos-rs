@@ -14,7 +14,7 @@ use gromos::{
     integrator::{Integrator, LeapFrog},
     interaction::{
         bonded::calculate_bonded_forces,
-        nonbonded::{lj_crf_innerloop, CRFParameters, ForceStorage},
+        nonbonded::{lj_crf_innerloop, rf_excluded_corrections, CRFParameters, ForceStorage},
     },
     io::{
         energy::{EnergyFrame, EnergyWriter},
@@ -22,7 +22,7 @@ use gromos::{
         trajectory::TrajectoryWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
-    math::{Mat3, Rectangular, Vec3},
+    math::{Mat3, Periodicity, Rectangular, Vacuum, Vec3},
     pairlist::{PairlistContainer, StandardPairlistAlgorithm},
     validation::{
         validate_configuration, validate_coordinates, validate_energy, validate_topology,
@@ -377,49 +377,13 @@ fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
 /// Calculate CRF parameters from physical constants
 ///
 /// Translated from md++/src/interaction/nonbonded/interaction/cuda_nonbonded_set.cc:197-204
-fn calculate_crf_parameters(
-    cutoff: f64,
-    epsilon: f64,
-    rf_epsilon: f64,
-    rf_kappa: f64,
-) -> CRFParameters {
-    // CRF constant calculation (GROMOS formula)
-    let kappa_cut = rf_kappa * cutoff;
-    let kappa_cut2 = kappa_cut * kappa_cut;
-
-    let crf = (2.0 * (epsilon - rf_epsilon) * (1.0 + kappa_cut) - rf_epsilon * kappa_cut2)
-        / ((epsilon + 2.0 * rf_epsilon) * (1.0 + kappa_cut) + rf_epsilon * kappa_cut2);
-
-    let crf_cut3i = 1.0 / (cutoff * cutoff * cutoff);
-    let crf_2cut3i = crf * crf_cut3i / 2.0;
-
-    CRFParameters {
-        crf_cut: cutoff,
-        crf_2cut3i,
-        crf_cut3i,
-    }
-}
-
 /// Convert topology LJ parameters to nonbonded module format
-///
-/// Topology already contains a matrix of LJ parameters.
-/// This function converts them to the format expected by nonbonded.rs
 fn convert_lj_parameters(
     topo: &gromos::topology::Topology,
 ) -> Vec<Vec<gromos::interaction::nonbonded::LJParameters>> {
-    use gromos::interaction::nonbonded::LJParameters as NBLJParams;
-
-    // Convert topology LJ parameters to nonbonded format
     topo.lj_parameters
         .iter()
-        .map(|row| {
-            row.iter()
-                .map(|params| NBLJParams {
-                    c6: params.c6,
-                    c12: params.c12,
-                })
-                .collect()
-        })
+        .map(|row| row.iter().map(Into::into).collect())
         .collect()
 }
 
@@ -775,7 +739,7 @@ fn main() {
     println!();
 
     log::debug!("Calculating CRF parameters");
-    let crf_params = calculate_crf_parameters(
+    let crf_params = CRFParameters::new(
         md_args.cutoff,
         md_args.epsilon,
         md_args.rf_epsilon,
@@ -812,7 +776,11 @@ fn main() {
     );
 
     let pairlist_algorithm = StandardPairlistAlgorithm::new(false); // atom-based for now
-    let periodicity = Rectangular::new(box_dims);
+    let periodicity = if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
+        Periodicity::Vacuum(Vacuum)
+    } else {
+        Periodicity::Rectangular(Rectangular::new(box_dims))
+    };
 
     // Initial pairlist generation
     log::debug!("Generating initial pairlist");
@@ -1045,6 +1013,15 @@ fn main() {
             "Nonbonded energies: LJ={:.4}, CRF={:.4}",
             nonbonded_storage.e_lj,
             nonbonded_storage.e_crf
+        );
+
+        // Add RF self-energy and excluded-pair corrections
+        nonbonded_storage.e_crf += rf_excluded_corrections(
+            &charges_f64,
+            &topo.exclusions,
+            &conf.current().pos,
+            &crf_params,
+            &periodicity,
         );
 
         // Update virial for barostat

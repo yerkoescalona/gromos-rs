@@ -137,10 +137,10 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
         let r2 = r * r;
         let r0_2 = params.r0 * params.r0;
         let dr2 = r2 - r0_2;
-        let energy = 0.25 * params.k_harmonic * dr2 * dr2;
+        let energy = 0.25 * params.k_quartic * dr2 * dr2;
 
         // Force magnitude: dV/dr = k * (r^2 - r0^2) * r
-        let f_magnitude = params.k_harmonic * dr2 * r;
+        let f_magnitude = params.k_quartic * dr2 * r;
 
         // Force vector: F = -f_magnitude * r_vec/r
         let force = r_vec * (-f_magnitude / r);
@@ -282,11 +282,11 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
 
         // Energy: V = (1/2) * k * (cos(θ) - cos(θ0))^2
         let d_cos = cos_theta - cos_theta0;
-        let energy = 0.5 * params.k_harmonic * d_cos * d_cos;
+        let energy = 0.5 * params.k_cosine * d_cos * d_cos;
 
         // Force calculation using chain rule
         // F = -dV/dcos(θ) * dcos(θ)/dr
-        let dV_dcos = params.k_harmonic * d_cos;
+        let dV_dcos = params.k_cosine * d_cos;
 
         // Derivatives of cos(θ) with respect to positions
         // d(cos θ)/dr_i = (r_kj / (|r_ij| |r_kj|)) - cos(θ) * r_ij / |r_ij|^2
