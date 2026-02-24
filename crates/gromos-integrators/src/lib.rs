@@ -15,6 +15,7 @@ pub mod constraints;
 pub mod thermostats;
 pub mod barostats;
 pub mod virtual_atoms;
+pub mod algorithms;
 
 // Enhanced sampling modules
 pub mod eds;

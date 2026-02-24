@@ -63,6 +63,9 @@ pub mod algorithm {
     pub use gromos_integrators::barostats::*;
     pub use gromos_integrators::virtual_atoms;
     pub use gromos_integrators::virtual_atoms::*;
+    pub use gromos_integrators::algorithms;
+    pub use gromos_integrators::algorithms::*;
+    pub use gromos_core::algorithm::{Algorithm, AlgorithmSequence, SimulationState};
 }
 
 pub mod interaction {

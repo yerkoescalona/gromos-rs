@@ -232,37 +232,37 @@ impl EnergyWriter {
             self.write_header = false;
         }
 
-        // Write energy values (20 columns, GROMOS standard)
+        // Write energy values with full f64 precision (scientific notation, matching gromosXX)
         write!(
             self.writer,
-            "{:15.6} {:15.6} {:15.6} {:15.6} {:15.6}",
+            "{:20.12e} {:20.12e} {:20.12e} {:20.12e} {:20.12e}",
             frame.time, frame.kinetic, frame.potential, frame.total, frame.temperature
         )?;
 
         write!(
             self.writer,
-            " {:15.6} {:15.6}",
+            " {:20.12e} {:20.12e}",
             frame.volume, frame.pressure
         )?;
 
         // Bonded energies
         write!(
             self.writer,
-            " {:15.6} {:15.6} {:15.6} {:15.6}",
+            " {:20.12e} {:20.12e} {:20.12e} {:20.12e}",
             frame.bond, frame.angle, frame.improper, frame.dihedral
         )?;
 
         // Nonbonded energies
         write!(
             self.writer,
-            " {:15.6} {:15.6} {:15.6} {:15.6}",
+            " {:20.12e} {:20.12e} {:20.12e} {:20.12e}",
             frame.lj, frame.coul_real, frame.coul_recip, frame.coul_self
         )?;
 
         // Constraints
         write!(
             self.writer,
-            " {:15.6} {:15.6}",
+            " {:20.12e} {:20.12e}",
             frame.shake, frame.restraint
         )?;
 
