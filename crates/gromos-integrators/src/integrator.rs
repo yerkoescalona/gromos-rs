@@ -14,7 +14,7 @@ use rayon::prelude::*;
 
 /// Trait for MD integrators
 pub trait Integrator {
-    /// Perform one integration step
+    /// Perform one integration step (combined velocity + position)
     fn step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration);
 
     /// Get integrator name
@@ -46,13 +46,14 @@ impl LeapFrog {
         self.parallel = true;
         self
     }
-}
 
-impl Integrator for LeapFrog {
-    fn step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
+    /// Velocity update (Leap_Frog_Velocity in gromosXX)
+    ///
+    /// exchange_state(), then v_current = v_old + F_old*dt/m
+    pub fn velocity_step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
+        conf.exchange_state();
+
         let n_atoms = topo.num_atoms();
-
-        // Step 1: Update velocities v(t+dt/2) = v(t-dt/2) + F(t)/m * dt
         if self.parallel {
             let old_vel = conf.old().vel.clone();
             let old_force = conf.old().force.clone();
@@ -71,31 +72,38 @@ impl Integrator for LeapFrog {
                 conf.current_mut().vel[i] = conf.old().vel[i] + accel * dt;
             }
         }
+    }
 
-        // Step 2: Exchange states (zero-cost pointer swap)
-        conf.exchange_state();
-
-        // Step 3: Update positions r(t+dt) = r(t) + v(t+dt/2) * dt
-        // After exchange, conf.old() contains the updated velocities
+    /// Position update (Leap_Frog_Position in gromosXX)
+    ///
+    /// r_current = r_old + v_current*dt
+    pub fn position_step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
+        let n_atoms = topo.num_atoms();
         if self.parallel {
             let old_pos = conf.old().pos.clone();
-            let old_vel = conf.old().vel.clone();
+            let cur_vel = conf.current().vel.clone();
 
             conf.current_mut()
                 .pos
                 .par_iter_mut()
                 .enumerate()
                 .for_each(|(i, pos_new)| {
-                    *pos_new = old_pos[i] + old_vel[i] * dt;
+                    *pos_new = old_pos[i] + cur_vel[i] * dt;
                 });
         } else {
             for i in 0..n_atoms {
-                conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().vel[i] * dt;
+                conf.current_mut().pos[i] =
+                    conf.old().pos[i] + conf.current().vel[i] * dt;
             }
         }
+    }
+}
 
-        // Clear forces for next step
-        conf.current_mut().clear_forces();
+impl Integrator for LeapFrog {
+    fn step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
+        // Combined step using the split methods
+        self.velocity_step(dt, topo, conf);
+        self.position_step(dt, topo, conf);
     }
 
     fn name(&self) -> &str {
@@ -1508,13 +1516,13 @@ mod tests {
 
         // Initialize velocities in both current and old states
         for (i, vel) in conf.current_mut().vel.iter_mut().enumerate() {
-            *vel = Vec3::new((i) * 0.1, 0.0, 0.0);
+            *vel = Vec3::new((i as f64) * 0.1, 0.0, 0.0);
         }
         
         // Prepare old state as well (LeapFrog uses both)
         conf.exchange_state();
         for (i, vel) in conf.current_mut().vel.iter_mut().enumerate() {
-            *vel = Vec3::new((i) * 0.1, 0.0, 0.0);
+            *vel = Vec3::new((i as f64) * 0.1, 0.0, 0.0);
         }
 
         // In LeapFrog, after step() the velocities end up in old() due to internal exchange

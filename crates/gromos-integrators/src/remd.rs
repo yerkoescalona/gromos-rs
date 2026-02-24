@@ -470,7 +470,7 @@ mod tests {
     #[test]
     fn test_metropolis_criterion() {
         // Test that probability is 1.0 when delta < 0
-        let delta_negative = -5.0;
+        let delta_negative: f64 = -5.0;
         let prob = if delta_negative < 0.0 {
             1.0
         } else {
@@ -479,7 +479,7 @@ mod tests {
         assert_eq!(prob, 1.0);
 
         // Test that probability is exp(-delta) when delta > 0
-        let delta_positive = 2.0;
+        let delta_positive: f64 = 2.0;
         let prob = if delta_positive < 0.0 {
             1.0
         } else {

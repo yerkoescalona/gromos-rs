@@ -772,7 +772,7 @@ mod tests {
 
         let mut stats = GamdStatistics::new();
         for i in 0..100 {
-            stats.update(-100.0 + i);
+            stats.update(-100.0 + i as f64);
         }
 
         if let Some((k0, k, e)) = params.calculate_parameters(&stats, 1.0) {
@@ -796,7 +796,7 @@ mod tests {
 
         let mut stats = GamdStatistics::new();
         for i in 0..100 {
-            stats.update(-100.0 + i);
+            stats.update(-100.0 + i as f64);
         }
 
         if let Some((k0, k, e)) = params.calculate_parameters(&stats, 1.0) {

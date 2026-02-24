@@ -35,6 +35,7 @@ pub mod configuration;
 pub mod pairlist;
 pub mod selection;
 pub mod validation;
+pub mod algorithm;
 
 // FFI for C bindings (feature-gated)
 #[cfg(feature = "ffi")]

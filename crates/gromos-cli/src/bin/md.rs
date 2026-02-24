@@ -9,12 +9,13 @@ use gromos::{
     algorithm::{
         berendsen_barostat, berendsen_thermostat, shake, BerendsenBarostatParameters,
         BerendsenThermostatParameters, ShakeParameters,
+        Algorithm, AlgorithmSequence, SimulationState,
+        Forcefield, LeapFrogVelocity, LeapFrogPosition,
+        TemperatureCalculation, EnergyCalculation,
     },
     configuration::{Box as SimBox, Configuration},
-    integrator::{Integrator, LeapFrog},
     interaction::{
-        bonded::calculate_bonded_forces,
-        nonbonded::{lj_crf_innerloop, rf_excluded_corrections, CRFParameters, ForceStorage},
+        nonbonded::CRFParameters,
     },
     io::{
         energy::{EnergyFrame, EnergyWriter},
@@ -149,7 +150,7 @@ impl Default for MDArgs {
             // Output
             nstlog: 100,
             nstxout: 100,
-            nstener: 10,
+            nstener: 1,
             verbose: 0,
         }
     }
@@ -372,19 +373,6 @@ fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
     }
 
     Ok(md_args)
-}
-
-/// Calculate CRF parameters from physical constants
-///
-/// Translated from md++/src/interaction/nonbonded/interaction/cuda_nonbonded_set.cc:197-204
-/// Convert topology LJ parameters to nonbonded module format
-fn convert_lj_parameters(
-    topo: &gromos::topology::Topology,
-) -> Vec<Vec<gromos::interaction::nonbonded::LJParameters>> {
-    topo.lj_parameters
-        .iter()
-        .map(|row| row.iter().map(Into::into).collect())
-        .collect()
 }
 
 /// Simple coordinate file reader (reads first POSITION block from .g96)
@@ -725,11 +713,6 @@ fn main() {
         log::debug!("Configuration validation passed");
     }
 
-    // Setup integrator
-    println!("Setting up integrator: Leap-Frog");
-    let mut integrator = LeapFrog::new();
-    println!();
-
     // Setup nonbonded interactions
     println!("Setting up nonbonded interactions:");
     println!("  Cutoff:      {:.3} nm", md_args.cutoff);
@@ -752,7 +735,7 @@ fn main() {
     );
 
     log::debug!("Converting LJ parameter matrix");
-    let lj_params = convert_lj_parameters(&topo);
+    let lj_params = Forcefield::convert_lj_parameters(&topo);
     log::debug!(
         "LJ parameter matrix: {}x{} atom types",
         lj_params.len(),
@@ -787,6 +770,42 @@ fn main() {
     pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
     println!("  Initial pairlist: {} pairs", pairlist.total_pairs());
     println!();
+
+    // === Build Algorithm Sequence (gromosXX pattern) ===
+    println!("Setting up algorithm sequence: Leap-Frog");
+    let mut md_sequence = AlgorithmSequence::new();
+
+    // 1. Forcefield (bonded + nonbonded forces)
+    let forcefield = Forcefield::new(
+        lj_params,
+        crf_params,
+        periodicity,
+        pairlist,
+        pairlist_algorithm,
+    );
+    md_sequence.push(Box::new(forcefield));
+
+    // 2. Leap-Frog velocity step (exchange_state + v update)
+    md_sequence.push(Box::new(LeapFrogVelocity::new()));
+
+    // 3. Leap-Frog position step (r update)
+    md_sequence.push(Box::new(LeapFrogPosition::new()));
+
+    // 4. Temperature/kinetic energy calculation
+    md_sequence.push(Box::new(TemperatureCalculation::new()));
+
+    // 5. Energy finalization
+    md_sequence.push(Box::new(EnergyCalculation::new()));
+
+    println!("  Sequence: {}", md_sequence.algorithm_names().join(" → "));
+    println!();
+
+    // Initialize the sequence
+    let mut sim_state = SimulationState::new(md_args.dt, md_args.n_steps);
+    md_sequence.init(&topo, &mut conf, &sim_state).unwrap_or_else(|e| {
+        eprintln!("Error initializing algorithm sequence: {}", e);
+        process::exit(1);
+    });
 
     // Setup thermostat
     let thermostat_params = if md_args.thermostat == "berendsen" {
@@ -959,108 +978,26 @@ fn main() {
     let start_time = Instant::now();
     let mut energy_history: Vec<(f64, f64, f64)> = Vec::new();
 
-    // Main MD loop
+    // Main MD loop using AlgorithmSequence
+    //
+    // The sequence runs per step:
+    //   1. Forcefield (pairlist + bonded + nonbonded forces)
+    //   2. Leap_Frog_Velocity (exchange_state + velocity update)
+    //   3. Leap_Frog_Position (position update)
+    //   4. TemperatureCalculation (kinetic energy)
+    //   5. EnergyCalculation (total energy finalization)
+    //
+    // TODO: Thermostat, Constraints (SHAKE), Barostat as Algorithm impls
     for step in 0..=md_args.n_steps {
         let time = step as f64 * md_args.dt;
 
         log::debug!("Step {}: time = {:.6} ps", step, time);
 
-        // Virial tensor for barostat (will be updated by nonbonded forces)
-        let mut virial = Mat3::ZERO;
-
-        // Update pairlist if needed
-        if pairlist.needs_update() {
-            log::debug!("Updating pairlist at step {}", step);
-            let _pl_timer = Timer::new("Pairlist update");
-            pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
-            log::debug!("Pairlist updated: {} pairs", pairlist.total_pairs());
-        }
-        pairlist.step();
-
-        // Calculate bonded forces (bonds + angles + dihedrals)
-        let _force_timer = Timer::new("Force calculation");
-        let bonded_result = calculate_bonded_forces(&topo, &conf, true);
-
-        // Calculate nonbonded forces (LJ + CRF)
-        log::debug!("Calculating nonbonded forces");
-        let mut nonbonded_storage = ForceStorage::new(topo.num_atoms());
-
-        // Convert pairlist to (u32, u32) format
-        let pairlist_short: Vec<(u32, u32)> = pairlist
-            .solute_short
-            .iter()
-            .map(|&(i, j)| (i as u32, j as u32))
-            .collect();
-
-        // Convert charge from Vec<f64> to Vec<f64> for compatibility
-        let charges_f64: Vec<f64> = topo.charge.iter().map(|&q| q).collect();
-
-        // Convert iac from Vec<usize> to Vec<u32> for compatibility
-        let iac_u32: Vec<u32> = topo.iac.iter().map(|&i| i as u32).collect();
-
-        lj_crf_innerloop(
-            &conf.current().pos,
-            &charges_f64,
-            &iac_u32,
-            &pairlist_short,
-            &lj_params,
-            &crf_params,
-            &periodicity,
-            &mut nonbonded_storage,
-        );
-
-        log::debug!(
-            "Nonbonded energies: LJ={:.4}, CRF={:.4}",
-            nonbonded_storage.e_lj,
-            nonbonded_storage.e_crf
-        );
-
-        // Add RF self-energy and excluded-pair corrections
-        nonbonded_storage.e_crf += rf_excluded_corrections(
-            &charges_f64,
-            &topo.exclusions,
-            &conf.current().pos,
-            &crf_params,
-            &periodicity,
-        );
-
-        // Update virial for barostat
-        virial = Mat3 {
-            x_axis: Vec3::new(
-                nonbonded_storage.virial[0][0],
-                nonbonded_storage.virial[0][1],
-                nonbonded_storage.virial[0][2],
-            ),
-            y_axis: Vec3::new(
-                nonbonded_storage.virial[1][0],
-                nonbonded_storage.virial[1][1],
-                nonbonded_storage.virial[1][2],
-            ),
-            z_axis: Vec3::new(
-                nonbonded_storage.virial[2][0],
-                nonbonded_storage.virial[2][1],
-                nonbonded_storage.virial[2][2],
-            ),
-        };
-
-        // Apply forces to configuration (bonded + nonbonded)
-        let state = conf.current_mut();
-        for i in 0..topo.num_atoms() {
-            // Add bonded and nonbonded forces
-            state.force[i] = bonded_result.forces[i] + nonbonded_storage.forces[i];
-        }
-
-        // Update energies
-        state.energies.bond_total = bonded_result.energy;
-        state.energies.lj_total = nonbonded_storage.e_lj;
-        state.energies.crf_total = nonbonded_storage.e_crf;
-        state.energies.update_potential_total();
-
-        // Calculate kinetic energy
-        state.calculate_kinetic_energy(&topo.mass);
-
-        // Drop state borrow before GAMD boost
-        drop(state);
+        // Run the algorithm sequence for this step
+        md_sequence.run_step(&topo, &mut conf, &sim_state).unwrap_or_else(|e| {
+            eprintln!("Error at step {}: {}", step, e);
+            process::exit(1);
+        });
 
         // Apply GAMD boost if enabled
         if let Some(ref mut gamd) = gamd_params {
@@ -1180,8 +1117,12 @@ fn main() {
         }
 
         // Validate energy
-        let state = conf.current();
-        let temp = state.temperature(topo.num_atoms() * 3);
+        // gromosXX convention: after the algorithm sequence, energies are in old()
+        // (Forcefield wrote to current(), exchange_state moved it to old(),
+        //  Temperature_Calculation and Energy_Calculation also write to old())
+        let state = conf.old();
+        let n_dof = topo.inverse_mass.len() * 3;
+        let temp = state.temperature(n_dof);
         let ene_validation = validate_energy(
             state.energies.kinetic_total,
             state.energies.potential_total,
@@ -1202,11 +1143,11 @@ fn main() {
 
         // Log progress
         if step % md_args.nstlog == 0 {
-            println!("Step {:6}  Time: {:8.3} ps  E_pot: {:12.4}  E_kin: {:12.4}  E_tot: {:12.4}  T: {:6.1} K",
+            println!("Step {:6}  Time: {:8.3} ps  E_pot: {:18.10e}  E_kin: {:18.10e}  E_tot: {:18.10e}  T: {:6.1} K",
                 step, time, state.energies.potential_total, state.energies.kinetic_total,
                 state.energies.total(), temp);
             log::debug!(
-                "  Bond: {:.4}  LJ: {:.4}  CRF: {:.4}",
+                "  Bond: {:.10e}  LJ: {:.10e}  CRF: {:.10e}",
                 state.energies.bond_total,
                 state.energies.lj_total,
                 state.energies.crf_total
@@ -1222,14 +1163,9 @@ fn main() {
 
         // Write energies
         if step % md_args.nstener == 0 {
-            // Get values without keeping the borrow
-            let temp = {
-                let state = conf.current();
-                state.temperature(topo.num_atoms() * 3)
-            };
-            let volume = conf.current().box_config.volume();
-            let pressure = conf.current().pressure();
-            let energies = conf.current().energies.clone();
+            let volume = conf.old().box_config.volume();
+            let pressure = conf.old().pressure();
+            let energies = conf.old().energies.clone();
 
             let ene_frame = EnergyFrame {
                 time,
@@ -1257,48 +1193,8 @@ fn main() {
             }
         }
 
-        // Integrate (skip last step)
-        if step < md_args.n_steps {
-            integrator.step(md_args.dt, &topo, &mut conf);
-
-            // Apply SHAKE constraints to satisfy bond length constraints
-            if let Some(ref params) = shake_params {
-                log::debug!("Applying SHAKE constraints");
-                let _shake_timer = Timer::new("SHAKE constraints");
-                let shake_result = shake(&topo, &mut conf, md_args.dt, params);
-
-                if !shake_result.converged {
-                    log::warn!(
-                        "SHAKE did not converge at step {}: {} iterations, error={:.6}",
-                        step,
-                        shake_result.iterations,
-                        shake_result.max_error
-                    );
-                }
-
-                log::debug!(
-                    "SHAKE converged in {} iterations, error={:.6}",
-                    shake_result.iterations,
-                    shake_result.max_error
-                );
-            }
-
-            // Apply thermostat to control temperature
-            if let Some(ref params) = thermostat_params {
-                log::debug!("Applying Berendsen thermostat");
-                let _thermo_timer = Timer::new("Thermostat");
-                berendsen_thermostat(&topo, &mut conf, md_args.dt, params);
-            }
-
-            // Apply barostat to control pressure
-            if let Some(ref params) = barostat_params {
-                log::debug!("Applying Berendsen barostat");
-                let _baro_timer = Timer::new("Barostat");
-
-                // Use virial from nonbonded calculations
-                berendsen_barostat(&topo, &mut conf, md_args.dt, params, &virial);
-            }
-        }
+        // Advance simulation state for next step
+        sim_state.advance();
     }
 
     log::info!("MD loop completed - {} steps", md_args.n_steps);

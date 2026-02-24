@@ -556,7 +556,7 @@ mod tests {
 
         // Place atoms randomly in box
         for (i, pos) in conf.current_mut().pos.iter_mut().enumerate() {
-            *pos = Vec3::new((i % 5.0), ((i / 5) % 5.0), 0.0);
+            *pos = Vec3::new((i % 5) as f64, ((i / 5) % 5) as f64, 0.0);
         }
 
         let mut pairlist = PairlistContainer::new(1.5, 2.5, 0.2);
