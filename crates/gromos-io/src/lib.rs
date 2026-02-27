@@ -25,6 +25,7 @@ pub mod trajectory;
 pub mod trajectory_binary;
 
 // Re-export commonly used types
+pub use coordinate::{CoordinateData, read_coordinates};
 pub use dlg::{DlgWriter, LambdaDerivativeFrame};
 pub use energy::{EnergyBlock, EnergyFrame, EnergyReader, EnergyWriter};
 pub use energy_binary::{BinaryEnergyReader, BinaryEnergyWriter};

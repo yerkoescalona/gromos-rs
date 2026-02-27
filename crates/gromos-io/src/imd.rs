@@ -73,6 +73,7 @@ pub struct ImdParameters {
     pub ntc: i32,  // SHAKE constraints (1=none, 2=H-bonds, 3=all bonds, 4=all)
     pub ntcp: i32, // P-SHAKE (pressure-SHAKE)
     pub ntcs: i32, // Solvent SHAKE/SETTLE
+    pub shake_tol: f64, // SHAKE tolerance
 
     // PAIRLIST block
     pub algorithm: i32, // Pairlist algorithm
@@ -88,6 +89,18 @@ pub struct ImdParameters {
     pub rcrf: f64,     // Reaction field cutoff (nm)
     pub epsrf: f64,    // Reaction field permittivity
     pub nslfexcl: i32, // Exclusions
+
+    // FORCE block  
+    /// NTF force flags: [bonds, angles, improper, dihedral, charge, nonbonded]
+    /// 0=off, 1=on for each term
+    pub ntf: [i32; 6],
+    /// Number of energy groups
+    pub negr: usize,
+    /// Last atom of each energy group (1-indexed)
+    pub nre: Vec<usize>,
+
+    // COMTRANSROT
+    pub nscm: usize, // COM translation removal frequency
 
     // PME-specific parameters
     pub grid_x: usize,    // PME grid size X
@@ -155,9 +168,10 @@ impl Default for ImdParameters {
             couple_pressure: false,
             pressure_parameters: None,
             force_groups: Vec::new(),
-            ntc: 2,
+            ntc: 1,
             ntcp: 0,
             ntcs: 1,
+            shake_tol: 1e-4,
             algorithm: 0,
             nsnb: 5,
             rcutp: 0.8,
@@ -169,6 +183,10 @@ impl Default for ImdParameters {
             rcrf: 1.4,
             epsrf: 0.0,
             nslfexcl: 0,
+            ntf: [1, 1, 1, 1, 1, 1], // All force terms on by default
+            negr: 1,
+            nre: Vec::new(),
+            nscm: 100000,
             grid_x: 64,
             grid_y: 64,
             grid_z: 64,
@@ -204,7 +222,11 @@ impl Default for TempBathParameters {
     }
 }
 
-/// Parse GROMOS .imd parameter file
+/// Parse GROMOS .imd/.in parameter file.
+///
+/// Handles both key-value format and gromosXX positional format.
+/// In positional format, comment lines starting with `#` describe fields,
+/// and the following data line contains values in that order.
 pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> {
     let file = File::open(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
@@ -216,18 +238,22 @@ pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> 
 
     for line in reader.lines() {
         let line = line?;
-        let trimmed = line.trim();
+        let trimmed = line.trim().to_string();
 
-        // Skip comments and empty lines
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        if trimmed.is_empty() {
             continue;
         }
 
         // Check for block start/end
         if trimmed == "END" {
-            // Process completed block
             if !current_block.is_empty() {
-                parse_block(&mut params, &current_block, &block_lines)?;
+                // Filter out comment lines for positional parsing
+                let data_lines: Vec<String> = block_lines
+                    .iter()
+                    .filter(|l| !l.starts_with('#'))
+                    .cloned()
+                    .collect();
+                parse_block(&mut params, &current_block, &data_lines)?;
                 params
                     .raw_blocks
                     .insert(current_block.clone(), block_lines.clone());
@@ -235,194 +261,557 @@ pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> 
             }
             current_block.clear();
         } else if !current_block.is_empty() {
-            // Inside a block - collect lines
-            block_lines.push(trimmed.to_string());
-        } else {
-            // New block starting
-            current_block = trimmed.to_string();
+            // Inside a block - collect ALL lines (including comments for raw_blocks)
+            block_lines.push(trimmed);
+        } else if !trimmed.starts_with('#') {
+            // New block starting (not a comment)
+            current_block = trimmed;
         }
     }
 
     Ok(params)
 }
 
-/// Parse a specific IMD block
+/// Parse a specific IMD block using gromosXX positional format.
+///
+/// Data lines are the non-comment lines within the block, in order.
+/// The format follows gromosXX conventions where each data line
+/// corresponds to a group of parameters described by preceding comments.
 fn parse_block(
     params: &mut ImdParameters,
     block_name: &str,
-    lines: &[String],
+    data_lines: &[String],
 ) -> Result<(), IoError> {
     match block_name {
         "TITLE" => {
-            params.title = lines.join(" ");
+            params.title = data_lines.join(" ");
         },
         "SYSTEM" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NPM" => params.npm = parts[1].parse().unwrap_or(1),
-                        "NSM" => params.nsm = parts[1].parse().unwrap_or(0),
-                        _ => {},
-                    }
-                }
+            // Line 0: NPM NSM
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.npm = parse_usize(&v[0]); }
+                if v.len() >= 2 { params.nsm = parse_usize(&v[1]); }
             }
         },
         "STEP" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NSTLIM" => params.nstlim = parts[1].parse().unwrap_or(1000),
-                        "T" => params.t0 = parts[1].parse().unwrap_or(0.0),
-                        "DT" => params.dt = parts[1].parse().unwrap_or(0.002),
-                        _ => {},
-                    }
-                }
+            // Line 0: NSTLIM T DT
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.nstlim = parse_usize(&v[0]); }
+                if v.len() >= 2 { params.t0 = parse_f64(&v[1]); }
+                if v.len() >= 3 { params.dt = parse_f64(&v[2]); }
             }
         },
         "BOUNDCOND" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NTB" => params.ntb = parts[1].parse().unwrap_or(1),
-                        "NDFMIN" => params.ndfmin = parts[1].parse().unwrap_or(0),
-                        _ => {},
-                    }
-                }
+            // Line 0: NTB NDFMIN
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntb = parse_i32(&v[0]); }
+                if v.len() >= 2 { params.ndfmin = parse_i32(&v[1]); }
             }
         },
         "MULTIBATH" => {
-            // Simplified MULTIBATH parsing
+            // gromosXX format:
+            //   Line 0: algorithm name (e.g. "weak-coupling")
+            //   Line 1: NBATHS
+            //   Line 2: TEMP0 TAU (per bath, may have multiple values)
+            //   Line 3: DOFSET (number of DOF sets)
+            //   Line 4+: LAST COM-BATH IR-BATH (per DOF set)
             let mut bath = TempBathParameters::default();
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "ALGORITHM" => bath.algorithm = parts[1].parse().unwrap_or(1),
-                        "NUM" | "NBATHS" => bath.num_bath_groups = parts[1].parse().unwrap_or(1),
-                        "TEMP0" | "TEMP" => {
-                            bath.temp0 = parts[1..].iter().filter_map(|s| s.parse().ok()).collect();
+            if data_lines.is_empty() { return Ok(()); }
+
+            let mut line_idx = 0;
+
+            // Line 0: algorithm (string like "weak-coupling" or number)
+            if line_idx < data_lines.len() {
+                let v0 = parse_values(&data_lines[line_idx]);
+                if let Some(first) = v0.first() {
+                    match first.as_str() {
+                        "weak-coupling" | "nose-hoover" | "nose-hoover-chains" => {
+                            bath.algorithm = match first.as_str() {
+                                "weak-coupling" => 1,
+                                "nose-hoover" => 2,
+                                "nose-hoover-chains" => 3,
+                                _ => 0,
+                            };
                         },
-                        "TAU" | "TAUT" => {
-                            bath.tau = parts[1..].iter().filter_map(|s| s.parse().ok()).collect();
+                        _ => {
+                            bath.algorithm = parse_i32(first);
                         },
-                        _ => {},
+                    }
+                }
+                line_idx += 1;
+            }
+
+            // Line 1: NBATHS
+            if line_idx < data_lines.len() {
+                let v = parse_values(&data_lines[line_idx]);
+                if let Some(nb) = v.first() {
+                    bath.num_bath_groups = parse_usize(nb);
+                }
+                line_idx += 1;
+            }
+
+            // Line 2: TEMP0 TAU (repeated per bath)
+            if line_idx < data_lines.len() {
+                let v = parse_values(&data_lines[line_idx]);
+                bath.temp0.clear();
+                bath.tau.clear();
+                // Format: temp0_1 tau_1 [temp0_2 tau_2 ...]
+                let mut i = 0;
+                while i + 1 < v.len() {
+                    bath.temp0.push(parse_f64(&v[i]));
+                    bath.tau.push(parse_f64(&v[i + 1]));
+                    i += 2;
+                }
+                line_idx += 1;
+            }
+
+            // Line 3: DOFSET (number of DOF groups)
+            if line_idx < data_lines.len() {
+                // Just skip, we don't use it directly
+                line_idx += 1;
+            }
+
+            // Lines 4+: LAST COM-BATH IR-BATH
+            // (skip, used internally by gromosXX)
+            let _ = line_idx;
+
+            params.temp_bath = vec![bath];
+        },
+        "PRESSURESCALE" => {
+            // gromosXX format:
+            //   Line 0: COUPLE SCALE COMP VIRIAL
+            //   Line 1: PRES0 (3x3 matrix, 3 lines)
+            //   ...
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 {
+                    let couple = parse_i32(&v[0]);
+                    params.couple_pressure = couple > 0;
+                    if couple > 0 {
+                        let mut pp = PressureParameters {
+                            algorithm: couple,
+                            pressure0: [[0.0; 3]; 3],
+                            compressibility: [[4.575e-4; 3]; 3],
+                            tau_p: 0.5,
+                            virial: 0,
+                        };
+                        if v.len() >= 4 {
+                            pp.virial = parse_i32(&v[3]);
+                        }
+                        // Parse reference pressure and compressibility from subsequent lines
+                        // Line 1-3: PRES0 (3x3), Line 4-6: COMP (3x3), Line 7: TAU
+                        let mut dl = 1;
+                        for row in 0..3 {
+                            if dl < data_lines.len() {
+                                let pv = parse_values(&data_lines[dl]);
+                                for col in 0..3.min(pv.len()) {
+                                    pp.pressure0[row][col] = parse_f64(&pv[col]);
+                                }
+                                dl += 1;
+                            }
+                        }
+                        for row in 0..3 {
+                            if dl < data_lines.len() {
+                                let cv = parse_values(&data_lines[dl]);
+                                for col in 0..3.min(cv.len()) {
+                                    pp.compressibility[row][col] = parse_f64(&cv[col]);
+                                }
+                                dl += 1;
+                            }
+                        }
+                        if dl < data_lines.len() {
+                            let tv = parse_values(&data_lines[dl]);
+                            if let Some(t) = tv.first() {
+                                pp.tau_p = parse_f64(t);
+                            }
+                        }
+                        params.pressure_parameters = Some(pp);
                     }
                 }
             }
-            params.temp_bath = vec![bath];
         },
         "CONSTRAINT" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NTC" => params.ntc = parts[1].parse().unwrap_or(2),
-                        "NTCP" => params.ntcp = parts[1].parse().unwrap_or(0),
-                        "NTCS" => params.ntcs = parts[1].parse().unwrap_or(1),
-                        _ => {},
-                    }
+            // gromosXX format:
+            //   Line 0: NTC
+            //   Line 1: NTCP (string: "shake" or number)
+            //   Line 2: NTCP0 (tolerance)
+            //   Line 3: NTCS (string: "shake" or number)
+            //   Line 4: NTCS0 (tolerance)
+            if data_lines.is_empty() { return Ok(()); }
+            let mut idx = 0;
+            if idx < data_lines.len() {
+                params.ntc = parse_i32(&parse_values(&data_lines[idx])[0]);
+                idx += 1;
+            }
+            if idx < data_lines.len() {
+                let v = parse_values(&data_lines[idx]);
+                // NTCP can be "shake" (string) or a number
+                params.ntcp = match v[0].as_str() {
+                    "shake" => 1,
+                    "lincs" => 2,
+                    "settle" => 3,
+                    _ => parse_i32(&v[0]),
+                };
+                idx += 1;
+            }
+            if idx < data_lines.len() {
+                params.shake_tol = parse_f64(&parse_values(&data_lines[idx])[0]);
+                idx += 1;
+            }
+            if idx < data_lines.len() {
+                let v = parse_values(&data_lines[idx]);
+                params.ntcs = match v[0].as_str() {
+                    "shake" => 1,
+                    "lincs" => 2,
+                    "settle" => 3,
+                    _ => parse_i32(&v[0]),
+                };
+                // skip NTCS0 line
+            }
+        },
+        "FORCE" => {
+            // gromosXX format:
+            //   Line 0: bonds angles imp dih charge nonbonded (6 NTF values)
+            //   Line 1: NEGR NRE(1) NRE(2) ... NRE(NEGR)
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                for i in 0..6.min(v.len()) {
+                    params.ntf[i] = parse_i32(&v[i]);
+                }
+            }
+            if data_lines.len() >= 2 {
+                let v = parse_values(&data_lines[1]);
+                if !v.is_empty() {
+                    params.negr = parse_usize(&v[0]);
+                    params.nre = v[1..].iter().map(|s| parse_usize(s)).collect();
                 }
             }
         },
         "PAIRLIST" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "ALGORITHM" => params.algorithm = parts[1].parse().unwrap_or(0),
-                        "NSNB" => params.nsnb = parts[1].parse().unwrap_or(5),
-                        "RCUTP" => params.rcutp = parts[1].parse().unwrap_or(0.8),
-                        "RCUTL" => params.rcutl = parts[1].parse().unwrap_or(1.4),
-                        "SIZE" => params.size = parts[1].parse().unwrap_or(0.4),
-                        "TYPE" => params.type_ = parts[1].parse().unwrap_or(0),
-                        _ => {},
-                    }
+            // gromosXX format:
+            //   Line 0: ALGORITHM NSNB RCUTP RCUTL SIZE TYPE
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 {
+                    // ALGORITHM can be "standard" or a number
+                    params.algorithm = match v[0].as_str() {
+                        "standard" => 0,
+                        "grid" => 1,
+                        _ => parse_i32(&v[0]),
+                    };
+                }
+                if v.len() >= 2 { params.nsnb = parse_usize(&v[1]); }
+                if v.len() >= 3 { params.rcutp = parse_f64(&v[2]); }
+                if v.len() >= 4 { params.rcutl = parse_f64(&v[3]); }
+                if v.len() >= 5 {
+                    // SIZE can be "auto" or a number
+                    params.size = match v[4].as_str() {
+                        "auto" => 0.0,
+                        _ => parse_f64(&v[4]),
+                    };
+                }
+                if v.len() >= 6 {
+                    params.type_ = match v[5].as_str() {
+                        "chargegroup" => 0,
+                        "atomic" => 1,
+                        _ => parse_i32(&v[5]),
+                    };
                 }
             }
         },
         "NONBONDED" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NLRELE" => params.nlrele = parts[1].parse().unwrap_or(1),
-                        "APPAK" => params.appak = parts[1].parse().unwrap_or(0.0),
-                        "RCRF" => params.rcrf = parts[1].parse().unwrap_or(1.4),
-                        "EPSRF" => params.epsrf = parts[1].parse().unwrap_or(0.0),
-                        "NSLFEXCL" => params.nslfexcl = parts[1].parse().unwrap_or(0),
-                        // PME parameters
-                        "GRIDX" => params.grid_x = parts[1].parse().unwrap_or(64),
-                        "GRIDY" => params.grid_y = parts[1].parse().unwrap_or(64),
-                        "GRIDZ" => params.grid_z = parts[1].parse().unwrap_or(64),
-                        "ORDER" | "PMEORDER" => params.pme_order = parts[1].parse().unwrap_or(4),
-                        "ALPHA" | "PMEALPHA" => params.pme_alpha = parts[1].parse().unwrap_or(0.0),
-                        _ => {},
-                    }
+            // gromosXX format:
+            //   Line 0: NLRELE
+            //   Line 1: APPAK RCRF EPSRF NSLFEXCL
+            //   Line 2: NSHAPE ASHAPE NA2CLC TOLA2 EPSLS
+            //   Line 3: NKX NKY NKZ NK2 (optional, for PME)
+            //   Line 4: NGX NGY NGZ NASORD NFDORD NALIAS NSPORD (optional)
+            //   ...
+            if let Some(line) = data_lines.first() {
+                params.nlrele = parse_i32(&parse_values(line)[0]);
+            }
+            if data_lines.len() >= 2 {
+                let v = parse_values(&data_lines[1]);
+                if v.len() >= 1 { params.appak = parse_f64(&v[0]); }
+                if v.len() >= 2 { params.rcrf = parse_f64(&v[1]); }
+                if v.len() >= 3 { params.epsrf = parse_f64(&v[2]); }
+                if v.len() >= 4 { params.nslfexcl = parse_i32(&v[3]); }
+            }
+            // Line 3+ for PME parameters
+            if data_lines.len() >= 4 {
+                let v = parse_values(&data_lines[3]);
+                if v.len() >= 3 {
+                    params.grid_x = parse_usize(&v[0]);
+                    params.grid_y = parse_usize(&v[1]);
+                    params.grid_z = parse_usize(&v[2]);
                 }
             }
         },
         "INITIALISE" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NTIVEL" => params.ntivel = parts[1].parse().unwrap_or(0),
-                        "NTISHK" => params.ntishk = parts[1].parse().unwrap_or(0),
-                        "NTINHT" => params.ntinht = parts[1].parse().unwrap_or(0),
-                        "NTINHB" => params.ntinhb = parts[1].parse().unwrap_or(0),
-                        "NTISHI" => params.ntishi = parts[1].parse().unwrap_or(1000),
-                        "IG" => params.ig = parts[1].parse().unwrap_or(12345),
-                        "TEMPI" => params.tempi = parts[1].parse().unwrap_or(300.0),
-                        _ => {},
-                    }
-                }
+            // gromosXX format:
+            //   Line 0: NTIVEL NTISHK NTINHT NTINHB
+            //   Line 1: NTISHI NTIRTC NTICOM
+            //   Line 2: NTISTI
+            //   Line 3: IG TEMPI
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntivel = parse_i32(&v[0]); }
+                if v.len() >= 2 { params.ntishk = parse_i32(&v[1]); }
+                if v.len() >= 3 { params.ntinht = parse_i32(&v[2]); }
+                if v.len() >= 4 { params.ntinhb = parse_i32(&v[3]); }
+            }
+            if data_lines.len() >= 2 {
+                let v = parse_values(&data_lines[1]);
+                if v.len() >= 1 { params.ntishi = parse_i32(&v[0]); }
+            }
+            // Line 2: NTISTI (skip)
+            if data_lines.len() >= 4 {
+                let v = parse_values(&data_lines[3]);
+                if v.len() >= 1 { params.ig = v[0].parse::<i64>().unwrap_or(12345); }
+                if v.len() >= 2 { params.tempi = parse_f64(&v[1]); }
             }
         },
         "WRITETRAJ" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NTWX" => params.ntwx = parts[1].parse().unwrap_or(100),
-                        "NTWE" => params.ntwe = parts[1].parse().unwrap_or(100),
-                        "NTWV" => params.ntwv = parts[1].parse::<i32>().unwrap_or(0) != 0,
-                        "NTWF" => params.ntwf = parts[1].parse::<i32>().unwrap_or(0) != 0,
-                        _ => {},
-                    }
-                }
+            // gromosXX format:
+            //   Line 0: NTWX NTWSE NTWV NTWF NTWE NTWG NTWB
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntwx = parse_usize(&v[0]); }
+                // NTWSE at v[1] - skip
+                if v.len() >= 3 { params.ntwv = parse_i32(&v[2]) != 0; }
+                if v.len() >= 4 { params.ntwf = parse_i32(&v[3]) != 0; }
+                if v.len() >= 5 { params.ntwe = parse_usize(&v[4]); }
             }
         },
         "PRINTOUT" => {
-            for line in lines {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    match parts[0] {
-                        "NTPR" => params.ntpr = parts[1].parse().unwrap_or(100),
-                        _ => {},
-                    }
-                }
+            // gromosXX format:
+            //   Line 0: NTPR NTPP
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntpr = parse_usize(&v[0]); }
+            }
+        },
+        "COMTRANSROT" => {
+            // Line 0: NSCM
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.nscm = parse_usize(&v[0]); }
             }
         },
         _ => {
-            // Unknown block - store in raw_blocks for later use
+            // Unknown block - stored in raw_blocks by caller
         },
     }
 
     Ok(())
 }
 
+/// Split a line into whitespace-separated tokens
+fn parse_values(line: &str) -> Vec<String> {
+    line.split_whitespace().map(|s| s.to_string()).collect()
+}
+
+fn parse_f64(s: &str) -> f64 {
+    s.parse::<f64>().unwrap_or(0.0)
+}
+
+fn parse_i32(s: &str) -> i32 {
+    s.parse::<i32>().unwrap_or(0)
+}
+
+fn parse_usize(s: &str) -> usize {
+    s.parse::<usize>().unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    fn write_tmp(content: &str, suffix: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("gromos_imd_test_{suffix}.tmp"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
 
     #[test]
     fn test_default_parameters() {
         let params = ImdParameters::default();
         assert_eq!(params.nstlim, 1000);
         assert_eq!(params.dt, 0.002);
-        assert_eq!(params.ntc, 2); // SHAKE on H-bonds
+        assert_eq!(params.ntc, 1); // No constraints
+    }
+
+    #[test]
+    fn test_parse_gromosxx_format() {
+        // Actual gromosXX .in file format (positional)
+        let content = "\
+TITLE
+Two Argon atoms - LJ pair reference
+END
+SYSTEM
+#      NPM      NSM
+         1        0
+END
+STEP
+#   NSTLIM         T        DT
+        10       0.0     0.002
+END
+BOUNDCOND
+#      NTB    NDFMIN
+         0         0
+END
+FORCE
+#      NTF array
+# bonds    angles    imp.     dihe     charge nonbonded
+# H        H         H        H
+     0        0         0        0     0  1
+# NEGR    NRE(1)    NRE(2)    ...      NRE(NEGR)
+     2     1      2
+END
+PAIRLIST
+#       ALGORITHM       NSNB    RCUTP   RCUTL   SIZE    TYPE
+        standard        1       0.8     1.4     auto    chargegroup
+END
+NONBONDED
+#   NLRELE
+         0
+#    APPAK      RCRF     EPSRF  NSLFEXCL
+       0.0       1.4       1.0         1
+END
+CONSTRAINT
+#       NTC
+        1
+#       NTCP
+        shake
+#       NTCP0(1)
+        0.0001
+#       NTCS
+        shake
+#       NTCS0(1)
+        0.0001
+END
+WRITETRAJ
+#     NTWX     NTWSE      NTWV      NTWF      NTWE      NTWG      NTWB
+         1         0         0         1         1         0         0
+END
+PRINTOUT
+#     NTPR      NTPP
+         1         0
+END
+MULTIBATH
+    weak-coupling
+#   NBATHS
+    1
+#   TEMP0  TAU
+    300.0  -1.0
+#   DOFSET
+    1
+#   LAST   COM-BATH  IR-BATH
+    2      1         1
+END
+INITIALISE
+#  NTIVEL  NTISHK  NTINHT  NTINHB
+        0       0       0       0
+#  NTISHI  NTIRTC  NTICOM
+        1       0       0
+#  NTISTI
+        0
+#      IG   TEMPI
+   210185     0.0
+END
+";
+        let path = write_tmp(content, "gxx_format");
+        let params = read_imd_file(&path).expect("Failed to parse gromosXX format");
+
+        assert_eq!(params.npm, 1);
+        assert_eq!(params.nsm, 0);
+        assert_eq!(params.nstlim, 10);
+        assert_eq!(params.t0, 0.0);
+        assert_eq!(params.dt, 0.002);
+        assert_eq!(params.ntb, 0);
+        assert_eq!(params.ndfmin, 0);
+        assert_eq!(params.ntf, [0, 0, 0, 0, 0, 1]);
+        assert_eq!(params.negr, 2);
+        assert_eq!(params.nre, vec![1, 2]);
+        assert_eq!(params.nlrele, 0);
+        assert_eq!(params.appak, 0.0);
+        assert_eq!(params.rcrf, 1.4);
+        assert_eq!(params.epsrf, 1.0);
+        assert_eq!(params.nslfexcl, 1);
+        assert_eq!(params.nsnb, 1);
+        assert_eq!(params.rcutp, 0.8);
+        assert_eq!(params.rcutl, 1.4);
+        assert_eq!(params.ntc, 1);
+        assert_eq!(params.shake_tol, 0.0001);
+        assert_eq!(params.ntwx, 1);
+        assert_eq!(params.ntwe, 1);
+        assert!(params.ntwf);
+        assert_eq!(params.ntpr, 1);
+        assert_eq!(params.temp_bath[0].temp0, vec![300.0]);
+        assert_eq!(params.temp_bath[0].tau, vec![-1.0]);
+        assert_eq!(params.ntivel, 0);
+        assert_eq!(params.ig, 210185);
+        assert_eq!(params.tempi, 0.0);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_parse_water_box_format() {
+        let content = "\
+TITLE
+216 SPC waters in rectangular box
+END
+SYSTEM
+#      NPM      NSM
+         1        0
+END
+STEP
+#   NSTLIM         T        DT
+       100       0.0     0.002
+END
+BOUNDCOND
+#      NTB    NDFMIN
+         1         0
+END
+FORCE
+#      NTF array
+# bonds    angles    imp.     dihe     charge nonbonded
+# H        H         H        H
+     1        1         1        1     1  1
+# NEGR    NRE(1)
+     1     648
+END
+NONBONDED
+#   NLRELE
+         1
+#    APPAK      RCRF     EPSRF  NSLFEXCL
+       0.0       0.9      62.0         1
+END
+PAIRLIST
+#       ALGORITHM       NSNB    RCUTP   RCUTL   SIZE    TYPE
+        standard        5       0.8     0.9     auto    chargegroup
+END
+";
+        let path = write_tmp(content, "water_box");
+        let params = read_imd_file(&path).expect("Failed to parse water box");
+
+        assert_eq!(params.nstlim, 100);
+        assert_eq!(params.ntb, 1);
+        assert_eq!(params.ntf, [1, 1, 1, 1, 1, 1]);
+        assert_eq!(params.negr, 1);
+        assert_eq!(params.nre, vec![648]);
+        assert_eq!(params.nlrele, 1);
+        assert_eq!(params.rcrf, 0.9);
+        assert_eq!(params.epsrf, 62.0);
+        assert_eq!(params.nsnb, 5);
+        assert_eq!(params.rcutl, 0.9);
+
+        std::fs::remove_file(path).ok();
     }
 }

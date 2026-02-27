@@ -1,6 +1,9 @@
-//! Parser for GROMOS coordinate files (.conf/.cnf)
+//! Parser for GROMOS coordinate files (.conf/.cnf/.g96)
 //!
-//! Format example:
+//! Supports both legacy BOX and gromosXX GENBOX block formats,
+//! as well as POSITION/POSITIONRED and VELOCITY/VELOCITYRED blocks.
+//!
+//! # Format Example
 //! ```text
 //! TITLE
 //!   System description
@@ -11,8 +14,14 @@
 //! VELOCITY (optional)
 //!     1 RES    ATOM      1    vx       vy       vz
 //! END
-//! BOX
-//!     lx   ly   lz
+//! GENBOX
+//! # box type (0=vacuum, 1=rectangular)
+//! 1
+//! # box dimensions
+//! 1.8652 1.8652 1.8652
+//! 90.0 90.0 90.0
+//! 0.0 0.0 0.0
+//! 0.0 0.0 0.0
 //! END
 //! ```
 
@@ -23,12 +32,25 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-/// Read GROMOS coordinate file
-pub fn read_coordinate_file<P: AsRef<Path>>(
-    path: P,
-    num_temp_groups: usize,
-    num_energy_groups: usize,
-) -> Result<Configuration, IoError> {
+/// Raw coordinate data read from a .conf/.cnf/.g96 file.
+///
+/// This is a lightweight struct without Configuration dependencies,
+/// suitable for use from the CLI binary.
+#[derive(Debug, Clone)]
+pub struct CoordinateData {
+    pub positions: Vec<Vec3>,
+    pub velocities: Vec<Vec3>,
+    /// Box dimensions (0,0,0 for vacuum)
+    pub box_dims: Vec3,
+    /// Box type from GENBOX (0=vacuum, 1=rectangular, 2=triclinic, 3=truncated octahedron)
+    pub box_type: i32,
+}
+
+/// Read raw coordinate data from a GROMOS coordinate file (.conf/.cnf/.g96).
+///
+/// Handles POSITION, POSITIONRED, VELOCITY, VELOCITYRED, BOX, and GENBOX blocks.
+/// Returns raw data without constructing a Configuration object.
+pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoError> {
     let file = File::open(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
     let reader = BufReader::new(file);
@@ -36,135 +58,154 @@ pub fn read_coordinate_file<P: AsRef<Path>>(
     let mut positions = Vec::new();
     let mut velocities = Vec::new();
     let mut box_dims = Vec3::ZERO;
-    let mut in_position = false;
-    let mut in_velocity = false;
-    let mut in_box = false;
+    let mut box_type: i32 = -1; // unknown until parsed
+
+    #[derive(PartialEq)]
+    enum Section { None, Position, PositionRed, Velocity, VelocityRed, Box, GenBox }
+    let mut section = Section::None;
+    let mut genbox_line_num: usize = 0;
 
     for line in reader.lines() {
         let line = line?;
         let trimmed = line.trim();
 
-        // Skip comments and empty lines
+        match trimmed {
+            "POSITION" => { section = Section::Position; continue; }
+            "POSITIONRED" => { section = Section::PositionRed; continue; }
+            "VELOCITY" => { section = Section::Velocity; continue; }
+            "VELOCITYRED" => { section = Section::VelocityRed; continue; }
+            "BOX" => { section = Section::Box; continue; }
+            "GENBOX" => { section = Section::GenBox; genbox_line_num = 0; continue; }
+            "END" => { section = Section::None; continue; }
+            _ => {}
+        }
+
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
-        // Check for block markers
-        if trimmed == "POSITION" {
-            in_position = true;
-            in_velocity = false;
-            in_box = false;
-            continue;
-        } else if trimmed == "VELOCITY" {
-            in_position = false;
-            in_velocity = true;
-            in_box = false;
-            continue;
-        } else if trimmed == "BOX" {
-            in_position = false;
-            in_velocity = false;
-            in_box = true;
-            continue;
-        } else if trimmed == "END" {
-            in_position = false;
-            in_velocity = false;
-            in_box = false;
-            continue;
-        }
-
-        // Parse data
-        if in_position {
-            // CRITICAL: Skip first 24 characters (residue/atom metadata)
-            // Format: "    1 RES    ATOM      1"  (24 chars) then x y z
-            if line.len() < 24 {
-                continue;
+        match section {
+            Section::Position => {
+                // Full format: first 24 chars are residue/atom metadata, then x y z
+                if line.len() < 24 { continue; }
+                let coords = &line[24..];
+                let parts: Vec<&str> = coords.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    positions.push(parse_vec3(&parts[..3])?);
+                }
             }
-
-            let coords = &line[24..];
-            let parts: Vec<&str> = coords.split_whitespace().collect();
-
-            if parts.len() >= 3 {
-                let x: f64 = parts[0].parse().map_err(|_| {
-                    IoError::ParseError(format!("Invalid x coordinate: {}", parts[0]))
-                })?;
-                let y: f64 = parts[1].parse().map_err(|_| {
-                    IoError::ParseError(format!("Invalid y coordinate: {}", parts[1]))
-                })?;
-                let z: f64 = parts[2].parse().map_err(|_| {
-                    IoError::ParseError(format!("Invalid z coordinate: {}", parts[2]))
-                })?;
-
-                positions.push(Vec3::new(x, y, z));
+            Section::PositionRed => {
+                // Reduced format: just x y z (last 3 whitespace-separated values)
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let len = parts.len();
+                    positions.push(parse_vec3(&parts[len-3..len])?);
+                }
             }
-        } else if in_velocity {
-            // Same format as POSITION
-            if line.len() < 24 {
-                continue;
+            Section::Velocity => {
+                if line.len() < 24 { continue; }
+                let coords = &line[24..];
+                let parts: Vec<&str> = coords.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    velocities.push(parse_vec3(&parts[..3])?);
+                }
             }
-
-            let coords = &line[24..];
-            let parts: Vec<&str> = coords.split_whitespace().collect();
-
-            if parts.len() >= 3 {
-                let vx: f64 = parts[0]
-                    .parse()
-                    .map_err(|_| IoError::ParseError(format!("Invalid vx: {}", parts[0])))?;
-                let vy: f64 = parts[1]
-                    .parse()
-                    .map_err(|_| IoError::ParseError(format!("Invalid vy: {}", parts[1])))?;
-                let vz: f64 = parts[2]
-                    .parse()
-                    .map_err(|_| IoError::ParseError(format!("Invalid vz: {}", parts[2])))?;
-
-                velocities.push(Vec3::new(vx, vy, vz));
+            Section::VelocityRed => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let len = parts.len();
+                    velocities.push(parse_vec3(&parts[len-3..len])?);
+                }
             }
-        } else if in_box {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-
-            if parts.len() >= 3 {
-                let lx: f64 = parts[0]
-                    .parse()
-                    .map_err(|_| IoError::ParseError(format!("Invalid box x: {}", parts[0])))?;
-                let ly: f64 = parts[1]
-                    .parse()
-                    .map_err(|_| IoError::ParseError(format!("Invalid box y: {}", parts[1])))?;
-                let lz: f64 = parts[2]
-                    .parse()
-                    .map_err(|_| IoError::ParseError(format!("Invalid box z: {}", parts[2])))?;
-
-                box_dims = Vec3::new(lx, ly, lz);
+            Section::Box => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    box_dims = parse_vec3(&parts[..3])?;
+                    if box_type < 0 {
+                        box_type = if box_dims == Vec3::ZERO { 0 } else { 1 };
+                    }
+                }
             }
+            Section::GenBox => {
+                // GENBOX format:
+                //   line 0: box_type (int)
+                //   line 1: box dimensions (3 floats)
+                //   line 2: angles (3 floats) - ignored for rectangular
+                //   line 3: origin (3 floats) - ignored
+                //   line 4: origin2 (3 floats) - ignored
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                match genbox_line_num {
+                    0 => {
+                        box_type = parts[0].parse::<i32>().map_err(|_| {
+                            IoError::ParseError(format!("Invalid GENBOX type: {}", parts[0]))
+                        })?;
+                    }
+                    1 => {
+                        if parts.len() >= 3 {
+                            box_dims = parse_vec3(&parts[..3])?;
+                        }
+                    }
+                    _ => {} // angles, origin lines - skip for now
+                }
+                genbox_line_num += 1;
+            }
+            Section::None => {}
         }
     }
 
-    // Validate
     if positions.is_empty() {
-        return Err(IoError::FormatError("No positions found".to_string()));
+        return Err(IoError::FormatError("No positions found in coordinate file".to_string()));
     }
 
-    let n_atoms = positions.len();
+    Ok(CoordinateData {
+        positions,
+        velocities,
+        box_dims,
+        box_type,
+    })
+}
 
-    // Create configuration
+fn parse_vec3(parts: &[&str]) -> Result<Vec3, IoError> {
+    let x: f64 = parts[0].parse().map_err(|_| {
+        IoError::ParseError(format!("Invalid coordinate: {}", parts[0]))
+    })?;
+    let y: f64 = parts[1].parse().map_err(|_| {
+        IoError::ParseError(format!("Invalid coordinate: {}", parts[1]))
+    })?;
+    let z: f64 = parts[2].parse().map_err(|_| {
+        IoError::ParseError(format!("Invalid coordinate: {}", parts[2]))
+    })?;
+    Ok(Vec3::new(x, y, z))
+}
+
+/// Read GROMOS coordinate file and return a Configuration object.
+///
+/// This is a convenience wrapper around [`read_coordinates`] that constructs
+/// a full Configuration with the specified number of temperature/energy groups.
+pub fn read_coordinate_file<P: AsRef<Path>>(
+    path: P,
+    num_temp_groups: usize,
+    num_energy_groups: usize,
+) -> Result<Configuration, IoError> {
+    let data = read_coordinates(path)?;
+    let n_atoms = data.positions.len();
+
     let mut conf = Configuration::new(n_atoms, num_temp_groups, num_energy_groups);
+    conf.current_mut().pos = data.positions;
 
-    // Set positions
-    conf.current_mut().pos = positions;
-
-    // Set velocities (if present)
-    if !velocities.is_empty() {
-        if velocities.len() != n_atoms {
+    if !data.velocities.is_empty() {
+        if data.velocities.len() != n_atoms {
             return Err(IoError::FormatError(format!(
                 "Velocity count ({}) doesn't match atom count ({})",
-                velocities.len(),
+                data.velocities.len(),
                 n_atoms
             )));
         }
-        conf.current_mut().vel = velocities;
+        conf.current_mut().vel = data.velocities;
     }
 
-    // Set box
-    if box_dims != Vec3::ZERO {
-        conf.current_mut().box_config = SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z);
+    if data.box_dims != Vec3::ZERO {
+        conf.current_mut().box_config = SimBox::rectangular(data.box_dims.x, data.box_dims.y, data.box_dims.z);
     }
 
     Ok(conf)
@@ -207,12 +248,12 @@ END
         assert_eq!(conf.current().pos.len(), 4);
 
         let pos0 = conf.current().pos[0];
-        assert!((pos0.x - 4.197156491_f32).abs() < 1e-5);
-        assert!((pos0.y - 0.505921049_f32).abs() < 1e-5);
-        assert!((pos0.z - 2.679733124_f32).abs() < 1e-5);
+        assert!((pos0.x - 4.197156491).abs() < 1e-5);
+        assert!((pos0.y - 0.505921049).abs() < 1e-5);
+        assert!((pos0.z - 2.679733124).abs() < 1e-5);
 
         let box_dims = conf.current().box_config.dimensions();
-        assert!((box_dims.x - 10.0_f32).abs() < 1e-5);
+        assert!((box_dims.x - 10.0).abs() < 1e-5);
 
         std::fs::remove_file(path).ok();
     }
@@ -244,7 +285,108 @@ END
 
         assert_eq!(conf.current().pos.len(), 1);
         assert_eq!(conf.current().vel.len(), 1);
-        assert!((conf.current().vel[0].x - 0.01_f32).abs() < 1e-5);
+        assert!((conf.current().vel[0].x - 0.01).abs() < 1e-5);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_read_coordinates_genbox_rectangular() {
+        let content = "\
+TITLE
+  GENBOX test
+END
+POSITION
+    1 WAT    OW        1   0.100000000  0.200000000  0.300000000
+    1 WAT    HW1       2   0.150000000  0.250000000  0.350000000
+END
+VELOCITY
+    1 WAT    OW        1   0.001000000  0.002000000  0.003000000
+    1 WAT    HW1       2   0.004000000  0.005000000  0.006000000
+END
+GENBOX
+# box type (1=rectangular)
+1
+# box dimensions
+1.8652 1.8652 1.8652
+90.0 90.0 90.0
+0.0 0.0 0.0
+0.0 0.0 0.0
+END
+";
+        let path = write_tmp(content, "genbox_rect");
+        let data = read_coordinates(&path).expect("Failed to parse GENBOX file");
+
+        assert_eq!(data.positions.len(), 2);
+        assert_eq!(data.velocities.len(), 2);
+        assert_eq!(data.box_type, 1);
+        assert!((data.box_dims.x - 1.8652).abs() < 1e-9);
+        assert!((data.box_dims.y - 1.8652).abs() < 1e-9);
+        assert!((data.positions[0].x - 0.1).abs() < 1e-9);
+        assert!((data.velocities[1].z - 0.006).abs() < 1e-9);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_read_coordinates_genbox_vacuum() {
+        let content = "\
+TITLE
+  vacuum test
+END
+POSITION
+    1 AR     AR        1   0.000000000  0.000000000  0.000000000
+    1 AR     AR        2   0.350000000  0.000000000  0.000000000
+END
+GENBOX
+# box type (0=vacuum)
+0
+# box dimensions
+0.0 0.0 0.0
+0.0 0.0 0.0
+0.0 0.0 0.0
+0.0 0.0 0.0
+END
+";
+        let path = write_tmp(content, "genbox_vac");
+        let data = read_coordinates(&path).expect("Failed to parse vacuum GENBOX");
+
+        assert_eq!(data.positions.len(), 2);
+        assert_eq!(data.box_type, 0);
+        assert_eq!(data.box_dims, Vec3::ZERO);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_read_coordinates_positionred() {
+        let content = "\
+TITLE
+  reduced format test
+END
+POSITIONRED
+   0.100000000   0.200000000   0.300000000
+   0.400000000   0.500000000   0.600000000
+END
+VELOCITYRED
+   0.001000000   0.002000000   0.003000000
+   0.004000000   0.005000000   0.006000000
+END
+GENBOX
+0
+0.0 0.0 0.0
+0.0 0.0 0.0
+0.0 0.0 0.0
+0.0 0.0 0.0
+END
+";
+        let path = write_tmp(content, "posred");
+        let data = read_coordinates(&path).expect("Failed to parse POSITIONRED");
+
+        assert_eq!(data.positions.len(), 2);
+        assert_eq!(data.velocities.len(), 2);
+        assert!((data.positions[0].x - 0.1).abs() < 1e-9);
+        assert!((data.velocities[1].y - 0.005).abs() < 1e-9);
 
         std::fs::remove_file(path).ok();
     }
