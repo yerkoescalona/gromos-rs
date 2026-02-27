@@ -351,7 +351,7 @@ mod tests {
 
             for i in 0..100 {
                 let mut frame =
-                    EnergyFrame::new(i * 0.002, 100.0 + i, -200.0 - i, 300.0);
+                    EnergyFrame::new(i as f64 * 0.002, 100.0 + i as f64, -200.0 - i as f64, 300.0);
                 frame.bond = -50.0;
                 frame.lj = -100.0;
                 writer.write_frame(&frame).unwrap();

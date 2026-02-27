@@ -1,29 +1,34 @@
-//! md - Molecular Dynamics simulation engine
+//! md - Molecular Dynamics simulation engine (gromosXX-compatible CLI)
 //!
-//! Usage: md @topo <topology> @conf <coordinates> [@steps <n>] [@dt <timestep>] [@traj <output>] [@ene <energy>]
+//! Usage: md @topo <topology> @conf <coordinates> @input <parameters> [@fin <final_conf>]
+//!           [@trc <trajectory>] [@tre <energies>] [@trf <forces>] [@trv <velocities>]
+//!           [@verb <level>]
 //!
-//! The main GROMOS molecular dynamics simulation program.
-//! Performs MD simulations with various integration algorithms.
+//! The main GROMOS-RS molecular dynamics simulation program.
+//! Command-line interface matches gromosXX md++ conventions.
+//! All simulation parameters are read from the @input (.imd/.in) file.
 
 use gromos::{
     algorithm::{
-        berendsen_barostat, berendsen_thermostat, shake, BerendsenBarostatParameters,
+        BerendsenBarostatParameters,
         BerendsenThermostatParameters, ShakeParameters,
-        Algorithm, AlgorithmSequence, SimulationState,
+        AlgorithmSequence, SimulationState,
         Forcefield, LeapFrogVelocity, LeapFrogPosition,
-        TemperatureCalculation, EnergyCalculation,
+        TemperatureCalculation, EnergyCalculation, ShakeAlgorithm,
     },
     configuration::{Box as SimBox, Configuration},
     interaction::{
         nonbonded::CRFParameters,
     },
     io::{
+        coordinate::read_coordinates,
         energy::{EnergyFrame, EnergyWriter},
+        imd::read_imd_file,
         topology::{build_topology, read_topology_file},
         trajectory::TrajectoryWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
-    math::{Mat3, Periodicity, Rectangular, Vacuum, Vec3},
+    math::{Periodicity, Rectangular, Vacuum, Vec3},
     pairlist::{PairlistContainer, StandardPairlistAlgorithm},
     validation::{
         validate_configuration, validate_coordinates, validate_energy, validate_topology,
@@ -50,75 +55,92 @@ impl Drop for Timer {
 }
 
 fn print_usage() {
-    eprintln!("md - Molecular Dynamics simulation");
+    eprintln!("md - Molecular Dynamics simulation (gromosXX-compatible)");
     eprintln!();
-    eprintln!("Usage: md @topo <topology> @conf <coordinates> [@input <parameters>] [@steps <n>] [@dt <timestep>] [@traj <output>] [@ene <energy>]");
+    eprintln!("Usage: md @topo <topology> @conf <coordinates> @input <parameters>");
+    eprintln!("          [@fin <final_conf>] [@trc <trajectory>] [@tre <energies>]");
+    eprintln!("          [@trf <forces>] [@trv <velocities>] [@verb <level>]");
     eprintln!();
-    eprintln!("Arguments:");
-    eprintln!("  @topo       Topology file (.top)");
-    eprintln!("  @conf       Initial coordinates (.g96)");
-    eprintln!("  @input      Input parameter file (.imd) for GAMD/EDS/advanced sampling");
-    eprintln!("  @steps      Number of MD steps (default: 1000)");
-    eprintln!("  @dt         Time step in ps (default: 0.002)");
-    eprintln!("  @traj       Output trajectory file (.trc, default: md.trc)");
-    eprintln!("  @ene        Output energy file (.tre, default: md.tre)");
-    eprintln!("  @temp       Temperature in K (default: 300.0)");
-    eprintln!("  @cutoff     Nonbonded cutoff distance in nm (default: 1.4)");
-    eprintln!("  @epsilon    Dielectric constant inside cutoff (default: 1.0)");
-    eprintln!("  @rf_epsilon Dielectric constant outside cutoff for CRF (default: 61.0)");
-    eprintln!("  @rf_kappa   Screening parameter for CRF in nm^-1 (default: 0.0)");
-    eprintln!("  @pairlist   Pairlist update frequency in steps (default: 5)");
-    eprintln!("  @thermostat Thermostat: off, berendsen (default: off)");
-    eprintln!("  @tau_t      Thermostat coupling time in ps (default: 0.1)");
-    eprintln!("  @barostat   Barostat: off, berendsen (default: off)");
-    eprintln!("  @tau_p      Barostat coupling time in ps (default: 0.5)");
-    eprintln!("  @pres       Target pressure in bar (default: 1.0)");
-    eprintln!("  @shake      SHAKE constraints: on, off (default: off)");
-    eprintln!("  @shake_tol  SHAKE tolerance (default: 0.0001)");
-    eprintln!("  @verbose    Verbose output for debugging (0=normal, 1=verbose, 2=debug)");
+    eprintln!("Input files:");
+    eprintln!("  @topo       Molecular topology file (.topo/.top)");
+    eprintln!("  @pttopo     Perturbation topology file (.ptp)");
+    eprintln!("  @conf       Initial coordinates and restart data (.cnf/.g96)");
+    eprintln!("  @input      Input parameter file (.imd/.in) — all simulation settings");
+    eprintln!("  @posresspec Position restraints specification");
+    eprintln!("  @refpos     Position restraints reference positions");
+    eprintln!("  @distrest   Distance restraints specification");
+    eprintln!("  @angrest    Angle restraints specification");
+    eprintln!("  @dihrest    Dihedral restraints specification");
+    eprintln!("  @colvarres  Collective variable restraints");
+    eprintln!("  @jval       J-value restraints specification");
+    eprintln!("  @xray       X-ray restraints specification");
+    eprintln!("  @sym        Symmetry restraints specification");
+    eprintln!("  @rdc        RDC restraints specification");
+    eprintln!("  @order      Order-parameter restraints specification");
+    eprintln!("  @lud        Local elevation umbrella database");
+    eprintln!("  @led        Local elevation coordinate definition");
+    eprintln!("  @bsleus     Ball & Stick Local Elevation topology");
+    eprintln!("  @friction   Atomic friction coefficients");
+    eprintln!("  @qmmm       QM/MM specification file");
+    eprintln!("  @gamd       GaMD restraints specification");
+    eprintln!();
+    eprintln!("Output files:");
+    eprintln!("  @fin        Final configuration output (.cnf)");
+    eprintln!("  @trc        Coordinate trajectory (.trc)");
+    eprintln!("  @trv        Velocity trajectory (.trv)");
+    eprintln!("  @trf        Force trajectory (.trf)");
+    eprintln!("  @trs        Special trajectory (.trs)");
+    eprintln!("  @tre        Energy trajectory (.tre)");
+    eprintln!("  @trg        Free energy trajectory (.trg)");
+    eprintln!("  @bae        Block averaged energy trajectory");
+    eprintln!("  @bag        Block averaged free-energy trajectory");
+    eprintln!();
+    eprintln!("Control:");
+    eprintln!("  @verb       Verbosity level (0=quiet, 1=info, 2=debug)");
+    eprintln!("  @print      Print additional information (pairlist, force)");
+    eprintln!("  @version    Print version information");
+    eprintln!("  @develop    Run untested development code");
+    eprintln!();
+    eprintln!("All simulation parameters (timestep, cutoffs, thermostat, etc.)");
+    eprintln!("are specified in the @input file, following gromosXX conventions.");
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  md @topo system.top @conf initial.g96");
-    eprintln!("  md @topo system.top @conf initial.g96 @steps 10000 @dt 0.002");
-    eprintln!("  md @topo system.top @conf initial.g96 @cutoff 1.4 @rf_epsilon 61.0");
-    eprintln!("  md @topo system.top @conf initial.g96 @thermostat berendsen @temp 300");
-    eprintln!("  md @topo system.top @conf initial.g96 @barostat berendsen @pres 1.0");
-    eprintln!("  md @topo system.top @conf initial.g96 @shake on @shake_tol 0.0001");
-    eprintln!(
-        "  md @topo system.top @conf initial.g96 @traj output.trc @ene output.tre @verbose 1"
-    );
+    eprintln!("  md @topo system.topo @conf initial.cnf @input run.imd");
+    eprintln!("  md @topo system.topo @conf initial.cnf @input run.imd @trc out.trc @tre out.tre");
+    eprintln!("  md @topo system.topo @conf initial.cnf @input run.imd @verb 1");
 }
 
+/// gromosXX-compatible command-line arguments.
+/// These are file paths and control flags — all simulation parameters
+/// come from the @input file.
 #[derive(Debug)]
 struct MDArgs {
+    // Required input files
     topo_file: String,
     conf_file: String,
-    input_file: Option<String>, // Optional .imd input file for GAMD/EDS/etc.
-    traj_file: String,
-    ene_file: String,
-    n_steps: usize,
-    dt: f64,
-    temperature: f64,
-    cutoff: f64,
-    epsilon: f64,
-    rf_epsilon: f64,
-    rf_kappa: f64,
-    pairlist_update: usize,
-    // Thermostat
-    thermostat: String, // "off", "berendsen", "nose-hoover"
-    tau_t: f64,         // Thermostat coupling time
-    // Barostat
-    barostat: String,     // "off", "berendsen", "parrinello-rahman"
-    tau_p: f64,           // Barostat coupling time
-    target_pressure: f64, // Target pressure in bar
-    // Constraints
-    shake_enabled: bool,
-    shake_tolerance: f64,
-    // Output
-    nstlog: usize,
-    nstxout: usize,
-    nstener: usize,
+    input_file: String,
+    // Optional input files
+    pttopo_file: Option<String>,
+    posresspec_file: Option<String>,
+    refpos_file: Option<String>,
+    distrest_file: Option<String>,
+    angrest_file: Option<String>,
+    dihrest_file: Option<String>,
+    gamd_file: Option<String>,
+    // Output files
+    fin_file: Option<String>,
+    trc_file: Option<String>,
+    trv_file: Option<String>,
+    trf_file: Option<String>,
+    trs_file: Option<String>,
+    tre_file: Option<String>,
+    trg_file: Option<String>,
+    bae_file: Option<String>,
+    bag_file: Option<String>,
+    // Control
     verbose: usize,
+    print_flags: Vec<String>,
+    develop: bool,
 }
 
 impl Default for MDArgs {
@@ -126,32 +148,26 @@ impl Default for MDArgs {
         Self {
             topo_file: String::new(),
             conf_file: String::new(),
-            input_file: None,
-            traj_file: "md.trc".to_string(),
-            ene_file: "md.tre".to_string(),
-            n_steps: 1000,
-            dt: 0.002,
-            temperature: 300.0,
-            cutoff: 1.4,
-            epsilon: 1.0,
-            rf_epsilon: 61.0, // Typical for water
-            rf_kappa: 0.0,    // No screening
-            pairlist_update: 5,
-            // Thermostat
-            thermostat: "off".to_string(),
-            tau_t: 0.1, // 0.1 ps (typical)
-            // Barostat
-            barostat: "off".to_string(),
-            tau_p: 0.5,           // 0.5 ps (typical)
-            target_pressure: 1.0, // 1 bar (atmospheric)
-            // Constraints
-            shake_enabled: false,
-            shake_tolerance: 1e-4, // GROMOS default
-            // Output
-            nstlog: 100,
-            nstxout: 100,
-            nstener: 1,
+            input_file: String::new(),
+            pttopo_file: None,
+            posresspec_file: None,
+            refpos_file: None,
+            distrest_file: None,
+            angrest_file: None,
+            dihrest_file: None,
+            gamd_file: None,
+            fin_file: None,
+            trc_file: None,
+            trv_file: None,
+            trf_file: None,
+            trs_file: None,
+            tre_file: None,
+            trg_file: None,
+            bae_file: None,
+            bag_file: None,
             verbose: 0,
+            print_flags: Vec::new(),
+            develop: false,
         }
     }
 }
@@ -161,204 +177,64 @@ fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
 
     let mut i = 1;
     while i < args.len() {
-        match args[i].as_str() {
-            "@topo" => {
+        let arg = args[i].as_str();
+
+        // Helper: get the next argument value
+        macro_rules! next_val {
+            ($name:expr) => {{
                 i += 1;
                 if i >= args.len() {
-                    return Err("Missing value for @topo".to_string());
+                    return Err(format!("Missing value for {}", $name));
                 }
-                md_args.topo_file = args[i].clone();
-            },
-            "@conf" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @conf".to_string());
-                }
-                md_args.conf_file = args[i].clone();
-            },
-            "@input" | "@imd" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @input".to_string());
-                }
-                md_args.input_file = Some(args[i].clone());
-            },
-            "@traj" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @traj".to_string());
-                }
-                md_args.traj_file = args[i].clone();
-            },
-            "@ene" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @ene".to_string());
-                }
-                md_args.ene_file = args[i].clone();
-            },
-            "@steps" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @steps".to_string());
-                }
-                md_args.n_steps = args[i]
+                args[i].clone()
+            }};
+        }
+
+        match arg {
+            // Required input files
+            "@topo" => md_args.topo_file = next_val!("@topo"),
+            "@conf" => md_args.conf_file = next_val!("@conf"),
+            "@input" | "@imd" => md_args.input_file = next_val!("@input"),
+            // Optional input files
+            "@pttopo" => md_args.pttopo_file = Some(next_val!("@pttopo")),
+            "@posresspec" => md_args.posresspec_file = Some(next_val!("@posresspec")),
+            "@refpos" => md_args.refpos_file = Some(next_val!("@refpos")),
+            "@distrest" => md_args.distrest_file = Some(next_val!("@distrest")),
+            "@angrest" => md_args.angrest_file = Some(next_val!("@angrest")),
+            "@dihrest" => md_args.dihrest_file = Some(next_val!("@dihrest")),
+            "@gamd" => md_args.gamd_file = Some(next_val!("@gamd")),
+            // Output files
+            "@fin" => md_args.fin_file = Some(next_val!("@fin")),
+            "@trc" | "@traj" => md_args.trc_file = Some(next_val!(arg)),
+            "@trv" => md_args.trv_file = Some(next_val!("@trv")),
+            "@trf" => md_args.trf_file = Some(next_val!("@trf")),
+            "@trs" => md_args.trs_file = Some(next_val!("@trs")),
+            "@tre" | "@ene" => md_args.tre_file = Some(next_val!(arg)),
+            "@trg" => md_args.trg_file = Some(next_val!("@trg")),
+            "@bae" => md_args.bae_file = Some(next_val!("@bae")),
+            "@bag" => md_args.bag_file = Some(next_val!("@bag")),
+            // Control
+            "@verb" | "@verbose" | "@v" => {
+                md_args.verbose = next_val!("@verb")
                     .parse()
-                    .map_err(|_| format!("Invalid value for @steps: {}", args[i]))?;
+                    .map_err(|_| format!("Invalid value for @verb: {}", args[i]))?;
             },
-            "@dt" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @dt".to_string());
-                }
-                md_args.dt = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @dt: {}", args[i]))?;
+            "@print" => {
+                md_args.print_flags.push(next_val!("@print"));
             },
-            "@temp" | "@temperature" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @temp".to_string());
-                }
-                md_args.temperature = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @temp: {}", args[i]))?;
+            "@version" => {
+                println!("GROMOS-RS md {}", env!("CARGO_PKG_VERSION"));
+                process::exit(0);
             },
-            "@cutoff" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @cutoff".to_string());
-                }
-                md_args.cutoff = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @cutoff: {}", args[i]))?;
+            "@develop" => {
+                md_args.develop = true;
             },
-            "@epsilon" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @epsilon".to_string());
-                }
-                md_args.epsilon = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @epsilon: {}", args[i]))?;
-            },
-            "@rf_epsilon" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @rf_epsilon".to_string());
-                }
-                md_args.rf_epsilon = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @rf_epsilon: {}", args[i]))?;
-            },
-            "@rf_kappa" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @rf_kappa".to_string());
-                }
-                md_args.rf_kappa = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @rf_kappa: {}", args[i]))?;
-            },
-            "@pairlist" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @pairlist".to_string());
-                }
-                md_args.pairlist_update = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @pairlist: {}", args[i]))?;
-            },
-            "@thermostat" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @thermostat".to_string());
-                }
-                md_args.thermostat = args[i].to_lowercase();
-                if !["off", "berendsen", "nose-hoover"].contains(&md_args.thermostat.as_str()) {
-                    return Err(format!(
-                        "Invalid thermostat: {}. Use: off, berendsen, nose-hoover",
-                        args[i]
-                    ));
-                }
-            },
-            "@tau_t" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @tau_t".to_string());
-                }
-                md_args.tau_t = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @tau_t: {}", args[i]))?;
-            },
-            "@barostat" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @barostat".to_string());
-                }
-                md_args.barostat = args[i].to_lowercase();
-                if !["off", "berendsen", "parrinello-rahman"].contains(&md_args.barostat.as_str()) {
-                    return Err(format!(
-                        "Invalid barostat: {}. Use: off, berendsen, parrinello-rahman",
-                        args[i]
-                    ));
-                }
-            },
-            "@tau_p" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @tau_p".to_string());
-                }
-                md_args.tau_p = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @tau_p: {}", args[i]))?;
-            },
-            "@pres" | "@pressure" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @pres".to_string());
-                }
-                md_args.target_pressure = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @pres: {}", args[i]))?;
-            },
-            "@shake" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @shake".to_string());
-                }
-                let shake_str = args[i].to_lowercase();
-                md_args.shake_enabled = match shake_str.as_str() {
-                    "on" | "yes" | "true" | "1" => true,
-                    "off" | "no" | "false" | "0" => false,
-                    _ => {
-                        return Err(format!(
-                            "Invalid value for @shake: {}. Use: on, off",
-                            args[i]
-                        ))
-                    },
-                };
-            },
-            "@shake_tol" | "@shake_tolerance" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @shake_tol".to_string());
-                }
-                md_args.shake_tolerance = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @shake_tol: {}", args[i]))?;
-            },
-            "@verbose" | "@v" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @verbose".to_string());
-                }
-                md_args.verbose = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @verbose: {}", args[i]))?;
+            // Catch unrecognized
+            _ if arg.starts_with('@') => {
+                return Err(format!("Unknown argument: {}", arg));
             },
             _ => {
-                return Err(format!("Unknown argument: {}", args[i]));
+                return Err(format!("Unexpected argument: {} (did you forget @?)", arg));
             },
         }
         i += 1;
@@ -367,86 +243,14 @@ fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
     if md_args.topo_file.is_empty() {
         return Err("Missing required argument @topo".to_string());
     }
-
     if md_args.conf_file.is_empty() {
         return Err("Missing required argument @conf".to_string());
     }
+    if md_args.input_file.is_empty() {
+        return Err("Missing required argument @input".to_string());
+    }
 
     Ok(md_args)
-}
-
-/// Simple coordinate file reader (reads first POSITION block from .g96)
-fn read_coordinates(path: &str) -> Result<(Vec<Vec3>, Vec3), String> {
-    use std::fs::File;
-    use std::io::{BufRead, BufReader};
-
-    let file = File::open(path).map_err(|e| format!("Cannot open file: {}", e))?;
-    let reader = BufReader::new(file);
-
-    let mut positions = Vec::new();
-    let mut box_dims = Vec3::new(3.0, 3.0, 3.0); // Default
-    let mut in_position = false;
-    let mut in_box = false;
-
-    for line in reader.lines() {
-        let line = line.map_err(|e| format!("Read error: {}", e))?;
-        let trimmed = line.trim();
-
-        if trimmed == "POSITION" || trimmed == "POSITIONRED" {
-            in_position = true;
-            continue;
-        }
-
-        if trimmed == "GENBOX" {
-            in_box = true;
-            in_position = false;
-            continue;
-        }
-
-        if trimmed == "END" {
-            if in_box {
-                in_box = false;
-            }
-            if in_position {
-                in_position = false;
-            }
-            continue;
-        }
-
-        if in_position {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 3 {
-                // Try parsing last 3 elements as coordinates
-                let len = parts.len();
-                if let (Ok(x), Ok(y), Ok(z)) = (
-                    parts[len - 3].parse::<f64>(),
-                    parts[len - 2].parse::<f64>(),
-                    parts[len - 1].parse::<f64>(),
-                ) {
-                    positions.push(Vec3::new(x, y, z));
-                }
-            }
-        }
-
-        if in_box {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 3 {
-                if let (Ok(x), Ok(y), Ok(z)) = (
-                    parts[0].parse::<f64>(),
-                    parts[1].parse::<f64>(),
-                    parts[2].parse::<f64>(),
-                ) {
-                    box_dims = Vec3::new(x, y, z);
-                }
-            }
-        }
-    }
-
-    if positions.is_empty() {
-        return Err("No coordinates found in file".to_string());
-    }
-
-    Ok((positions, box_dims))
 }
 
 fn main() {
@@ -457,7 +261,7 @@ fn main() {
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
-    // Parse arguments
+    // Parse command-line arguments (file paths only, gromosXX style)
     let md_args = match parse_args(args) {
         Ok(a) => a,
         Err(e) => {
@@ -485,7 +289,53 @@ fn main() {
     log::info!("GROMOS-RS MD simulation starting");
     log::debug!("Verbose level: {}", md_args.verbose);
 
-    // Load topology
+    // === Read simulation parameters from @input file ===
+    println!("Loading input parameters: {}", md_args.input_file);
+    let imd = match read_imd_file(&md_args.input_file) {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("Failed to read input file: {}", e);
+            eprintln!("Error reading input file: {}", e);
+            process::exit(1);
+        },
+    };
+    log::debug!("Input parameters: steps={}, dt={}, ntb={}", imd.nstlim, imd.dt, imd.ntb);
+
+    // Extract simulation parameters from IMD file
+    let n_steps = imd.nstlim;
+    let dt = imd.dt;
+    let cutoff = imd.rcutl;
+    let epsilon = 1.0; // CRF interior dielectric (always 1 in GROMOS)
+    let rf_epsilon = imd.epsrf;
+    let rf_kappa = imd.appak;
+    let pairlist_update = imd.nsnb;
+    let ntf = imd.ntf;
+    let ntf_bond = ntf[0] != 0;
+    let ntf_angle = ntf[1] != 0;
+    let ntf_improper = ntf[2] != 0;
+    let ntf_dihedral = ntf[3] != 0;
+    let shake_enabled = imd.ntc > 1; // NTC=1 means no constraints
+    let shake_tolerance = imd.shake_tol;
+    let nstxout = imd.ntwx;
+    let nstener = imd.ntwe;
+    let nstlog = imd.ntpr;
+    let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
+        imd.temp_bath[0].temp0[0]
+    } else {
+        300.0
+    };
+    let thermostat_tau = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].tau.is_empty() {
+        imd.temp_bath[0].tau[0]
+    } else {
+        -1.0
+    };
+    let thermostat_on = thermostat_tau > 0.0;
+
+    // Derive output file paths (from @args or defaults)
+    let trc_file = md_args.trc_file.clone().unwrap_or_else(|| "md.trc".to_string());
+    let tre_file = md_args.tre_file.clone().unwrap_or_else(|| "md.tre".to_string());
+
+    // === Load topology ===
     println!("Loading topology: {}", md_args.topo_file);
     log::debug!("Reading topology file: {}", md_args.topo_file);
     let _timer = Timer::new("Topology loading");
@@ -506,6 +356,7 @@ fn main() {
     println!("  Bonds: {}", topo.solute.bonds.len());
     println!("  Angles: {}", topo.solute.angles.len());
     println!("  Dihedrals: {}", topo.solute.proper_dihedrals.len());
+    println!("  Impropers: {}", topo.solute.improper_dihedrals.len());
     println!();
 
     // Validate topology
@@ -526,12 +377,12 @@ fn main() {
         log::debug!("Topology validation passed");
     }
 
-    // Load coordinates
+    // === Load coordinates (using gromos-io) ===
     println!("Loading coordinates: {}", md_args.conf_file);
     log::debug!("Reading coordinate file: {}", md_args.conf_file);
     let _timer = Timer::new("Coordinate loading");
 
-    let (positions, box_dims) = match read_coordinates(&md_args.conf_file) {
+    let coord_data = match read_coordinates(&md_args.conf_file) {
         Ok(data) => data,
         Err(e) => {
             log::error!("Failed to read coordinates: {}", e);
@@ -540,11 +391,25 @@ fn main() {
         },
     };
 
+    let positions = coord_data.positions;
+    let velocities = coord_data.velocities;
+    let box_dims = coord_data.box_dims;
+
     println!("  Positions loaded: {}", positions.len());
+    if !velocities.is_empty() {
+        println!("  Velocities loaded: {}", velocities.len());
+    }
     println!(
         "  Box: ({:.4}, {:.4}, {:.4}) nm",
         box_dims.x, box_dims.y, box_dims.z
     );
+    println!("  Box type: {}", match coord_data.box_type {
+        0 => "vacuum",
+        1 => "rectangular",
+        2 => "triclinic",
+        3 => "truncated octahedron",
+        _ => "unknown",
+    });
     println!();
 
     if positions.len() != topo.num_atoms() {
@@ -561,31 +426,27 @@ fn main() {
         process::exit(1);
     }
 
-    // Parse input file for GAMD/EDS blocks if provided
-    let gamd_block = if let Some(ref input_file) = md_args.input_file {
-        log::debug!("Parsing input file for GAMD block: {}", input_file);
-        match GamdBlock::parse_file(input_file) {
+    // Parse input file for GAMD/EDS blocks
+    let gamd_block = {
+        log::debug!("Parsing input file for GAMD block: {}", md_args.input_file);
+        match GamdBlock::parse_file(&md_args.input_file) {
             Ok(block) => block,
             Err(e) => {
                 log::warn!("Failed to parse GAMD block: {}", e);
                 None
             },
         }
-    } else {
-        None
     };
 
-    let eds_block = if let Some(ref input_file) = md_args.input_file {
-        log::debug!("Parsing input file for EDS block: {}", input_file);
-        match EdsBlock::parse_file(input_file) {
+    let eds_block = {
+        log::debug!("Parsing input file for EDS block: {}", md_args.input_file);
+        match EdsBlock::parse_file(&md_args.input_file) {
             Ok(block) => block,
             Err(e) => {
                 log::warn!("Failed to parse EDS block: {}", e);
                 None
             },
         }
-    } else {
-        None
     };
 
     if let Some(ref block) = gamd_block {
@@ -659,7 +520,11 @@ fn main() {
     log::debug!("Creating configuration");
     let mut conf = Configuration::new(topo.num_atoms(), 1, 1);
     conf.current_mut().pos = positions.clone();
-    conf.current_mut().vel = vec![Vec3::ZERO; topo.num_atoms()]; // Zero initial velocities
+    conf.current_mut().vel = if velocities.len() == topo.num_atoms() {
+        velocities.clone()
+    } else {
+        vec![Vec3::ZERO; topo.num_atoms()]
+    };
     conf.current_mut().box_config = SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z);
     conf.copy_current_to_old();
 
@@ -715,18 +580,18 @@ fn main() {
 
     // Setup nonbonded interactions
     println!("Setting up nonbonded interactions:");
-    println!("  Cutoff:      {:.3} nm", md_args.cutoff);
-    println!("  Epsilon:     {:.2}", md_args.epsilon);
-    println!("  RF epsilon:  {:.2}", md_args.rf_epsilon);
-    println!("  RF kappa:    {:.3} nm^-1", md_args.rf_kappa);
+    println!("  Cutoff:      {:.3} nm", cutoff);
+    println!("  Epsilon:     {:.2}", epsilon);
+    println!("  RF epsilon:  {:.2}", rf_epsilon);
+    println!("  RF kappa:    {:.3} nm^-1", rf_kappa);
     println!();
 
     log::debug!("Calculating CRF parameters");
     let crf_params = CRFParameters::new(
-        md_args.cutoff,
-        md_args.epsilon,
-        md_args.rf_epsilon,
-        md_args.rf_kappa,
+        cutoff,
+        epsilon,
+        rf_epsilon,
+        rf_kappa,
     );
     log::debug!(
         "CRF parameters: crf_2cut3i={:.6}, crf_cut3i={:.6}",
@@ -748,11 +613,11 @@ fn main() {
 
     log::debug!("Initializing pairlist");
     let mut pairlist = PairlistContainer::new(
-        md_args.cutoff, // short range cutoff
-        md_args.cutoff, // long range cutoff (same for now)
+        cutoff, // short range cutoff
+        cutoff, // long range cutoff (same for now)
         0.0,            // skin (no extra distance)
     );
-    pairlist.update_frequency = md_args.pairlist_update;
+    pairlist.update_frequency = pairlist_update;
     log::debug!(
         "Pairlist update frequency: {} steps",
         pairlist.update_frequency
@@ -776,13 +641,17 @@ fn main() {
     let mut md_sequence = AlgorithmSequence::new();
 
     // 1. Forcefield (bonded + nonbonded forces)
-    let forcefield = Forcefield::new(
+    let mut forcefield = Forcefield::new(
         lj_params,
         crf_params,
         periodicity,
         pairlist,
         pairlist_algorithm,
     );
+    forcefield.ntf_bond = ntf_bond;
+    forcefield.ntf_angle = ntf_angle;
+    forcefield.ntf_improper = ntf_improper;
+    forcefield.ntf_dihedral = ntf_dihedral;
     md_sequence.push(Box::new(forcefield));
 
     // 2. Leap-Frog velocity step (exchange_state + v update)
@@ -791,7 +660,15 @@ fn main() {
     // 3. Leap-Frog position step (r update)
     md_sequence.push(Box::new(LeapFrogPosition::new()));
 
-    // 4. Temperature/kinetic energy calculation
+    // 4. SHAKE constraints (if enabled)
+    if shake_enabled {
+        md_sequence.push(Box::new(ShakeAlgorithm::new(ShakeParameters {
+            tolerance: shake_tolerance,
+            max_iterations: 1000,
+        })));
+    }
+
+    // 5. Temperature/kinetic energy calculation
     md_sequence.push(Box::new(TemperatureCalculation::new()));
 
     // 5. Energy finalization
@@ -801,17 +678,17 @@ fn main() {
     println!();
 
     // Initialize the sequence
-    let mut sim_state = SimulationState::new(md_args.dt, md_args.n_steps);
+    let mut sim_state = SimulationState::new(dt, n_steps);
     md_sequence.init(&topo, &mut conf, &sim_state).unwrap_or_else(|e| {
         eprintln!("Error initializing algorithm sequence: {}", e);
         process::exit(1);
     });
 
-    // Setup thermostat
-    let thermostat_params = if md_args.thermostat == "berendsen" {
+    // Setup thermostat (from MULTIBATH block: tau > 0 means coupling enabled)
+    let thermostat_params = if thermostat_on {
         Some(BerendsenThermostatParameters {
-            target_temperature: md_args.temperature,
-            coupling_time: md_args.tau_t,
+            target_temperature: temperature,
+            coupling_time: thermostat_tau,
         })
     } else {
         None
@@ -824,12 +701,13 @@ fn main() {
         println!();
     }
 
-    // Setup barostat
-    let barostat_params = if md_args.barostat == "berendsen" {
+    // Setup barostat (from PRESSURESCALE block)
+    let barostat_params = if imd.couple_pressure {
+        let pp = imd.pressure_parameters.as_ref();
         Some(BerendsenBarostatParameters {
-            target_pressure: md_args.target_pressure,
-            coupling_time: md_args.tau_p,
-            compressibility: 4.5e-5, // Water compressibility
+            target_pressure: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
+            coupling_time: pp.map(|p| p.tau_p).unwrap_or(0.5),
+            compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
             isotropic: true,
         })
     } else {
@@ -844,9 +722,9 @@ fn main() {
     }
 
     // Setup SHAKE constraints
-    let shake_params = if md_args.shake_enabled {
+    let shake_params = if shake_enabled {
         Some(ShakeParameters {
-            tolerance: md_args.shake_tolerance,
+            tolerance: shake_tolerance,
             max_iterations: 1000,
         })
     } else {
@@ -862,7 +740,7 @@ fn main() {
 
     // Setup trajectory writer
     let mut traj_writer = match TrajectoryWriter::new(
-        &md_args.traj_file,
+        &trc_file,
         "GROMOS-RS MD trajectory",
         false, // velocities
         false, // forces
@@ -875,7 +753,7 @@ fn main() {
     };
 
     // Setup energy writer
-    let mut ene_writer = match EnergyWriter::new(&md_args.ene_file, "GROMOS-RS MD energies") {
+    let mut ene_writer = match EnergyWriter::new(&tre_file, "GROMOS-RS MD energies") {
         Ok(w) => w,
         Err(e) => {
             eprintln!("Error creating energy file: {}", e);
@@ -953,15 +831,15 @@ fn main() {
 
     // MD parameters summary
     println!("MD Parameters:");
-    println!("  Steps:         {}", md_args.n_steps);
-    println!("  Time step:     {} ps", md_args.dt);
+    println!("  Steps:         {}", n_steps);
+    println!("  Time step:     {} ps", dt);
     println!(
         "  Total time:    {} ps",
-        md_args.n_steps as f64 * md_args.dt
+        n_steps as f64 * dt
     );
-    println!("  Temperature:   {} K", md_args.temperature);
-    println!("  Traj output:   {}", md_args.traj_file);
-    println!("  Energy output: {}", md_args.ene_file);
+    println!("  Temperature:   {} K", temperature);
+    println!("  Traj output:   {}", trc_file);
+    println!("  Energy output: {}", tre_file);
     println!();
 
     println!("╔══════════════════════════════════════════════════════════════╗");
@@ -971,8 +849,8 @@ fn main() {
 
     log::info!(
         "Starting MD simulation: {} steps, dt={} ps",
-        md_args.n_steps,
-        md_args.dt
+        n_steps,
+        dt
     );
 
     let start_time = Instant::now();
@@ -988,8 +866,8 @@ fn main() {
     //   5. EnergyCalculation (total energy finalization)
     //
     // TODO: Thermostat, Constraints (SHAKE), Barostat as Algorithm impls
-    for step in 0..=md_args.n_steps {
-        let time = step as f64 * md_args.dt;
+    for step in 0..=n_steps {
+        let time = step as f64 * dt;
 
         log::debug!("Step {}: time = {:.6} ps", step, time);
 
@@ -998,6 +876,15 @@ fn main() {
             eprintln!("Error at step {}: {}", step, e);
             process::exit(1);
         });
+
+        // Debug: dump forces at step 0
+        if step == 0 && md_args.verbose >= 2 {
+            log::debug!("=== Forces at step 0 (old state, after exchange) ===");
+            for i in 0..topo.num_atoms() {
+                let f = conf.old().force[i];
+                log::debug!("  Atom {:2}: ({:18.9}, {:18.9}, {:18.9})", i+1, f.x, f.y, f.z);
+            }
+        }
 
         // Apply GAMD boost if enabled
         if let Some(ref mut gamd) = gamd_params {
@@ -1142,7 +1029,7 @@ fn main() {
         ));
 
         // Log progress
-        if step % md_args.nstlog == 0 {
+        if step % nstlog == 0 {
             println!("Step {:6}  Time: {:8.3} ps  E_pot: {:18.10e}  E_kin: {:18.10e}  E_tot: {:18.10e}  T: {:6.1} K",
                 step, time, state.energies.potential_total, state.energies.kinetic_total,
                 state.energies.total(), temp);
@@ -1155,14 +1042,14 @@ fn main() {
         }
 
         // Write trajectory
-        if step % md_args.nstxout == 0 {
+        if step % nstxout == 0 {
             if let Err(e) = traj_writer.write_frame(step, time, &conf) {
                 eprintln!("Error writing trajectory: {}", e);
             }
         }
 
         // Write energies
-        if step % md_args.nstener == 0 {
+        if step % nstener == 0 {
             let volume = conf.old().box_config.volume();
             let pressure = conf.old().pressure();
             let energies = conf.old().energies.clone();
@@ -1197,7 +1084,7 @@ fn main() {
         sim_state.advance();
     }
 
-    log::info!("MD loop completed - {} steps", md_args.n_steps);
+    log::info!("MD loop completed - {} steps", n_steps);
 
     // Check energy drift
     log::debug!("Checking energy drift over trajectory");
@@ -1216,14 +1103,14 @@ fn main() {
         log::error!("Failed to flush trajectory: {}", e);
         eprintln!("Error flushing trajectory: {}", e);
     } else {
-        log::debug!("Trajectory file finalized: {}", md_args.traj_file);
+        log::debug!("Trajectory file finalized: {}", trc_file);
     }
 
     if let Err(e) = ene_writer.finalize() {
         log::error!("Failed to finalize energy file: {}", e);
         eprintln!("Error finalizing energy file: {}", e);
     } else {
-        log::debug!("Energy file finalized: {}", md_args.ene_file);
+        log::debug!("Energy file finalized: {}", tre_file);
     }
 
     // Finalize GaMD writers if enabled
@@ -1273,20 +1160,20 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
     println!("Statistics:");
-    println!("  Total steps:     {}", md_args.n_steps);
+    println!("  Total steps:     {}", n_steps);
     println!(
         "  Simulation time: {:.3} ps",
-        md_args.n_steps as f64 * md_args.dt
+        n_steps as f64 * dt
     );
     println!("  Wall time:       {:.2} s", elapsed.as_secs_f64());
     println!(
         "  Performance:     {:.1} ns/day",
-        (md_args.n_steps as f64 * md_args.dt * 1e-3) / elapsed.as_secs_f64() * 86400.0
+        (n_steps as f64 * dt * 1e-3) / elapsed.as_secs_f64() * 86400.0
     );
     println!();
     println!("Output files:");
-    println!("  Trajectory: {}", md_args.traj_file);
-    println!("  Energies:   {}", md_args.ene_file);
+    println!("  Trajectory: {}", trc_file);
+    println!("  Energies:   {}", tre_file);
     println!();
     println!("Done!");
 }

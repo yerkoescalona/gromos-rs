@@ -585,7 +585,7 @@ mod tests {
         // Create test configuration
         let mut config = Configuration::new(10, 1, 1);
         config.current_mut().pos = (0..10)
-            .map(|i| Vec3::new(i * 0.1, i * 0.2, i * 0.3))
+            .map(|i| Vec3::new(i as f64 * 0.1, i as f64 * 0.2, i as f64 * 0.3))
             .collect();
         config.current_mut().box_config = SimBox::rectangular(3.0, 3.0, 3.0);
 
@@ -594,7 +594,7 @@ mod tests {
             let mut writer = DcdWriter::new(temp_file, "Test trajectory").unwrap();
             for step in 0..5 {
                 writer
-                    .write_frame(step, step * 0.002, &config)
+                    .write_frame(step, step as f64 * 0.002, &config)
                     .unwrap();
             }
             writer.finish().unwrap();
