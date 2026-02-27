@@ -12,9 +12,9 @@ use gromos_core::math::Periodicity;
 use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
 
-use gromos_forces::bonded::{calculate_bonded_forces, ForceEnergy};
+use gromos_forces::bonded::calculate_bonded_forces_ntf;
 use gromos_forces::nonbonded::{
-    lj_crf_innerloop, rf_excluded_corrections, CRFParameters, ForceStorage,
+    lj_crf_innerloop, rf_excluded_interactions, CRFParameters, ForceStorage,
     LJParameters,
 };
 
@@ -37,6 +37,11 @@ pub struct Forcefield {
     pub use_quartic_bonds: bool,
     /// Whether to run nonbonded in parallel
     pub parallel_nonbonded: bool,
+    /// NTF flags: which bonded terms to include (gromosXX FORCE block)
+    pub ntf_bond: bool,
+    pub ntf_angle: bool,
+    pub ntf_improper: bool,
+    pub ntf_dihedral: bool,
     /// Reusable nonbonded force storage (avoids allocation per step)
     nonbonded_storage: ForceStorage,
     /// Cached pairlist in (u32, u32) format
@@ -63,6 +68,10 @@ impl Forcefield {
             pairlist_algorithm,
             use_quartic_bonds: true,
             parallel_nonbonded: false,
+            ntf_bond: true,
+            ntf_angle: true,
+            ntf_improper: true,
+            ntf_dihedral: true,
             nonbonded_storage: ForceStorage::new(0),
             pairlist_u32: Vec::new(),
             charges: Vec::new(),
@@ -124,8 +133,16 @@ impl Algorithm for Forcefield {
                 .map(|&(i, j)| (i as u32, j as u32)),
         );
 
-        // --- 2. Calculate bonded forces ---
-        let bonded_result = calculate_bonded_forces(topo, conf, self.use_quartic_bonds);
+        // --- 2. Calculate bonded forces (conditional on NTF flags) ---
+        let any_bonded = self.ntf_bond || self.ntf_angle || self.ntf_improper || self.ntf_dihedral;
+        let bonded_result = if any_bonded {
+            calculate_bonded_forces_ntf(
+                topo, conf, self.use_quartic_bonds,
+                self.ntf_bond, self.ntf_angle, self.ntf_dihedral, self.ntf_improper,
+            )
+        } else {
+            gromos_forces::bonded::ForceEnergy::new(n_atoms)
+        };
 
         // --- 3. Calculate nonbonded forces ---
         self.nonbonded_storage.clear();
@@ -141,13 +158,14 @@ impl Algorithm for Forcefield {
             &mut self.nonbonded_storage,
         );
 
-        // RF self-energy and excluded-pair corrections
-        self.nonbonded_storage.e_crf += rf_excluded_corrections(
+        // RF self-energy and excluded-pair Coulomb (energy + forces)
+        rf_excluded_interactions(
             &self.charges,
             &topo.exclusions,
             &conf.current().pos,
             &self.crf_params,
             &self.periodicity,
+            &mut self.nonbonded_storage,
         );
 
         // --- 4. Assemble forces and energies ---
@@ -162,6 +180,11 @@ impl Algorithm for Forcefield {
         state.energies.lj_total = self.nonbonded_storage.e_lj;
         state.energies.crf_total = self.nonbonded_storage.e_crf;
         state.energies.update_potential_total();
+
+        // Debug: show force magnitudes
+        let f_max = state.force.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
+        log::debug!("  Bond: {:.10e}  LJ: {:.10e}  CRF: {:.10e}", bonded_result.energy, self.nonbonded_storage.e_lj, self.nonbonded_storage.e_crf);
+        log::debug!("  Max |force|: {:.10e}, n_pairs: {}", f_max, self.pairlist_u32.len());
 
         Ok(())
     }

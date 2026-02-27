@@ -101,23 +101,20 @@ pub fn shake(
     dt: f64,
     params: &ShakeParameters,
 ) -> ConstraintResult {
-    let dt_sq = dt * dt;
-    let tolerance_sq = params.tolerance * params.tolerance;
+    let tolerance = params.tolerance;
 
-    let mut max_error = std::f64::MAX;
+    // Collect constrained atom indices for velocity correction
+    let mut constrained_atoms = std::collections::HashSet::new();
+
+    let mut converged = false;
     let mut iteration = 0;
 
-    // Get mutable reference to current positions
-    let num_atoms = topo.num_atoms();
-
     // Iterate until convergence or max iterations
-    while iteration < params.max_iterations && max_error > tolerance_sq {
-        max_error = 0.0;
+    while iteration < params.max_iterations && !converged {
+        converged = true;
         iteration += 1;
 
-        // Process each distance constraint
         for bond in &topo.solute.bonds {
-            // Skip if not constrained (constraint length = 0 means no constraint)
             let constraint_length = topo.bond_parameters[bond.bond_type].r0;
             if constraint_length < 1e-10 {
                 continue;
@@ -126,33 +123,30 @@ pub fn shake(
             let i = bond.i;
             let j = bond.j;
 
-            // Target distance squared
-            let d_ij_sq = constraint_length * constraint_length;
-
-            // Current distance vector
-            let r_ij = conf.current().pos[j] - conf.current().pos[i];
-            let r_current_sq = (r_ij.dot(r_ij));
-
-            if r_current_sq < 1e-20 {
-                continue; // Avoid division by zero
-            }
-
-            // Constraint error: how far we are from satisfying the constraint
-            let diff = r_current_sq - d_ij_sq;
-            let error = diff * diff / (d_ij_sq * d_ij_sq);
-
-            if error > max_error {
-                max_error = error;
-            }
-
-            // If this constraint is already satisfied, skip
-            if error < tolerance_sq {
+            // Only constrain bonds involving hydrogen (mass < 2.0)
+            // This corresponds to NTC=1 in GROMOS
+            let mass_i = topo.mass[i];
+            let mass_j = topo.mass[j];
+            if mass_i > 2.0 && mass_j > 2.0 {
                 continue;
             }
 
-            // Old distance vector (for velocity correction)
-            let r_ij_old = conf.old().pos[j] - conf.old().pos[i];
-            let r_ij_dot_r_ij_old = r_ij.dot(r_ij_old);
+            // gromosXX convention: r = pos(i) - pos(j)
+            let r = conf.current().pos[i] - conf.current().pos[j];
+            let dist2 = r.dot(r);
+            let constr_length2 = constraint_length * constraint_length;
+
+            // gromosXX: diff = constr_length2 - dist2
+            let diff = constr_length2 - dist2;
+
+            // gromosXX convergence: fabs(diff) >= constr_length2 * tolerance * 2.0
+            if diff.abs() < constr_length2 * tolerance * 2.0 {
+                continue;
+            }
+
+            // Reference (old) distance vector
+            let ref_r = conf.old().pos[i] - conf.old().pos[j];
+            let sp = ref_r.dot(r);
 
             // Mass weighting
             let inv_mass_i = topo.inverse_mass[i];
@@ -160,35 +154,34 @@ pub fn shake(
             let inv_mass_sum = inv_mass_i + inv_mass_j;
 
             if inv_mass_sum < 1e-20 {
-                continue; // Both masses are infinite (fixed atoms)
+                continue;
             }
 
-            // Lagrange multiplier
-            // λ = (r_current² - d_ij²) / (2 * (1/m_i + 1/m_j) * r_ij · r_ij_old)
-            let denominator = 2.0 * inv_mass_sum * r_ij_dot_r_ij_old;
+            // gromosXX: lambda = diff / (sp * 2.0 * inv_mass_sum)
+            let lambda = diff / (sp * 2.0 * inv_mass_sum);
 
-            if denominator.abs() < 1e-20 {
-                continue; // Avoid division by zero
-            }
+            // Update positions: ref_r *= lambda; pos_i += ref_r * inv_mass_i; pos_j -= ref_r * inv_mass_j
+            let correction = ref_r * lambda;
+            conf.current_mut().pos[i] += correction * inv_mass_i;
+            conf.current_mut().pos[j] -= correction * inv_mass_j;
 
-            let lambda = diff / denominator;
-
-            // Position corrections
-            // Δr_i = -λ * (1/m_i) * r_ij_old
-            // Δr_j = +λ * (1/m_j) * r_ij_old
-            let delta_i = r_ij_old * ((-lambda * inv_mass_i));
-            let delta_j = r_ij_old * ((lambda * inv_mass_j));
-
-            // Apply position corrections
-            conf.current_mut().pos[i] += delta_i;
-            conf.current_mut().pos[j] += delta_j;
+            constrained_atoms.insert(i);
+            constrained_atoms.insert(j);
+            converged = false;
         }
     }
 
+    // gromosXX velocity correction: vel = (pos_new - pos_old) / dt
+    // Done AFTER all SHAKE iterations converge
+    for &atom in &constrained_atoms {
+        conf.current_mut().vel[atom] =
+            (conf.current().pos[atom] - conf.old().pos[atom]) * (1.0 / dt);
+    }
+
     ConstraintResult {
-        converged: max_error <= tolerance_sq,
+        converged,
         iterations: iteration,
-        max_error: max_error.sqrt(),
+        max_error: 0.0,
     }
 }
 

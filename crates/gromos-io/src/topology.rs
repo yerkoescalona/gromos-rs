@@ -9,7 +9,7 @@
 //! - TEMPERATUREGROUPS: temperature coupling groups
 
 use crate::IoError;
-use gromos_core::topology::{Angle, AngleParameters, Bond, BondParameters, LJParameters, Topology};
+use gromos_core::topology::{Angle, AngleParameters, Bond, BondParameters, Dihedral, DihedralParameters, ImproperDihedralParameters, LJParameters, Topology};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -27,6 +27,10 @@ pub struct ParsedTopology {
     pub bond_parameters: Vec<BondParameters>,
     pub angles: Vec<(usize, usize, usize, usize)>, // (i, j, k, type)
     pub angle_parameters: Vec<AngleParameters>,
+    pub proper_dihedrals: Vec<(usize, usize, usize, usize, usize)>, // (i, j, k, l, type)
+    pub dihedral_parameters: Vec<DihedralParameters>,
+    pub improper_dihedrals: Vec<(usize, usize, usize, usize, usize)>, // (i, j, k, l, type)
+    pub improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
     pub lj_parameters: HashMap<(usize, usize), LJParameters>,
     pub temperature_groups: Vec<usize>, // Last atom index of each group
 }
@@ -50,6 +54,10 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     let mut angle_parameters = Vec::new();
     let mut lj_parameters = HashMap::new();
     let mut temperature_groups = Vec::new();
+    let mut proper_dihedrals = Vec::new();
+    let mut dihedral_parameters = Vec::new();
+    let mut improper_dihedrals = Vec::new();
+    let mut improper_dihedral_parameters = Vec::new();
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
@@ -82,6 +90,18 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
             "BONDANGLE" | "BONDANGLEH" => {
                 parse_angles(&mut lines, &mut angles)?;
             },
+            "TORSDIHEDRALTYPE" => {
+                parse_dihedral_types(&mut lines, &mut dihedral_parameters)?;
+            },
+            "DIHEDRAL" | "DIHEDRALH" => {
+                parse_dihedrals(&mut lines, &mut proper_dihedrals)?;
+            },
+            "IMPDIHEDRALTYPE" => {
+                parse_improper_dihedral_types(&mut lines, &mut improper_dihedral_parameters)?;
+            },
+            "IMPDIHEDRAL" | "IMPDIHEDRALH" => {
+                parse_dihedrals(&mut lines, &mut improper_dihedrals)?;
+            },
             "CGPARAMETERS" | "LJPARAMETERS" => {
                 parse_lj_parameters(&mut lines, &mut lj_parameters)?;
             },
@@ -105,6 +125,10 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
         bond_parameters,
         angles,
         angle_parameters,
+        proper_dihedrals,
+        dihedral_parameters,
+        improper_dihedrals,
+        improper_dihedral_parameters,
         lj_parameters,
         temperature_groups,
     })
@@ -159,20 +183,30 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
             masses.push(mass);
             charges.push(charge);
 
-            // Read exclusion list from next line(s)
+            // Exclusion indices are on the SAME line, starting at parts[8]
+            // Format: ATNM MRES PANM IAC MASS CG CGC INE [excl1 excl2 ...]
             let mut atom_exclusions = Vec::new();
-            if n_exclusions > 0 {
-                // Next line contains exclusions
-                if let Some(Ok(excl_line)) = lines.next() {
-                    let excl_parts: Vec<&str> = excl_line.trim().split_whitespace().collect();
-                    for excl in excl_parts.iter().take(n_exclusions) {
-                        if let Ok(excl_idx) = excl.parse::<usize>() {
-                            atom_exclusions.push(excl_idx);
-                        }
+            for idx in 8..8 + n_exclusions {
+                if idx < parts.len() {
+                    if let Ok(excl_idx) = parts[idx].parse::<usize>() {
+                        // Convert from 1-based (GROMOS topology) to 0-based
+                        atom_exclusions.push(excl_idx - 1);
                     }
                 }
             }
             exclusions.push(atom_exclusions);
+
+            // Skip the INE14 line (1-4 pairs) — always present after each atom
+            // Format: INE14 [pair1 pair2 ...]
+            // We consume it but don't use it (1-4 pairs are built from dihedrals)
+            while let Some(Ok(next_line)) = lines.next() {
+                let next_trimmed = next_line.trim();
+                if next_trimmed.is_empty() || next_trimmed.starts_with('#') {
+                    continue;
+                }
+                // This is the INE14 line, consumed and discarded
+                break;
+            }
         }
     }
 
@@ -376,6 +410,99 @@ fn parse_angles<I: Iterator<Item = Result<String, std::io::Error>>>(
     Ok(())
 }
 
+fn parse_dihedrals<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    dihedrals: &mut Vec<(usize, usize, usize, usize, usize)>,
+) -> Result<(), IoError> {
+    let mut n_dihedrals = 0;
+
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+        if trimmed == "END" { break; }
+
+        if n_dihedrals == 0 {
+            n_dihedrals = trimmed.parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid dihedral count: {}", trimmed)))?;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 5 {
+            let i: usize = parts[0].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[0])))?;
+            let j: usize = parts[1].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[1])))?;
+            let k: usize = parts[2].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[2])))?;
+            let l: usize = parts[3].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[3])))?;
+            let dtype: usize = parts[4].parse().map_err(|_| IoError::ParseError(format!("Invalid type: {}", parts[4])))?;
+            dihedrals.push((i - 1, j - 1, k - 1, l - 1, dtype - 1));
+        }
+    }
+    Ok(())
+}
+
+fn parse_dihedral_types<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    params: &mut Vec<DihedralParameters>,
+) -> Result<(), IoError> {
+    let mut n_types = 0;
+
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+        if trimmed == "END" { break; }
+
+        if n_types == 0 {
+            n_types = trimmed.parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid dihedral type count: {}", trimmed)))?;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 3 {
+            let cp: f64 = parts[0].parse().map_err(|_| IoError::ParseError(format!("Invalid CP: {}", parts[0])))?;
+            let pd: f64 = parts[1].parse().map_err(|_| IoError::ParseError(format!("Invalid PD: {}", parts[1])))?;
+            let np: i32 = parts[2].parse().map_err(|_| IoError::ParseError(format!("Invalid NP: {}", parts[2])))?;
+            params.push(DihedralParameters {
+                k: cp,
+                pd: pd * std::f64::consts::PI / 180.0,
+                cospd: (pd * std::f64::consts::PI / 180.0).cos(),
+                m: np,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn parse_improper_dihedral_types<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    params: &mut Vec<ImproperDihedralParameters>,
+) -> Result<(), IoError> {
+    let mut n_types = 0;
+
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+        if trimmed == "END" { break; }
+
+        if n_types == 0 {
+            n_types = trimmed.parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid improper type count: {}", trimmed)))?;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let cq: f64 = parts[0].parse().map_err(|_| IoError::ParseError(format!("Invalid CQ: {}", parts[0])))?;
+            let q0: f64 = parts[1].parse().map_err(|_| IoError::ParseError(format!("Invalid Q0: {}", parts[1])))?;
+            params.push(ImproperDihedralParameters {
+                q0: q0 * std::f64::consts::PI / 180.0, // Convert to radians
+                k: cq,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn parse_lj_parameters<I: Iterator<Item = Result<String, std::io::Error>>>(
     lines: &mut I,
     lj_params: &mut HashMap<(usize, usize), LJParameters>,
@@ -532,6 +659,22 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     }
 
     topo.angle_parameters = parsed.angle_parameters;
+
+    // Build proper dihedrals
+    for (i, j, k, l, dihedral_type) in parsed.proper_dihedrals {
+        topo.solute.proper_dihedrals.push(Dihedral {
+            i, j, k, l, dihedral_type,
+        });
+    }
+    topo.dihedral_parameters = parsed.dihedral_parameters;
+
+    // Build improper dihedrals
+    for (i, j, k, l, dihedral_type) in parsed.improper_dihedrals {
+        topo.solute.improper_dihedrals.push(Dihedral {
+            i, j, k, l, dihedral_type,
+        });
+    }
+    topo.improper_dihedral_parameters = parsed.improper_dihedral_parameters;
 
     // Build LJ parameter matrix (1-indexed: lj_parameters[iac][jac])
     // IAC values in topology files are 1-based, so matrix size is max_iac + 1

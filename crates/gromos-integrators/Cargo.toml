@@ -20,6 +20,9 @@ rayon = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 
+# Logging
+log = { workspace = true }
+
 # Serialization
 serde = { workspace = true, optional = true }
 

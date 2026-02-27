@@ -16,6 +16,9 @@ wide = { workspace = true }
 # Parallelism
 rayon = { workspace = true }
 
+# Logging
+log = { workspace = true }
+
 # FFT for PME electrostatics
 rustfft = { workspace = true }
 fftw = { workspace = true, optional = true }
