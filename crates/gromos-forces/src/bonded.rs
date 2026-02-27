@@ -125,25 +125,17 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
         }
 
         let params = &topo.bond_parameters[bond.bond_type];
-        let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let r = r_vec.length();
-
-        if r < 1e-10 {
-            // Avoid division by zero
-            continue;
-        }
+        // gromosXX convention: v = pos(i) - pos(j)
+        let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
 
         // Energy: V = (1/4) * k * (r^2 - r0^2)^2
-        let r2 = r * r;
+        let r2 = r_vec.length_squared();
         let r0_2 = params.r0 * params.r0;
         let dr2 = r2 - r0_2;
         let energy = 0.25 * params.k_quartic * dr2 * dr2;
 
-        // Force magnitude: dV/dr = k * (r^2 - r0^2) * r
-        let f_magnitude = params.k_quartic * dr2 * r;
-
-        // Force vector: F = -f_magnitude * r_vec/r
-        let force = r_vec * (-f_magnitude / r);
+        // Force: f = -K * (r^2 - r0^2) * v  (gromosXX convention)
+        let force = r_vec * (-params.k_quartic * dr2);
 
         result.energy += energy;
         result.forces[bond.i] += force;
@@ -166,7 +158,8 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
         }
 
         let params = &topo.bond_parameters[bond.bond_type];
-        let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
+        // gromosXX convention: v = pos(i) - pos(j)
+        let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
         let r = r_vec.length();
 
         if r < 1e-10 {
@@ -177,9 +170,8 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
         let dr = r - params.r0;
         let energy = 0.5 * params.k_harmonic * dr * dr;
 
-        // Force: F = -k * (r - r0) * r_vec/r
-        let f_magnitude = params.k_harmonic * dr;
-        let force = r_vec * (-f_magnitude / r);
+        // Force: f = -k * (r - r0) * v/|v|  (gromosXX convention)
+        let force = r_vec * (-params.k_harmonic * dr / r);
 
         result.energy += energy;
         result.forces[bond.i] += force;
@@ -214,7 +206,8 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
             continue;
         }
 
-        let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
+        // gromosXX convention: v = pos(i) - pos(j)
+        let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
         let r = r_vec.length();
 
         if r < 1e-10 {
@@ -265,48 +258,32 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
 
         let params = &topo.angle_parameters[angle.angle_type];
 
-        // Vectors: i->j and k->j (both point to central atom j)
-        let r_ij = conf.current().pos[angle.j] - conf.current().pos[angle.i];
-        let r_kj = conf.current().pos[angle.j] - conf.current().pos[angle.k];
+        // gromosXX convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
+        let rij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
+        let rkj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
 
-        let len_ij = r_ij.length();
-        let len_kj = r_kj.length();
+        let dij = rij.length();
+        let dkj = rkj.length();
 
-        if len_ij < 1e-10 || len_kj < 1e-10 {
+        if dij < 1e-10 || dkj < 1e-10 {
             continue;
         }
 
-        // cos(θ) = r_ij · r_kj / (|r_ij| |r_kj|)
-        let cos_theta = (r_ij.dot(r_kj) / (len_ij * len_kj)).clamp(-1.0, 1.0);
-        let cos_theta0 = params.theta0.cos();
+        let cost = (rij.dot(rkj) / (dij * dkj)).clamp(-1.0, 1.0);
+        let cos0 = params.theta0.cos();
 
-        // Energy: V = (1/2) * k * (cos(θ) - cos(θ0))^2
-        let d_cos = cos_theta - cos_theta0;
+        // Energy: V = (1/2) * K * (cos(θ) - cos(θ0))^2
+        let d_cos = cost - cos0;
         let energy = 0.5 * params.k_cosine * d_cos * d_cos;
 
-        // Force calculation using chain rule
-        // F = -dV/dcos(θ) * dcos(θ)/dr
-        let dV_dcos = params.k_cosine * d_cos;
+        // Force: gromosXX convention (angle_interaction.cc)
+        // df = -K * (cos(θ) - cos(θ0))
+        // fi = df/dij * (rkj/dkj - rij/dij * cos(θ))
+        // fk = df/dkj * (rij/dij - rkj/dkj * cos(θ))
+        let df = -params.k_cosine * d_cos;
 
-        // Derivatives of cos(θ) with respect to positions
-        // d(cos θ)/dr_i = (r_kj / (|r_ij| |r_kj|)) - cos(θ) * r_ij / |r_ij|^2
-        // d(cos θ)/dr_k = (r_ij / (|r_ij| |r_kj|)) - cos(θ) * r_kj / |r_kj|^2
-
-        let inv_len_ij = 1.0 / len_ij;
-        let inv_len_kj = 1.0 / len_kj;
-        let inv_len_prod = inv_len_ij * inv_len_kj;
-
-        // Force on atom i
-        let dcos_dri =
-            r_kj * (inv_len_prod) - r_ij * ((cos_theta * inv_len_ij * inv_len_ij));
-        let f_i = dcos_dri * (-dV_dcos);
-
-        // Force on atom k
-        let dcos_drk =
-            r_ij * (inv_len_prod) - r_kj * ((cos_theta * inv_len_kj * inv_len_kj));
-        let f_k = dcos_drk * (-dV_dcos);
-
-        // Force on atom j (central atom): F_j = -(F_i + F_k)
+        let f_i = (rkj * (1.0 / dkj) - rij * (cost / dij)) * (df / dij);
+        let f_k = (rij * (1.0 / dij) - rkj * (cost / dkj)) * (df / dkj);
         let f_j = -(f_i + f_k);
 
         result.energy += energy;
@@ -341,9 +318,9 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
 
         let params = &topo.angle_parameters[angle.angle_type];
 
-        // Get position vectors (point from outer atoms to central atom j)
-        let r_ij = conf.current().pos[angle.j] - conf.current().pos[angle.i];
-        let r_kj = conf.current().pos[angle.j] - conf.current().pos[angle.k];
+        // gromosXX convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
+        let r_ij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
+        let r_kj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
 
         let d_ij = r_ij.length();
         let d_kj = r_kj.length();
@@ -435,10 +412,10 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
 
         let params = &topo.dihedral_parameters[dihedral.dihedral_type];
 
-        // Get position vectors (applying PBC if needed)
-        let r_ij = conf.current().pos[dihedral.j] - conf.current().pos[dihedral.i];
-        let r_kj = conf.current().pos[dihedral.j] - conf.current().pos[dihedral.k];
-        let r_kl = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.k];
+        // gromosXX convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
+        let r_ij = conf.current().pos[dihedral.i] - conf.current().pos[dihedral.j];
+        let r_kj = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.j];
+        let r_kl = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.l];
 
         // Cross products to get plane normals
         let r_mj = r_ij.cross(r_kj); // normal to plane i-j-k
@@ -536,10 +513,10 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
 
         let params = &topo.improper_dihedral_parameters[improper.dihedral_type];
 
-        // Get position vectors
-        let r_kj = conf.current().pos[improper.j] - conf.current().pos[improper.k];
-        let r_ij = conf.current().pos[improper.j] - conf.current().pos[improper.i];
-        let r_kl = conf.current().pos[improper.l] - conf.current().pos[improper.k];
+        // gromosXX convention: rkj = pos(k)-pos(j), rij = pos(i)-pos(j), rkl = pos(k)-pos(l)
+        let r_kj = conf.current().pos[improper.k] - conf.current().pos[improper.j];
+        let r_ij = conf.current().pos[improper.i] - conf.current().pos[improper.j];
+        let r_kl = conf.current().pos[improper.k] - conf.current().pos[improper.l];
 
         // Cross products
         let r_mj = r_ij.cross(r_kj);
@@ -632,10 +609,10 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
 
         let params = &topo.dihedral_parameters[dihedral.dihedral_type];
 
-        // Get position vectors
-        let r_ij = conf.current().pos[dihedral.j] - conf.current().pos[dihedral.i];
-        let r_kj = conf.current().pos[dihedral.j] - conf.current().pos[dihedral.k];
-        let r_kl = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.k];
+        // gromosXX convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
+        let r_ij = conf.current().pos[dihedral.i] - conf.current().pos[dihedral.j];
+        let r_kj = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.j];
+        let r_kl = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.l];
 
         // Cross products to get plane normals
         let r_mj = r_ij.cross(r_kj); // normal to plane i-j-k
@@ -875,27 +852,62 @@ pub fn calculate_bonded_forces(
     conf: &Configuration,
     use_quartic_bonds: bool,
 ) -> ForceEnergy {
+    calculate_bonded_forces_ntf(topo, conf, use_quartic_bonds, true, true, true, true)
+}
+
+/// Calculate bonded forces with NTF flags controlling which terms are included.
+///
+/// Matches gromosXX FORCE block NTF(1..4):
+/// - ntf_bond: include bond stretching
+/// - ntf_angle: include bond angle bending
+/// - ntf_dihedral: include proper dihedrals
+/// - ntf_improper: include improper dihedrals
+pub fn calculate_bonded_forces_ntf(
+    topo: &Topology,
+    conf: &Configuration,
+    use_quartic_bonds: bool,
+    ntf_bond: bool,
+    ntf_angle: bool,
+    ntf_dihedral: bool,
+    ntf_improper: bool,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     // Bonds
-    let bond_forces = if use_quartic_bonds {
-        calculate_bond_forces_quartic(topo, conf)
-    } else {
-        calculate_bond_forces_harmonic(topo, conf)
-    };
-    result.add(&bond_forces);
+    if ntf_bond {
+        let bond_forces = if use_quartic_bonds {
+            calculate_bond_forces_quartic(topo, conf)
+        } else {
+            calculate_bond_forces_harmonic(topo, conf)
+        };
+        log::debug!("  bonded: bond={:.6e}", bond_forces.energy);
+        result.add(&bond_forces);
+    }
 
     // Angles
-    let angle_forces = calculate_angle_forces(topo, conf);
-    result.add(&angle_forces);
+    if ntf_angle {
+        let angle_forces = calculate_angle_forces(topo, conf);
+        log::debug!("  bonded: angle={:.6e}", angle_forces.energy);
+        result.add(&angle_forces);
+    }
 
     // Proper dihedrals
-    let dihedral_forces = calculate_dihedral_forces(topo, conf);
-    result.add(&dihedral_forces);
+    if ntf_dihedral {
+        let dihedral_forces = calculate_dihedral_forces(topo, conf);
+        log::debug!("  bonded: dihe={:.6e}", dihedral_forces.energy);
+        result.add(&dihedral_forces);
+    }
 
     // Improper dihedrals
-    let improper_forces = calculate_improper_dihedral_forces(topo, conf);
-    result.add(&improper_forces);
+    if ntf_improper {
+        let improper_forces = calculate_improper_dihedral_forces(topo, conf);
+        log::debug!("  bonded: impr={:.6e}", improper_forces.energy);
+        result.add(&improper_forces);
+    }
+
+    log::debug!("  bonded total={:.6e}", result.energy);
+    let max_bf = result.forces.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
+    log::debug!("  bonded max|f|={:.6e}", max_bf);
 
     result
 }
@@ -936,8 +948,8 @@ pub fn calculate_perturbed_bond_forces(
         let k = (1.0 - lambda) * params_a.k_harmonic + lambda * params_b.k_harmonic;
         let r0 = (1.0 - lambda) * params_a.r0 + lambda * params_b.r0;
 
-        // Compute bond vector and distance
-        let r_vec = conf.current().pos[bond.j] - conf.current().pos[bond.i];
+        // gromosXX convention: v = pos(i) - pos(j)
+        let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
         let r_sq = (r_vec.length_squared()).max(1e-10);
         let r = r_sq.sqrt();
 
@@ -1003,9 +1015,9 @@ pub fn calculate_perturbed_angle_forces(
         let j = angle.j;
         let k_atom = angle.k;
 
-        // Get vectors
-        let r_ij = conf.current().pos[j] - conf.current().pos[i];
-        let r_kj = conf.current().pos[j] - conf.current().pos[k_atom];
+        // gromosXX convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j)
+        let r_ij = conf.current().pos[i] - conf.current().pos[j];
+        let r_kj = conf.current().pos[k_atom] - conf.current().pos[j];
 
         let r_ij_len_sq = (r_ij.length_squared()).max(1e-10);
         let r_kj_len_sq = (r_kj.length_squared()).max(1e-10);

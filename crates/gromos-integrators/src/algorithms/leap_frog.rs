@@ -67,6 +67,10 @@ impl Algorithm for LeapFrogVelocity {
             }
         }
 
+        let max_f = conf.old().force.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
+        let max_v = conf.current().vel.iter().map(|v| v.length()).fold(0.0_f64, f64::max);
+        log::debug!("  max|f_old|={:.6e}  max|v_new|={:.6e}", max_f, max_v);
+
         Ok(())
     }
 
@@ -125,6 +129,11 @@ impl Algorithm for LeapFrogPosition {
                     conf.old().pos[i] + conf.current().vel[i] * dt;
             }
         }
+
+        let max_dr = (0..n_atoms)
+            .map(|i| (conf.current().pos[i] - conf.old().pos[i]).length())
+            .fold(0.0_f64, f64::max);
+        log::debug!("  max|dr|={:.6e}", max_dr);
 
         Ok(())
     }

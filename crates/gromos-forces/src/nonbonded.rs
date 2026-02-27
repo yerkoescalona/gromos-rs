@@ -71,33 +71,53 @@ impl CRFParameters {
 /// * `positions` - Current atomic positions
 /// * `crf` - CRF parameters
 /// * `boundary` - Boundary condition for nearest-image calculation
-pub fn rf_excluded_corrections<BC: BoundaryCondition>(
+/// Calculate reaction-field excluded-pair corrections (energy + forces).
+///
+/// In gromosXX, excluded atom pairs (bonded neighbours) are removed from the
+/// pairlist.  With `NSLFEXCL=1` (default), they receive only the RF
+/// **correction** — NOT the full Coulomb 1/r term.  This matches gromosXX
+/// `rf_interaction()` in `nonbonded_term.cc`:
+///
+///   Force  = q_prod * FPEPSI * crf_cut3i * r_vec
+///   Energy = q_prod * FPEPSI * (-crf_2cut3i * r² - crf_cut)
+///
+/// 1. **Atomic self-term** (energy only):
+///    `E_self = -0.5 * qi^2 * FPEPSI * crf_cut`
+///
+/// 2. **Excluded-pair RF correction** (energy + forces):
+///    `E = q_ij * FPEPSI * (-crf_2cut3i * r² - crf_cut)`
+///    `F = q_ij * FPEPSI * crf_cut3i * r`
+pub fn rf_excluded_interactions<BC: BoundaryCondition>(
     charges: &[f64],
     exclusions: &[std::collections::HashSet<usize>],
     positions: &[Vec3],
     crf: &CRFParameters,
     boundary: &BC,
-) -> f64 {
-    let mut energy = 0.0_f64;
-
-    // Self term: -0.5 * qi^2 * FPEPSI * crf_cut  for each atom
+    storage: &mut ForceStorage,
+) {
+    // Self term: -0.5 * qi^2 * FPEPSI * crf_cut  for each atom (energy only)
     for &q in charges.iter() {
-        energy += -0.5 * q * q * FOUR_PI_EPS_I * crf.crf_cut;
+        storage.e_crf += -0.5 * q * q * FOUR_PI_EPS_I * crf.crf_cut;
     }
 
-    // Excluded pair term: qi*qj * FPEPSI * (-crf_2cut3i * r_ij^2 - crf_cut)
+    // Excluded pair RF correction (energy + forces) — NO 1/r term
     for i in 0..charges.len() {
         for &j in exclusions[i].iter() {
             if j > i {
                 let r = boundary.nearest_image(positions[i], positions[j]);
                 let r2 = r.length_squared();
                 let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
-                energy += q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
+
+                // Energy: q_prod * (-crf_2cut3i * r² - crf_cut)
+                storage.e_crf += q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
+
+                // Force: q_prod * crf_cut3i * r_vec
+                let force = r * (q_prod * crf.crf_cut3i);
+                storage.forces[i] += force;
+                storage.forces[j] -= force;
             }
         }
     }
-
-    energy
 }
 
 /// Storage for forces and energies

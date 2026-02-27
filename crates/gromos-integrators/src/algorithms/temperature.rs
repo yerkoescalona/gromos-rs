@@ -52,6 +52,7 @@ impl Algorithm for TemperatureCalculation {
             e_kin += 0.5 * m * (v_new.length_squared() + v_old.length_squared()) / 2.0;
         }
         conf.old_mut().energies.kinetic_total = e_kin;
+        log::debug!("  E_kin={:.10e}", e_kin);
         Ok(())
     }
 
