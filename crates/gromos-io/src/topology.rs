@@ -15,6 +15,23 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+/// Parsed solvent atom template
+#[derive(Debug, Clone)]
+pub struct ParsedSolventAtom {
+    pub iac: usize,
+    pub name: String,
+    pub mass: f64,
+    pub charge: f64,
+}
+
+/// Parsed solvent constraint
+#[derive(Debug, Clone)]
+pub struct ParsedSolventConstraint {
+    pub i: usize, // 0-indexed within solvent molecule
+    pub j: usize,
+    pub length: f64,
+}
+
 /// Parsed topology data from GROMOS .topo file
 #[derive(Debug)]
 pub struct ParsedTopology {
@@ -22,6 +39,7 @@ pub struct ParsedTopology {
     pub masses: Vec<f64>,
     pub charges: Vec<f64>,
     pub iac: Vec<usize>,
+    pub chargegroup_codes: Vec<usize>, // CGC values: 1 = end of chargegroup
     pub exclusions: Vec<Vec<usize>>,
     pub bonds: Vec<(usize, usize, usize)>, // (i, j, type)
     pub bond_parameters: Vec<BondParameters>,
@@ -33,6 +51,8 @@ pub struct ParsedTopology {
     pub improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
     pub lj_parameters: HashMap<(usize, usize), LJParameters>,
     pub temperature_groups: Vec<usize>, // Last atom index of each group
+    pub solvent_atoms: Vec<ParsedSolventAtom>,
+    pub solvent_constraints: Vec<ParsedSolventConstraint>,
 }
 
 /// Read GROMOS topology file
@@ -47,6 +67,7 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     let mut masses = Vec::new();
     let mut charges = Vec::new();
     let mut iac = Vec::new();
+    let mut chargegroup_codes = Vec::new();
     let mut exclusions = Vec::new();
     let mut bonds = Vec::new();
     let mut bond_parameters = Vec::new();
@@ -58,6 +79,8 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     let mut dihedral_parameters = Vec::new();
     let mut improper_dihedrals = Vec::new();
     let mut improper_dihedral_parameters = Vec::new();
+    let mut solvent_atoms = Vec::new();
+    let mut solvent_constraints = Vec::new();
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
@@ -75,6 +98,7 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
                     &mut masses,
                     &mut charges,
                     &mut iac,
+                    &mut chargegroup_codes,
                     &mut exclusions,
                 )?;
             },
@@ -108,6 +132,12 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
             "TEMPERATUREGROUPS" => {
                 parse_temperature_groups(&mut lines, &mut temperature_groups)?;
             },
+            "SOLVENTATOM" => {
+                parse_solventatom(&mut lines, &mut solvent_atoms)?;
+            },
+            "SOLVENTCONSTR" => {
+                parse_solventconstr(&mut lines, &mut solvent_constraints)?;
+            },
             _ => {
                 // Skip unknown blocks
                 continue;
@@ -120,6 +150,7 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
         masses,
         charges,
         iac,
+        chargegroup_codes,
         exclusions,
         bonds,
         bond_parameters,
@@ -131,6 +162,8 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
         improper_dihedral_parameters,
         lj_parameters,
         temperature_groups,
+        solvent_atoms,
+        solvent_constraints,
     })
 }
 
@@ -140,6 +173,7 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
     masses: &mut Vec<f64>,
     charges: &mut Vec<f64>,
     iac: &mut Vec<usize>,
+    chargegroup_codes: &mut Vec<usize>,
     exclusions: &mut Vec<Vec<usize>>,
 ) -> Result<(), IoError> {
     // First line after SOLUTEATOM is atom count
@@ -175,6 +209,9 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
             let charge: f64 = parts[5]
                 .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid charge: {}", parts[5])))?;
+            let cgc: usize = parts[6]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid CGC: {}", parts[6])))?;
             let n_exclusions: usize = parts[7].parse().map_err(|_| {
                 IoError::ParseError(format!("Invalid exclusion count: {}", parts[7]))
             })?;
@@ -182,6 +219,7 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
             iac.push(atom_iac);
             masses.push(mass);
             charges.push(charge);
+            chargegroup_codes.push(cgc);
 
             // Exclusion indices are on the SAME line, starting at parts[8]
             // Format: ATNM MRES PANM IAC MASS CG CGC INE [excl1 excl2 ...]
@@ -594,19 +632,98 @@ fn parse_temperature_groups<I: Iterator<Item = Result<String, std::io::Error>>>(
     Ok(())
 }
 
-/// Convert ParsedTopology to Topology
-pub fn build_topology(parsed: ParsedTopology) -> Topology {
-    let mut topo = Topology::new();
+fn parse_solventatom<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    solvent_atoms: &mut Vec<ParsedSolventAtom>,
+) -> Result<(), IoError> {
+    let mut nram: usize = 0;
 
-    // Populate both flat arrays and solute.atoms for compatibility
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+        if trimmed == "END" { break; }
+
+        if nram == 0 {
+            nram = trimmed.parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid NRAM: {}", trimmed)))?;
+            if nram == 0 { break; }
+            continue;
+        }
+
+        // Format: I ANMS IACS MASS CGS
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 5 {
+            let atom_iac: usize = parts[2].parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid solvent IAC: {}", parts[2])))?;
+            let mass: f64 = parts[3].parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid solvent mass: {}", parts[3])))?;
+            let charge: f64 = parts[4].parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid solvent charge: {}", parts[4])))?;
+            solvent_atoms.push(ParsedSolventAtom {
+                iac: atom_iac,
+                name: parts[1].to_string(),
+                mass,
+                charge,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn parse_solventconstr<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    constraints: &mut Vec<ParsedSolventConstraint>,
+) -> Result<(), IoError> {
+    let mut ncons: usize = 0;
+
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+        if trimmed == "END" { break; }
+
+        if ncons == 0 {
+            ncons = trimmed.parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid NCONS: {}", trimmed)))?;
+            if ncons == 0 { break; }
+            continue;
+        }
+
+        // Format: ICONS JCONS CONS
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 3 {
+            let i: usize = parts[0].parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid ICONS: {}", parts[0])))?;
+            let j: usize = parts[1].parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid JCONS: {}", parts[1])))?;
+            let length: f64 = parts[2].parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid CONS: {}", parts[2])))?;
+            constraints.push(ParsedSolventConstraint {
+                i: i - 1, // 0-indexed within molecule
+                j: j - 1,
+                length,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Convert ParsedTopology to Topology.
+///
+/// Builds solute topology and stores the solvent template.
+/// To expand solvent molecules, call `topo.solvate(nsm)` afterwards
+/// (gromosXX convention: NSM comes from the IMD SYSTEM block).
+pub fn build_topology(parsed: ParsedTopology) -> Topology {
+    use gromos_core::topology::{Atom, ChargeGroup, SolventAtomTemplate, SolventConstraintTemplate};
+
+    let mut topo = Topology::new();
+    let n_solute = parsed.n_atoms;
+
+    // --- Populate solute atoms ---
     topo.mass = parsed.masses.clone();
     topo.charge = parsed.charges.clone();
     topo.iac = parsed.iac.clone();
-    topo.compute_inverse_masses();
 
-    // Populate solute.atoms as well (needed for num_atoms())
-    use gromos_core::topology::Atom;
-    for i in 0..parsed.n_atoms {
+    for i in 0..n_solute {
         topo.solute.atoms.push(Atom {
             name: format!("ATOM{}", i + 1),
             residue_nr: 1,
@@ -620,14 +737,63 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         });
     }
 
-    // Initialize exclusions for each atom
-    topo.exclusions = vec![std::collections::HashSet::new(); parsed.n_atoms];
+    // --- Store solvent template (expanded later by topo.solvate(nsm)) ---
+    for sa in &parsed.solvent_atoms {
+        topo.solvent_atom_template.push(SolventAtomTemplate {
+            iac: sa.iac,
+            name: sa.name.clone(),
+            mass: sa.mass,
+            charge: sa.charge,
+        });
+    }
+    for sc in &parsed.solvent_constraints {
+        topo.solvent_constraint_template.push(SolventConstraintTemplate {
+            i: sc.i,
+            j: sc.j,
+            length: sc.length,
+        });
+    }
 
-    // Build exclusions
+    topo.compute_inverse_masses();
+
+    // --- Store chargegroup codes and build solute chargegroups ---
+    topo.chargegroup_codes = parsed.chargegroup_codes.clone();
+    {
+        let mut current_cg_atoms = Vec::new();
+        for i in 0..n_solute {
+            current_cg_atoms.push(i);
+            let cgc = if i < parsed.chargegroup_codes.len() {
+                parsed.chargegroup_codes[i]
+            } else {
+                1 // default: each atom is its own chargegroup
+            };
+            if cgc == 1 {
+                topo.chargegroups.push(ChargeGroup { atoms: current_cg_atoms.clone() });
+                current_cg_atoms.clear();
+            }
+        }
+        if !current_cg_atoms.is_empty() {
+            topo.chargegroups.push(ChargeGroup { atoms: current_cg_atoms });
+        }
+
+        // Build atom_to_chargegroup mapping (solute only at this point)
+        topo.atom_to_chargegroup = vec![0; n_solute];
+        for (cg_idx, cg) in topo.chargegroups.iter().enumerate() {
+            for &atom in &cg.atoms {
+                if atom < n_solute {
+                    topo.atom_to_chargegroup[atom] = cg_idx;
+                }
+            }
+        }
+    }
+
+    // --- Initialize exclusions for solute atoms ---
+    topo.exclusions = vec![std::collections::HashSet::new(); n_solute];
+
     for (i, excl_list) in parsed.exclusions.iter().enumerate() {
         for &j in excl_list {
             topo.exclusions[i].insert(j);
-            if j < topo.num_atoms() {
+            if j < n_solute {
                 topo.exclusions[j].insert(i);
             }
         }
@@ -636,8 +802,6 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // Build bonds
     for (i, j, bond_type) in parsed.bonds {
         topo.solute.bonds.push(Bond { i, j, bond_type });
-
-        // Add bond exclusions (atoms bonded are excluded)
         topo.exclusions[i].insert(j);
         topo.exclusions[j].insert(i);
     }
@@ -647,13 +811,8 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // Build angles
     for (i, j, k, angle_type) in parsed.angles {
         topo.solute.angles.push(Angle {
-            i,
-            j,
-            k,
-            angle_type,
+            i, j, k, angle_type,
         });
-
-        // Add 1-3 exclusions (i-j-k angle: i and k are excluded)
         topo.exclusions[i].insert(k);
         topo.exclusions[k].insert(i);
     }
@@ -676,22 +835,24 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     }
     topo.improper_dihedral_parameters = parsed.improper_dihedral_parameters;
 
-    // Build LJ parameter matrix (1-indexed: lj_parameters[iac][jac])
-    // IAC values in topology files are 1-based, so matrix size is max_iac + 1
-    let max_iac = topo.iac.iter().max().copied().unwrap_or(0);
+    // Build LJ parameter matrix
+    let max_iac = topo.iac.iter()
+        .chain(topo.solvent_atom_template.iter().map(|sa| &sa.iac))
+        .max().copied().unwrap_or(0);
     let n_types = max_iac + 1;
     topo.lj_parameters = vec![vec![LJParameters::default(); n_types]; n_types];
 
     for ((iac, jac), params) in parsed.lj_parameters {
         if iac < n_types && jac < n_types {
             topo.lj_parameters[iac][jac] = params;
-            topo.lj_parameters[jac][iac] = params; // Symmetric
+            topo.lj_parameters[jac][iac] = params;
             log::debug!("LJ params[{}][{}]: c6={:.6e}, c12={:.6e}", iac, jac, params.c6, params.c12);
         }
     }
 
-    log::debug!("Built topology: {} atoms, {} atom types, LJ matrix {}x{}",
-        topo.num_atoms(), n_types, n_types, n_types);
+    log::debug!("Built topology: {} solute atoms, {} chargegroups, LJ {}x{}, solvent template: {} atoms",
+        n_solute, topo.chargegroups.len(), n_types, n_types,
+        topo.solvent_atom_template.len());
 
     topo
 }

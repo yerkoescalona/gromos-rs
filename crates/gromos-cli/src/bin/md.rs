@@ -335,7 +335,9 @@ fn main() {
     let trc_file = md_args.trc_file.clone().unwrap_or_else(|| "md.trc".to_string());
     let tre_file = md_args.tre_file.clone().unwrap_or_else(|| "md.tre".to_string());
 
-    // === Load topology ===
+    // === gromosXX initialization order: parameters → topology → coordinates ===
+
+    // === 1. Load topology (read_topology) ===
     println!("Loading topology: {}", md_args.topo_file);
     log::debug!("Reading topology file: {}", md_args.topo_file);
     let _timer = Timer::new("Topology loading");
@@ -349,14 +351,22 @@ fn main() {
         },
     };
 
-    log::debug!("Building topology data structures");
-    let topo = build_topology(topo_data);
+    // gromosXX convention: read_topology() then topo.solvate(0, nsm)
+    let mut topo = build_topology(topo_data);
+    topo.solvate(imd.nsm);
 
-    println!("  Atoms: {}", topo.num_atoms());
+    println!("  Solute atoms: {}", topo.solute.num_atoms());
+    if !topo.solvents.is_empty() {
+        let sv = &topo.solvents[0];
+        println!("  Solvent: {} molecules × {} atoms = {} atoms",
+            sv.num_molecules, sv.atoms_per_molecule(), sv.total_atoms());
+    }
+    println!("  Total atoms: {}", topo.num_atoms());
     println!("  Bonds: {}", topo.solute.bonds.len());
     println!("  Angles: {}", topo.solute.angles.len());
     println!("  Dihedrals: {}", topo.solute.proper_dihedrals.len());
     println!("  Impropers: {}", topo.solute.improper_dihedrals.len());
+    println!("  Chargegroups: {}", topo.chargegroups.len());
     println!();
 
     // Validate topology
@@ -377,7 +387,7 @@ fn main() {
         log::debug!("Topology validation passed");
     }
 
-    // === Load coordinates (using gromos-io) ===
+    // === 2. Load coordinates (read_configuration) ===
     println!("Loading coordinates: {}", md_args.conf_file);
     log::debug!("Reading coordinate file: {}", md_args.conf_file);
     let _timer = Timer::new("Coordinate loading");
@@ -412,6 +422,7 @@ fn main() {
     });
     println!();
 
+    // check_configuration: atom count must match
     if positions.len() != topo.num_atoms() {
         log::error!(
             "Atom count mismatch: topology={}, coordinates={}",
@@ -623,7 +634,8 @@ fn main() {
         pairlist.update_frequency
     );
 
-    let pairlist_algorithm = StandardPairlistAlgorithm::new(false); // atom-based for now
+    let use_chargegroups = !topo.chargegroups.is_empty();
+    let pairlist_algorithm = StandardPairlistAlgorithm::new(use_chargegroups);
     let periodicity = if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
         Periodicity::Vacuum(Vacuum)
     } else {

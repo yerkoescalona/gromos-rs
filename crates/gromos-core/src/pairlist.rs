@@ -131,7 +131,16 @@ impl StandardPairlistAlgorithm {
             .map(|cg| cg.center_of_geometry(&conf.current().pos))
             .collect();
 
+        // Debug: dump first few CG centers and distances
+        if n_chargegroups > 0 {
+            for i in 0..std::cmp::min(5, n_chargegroups) {
+                log::debug!("CG[{}] atoms={:?} center=({:.6}, {:.6}, {:.6})",
+                    i, topo.chargegroups[i].atoms, cg_centers[i].x, cg_centers[i].y, cg_centers[i].z);
+            }
+        }
+
         // Double loop over chargegroups
+        let mut n_cg_pairs = 0;
         for i in 0..n_chargegroups {
             for j in (i + 1)..n_chargegroups {
                 // Calculate distance between chargegroup centers
@@ -145,6 +154,7 @@ impl StandardPairlistAlgorithm {
                 if !in_short && !in_long {
                     continue; // Skip if beyond both cutoffs
                 }
+                n_cg_pairs += 1;
 
                 // Add all atom pairs from these chargegroups
                 for &atom_i in &topo.chargegroups[i].atoms {
@@ -164,6 +174,8 @@ impl StandardPairlistAlgorithm {
                 }
             }
         }
+        log::debug!("CG pairlist: {} CG pairs within cutoff ({:.4} nm), cutoff²={:.6}",
+            n_cg_pairs, cutoff2_short.sqrt(), cutoff2_short);
     }
 
     /// Atom-based pairlist generation (simpler, no chargegroups)
