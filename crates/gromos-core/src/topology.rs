@@ -288,6 +288,23 @@ impl Solvent {
     }
 }
 
+/// Solvent atom template (one molecule's worth of atom properties)
+#[derive(Debug, Clone)]
+pub struct SolventAtomTemplate {
+    pub iac: usize,
+    pub name: String,
+    pub mass: f64,
+    pub charge: f64,
+}
+
+/// Solvent constraint template (within one molecule)
+#[derive(Debug, Clone)]
+pub struct SolventConstraintTemplate {
+    pub i: usize, // 0-indexed within solvent molecule
+    pub j: usize,
+    pub length: f64,
+}
+
 /// Main topology structure containing all molecular information
 #[derive(Debug, Clone)]
 pub struct Topology {
@@ -329,6 +346,13 @@ pub struct Topology {
     pub dihedral_parameters: Vec<DihedralParameters>,
     pub improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
     pub lj_parameters: Vec<Vec<LJParameters>>, // [type_i][type_j] matrix
+
+    // Solvent template (read from topology, expanded by solvate())
+    pub solvent_atom_template: Vec<SolventAtomTemplate>,
+    pub solvent_constraint_template: Vec<SolventConstraintTemplate>,
+
+    // Chargegroup codes (CGC) from topology for solute atoms
+    pub chargegroup_codes: Vec<usize>,
 }
 
 impl Topology {
@@ -357,6 +381,9 @@ impl Topology {
             dihedral_parameters: Vec::new(),
             improper_dihedral_parameters: Vec::new(),
             lj_parameters: Vec::new(),
+            solvent_atom_template: Vec::new(),
+            solvent_constraint_template: Vec::new(),
+            chargegroup_codes: Vec::new(),
         }
     }
 
@@ -478,6 +505,99 @@ impl Topology {
             .iter()
             .map(|&m| if m > 0.0 { 1.0 / m } else { 0.0 })
             .collect();
+    }
+
+    /// Expand solvent molecules (gromosXX: topo.solvate(0, nsm))
+    ///
+    /// Uses the solvent template stored on the topology to create `nsm` copies.
+    /// Expands flat arrays (mass, charge, iac), chargegroups, and exclusions.
+    /// Must be called after build_topology() and before reading coordinates.
+    pub fn solvate(&mut self, nsm: usize) {
+        if nsm == 0 || self.solvent_atom_template.is_empty() {
+            return;
+        }
+
+        let atoms_per_solvent = self.solvent_atom_template.len();
+        let n_solute = self.solute.num_atoms();
+        let n_solvent_atoms = atoms_per_solvent * nsm;
+        let n_total = n_solute + n_solvent_atoms;
+
+        // Create Solvent entry
+        let mut solvent = Solvent::new("SOLV".to_string());
+        for sa in &self.solvent_atom_template {
+            solvent.atoms.push(Atom {
+                name: sa.name.clone(),
+                residue_nr: 0,
+                residue_name: "SOLV".to_string(),
+                iac: sa.iac,
+                mass: sa.mass,
+                charge: sa.charge,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            });
+        }
+        solvent.num_molecules = nsm;
+        self.solvents.push(solvent);
+
+        // Expand flat arrays for all solvent copies
+        for _mol in 0..nsm {
+            for sa in &self.solvent_atom_template {
+                self.mass.push(sa.mass);
+                self.charge.push(sa.charge);
+                self.iac.push(sa.iac);
+            }
+        }
+
+        self.compute_inverse_masses();
+
+        // Each solvent molecule is its own chargegroup
+        for mol in 0..nsm {
+            let base = n_solute + mol * atoms_per_solvent;
+            let atoms: Vec<usize> = (base..base + atoms_per_solvent).collect();
+            self.chargegroups.push(ChargeGroup { atoms });
+        }
+
+        // Rebuild atom_to_chargegroup mapping
+        self.atom_to_chargegroup = vec![0; n_total];
+        for (cg_idx, cg) in self.chargegroups.iter().enumerate() {
+            for &atom in &cg.atoms {
+                if atom < n_total {
+                    self.atom_to_chargegroup[atom] = cg_idx;
+                }
+            }
+        }
+
+        // Extend exclusions for solvent atoms
+        self.exclusions.resize(n_total, HashSet::new());
+
+        // Solvent intra-molecular exclusions: all atoms within each molecule exclude each other
+        for mol in 0..nsm {
+            let base = n_solute + mol * atoms_per_solvent;
+            for a in 0..atoms_per_solvent {
+                for b in (a + 1)..atoms_per_solvent {
+                    self.exclusions[base + a].insert(base + b);
+                    self.exclusions[base + b].insert(base + a);
+                }
+            }
+        }
+
+        // Rebuild LJ matrix if solvent introduces new IAC types
+        let max_iac = self.iac.iter().max().copied().unwrap_or(0);
+        let n_types = max_iac + 1;
+        if n_types > self.lj_parameters.len() {
+            let old_len = self.lj_parameters.len();
+            self.lj_parameters.resize(n_types, vec![LJParameters::default(); n_types]);
+            for row in self.lj_parameters.iter_mut() {
+                row.resize(n_types, LJParameters::default());
+            }
+            log::debug!("LJ matrix expanded from {}x{} to {}x{} for solvent types",
+                old_len, old_len, n_types, n_types);
+        }
+
+        log::debug!("Solvated: {} solute + {} solvent ({} molecules × {} atoms) = {} total, {} chargegroups",
+            n_solute, n_solvent_atoms, nsm, atoms_per_solvent, n_total,
+            self.chargegroups.len());
     }
 }
 

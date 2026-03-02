@@ -124,12 +124,14 @@ impl Algorithm for Forcefield {
         }
         self.pairlist.step();
 
-        // Cache pairlist as (u32, u32)
+        // Cache pairlist as (u32, u32) — include both short-range and long-range pairs
+        // In GROMOS twin-range scheme, both contribute to forces
         self.pairlist_u32.clear();
         self.pairlist_u32.extend(
             self.pairlist
                 .solute_short
                 .iter()
+                .chain(self.pairlist.solute_long.iter())
                 .map(|&(i, j)| (i as u32, j as u32)),
         );
 

@@ -96,11 +96,16 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
     storage: &mut ForceStorage,
 ) {
     // Self term: -0.5 * qi^2 * FPEPSI * crf_cut  for each atom (energy only)
+    let mut e_self = 0.0;
     for &q in charges.iter() {
-        storage.e_crf += -0.5 * q * q * FOUR_PI_EPS_I * crf.crf_cut;
+        let term = -0.5 * q * q * FOUR_PI_EPS_I * crf.crf_cut;
+        e_self += term;
+        storage.e_crf += term;
     }
 
     // Excluded pair RF correction (energy + forces) — NO 1/r term
+    let mut e_excl = 0.0;
+    let mut n_excl_pairs = 0usize;
     for i in 0..charges.len() {
         for &j in exclusions[i].iter() {
             if j > i {
@@ -109,7 +114,10 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
                 let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
 
                 // Energy: q_prod * (-crf_2cut3i * r² - crf_cut)
-                storage.e_crf += q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
+                let term = q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
+                e_excl += term;
+                storage.e_crf += term;
+                n_excl_pairs += 1;
 
                 // Force: q_prod * crf_cut3i * r_vec
                 let force = r * (q_prod * crf.crf_cut3i);
@@ -118,6 +126,8 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
             }
         }
     }
+    log::debug!("  RF self={:.10e}, excl={:.10e} ({} pairs), total_rf_corr={:.10e}",
+        e_self, e_excl, n_excl_pairs, e_self + e_excl);
 }
 
 /// Storage for forces and energies
