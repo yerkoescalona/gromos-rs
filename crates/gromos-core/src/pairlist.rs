@@ -100,6 +100,8 @@ impl StandardPairlistAlgorithm {
     ) {
         pairlist.solute_short.clear();
         pairlist.solute_long.clear();
+        pairlist.solvent_short.clear();
+        pairlist.solvent_long.clear();
 
         if self.use_chargegroups {
             self.update_chargegroup_based(topo, conf, pairlist, periodicity);
@@ -112,7 +114,11 @@ impl StandardPairlistAlgorithm {
 
     /// Chargegroup-based pairlist generation (GROMOS default)
     ///
-    /// Direct translation of lines 168-250 in standard_pairlist_algorithm.cc
+    /// Matches gromosXX standard_pairlist_algorithm.cc:
+    /// - Solute CGs: center-of-geometry distance, exclusion checks
+    /// - Solvent CGs: first-atom position distance, no exclusion checks
+    /// - Intra-CG non-excluded pairs added for solute CGs
+    /// - Solvent-solvent pairs go to solvent_short/long, rest to solute_short/long
     fn update_chargegroup_based<BC: BoundaryCondition>(
         &self,
         topo: &Topology,
@@ -121,61 +127,168 @@ impl StandardPairlistAlgorithm {
         periodicity: &BC,
     ) {
         let n_chargegroups = topo.chargegroups.len();
+        let n_solute_cg = topo.num_solute_chargegroups;
         let cutoff2_short = (pairlist.short_range_cutoff + pairlist.skin).powi(2);
         let cutoff2_long = (pairlist.long_range_cutoff + pairlist.skin).powi(2);
 
-        // Calculate chargegroup centers
-        let cg_centers: Vec<Vec3> = topo
-            .chargegroups
-            .iter()
-            .map(|cg| cg.center_of_geometry(&conf.current().pos))
+        // Precompute solute CG centers-of-geometry (gromosXX only computes COG for solute CGs)
+        let cg_cog: Vec<Vec3> = (0..n_solute_cg)
+            .map(|i| topo.chargegroups[i].center_of_geometry(&conf.current().pos))
             .collect();
 
-        // Debug: dump first few CG centers and distances
-        if n_chargegroups > 0 {
-            for i in 0..std::cmp::min(5, n_chargegroups) {
-                log::debug!("CG[{}] atoms={:?} center=({:.6}, {:.6}, {:.6})",
-                    i, topo.chargegroups[i].atoms, cg_centers[i].x, cg_centers[i].y, cg_centers[i].z);
-            }
+        log::debug!("Pairlist update: {} CGs total, {} solute CGs, cutoff_short²={:.6}, cutoff_long²={:.6}",
+            n_chargegroups, n_solute_cg, cutoff2_short, cutoff2_long);
+        for i in 0..n_solute_cg {
+            log::debug!("  Solute CG {}: atoms={:?}, COG=({:.6},{:.6},{:.6})",
+                i, topo.chargegroups[i].atoms, cg_cog[i].x, cg_cog[i].y, cg_cog[i].z);
+        }
+        for i in n_solute_cg..n_chargegroups {
+            let fa = topo.chargegroups[i].atoms[0];
+            log::debug!("  Solvent CG {}: first_atom={}, pos=({:.6},{:.6},{:.6}), atoms={:?}",
+                i, fa, conf.current().pos[fa].x, conf.current().pos[fa].y, conf.current().pos[fa].z,
+                topo.chargegroups[i].atoms);
         }
 
-        // Double loop over chargegroups
-        let mut n_cg_pairs = 0;
-        for i in 0..n_chargegroups {
-            for j in (i + 1)..n_chargegroups {
-                // Calculate distance between chargegroup centers
-                let r = periodicity.nearest_image(cg_centers[i], cg_centers[j]);
+        // === Solute CGs ===
+        let mut n_solute_solute_cg_pairs = 0usize;
+        let mut n_solute_solute_skip = 0usize;
+        let mut n_solute_solvent_cg_pairs = 0usize;
+        let mut n_solute_solvent_skip = 0usize;
+        let mut n_intra_cg_pairs = 0usize;
+
+        for cg1 in 0..n_solute_cg {
+            // Intra-CG non-excluded pairs (gromosXX lines ~185-200)
+            let cg1_atoms = &topo.chargegroups[cg1].atoms;
+            for ai in 0..cg1_atoms.len() {
+                let a1 = cg1_atoms[ai];
+                for aj in (ai + 1)..cg1_atoms.len() {
+                    let a2 = cg1_atoms[aj];
+                    if !topo.is_excluded(a1, a2) {
+                        pairlist.solute_short.push((a1, a2));
+                        n_intra_cg_pairs += 1;
+                    }
+                }
+            }
+
+            // Solute-solute pairs
+            for cg2 in (cg1 + 1)..n_solute_cg {
+                let r = periodicity.nearest_image(cg_cog[cg1], cg_cog[cg2]);
                 let dist2 = r.length_squared();
 
-                // Check if within cutoff
-                let in_short = dist2 < cutoff2_short;
-                let in_long = dist2 < cutoff2_long;
-
-                if !in_short && !in_long {
-                    continue; // Skip if beyond both cutoffs
+                if dist2 > cutoff2_long {
+                    log::debug!("  Solute-Solute CG({},{}) SKIP dist={:.6} > long_cut={:.6}",
+                        cg1, cg2, dist2.sqrt(), cutoff2_long.sqrt());
+                    n_solute_solute_skip += 1;
+                    continue;
                 }
-                n_cg_pairs += 1;
 
-                // Add all atom pairs from these chargegroups
-                for &atom_i in &topo.chargegroups[i].atoms {
-                    for &atom_j in &topo.chargegroups[j].atoms {
-                        // Check exclusions
-                        if topo.is_excluded(atom_i, atom_j) {
-                            continue;
+                n_solute_solute_cg_pairs += 1;
+                if dist2 > cutoff2_short {
+                    log::debug!("  Solute-Solute CG({},{}) LONG dist={:.6}", cg1, cg2, dist2.sqrt());
+                    // Long-range (no exclusion check in gromosXX for long-range solute-solute)
+                    for &a1 in &topo.chargegroups[cg1].atoms {
+                        for &a2 in &topo.chargegroups[cg2].atoms {
+                            pairlist.solute_long.push((a1, a2));
                         }
+                    }
+                    continue;
+                }
 
-                        // Add to appropriate pairlist
-                        if in_short {
-                            pairlist.solute_short.push((atom_i, atom_j));
-                        } else if in_long {
-                            pairlist.solute_long.push((atom_i, atom_j));
+                log::debug!("  Solute-Solute CG({},{}) SHORT dist={:.6}", cg1, cg2, dist2.sqrt());
+                // Short-range with exclusion check
+                for &a1 in &topo.chargegroups[cg1].atoms {
+                    for &a2 in &topo.chargegroups[cg2].atoms {
+                        if !topo.is_excluded(a1, a2) {
+                            pairlist.solute_short.push((a1, a2));
+                        } else {
+                            log::debug!("    Excluded pair ({},{})", a1, a2);
                         }
                     }
                 }
             }
+
+            // Solute-solvent pairs (solvent CG distance uses first-atom position)
+            for cg2 in n_solute_cg..n_chargegroups {
+                let solvent_first_atom = topo.chargegroups[cg2].atoms[0];
+                let r = periodicity.nearest_image(cg_cog[cg1], conf.current().pos[solvent_first_atom]);
+                let dist2 = r.length_squared();
+
+                if dist2 > cutoff2_long {
+                    log::debug!("  Solute({})-Solvent({}) SKIP dist={:.6} > long_cut={:.6}",
+                        cg1, cg2, dist2.sqrt(), cutoff2_long.sqrt());
+                    n_solute_solvent_skip += 1;
+                    continue;
+                }
+
+                n_solute_solvent_cg_pairs += 1;
+                if dist2 > cutoff2_short {
+                    log::debug!("  Solute({})-Solvent({}) LONG dist={:.6}", cg1, cg2, dist2.sqrt());
+                    for &a1 in &topo.chargegroups[cg1].atoms {
+                        for &a2 in &topo.chargegroups[cg2].atoms {
+                            pairlist.solute_long.push((a1, a2));
+                        }
+                    }
+                    continue;
+                }
+
+                log::debug!("  Solute({})-Solvent({}) SHORT dist={:.6}", cg1, cg2, dist2.sqrt());
+                // Short-range: no exclusion check for solute-solvent (gromosXX convention)
+                for &a1 in &topo.chargegroups[cg1].atoms {
+                    for &a2 in &topo.chargegroups[cg2].atoms {
+                        pairlist.solute_short.push((a1, a2));
+                    }
+                }
+            }
         }
-        log::debug!("CG pairlist: {} CG pairs within cutoff ({:.4} nm), cutoff²={:.6}",
-            n_cg_pairs, cutoff2_short.sqrt(), cutoff2_short);
+
+        // === Solvent-solvent CGs ===
+        // Distance uses first-atom positions (gromosXX _solvent_solvent)
+        // Store only first-atom pairs; solvent_innerloop expands all atom pairs internally
+        let mut n_solvent_solvent_cg_pairs = 0usize;
+        let mut n_solvent_solvent_skip = 0usize;
+
+        for cg1 in n_solute_cg..n_chargegroups {
+            let first_atom_1 = topo.chargegroups[cg1].atoms[0];
+
+            for cg2 in (cg1 + 1)..n_chargegroups {
+                let first_atom_2 = topo.chargegroups[cg2].atoms[0];
+                let r = periodicity.nearest_image(
+                    conf.current().pos[first_atom_1],
+                    conf.current().pos[first_atom_2],
+                );
+                let dist2 = r.length_squared();
+
+                if dist2 > cutoff2_long {
+                    log::debug!("  Solvent({},a{})-Solvent({},a{}) SKIP dist={:.6} > long_cut={:.6}",
+                        cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt(), cutoff2_long.sqrt());
+                    n_solvent_solvent_skip += 1;
+                    continue;
+                }
+
+                n_solvent_solvent_cg_pairs += 1;
+                if dist2 > cutoff2_short {
+                    log::debug!("  Solvent({},a{})-Solvent({},a{}) LONG dist={:.6}",
+                        cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt());
+                    pairlist.solvent_long.push((first_atom_1, first_atom_2));
+                    continue;
+                }
+
+                log::debug!("  Solvent({},a{})-Solvent({},a{}) SHORT dist={:.6}",
+                    cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt());
+                // Short-range solvent-solvent: store first-atom pair only
+                pairlist.solvent_short.push((first_atom_1, first_atom_2));
+            }
+        }
+
+        log::debug!("CG pairlist summary:");
+        log::debug!("  Solute intra-CG pairs: {}", n_intra_cg_pairs);
+        log::debug!("  Solute-Solute CG pairs: {} included, {} skipped", n_solute_solute_cg_pairs, n_solute_solute_skip);
+        log::debug!("  Solute-Solvent CG pairs: {} included, {} skipped", n_solute_solvent_cg_pairs, n_solute_solvent_skip);
+        log::debug!("  Solvent-Solvent CG pairs: {} included, {} skipped", n_solvent_solvent_cg_pairs, n_solvent_solvent_skip);
+        log::debug!("  solute_short={}, solute_long={}, solvent_short={}, solvent_long={}, cutoff={:.4}",
+            pairlist.solute_short.len(), pairlist.solute_long.len(),
+            pairlist.solvent_short.len(), pairlist.solvent_long.len(),
+            pairlist.short_range_cutoff);
     }
 
     /// Atom-based pairlist generation (simpler, no chargegroups)
