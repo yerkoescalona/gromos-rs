@@ -326,6 +326,7 @@ pub struct Topology {
     // Chargegroups
     pub chargegroups: Vec<ChargeGroup>,
     pub atom_to_chargegroup: Vec<usize>, // atom -> chargegroup index
+    pub num_solute_chargegroups: usize,  // boundary: CGs [0..n) are solute, [n..) are solvent
 
     // Temperature and pressure coupling groups
     pub temperature_groups: Vec<Vec<usize>>, // Atoms in each T-coupling group
@@ -369,6 +370,7 @@ impl Topology {
             one_four_pairs: Vec::new(),
             chargegroups: Vec::new(),
             atom_to_chargegroup: Vec::new(),
+            num_solute_chargegroups: 0,
             temperature_groups: Vec::new(),
             pressure_groups: Vec::new(),
             atom_to_temperature_group: Vec::new(),
@@ -390,6 +392,11 @@ impl Topology {
     /// Total number of atoms in the system
     pub fn num_atoms(&self) -> usize {
         self.solute.num_atoms() + self.solvents.iter().map(|s| s.total_atoms()).sum::<usize>()
+    }
+
+    /// Number of solute atoms
+    pub fn num_solute_atoms(&self) -> usize {
+        self.solute.num_atoms()
     }
 
     /// Number of atom types

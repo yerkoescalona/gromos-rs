@@ -785,6 +785,8 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
                 }
             }
         }
+        // Record how many CGs are solute (before solvate adds solvent CGs)
+        topo.num_solute_chargegroups = topo.chargegroups.len();
     }
 
     // --- Initialize exclusions for solute atoms ---
