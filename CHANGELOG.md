@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.8](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.7...v0.0.8) (2026-03-29)
+
+### Features
+
+- **core:** add solute/solvent boundary fields to Topology
+  - Add `num_solute_chargegroups` field and `num_solute_atoms()` method
+  - Set during `build_topology()` for solute/solvent dispatch
+
+- **forces:** gromosXX-compatible nonbonded force architecture
+  - Add HEAVISIDE truncation to `lj_crf_innerloop` (skip pairs beyond cutoff²)
+  - Add `solvent_innerloop` with shared PBC shift from O-O nearest_image
+  - Split `rf_excluded_interactions` into solute/solvent paths:
+    - Solute: self-term + excluded pair forces + full RF energy
+    - Solvent: no self-term, no forces, only distance-dependent energy
+  - Add `cutoff_sq` to CRFParameters
+
+### Refactor
+
+- **pairlist:** separate solute/solvent CG pairs with correct distance metrics
+  - Solute CGs: center-of-geometry distance, exclusion checks
+  - Solvent CGs: first-atom position distance (gromosXX convention)
+  - Intra-CG non-excluded pairs for solute CGs
+  - Solvent-solvent stores first-atom pairs only (expanded in innerloop)
+  - Add debug logging for CG positions, distances, pair classification
+
+## [0.0.7](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.6...v0.0.7) (2026-02-22)
+
+### Refactor
+
+- **io:** gromosXX-compatible topology init order with solvate() ([60207d9](https://github.com/yerkoescalona/gromos-rs/commit/60207d9584e67c0ae622ed6267f19fd38965467e))
+  - Follow gromosXX initialization: read_parameter → read_topology → solvate → read_configuration
+  - Add Topology::solvate(nsm) method matching gromosXX topo.solvate(0, nsm)
+  - Add SolventAtomTemplate/SolventConstraintTemplate types on Topology
+  - build_topology() now stores solvent template without expanding
+  - Remove build_topology_with_solvent() — NSM comes from IMD SYSTEM block
+  - Reorder md.rs: IMD → topology+solvate → coordinates (was: IMD → coords → topo)
+  - Store chargegroup_codes on Topology for later use
+  - LJ matrix now includes solvent IAC types at build time
+  - All 6 reference tests pass (pair_lj, pair_lj_mixed, nacl_pair, water_single, benzene_vacuum, water_3_box)
+
 ## [0.0.6](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.5...v0.0.6) (2026-02-22)
 
 ### Features
