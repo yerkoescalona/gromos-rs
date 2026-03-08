@@ -8,6 +8,7 @@ fn crf_params() -> CRFParameters {
         crf_cut: cutoff,
         crf_2cut3i: 1.0 / (2.0 * cutoff.powi(3)),
         crf_cut3i: 1.0 / cutoff,
+        cutoff_sq: 1.4_f64.powi(2),
     }
 }
 

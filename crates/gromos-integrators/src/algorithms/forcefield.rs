@@ -14,7 +14,7 @@ use gromos_core::topology::Topology;
 
 use gromos_forces::bonded::calculate_bonded_forces_ntf;
 use gromos_forces::nonbonded::{
-    lj_crf_innerloop, rf_excluded_interactions, CRFParameters, ForceStorage,
+    lj_crf_innerloop, rf_excluded_interactions, solvent_innerloop, CRFParameters, ForceStorage,
     LJParameters,
 };
 
@@ -42,10 +42,14 @@ pub struct Forcefield {
     pub ntf_angle: bool,
     pub ntf_improper: bool,
     pub ntf_dihedral: bool,
+    /// Number of atoms per solvent molecule (e.g. 3 for water)
+    pub atoms_per_solvent: usize,
     /// Reusable nonbonded force storage (avoids allocation per step)
     nonbonded_storage: ForceStorage,
-    /// Cached pairlist in (u32, u32) format
-    pairlist_u32: Vec<(u32, u32)>,
+    /// Cached solute pairlist in (u32, u32) format
+    pairlist_solute_u32: Vec<(u32, u32)>,
+    /// Cached solvent pairlist in (u32, u32) format
+    pairlist_solvent_u32: Vec<(u32, u32)>,
     /// Cached charge vector
     charges: Vec<f64>,
     /// Cached IAC vector
@@ -72,8 +76,10 @@ impl Forcefield {
             ntf_angle: true,
             ntf_improper: true,
             ntf_dihedral: true,
+            atoms_per_solvent: 3,
             nonbonded_storage: ForceStorage::new(0),
-            pairlist_u32: Vec::new(),
+            pairlist_solute_u32: Vec::new(),
+            pairlist_solvent_u32: Vec::new(),
             charges: Vec::new(),
             iac_u32: Vec::new(),
         }
@@ -124,14 +130,23 @@ impl Algorithm for Forcefield {
         }
         self.pairlist.step();
 
-        // Cache pairlist as (u32, u32) — include both short-range and long-range pairs
-        // In GROMOS twin-range scheme, both contribute to forces
-        self.pairlist_u32.clear();
-        self.pairlist_u32.extend(
+        // Cache solute pairlist as (u32, u32) — solute_short + solute_long
+        self.pairlist_solute_u32.clear();
+        self.pairlist_solute_u32.extend(
             self.pairlist
                 .solute_short
                 .iter()
                 .chain(self.pairlist.solute_long.iter())
+                .map(|&(i, j)| (i as u32, j as u32)),
+        );
+
+        // Cache solvent pairlist as (u32, u32) — solvent_short + solvent_long
+        self.pairlist_solvent_u32.clear();
+        self.pairlist_solvent_u32.extend(
+            self.pairlist
+                .solvent_short
+                .iter()
+                .chain(self.pairlist.solvent_long.iter())
                 .map(|&(i, j)| (i as u32, j as u32)),
         );
 
@@ -149,16 +164,32 @@ impl Algorithm for Forcefield {
         // --- 3. Calculate nonbonded forces ---
         self.nonbonded_storage.clear();
 
+        // Solute-solute and solute-solvent: lj_crf_innerloop (with HEAVISIDE truncation)
         lj_crf_innerloop(
             &conf.current().pos,
             &self.charges,
             &self.iac_u32,
-            &self.pairlist_u32,
+            &self.pairlist_solute_u32,
             &self.lj_params,
             &self.crf_params,
             &self.periodicity,
             &mut self.nonbonded_storage,
         );
+
+        // Solvent-solvent: solvent_innerloop (shared PBC shift, no HEAVISIDE)
+        if !self.pairlist_solvent_u32.is_empty() {
+            solvent_innerloop(
+                &conf.current().pos,
+                &self.charges,
+                &self.iac_u32,
+                &self.pairlist_solvent_u32,
+                &self.lj_params,
+                &self.crf_params,
+                &self.periodicity,
+                self.atoms_per_solvent,
+                &mut self.nonbonded_storage,
+            );
+        }
 
         // RF self-energy and excluded-pair Coulomb (energy + forces)
         rf_excluded_interactions(
@@ -168,6 +199,7 @@ impl Algorithm for Forcefield {
             &self.crf_params,
             &self.periodicity,
             &mut self.nonbonded_storage,
+            topo.num_solute_atoms(),
         );
 
         // --- 4. Assemble forces and energies ---
@@ -186,7 +218,7 @@ impl Algorithm for Forcefield {
         // Debug: show force magnitudes
         let f_max = state.force.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
         log::debug!("  Bond: {:.10e}  LJ: {:.10e}  CRF: {:.10e}", bonded_result.energy, self.nonbonded_storage.e_lj, self.nonbonded_storage.e_crf);
-        log::debug!("  Max |force|: {:.10e}, n_pairs: {}", f_max, self.pairlist_u32.len());
+        log::debug!("  Max |force|: {:.10e}, solute_pairs: {}, solvent_pairs: {}", f_max, self.pairlist_solute_u32.len(), self.pairlist_solvent_u32.len());
 
         Ok(())
     }

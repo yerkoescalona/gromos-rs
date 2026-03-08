@@ -27,6 +27,7 @@ pub struct CRFParameters {
     pub crf_cut: f64,    // (1 - crf/2) / cutoff  (energy shift constant)
     pub crf_2cut3i: f64, // crf / (2 * cutoff^3)  (energy quadratic term)
     pub crf_cut3i: f64,  // crf / cutoff^3         (force correction term)
+    pub cutoff_sq: f64,  // cutoff^2 for Heaviside truncation (gromosXX XXHEAVISIDE)
 }
 
 impl CRFParameters {
@@ -55,6 +56,7 @@ impl CRFParameters {
             crf_cut,
             crf_2cut3i,
             crf_cut3i,
+            cutoff_sq: cutoff * cutoff,
         }
     }
 }
@@ -75,18 +77,18 @@ impl CRFParameters {
 ///
 /// In gromosXX, excluded atom pairs (bonded neighbours) are removed from the
 /// pairlist.  With `NSLFEXCL=1` (default), they receive only the RF
-/// **correction** — NOT the full Coulomb 1/r term.  This matches gromosXX
-/// `rf_interaction()` in `nonbonded_term.cc`:
+/// **correction** — NOT the full Coulomb 1/r term.
 ///
-///   Force  = q_prod * FPEPSI * crf_cut3i * r_vec
-///   Energy = q_prod * FPEPSI * (-crf_2cut3i * r² - crf_cut)
+/// **Solute atoms** (gromosXX `RF_excluded_interaction_innerloop`):
+///   Self-term: `E_self = -0.5 * qi² * FPEPSI * crf_cut`
+///   Excluded pairs: full `rf_interaction` with force + energy:
+///     Force  = q_prod * FPEPSI * crf_cut3i * r_vec
+///     Energy = q_prod * FPEPSI * (-crf_2cut3i * r² - crf_cut)
 ///
-/// 1. **Atomic self-term** (energy only):
-///    `E_self = -0.5 * qi^2 * FPEPSI * crf_cut`
-///
-/// 2. **Excluded-pair RF correction** (energy + forces):
-///    `E = q_ij * FPEPSI * (-crf_2cut3i * r² - crf_cut)`
-///    `F = q_ij * FPEPSI * crf_cut3i * r`
+/// **Solvent atoms** (gromosXX `RF_solvent_interaction_innerloop`):
+///   NO self-term (distance-independent parts cancel for neutral charge groups)
+///   NO forces (rigid molecules)
+///   Only energy: `E = -qi*qj * FPEPSI * crf_2cut3i * r²` (distance-dependent part only)
 pub fn rf_excluded_interactions<BC: BoundaryCondition>(
     charges: &[f64],
     exclusions: &[std::collections::HashSet<usize>],
@@ -94,19 +96,20 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
     crf: &CRFParameters,
     boundary: &BC,
     storage: &mut ForceStorage,
+    num_solute_atoms: usize,
 ) {
-    // Self term: -0.5 * qi^2 * FPEPSI * crf_cut  for each atom (energy only)
+    // === Solute atoms ===
     let mut e_self = 0.0;
-    for &q in charges.iter() {
-        let term = -0.5 * q * q * FOUR_PI_EPS_I * crf.crf_cut;
+    let mut e_excl_solute = 0.0;
+    let mut n_solute_excl = 0usize;
+
+    for i in 0..num_solute_atoms {
+        // Self term: -0.5 * qi^2 * FPEPSI * crf_cut
+        let term = -0.5 * charges[i] * charges[i] * FOUR_PI_EPS_I * crf.crf_cut;
         e_self += term;
         storage.e_crf += term;
-    }
 
-    // Excluded pair RF correction (energy + forces) — NO 1/r term
-    let mut e_excl = 0.0;
-    let mut n_excl_pairs = 0usize;
-    for i in 0..charges.len() {
+        // Excluded pair RF correction (energy + forces)
         for &j in exclusions[i].iter() {
             if j > i {
                 let r = boundary.nearest_image(positions[i], positions[j]);
@@ -115,9 +118,9 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
 
                 // Energy: q_prod * (-crf_2cut3i * r² - crf_cut)
                 let term = q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
-                e_excl += term;
+                e_excl_solute += term;
                 storage.e_crf += term;
-                n_excl_pairs += 1;
+                n_solute_excl += 1;
 
                 // Force: q_prod * crf_cut3i * r_vec
                 let force = r * (q_prod * crf.crf_cut3i);
@@ -126,8 +129,31 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
             }
         }
     }
-    log::debug!("  RF self={:.10e}, excl={:.10e} ({} pairs), total_rf_corr={:.10e}",
-        e_self, e_excl, n_excl_pairs, e_self + e_excl);
+
+    // === Solvent atoms ===
+    // gromosXX: no self-term, no forces, only distance-dependent energy
+    let mut e_excl_solvent = 0.0;
+    let mut n_solvent_excl = 0usize;
+
+    for i in num_solute_atoms..charges.len() {
+        for &j in exclusions[i].iter() {
+            if j > i {
+                let r = boundary.nearest_image(positions[i], positions[j]);
+                let r2 = r.length_squared();
+
+                // Only: -qi*qj * FPEPSI * crf_2cut3i * r²
+                let term = -charges[i] * charges[j] * FOUR_PI_EPS_I * crf.crf_2cut3i * r2;
+                e_excl_solvent += term;
+                storage.e_crf += term;
+                n_solvent_excl += 1;
+
+                // NO force for solvent excluded pairs (rigid molecules)
+            }
+        }
+    }
+    log::debug!("  RF solute: self={:.10e}, excl={:.10e} ({} pairs)", e_self, e_excl_solute, n_solute_excl);
+    log::debug!("  RF solvent: excl={:.10e} ({} pairs)", e_excl_solvent, n_solvent_excl);
+    log::debug!("  RF total_corr={:.10e}", e_self + e_excl_solute + e_excl_solvent);
 }
 
 /// Storage for forces and energies
@@ -251,10 +277,12 @@ pub fn lj_crf_interaction_simd_x4(
     (force_array, e_lj_array, e_crf_array)
 }
 
-/// Inner loop for nonbonded interactions
+/// Inner loop for nonbonded interactions (solute-solute and solute-solvent).
 ///
 /// This is the hottest function in MD simulations!
 /// Processes pairlist and accumulates forces, energies, and virial.
+/// Applies HEAVISIDE truncation: if atom-atom dist² > cutoff², skip the pair.
+/// (gromosXX XXHEAVISIDE in nonbonded_term.cc)
 pub fn lj_crf_innerloop<BC: BoundaryCondition>(
     positions: &[Vec3],
     charges: &[f64],
@@ -265,6 +293,8 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
     periodicity: &BC,
     storage: &mut ForceStorage,
 ) {
+    let cutoff2 = crf.cutoff_sq;
+
     // Serial version (baseline)
     for &(i, j) in pairlist {
         let i = i as usize;
@@ -276,6 +306,12 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
 
         // Apply periodic boundary conditions
         let r = periodicity.nearest_image(pos_i, pos_j);
+
+        // HEAVISIDE truncation: skip pairs beyond cutoff (gromosXX XXHEAVISIDE)
+        let r2 = r.length_squared();
+        if r2 > cutoff2 {
+            continue;
+        }
 
         // Get interaction parameters
         let type_i = iac[i] as usize;
@@ -300,6 +336,82 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
         for a in 0..3 {
             for b in 0..3 {
                 storage.virial[a][b] += r[b] * force[a];
+            }
+        }
+    }
+}
+
+/// Solvent-solvent innerloop with shared PBC shift (gromosXX convention).
+///
+/// For each solvent-solvent CG pair, the PBC shift is computed once from
+/// the first atoms (typically O-O for water) and reused for all atom pairs.
+/// No HEAVISIDE truncation is applied (gromosXX solvent_innerloop.cc doesn't use it).
+///
+/// The pairlist stores pairs of first-atom indices (one per solvent molecule).
+/// `atoms_per_solvent` defines the molecule size (e.g. 3 for water).
+pub fn solvent_innerloop<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &[Vec<LJParameters>],
+    crf: &CRFParameters,
+    periodicity: &BC,
+    atoms_per_solvent: usize,
+    storage: &mut ForceStorage,
+) {
+    for &(i_first, j_first) in pairlist {
+        let i_first = i_first as usize;
+        let j_first = j_first as usize;
+
+        let pos_i0 = positions[i_first];
+        let pos_j0 = positions[j_first];
+
+        // Compute PBC shift from first-atom nearest image (O-O for water)
+        let r_first = periodicity.nearest_image(pos_i0, pos_j0);
+        // shift = r_first - (pos_i0 - pos_j0) = the PBC translation applied
+        // In gromosXX: tx = r(0) - pos_i(0) + pos_j(0)
+        let tx = r_first.x - pos_i0.x + pos_j0.x;
+        let ty = r_first.y - pos_i0.y + pos_j0.y;
+        let tz = r_first.z - pos_i0.z + pos_j0.z;
+
+        // Loop over all atom pairs in the two molecules
+        for atom_i in 0..atoms_per_solvent {
+            let i = i_first + atom_i;
+            // Apply shared shift to atom_i position
+            let xi = positions[i].x + tx;
+            let yi = positions[i].y + ty;
+            let zi = positions[i].z + tz;
+
+            for atom_j in 0..atoms_per_solvent {
+                let j = j_first + atom_j;
+
+                // Distance using shared PBC shift
+                let x = xi - positions[j].x;
+                let y = yi - positions[j].y;
+                let z = zi - positions[j].z;
+                let r = Vec3::new(x, y, z);
+
+                let type_i = iac[i] as usize;
+                let type_j = iac[j] as usize;
+                let lj = lj_params[type_i][type_j];
+                let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
+
+                // No HEAVISIDE truncation for solvent-solvent
+                let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
+
+                let force = r * f_mag;
+                storage.forces[i] += force;
+                storage.forces[j] -= force;
+
+                storage.e_lj += e_lj;
+                storage.e_crf += e_crf;
+
+                for a in 0..3 {
+                    for b in 0..3 {
+                        storage.virial[a][b] += r[b] * force[a];
+                    }
+                }
             }
         }
     }
@@ -654,6 +766,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.0,
             crf_cut3i: 0.0,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         let (f, e_lj, _e_crf) = lj_crf_interaction(r, c6, c12, q_prod, &crf);
@@ -682,6 +795,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.364431, // 2 / 1.4^3
             crf_cut3i: 0.364431 / 2.0,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         let periodicity = Vacuum;
@@ -727,6 +841,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.0,
             crf_cut3i: 0.0,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         let mut storage = ForceStorage::new(2);
@@ -916,6 +1031,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.364431 / 2.0,
             crf_cut3i: 0.364431 / 2.0 / 1.4,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         let lambdas = [0.0, 0.25, 0.5, 0.75, 1.0];
@@ -994,6 +1110,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.364431 / 2.0,
             crf_cut3i: 0.364431 / 2.0 / 1.4,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         // At λ=0 (particle not yet present), soft-core should prevent singularity
@@ -1071,6 +1188,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.364431 / 2.0,
             crf_cut3i: 0.364431 / 2.0 / 1.4,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         // Test n=1 (linear coupling)
