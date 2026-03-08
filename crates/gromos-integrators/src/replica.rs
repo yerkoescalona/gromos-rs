@@ -126,6 +126,7 @@ impl Replica {
             crf_cut: cutoff,
             crf_2cut3i: crf / (2.0 * cutoff * cutoff * cutoff),
             crf_cut3i: (1.0 - crf / 2.0) / cutoff,
+            cutoff_sq: cutoff * cutoff,
         };
 
         Replica {

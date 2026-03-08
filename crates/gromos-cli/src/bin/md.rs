@@ -664,6 +664,10 @@ fn main() {
     forcefield.ntf_angle = ntf_angle;
     forcefield.ntf_improper = ntf_improper;
     forcefield.ntf_dihedral = ntf_dihedral;
+    // Set atoms per solvent molecule for solvent innerloop
+    if !topo.solvent_atom_template.is_empty() {
+        forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
+    }
     md_sequence.push(Box::new(forcefield));
 
     // 2. Leap-Frog velocity step (exchange_state + v update)

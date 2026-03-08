@@ -238,6 +238,7 @@ fn test_pair_lj_forces_step0() {
         crf_cut: 1.4,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
+        cutoff_sq: 1.4_f64.powi(2),
     };
 
     // Compute forces
@@ -279,6 +280,7 @@ fn test_pair_lj_energy_step0() {
         crf_cut: 1.4,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
+        cutoff_sq: 1.4_f64.powi(2),
     };
 
     let bc = gromos::core::math::Vacuum;
@@ -321,6 +323,7 @@ fn test_nacl_pair_forces_step0() {
         crf_cut: 1.4,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
+        cutoff_sq: 1.4_f64.powi(2),
     };
 
     let bc = gromos::core::math::Vacuum;
@@ -360,6 +363,7 @@ fn test_nacl_pair_energy_step0() {
         crf_cut: 1.4,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
+        cutoff_sq: 1.4_f64.powi(2),
     };
 
     let bc = gromos::core::math::Vacuum;
@@ -396,6 +400,7 @@ fn test_pair_lj_mixed_forces_step0() {
         crf_cut: 1.4,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
+        cutoff_sq: 1.4_f64.powi(2),
     };
 
     let bc = gromos::core::math::Vacuum;
@@ -435,6 +440,7 @@ fn test_pair_lj_mixed_energy_step0() {
         crf_cut: 1.4,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
+        cutoff_sq: 1.4_f64.powi(2),
     };
 
     let bc = gromos::core::math::Vacuum;
