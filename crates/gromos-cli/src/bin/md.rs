@@ -314,7 +314,7 @@ fn main() {
     let ntf_angle = ntf[1] != 0;
     let ntf_improper = ntf[2] != 0;
     let ntf_dihedral = ntf[3] != 0;
-    let shake_enabled = imd.ntc > 1; // NTC=1 means no constraints
+    let shake_enabled = imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0); // NTC>1=solute, NTCS>0=solvent (only if solvent exists)
     let shake_tolerance = imd.shake_tol;
     let nstxout = imd.ntwx;
     let nstener = imd.ntwe;
@@ -624,9 +624,9 @@ fn main() {
 
     log::debug!("Initializing pairlist");
     let mut pairlist = PairlistContainer::new(
-        cutoff, // short range cutoff
-        cutoff, // long range cutoff (same for now)
-        0.0,            // skin (no extra distance)
+        imd.rcutp, // short range cutoff (RCUTP)
+        cutoff,    // long range cutoff (RCUTL)
+        0.0,       // skin (no extra distance)
     );
     pairlist.update_frequency = pairlist_update;
     log::debug!(

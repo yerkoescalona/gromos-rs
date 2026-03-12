@@ -8,7 +8,7 @@
 
 use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
-use gromos_core::math::Periodicity;
+use gromos_core::math::{Periodicity, Vec3};
 use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
 
@@ -50,10 +50,24 @@ pub struct Forcefield {
     pairlist_solute_u32: Vec<(u32, u32)>,
     /// Cached solvent pairlist in (u32, u32) format
     pairlist_solvent_u32: Vec<(u32, u32)>,
+    /// Cached long-range solute pairlist (u32, u32)
+    pairlist_solute_long_u32: Vec<(u32, u32)>,
+    /// Cached long-range solvent pairlist (u32, u32)
+    pairlist_solvent_long_u32: Vec<(u32, u32)>,
     /// Cached charge vector
     charges: Vec<f64>,
     /// Cached IAC vector
     iac_u32: Vec<u32>,
+    /// Cached long-range forces (twin-range: reused between pairlist updates)
+    longrange_forces: Vec<Vec3>,
+    /// Cached long-range LJ energy
+    longrange_e_lj: f64,
+    /// Cached long-range CRF energy
+    longrange_e_crf: f64,
+    /// Whether twin-range is active (RCUTP < RCUTL)
+    twin_range_active: bool,
+    /// Whether long-range forces have been computed at least once
+    longrange_computed: bool,
 }
 
 impl Forcefield {
@@ -64,6 +78,7 @@ impl Forcefield {
         pairlist: PairlistContainer,
         pairlist_algorithm: StandardPairlistAlgorithm,
     ) -> Self {
+        let twin_range_active = pairlist.short_range_cutoff < pairlist.long_range_cutoff - 1e-10;
         Self {
             lj_params,
             crf_params,
@@ -80,8 +95,15 @@ impl Forcefield {
             nonbonded_storage: ForceStorage::new(0),
             pairlist_solute_u32: Vec::new(),
             pairlist_solvent_u32: Vec::new(),
+            pairlist_solute_long_u32: Vec::new(),
+            pairlist_solvent_long_u32: Vec::new(),
             charges: Vec::new(),
             iac_u32: Vec::new(),
+            longrange_forces: Vec::new(),
+            longrange_e_lj: 0.0,
+            longrange_e_crf: 0.0,
+            twin_range_active,
+            longrange_computed: false,
         }
     }
 
@@ -105,6 +127,7 @@ impl Algorithm for Forcefield {
         self.nonbonded_storage = ForceStorage::new(n);
         self.charges = topo.charge.clone();
         self.iac_u32 = topo.iac.iter().map(|&i| i as u32).collect();
+        self.longrange_forces = vec![Vec3::ZERO; n];
         Ok(())
     }
 
@@ -121,32 +144,48 @@ impl Algorithm for Forcefield {
             self.nonbonded_storage = ForceStorage::new(n_atoms);
             self.charges = topo.charge.clone();
             self.iac_u32 = topo.iac.iter().map(|&i| i as u32).collect();
+            self.longrange_forces = vec![Vec3::ZERO; n_atoms];
         }
 
         // --- 1. Update pairlist if needed ---
-        if self.pairlist.needs_update() {
+        let pairlist_updated = self.pairlist.needs_update();
+        if pairlist_updated {
             self.pairlist_algorithm
                 .update(topo, conf, &mut self.pairlist, &self.periodicity);
         }
         self.pairlist.step();
 
-        // Cache solute pairlist as (u32, u32) — solute_short + solute_long
+        // Cache short-range solute pairlist as (u32, u32)
         self.pairlist_solute_u32.clear();
         self.pairlist_solute_u32.extend(
             self.pairlist
                 .solute_short
                 .iter()
-                .chain(self.pairlist.solute_long.iter())
                 .map(|&(i, j)| (i as u32, j as u32)),
         );
 
-        // Cache solvent pairlist as (u32, u32) — solvent_short + solvent_long
+        // Cache short-range solvent pairlist as (u32, u32)
         self.pairlist_solvent_u32.clear();
         self.pairlist_solvent_u32.extend(
             self.pairlist
                 .solvent_short
                 .iter()
-                .chain(self.pairlist.solvent_long.iter())
+                .map(|&(i, j)| (i as u32, j as u32)),
+        );
+
+        // Cache long-range pairlists
+        self.pairlist_solute_long_u32.clear();
+        self.pairlist_solute_long_u32.extend(
+            self.pairlist
+                .solute_long
+                .iter()
+                .map(|&(i, j)| (i as u32, j as u32)),
+        );
+        self.pairlist_solvent_long_u32.clear();
+        self.pairlist_solvent_long_u32.extend(
+            self.pairlist
+                .solvent_long
+                .iter()
                 .map(|&(i, j)| (i as u32, j as u32)),
         );
 
@@ -164,7 +203,7 @@ impl Algorithm for Forcefield {
         // --- 3. Calculate nonbonded forces ---
         self.nonbonded_storage.clear();
 
-        // Solute-solute and solute-solvent: lj_crf_innerloop (with HEAVISIDE truncation)
+        // Short-range solute interactions (with HEAVISIDE truncation)
         lj_crf_innerloop(
             &conf.current().pos,
             &self.charges,
@@ -176,7 +215,7 @@ impl Algorithm for Forcefield {
             &mut self.nonbonded_storage,
         );
 
-        // Solvent-solvent: solvent_innerloop (shared PBC shift, no HEAVISIDE)
+        // Short-range solvent-solvent interactions (shared PBC shift, no HEAVISIDE)
         if !self.pairlist_solvent_u32.is_empty() {
             solvent_innerloop(
                 &conf.current().pos,
@@ -189,6 +228,85 @@ impl Algorithm for Forcefield {
                 self.atoms_per_solvent,
                 &mut self.nonbonded_storage,
             );
+        }
+
+        // Twin-range long-range forces: recalculate on pairlist update, reuse otherwise
+        if self.twin_range_active {
+            // Recalculate long-range if pairlist was updated OR first step
+            if pairlist_updated || !self.longrange_computed {
+                // Recalculate long-range forces and cache them
+                let mut lr_storage = ForceStorage::new(n_atoms);
+
+                // Long-range solute interactions
+                if !self.pairlist_solute_long_u32.is_empty() {
+                    lj_crf_innerloop(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solute_long_u32,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        &mut lr_storage,
+                    );
+                }
+
+                // Long-range solvent-solvent interactions
+                if !self.pairlist_solvent_long_u32.is_empty() {
+                    solvent_innerloop(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solvent_long_u32,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        self.atoms_per_solvent,
+                        &mut lr_storage,
+                    );
+                }
+
+                // Cache the long-range results
+                self.longrange_forces.clear();
+                self.longrange_forces.extend_from_slice(&lr_storage.forces);
+                self.longrange_e_lj = lr_storage.e_lj;
+                self.longrange_e_crf = lr_storage.e_crf;
+                self.longrange_computed = true;
+            }
+
+            // Add cached long-range forces to current step
+            for i in 0..n_atoms {
+                self.nonbonded_storage.forces[i] += self.longrange_forces[i];
+            }
+            self.nonbonded_storage.e_lj += self.longrange_e_lj;
+            self.nonbonded_storage.e_crf += self.longrange_e_crf;
+        } else {
+            // No twin-range: evaluate long-range pairs as short-range (same as before)
+            if !self.pairlist_solute_long_u32.is_empty() {
+                lj_crf_innerloop(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solute_long_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    &mut self.nonbonded_storage,
+                );
+            }
+            if !self.pairlist_solvent_long_u32.is_empty() {
+                solvent_innerloop(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solvent_long_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    self.atoms_per_solvent,
+                    &mut self.nonbonded_storage,
+                );
+            }
         }
 
         // RF self-energy and excluded-pair Coulomb (energy + forces)
