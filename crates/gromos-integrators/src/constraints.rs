@@ -114,6 +114,7 @@ pub fn shake(
         converged = true;
         iteration += 1;
 
+        // === Solute bonds ===
         for bond in &topo.solute.bonds {
             let constraint_length = topo.bond_parameters[bond.bond_type].r0;
             if constraint_length < 1e-10 {
@@ -124,50 +125,43 @@ pub fn shake(
             let j = bond.j;
 
             // Only constrain bonds involving hydrogen (mass < 2.0)
-            // This corresponds to NTC=1 in GROMOS
+            // This corresponds to NTC=2 in GROMOS
             let mass_i = topo.mass[i];
             let mass_j = topo.mass[j];
             if mass_i > 2.0 && mass_j > 2.0 {
                 continue;
             }
 
-            // gromosXX convention: r = pos(i) - pos(j)
-            let r = conf.current().pos[i] - conf.current().pos[j];
-            let dist2 = r.dot(r);
-            let constr_length2 = constraint_length * constraint_length;
-
-            // gromosXX: diff = constr_length2 - dist2
-            let diff = constr_length2 - dist2;
-
-            // gromosXX convergence: fabs(diff) >= constr_length2 * tolerance * 2.0
-            if diff.abs() < constr_length2 * tolerance * 2.0 {
-                continue;
+            if !shake_one_constraint(
+                conf, topo, i, j, constraint_length, tolerance, &mut constrained_atoms,
+            ) {
+                converged = false;
             }
+        }
 
-            // Reference (old) distance vector
-            let ref_r = conf.old().pos[i] - conf.old().pos[j];
-            let sp = ref_r.dot(r);
+        // === Solvent constraints ===
+        // gromosXX: solvent constraints are applied to ALL solvent molecules
+        // using the template from SOLVENTCONSTR block
+        if !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
+            let n_solute = topo.solute.num_atoms();
+            let atoms_per_solvent = topo.solvent_atom_template.len();
+            let num_molecules = topo.solvents[0].num_molecules;
 
-            // Mass weighting
-            let inv_mass_i = topo.inverse_mass[i];
-            let inv_mass_j = topo.inverse_mass[j];
-            let inv_mass_sum = inv_mass_i + inv_mass_j;
+            for mol in 0..num_molecules {
+                let base = n_solute + mol * atoms_per_solvent;
 
-            if inv_mass_sum < 1e-20 {
-                continue;
+                for constr in &topo.solvent_constraint_template {
+                    let i = base + constr.i;
+                    let j = base + constr.j;
+                    let constraint_length = constr.length;
+
+                    if !shake_one_constraint(
+                        conf, topo, i, j, constraint_length, tolerance, &mut constrained_atoms,
+                    ) {
+                        converged = false;
+                    }
+                }
             }
-
-            // gromosXX: lambda = diff / (sp * 2.0 * inv_mass_sum)
-            let lambda = diff / (sp * 2.0 * inv_mass_sum);
-
-            // Update positions: ref_r *= lambda; pos_i += ref_r * inv_mass_i; pos_j -= ref_r * inv_mass_j
-            let correction = ref_r * lambda;
-            conf.current_mut().pos[i] += correction * inv_mass_i;
-            conf.current_mut().pos[j] -= correction * inv_mass_j;
-
-            constrained_atoms.insert(i);
-            constrained_atoms.insert(j);
-            converged = false;
         }
     }
 
@@ -183,6 +177,57 @@ pub fn shake(
         iterations: iteration,
         max_error: 0.0,
     }
+}
+
+/// Apply SHAKE to a single distance constraint. Returns true if already converged.
+#[inline]
+fn shake_one_constraint(
+    conf: &mut Configuration,
+    topo: &Topology,
+    i: usize,
+    j: usize,
+    constraint_length: f64,
+    tolerance: f64,
+    constrained_atoms: &mut std::collections::HashSet<usize>,
+) -> bool {
+    let constr_length2 = constraint_length * constraint_length;
+
+    // gromosXX convention: r = pos(i) - pos(j)
+    let r = conf.current().pos[i] - conf.current().pos[j];
+    let dist2 = r.dot(r);
+
+    // gromosXX: diff = constr_length2 - dist2
+    let diff = constr_length2 - dist2;
+
+    // gromosXX convergence: fabs(diff) >= constr_length2 * tolerance * 2.0
+    if diff.abs() < constr_length2 * tolerance * 2.0 {
+        return true; // already converged
+    }
+
+    // Reference (old) distance vector
+    let ref_r = conf.old().pos[i] - conf.old().pos[j];
+    let sp = ref_r.dot(r);
+
+    // Mass weighting
+    let inv_mass_i = topo.inverse_mass[i];
+    let inv_mass_j = topo.inverse_mass[j];
+    let inv_mass_sum = inv_mass_i + inv_mass_j;
+
+    if inv_mass_sum < 1e-20 {
+        return true; // fixed atoms
+    }
+
+    // gromosXX: lambda = diff / (sp * 2.0 * inv_mass_sum)
+    let lambda = diff / (sp * 2.0 * inv_mass_sum);
+
+    // Update positions
+    let correction = ref_r * lambda;
+    conf.current_mut().pos[i] += correction * inv_mass_i;
+    conf.current_mut().pos[j] -= correction * inv_mass_j;
+
+    constrained_atoms.insert(i);
+    constrained_atoms.insert(j);
+    false // not yet converged
 }
 
 /// M-SHAKE: Mass-weighted SHAKE variant
