@@ -6,12 +6,18 @@ letsgo reviewing things with compare references
 modify `PLAN.md` in case you advance
 in case we commit update CHANGELOG.md and update the Cargo.toml version
 
-DONT MODIFY THE REFERENCES gromosXX_references EXCEPT gromosXX_references/compare_reference.py
-COMPARE reference py is the only file that you can change
+DONT MODIFY THE REFERENCES in gromosXX_references/*/expected/ — those are gromosXX ground truth.
+To regenerate references: `python3 gromosXX_references/run_references.py --md-binary /path/to/gromosXX/md`
+New reference systems should be added via run_references.py (add to SYSTEMS list).
 
-her you can find the gromosXX code: .local/gromosXX/md++/src
-here you can find realistic tutorials: .local/gromos_tutorial_livecoms/tutorial_files
-here you can find theory behind everything: .local/doc/gromos_book
+Validation is done via Rust integration tests (replaces the old compare_reference.py):
+  `cargo test -p gromos-cli --test test_gromosXX_references`
+New test systems: add a `ref_test!(name, "system_dir")` line in:
+  `crates/gromos-cli/tests/test_gromosXX_references.rs`
+
+Here you can find the gromosXX code: .local/gromosXX/md++/src
+Here you can find realistic tutorials: .local/gromos_tutorial_livecoms/tutorial_files
+Here you can find theory behind everything: .local/doc/gromos_book
 
 
 ## Architecture
@@ -56,8 +62,10 @@ Forcefield → LeapFrogVelocity → LeapFrogPosition → SHAKE (if ntc>1) → Te
 
 ## Reference Test Status
 
-Validation: `python3 gromosXX_references/compare_reference.py`
-Generate refs: `python3 gromosXX_references/run_references.py`
+Validation: `cargo test -p gromos-cli --test test_gromosXX_references`
+Generate refs: `python3 crates/gromos-cli/tests/run_references.py --md-binary .local/gromosXX/md++/build/program/md`
+Test file: `crates/gromos-cli/tests/test_gromosXX_references.rs`
+Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 
 | Lvl | System           | Atoms | Isolates                              | Status   |
 |-----|------------------|-------|---------------------------------------|----------|
@@ -430,15 +438,31 @@ crates/gromos-integrators/src/barostats.rs   — Berendsen, Parrinello-Rahman
 crates/gromos-io/src/topology.rs             — topology file parser
 crates/gromos-io/src/coordinate.rs           — coordinate/GENBOX parser
 crates/gromos-io/src/imd.rs                  — IMD parameter file parser
-gromosXX_references/compare_reference.py     — validate against gromosXX
-gromosXX_references/run_references.py        — generate gromosXX reference data
+crates/gromos-cli/tests/test_gromosXX_references.rs — integration tests vs gromosXX
+crates/gromos-cli/tests/run_references.py           — generate gromosXX reference data
+crates/gromos-cli/tests/gromosXX_references/        — reference input + expected output
 ```
 
 ## How to Test
 
 ```sh
-cargo build --release
-python3 gromosXX_references/compare_reference.py                     # all systems
-python3 gromosXX_references/compare_reference.py pair_lj water_single # specific
-python3 gromosXX_references/compare_reference.py --md ./target/release/md
+# Build
+cargo build --release --bin md
+
+# Run integration tests against gromosXX references (10 active, 7 ignored)
+cargo test -p gromos-cli --test test_gromosXX_references
+
+# Run including known-failing systems
+cargo test -p gromos-cli --test test_gromosXX_references -- --include-ignored
+
+# Run a specific system
+cargo test -p gromos-cli --test test_gromosXX_references -- pair_lj --exact
+
+# Regenerate gromosXX reference data (requires gromosXX md++ binary)
+python3 crates/gromos-cli/tests/run_references.py --md-binary .local/gromosXX/md++/build/program/md
+
+# Add a new reference system:
+# 1. Add to SYSTEMS list in crates/gromos-cli/tests/run_references.py
+# 2. Run run_references.py to generate expected/ data
+# 3. Add ref_test!(name, "dir") in crates/gromos-cli/tests/test_gromosXX_references.rs
 ```
