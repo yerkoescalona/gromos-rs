@@ -1,0 +1,145 @@
+TITLE
+Two Argon atoms - LJ pair test
+Isolated LJ interaction, no charges, no PBC
+END
+PHYSICALCONSTANTS
+# FPEPSI: 1.0/(4.0*PI*EPS0) (EPS0 is the permittivity of vacuum)
+138.9354
+# HBAR: Planck's constant HBAR = H/(2* PI)
+0.0635078
+# SPDL: Speed of light (nm/ps)
+299792.458
+# BOLTZ: Boltzmann's constant kB
+0.00831441
+END
+TOPVERSION
+2.0
+END
+ATOMTYPENAME
+# NRATT: number of van der Waals atom types
+1
+# TYPE: atom type names
+AR
+END
+RESNAME
+# NRAA2: number of residues in a solute molecule
+1
+# AANM: residue names
+AR2
+END
+SOLUTEATOM
+#   NRP: number of solute atoms
+   2
+#  ATNM: atom number
+#  MRES: residue number
+#  PANM: atom name of solute atom
+#   IAC: integer (van der Waals) atom type code
+#  MASS: mass of solute atom
+#    CG: charge of solute atom
+#   CGC: charge group code (0 or 1)
+#   INE: number of excluded atoms
+# INE14: number of 1-4 interactions
+# ATNM MRES PANM IAC     MASS       CG  CGC INE
+#                                           INE14
+    1    1   AR1   1   39.94800    0.00000  1  0
+                                              0
+    2    1   AR2   1   39.94800    0.00000  1  0
+                                              0
+END
+BONDSTRETCHTYPE
+#  NBTY: number of covalent bond types
+0
+END
+BONDH
+#  NBONH: number of bonds involving H atoms in solute
+0
+END
+BOND
+#  NBON: number of bonds NOT involving H atoms in solute
+0
+END
+BONDANGLEBENDTYPE
+#  NTTY: number of bond angle types
+0
+END
+BONDANGLEH
+#  NTHEH: number of bond angles involving H atoms in solute
+0
+END
+BONDANGLE
+#  NTHE: number of bond angles NOT involving H atoms in solute
+0
+END
+IMPDIHEDRALTYPE
+#  NQTY: number of improper dihedrals
+0
+END
+IMPDIHEDRALH
+#  NQHIH: number of improper dihedrals involving H atoms in the solute
+0
+END
+IMPDIHEDRAL
+#  NQHI: number of improper dihedrals NOT involving H atoms in solute
+0
+END
+TORSDIHEDRALTYPE
+#  NPTY: number of dihedral types
+0
+END
+DIHEDRALH
+#  NPHIH: number of dihedrals involving H atoms in solute
+0
+END
+DIHEDRAL
+#  NPHI: number of dihedrals NOT involving H atoms in solute
+0
+END
+CROSSDIHEDRALH
+#  NPHIH: number of cross dihedrals involving H atoms in solute
+0
+END
+CROSSDIHEDRAL
+#  NPPC: number of cross dihedrals NOT involving H atoms in solute
+0
+END
+LJPARAMETERS
+#  NRATT2: number of LJ interaction types = NRATT*(NRATT+1)/2
+1
+#  IAC,JAC: integer (van der Waals) atom type code
+#  C12: r**(-12) term in nonbonded interactions
+#   C6: r**(-6) term in nonbonded interactions
+# CS12: r**(-12) term in 1-4 nonbonded interactions
+#  CS6: r**(-6) term in 1-4 nonbonded interactions
+# Argon-Argon: sigma=0.3405nm, epsilon=0.9961kJ/mol
+# C6 = 4*eps*sigma^6 = 6.2647e-3
+# C12 = 4*eps*sigma^12 = 9.847e-6
+# IAC  JAC           C12            C6          CS12           CS6
+    1    1  9.847000e-06  6.264700e-03  9.847000e-06  6.264700e-03
+END
+SOLUTEMOLECULES
+# NSPM  NSP[1...NSPM]
+         1
+    2
+END
+TEMPERATUREGROUPS
+# NSTM  NST[1...NSTM]
+         1
+    2
+END
+PRESSUREGROUPS
+# NSVM  NSV[1...NSVM]
+         1
+    2
+END
+LJEXCEPTIONS
+# NEX: number of exceptions
+0
+END
+SOLVENTATOM
+#  NRAM: number of atoms per solvent molecule
+0
+END
+SOLVENTCONSTR
+#  NCONS: number of constraints
+0
+END

@@ -73,7 +73,5 @@ test-results/
 # GROMOS
 gromosXX
 gromosPlsPls
-gromosXX_references/
 .local/
-PLAN.md
 md.trc
