@@ -26,11 +26,7 @@ const ENERGY_ABS_TOL: f64 = 1e-10; // for near-zero energies
 
 fn ref_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("gromosXX_references")
+        .join("tests/gromosXX_references")
 }
 
 fn md_bin() -> PathBuf {
