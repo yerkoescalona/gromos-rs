@@ -21,6 +21,7 @@ use std::process::Command;
 
 const ENERGY_REL_TOL: f64 = 1e-8;
 const ENERGY_ABS_TOL: f64 = 1e-10; // for near-zero energies
+const FORCE_ABS_TOL: f64 = 1e-6;   // kJ/(mol*nm)
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,53 @@ fn parse_enertrj(path: &Path) -> Vec<EnergyFrame> {
     frames
 }
 
+// ─── Force frame ────────────────────────────────────────────────────────────
+
+/// One frame of per-atom forces: Vec of (fx, fy, fz) for each atom.
+type ForceFrame = Vec<[f64; 3]>;
+
+// ─── Parser: FREEFORCERED blocks from .trf files ────────────────────────────
+//
+// Both gromosXX and gromos-rs write FREEFORCERED blocks with 3 floats per line.
+// Lines starting with '#' are comments (atom count markers).
+
+fn parse_trf(path: &Path) -> Vec<ForceFrame> {
+    let content =
+        fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut frames = Vec::new();
+    let mut in_block = false;
+    let mut current_frame: ForceFrame = Vec::new();
+
+    for line in content.lines() {
+        let t = line.trim();
+        if t == "FREEFORCERED" {
+            in_block = true;
+            current_frame.clear();
+            continue;
+        }
+        if t == "END" && in_block {
+            frames.push(current_frame.clone());
+            in_block = false;
+            continue;
+        }
+        if in_block && !t.starts_with('#') && !t.is_empty() {
+            let vals: Vec<f64> = t.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            if vals.len() == 3 {
+                current_frame.push([vals[0], vals[1], vals[2]]);
+            }
+        }
+    }
+    frames
+}
+
+fn assert_force_close(actual: f64, expected: f64, label: &str) {
+    let diff = (actual - expected).abs();
+    assert!(
+        diff <= FORCE_ABS_TOL,
+        "{label}: expected {expected:.10e}, got {actual:.10e}, diff={diff:.2e}, tol={FORCE_ABS_TOL:.2e}"
+    );
+}
+
 // ─── Comparison ─────────────────────────────────────────────────────────────
 
 fn assert_energy_close(actual: f64, expected: f64, label: &str) {
@@ -179,6 +227,7 @@ fn run_reference(system: &str) {
     fs::create_dir_all(&out).unwrap();
 
     let tre = out.join("energies.tre");
+    let trf = out.join("forces.trf");
 
     // Run md binary
     let result = Command::new(md_bin())
@@ -192,6 +241,8 @@ fn run_reference(system: &str) {
         .arg(out.join("final.conf"))
         .arg("@tre")
         .arg(&tre)
+        .arg("@trf")
+        .arg(&trf)
         .arg("@trc")
         .arg(out.join("trajectory.trc"))
         .output()
@@ -232,6 +283,41 @@ fn run_reference(system: &str) {
         );
     }
 
+    // Compare forces if reference .trf exists
+    let expected_trf = sys_dir.join("expected/forces.trf");
+    if expected_trf.exists() && trf.exists() {
+        let exp_forces = parse_trf(&expected_trf);
+        let act_forces = parse_trf(&trf);
+
+        let n_compare = exp_forces.len().min(act_forces.len());
+        for (frame_idx, (ef, af)) in exp_forces.iter().zip(&act_forces).enumerate() {
+            assert_eq!(
+                ef.len(),
+                af.len(),
+                "{system}[frame {frame_idx}]: atom count mismatch (expected {}, got {})",
+                ef.len(),
+                af.len()
+            );
+            for (atom_idx, (e, a)) in ef.iter().zip(af.iter()).enumerate() {
+                assert_force_close(
+                    a[0], e[0],
+                    &format!("{system}[{frame_idx}] atom {atom_idx} fx"),
+                );
+                assert_force_close(
+                    a[1], e[1],
+                    &format!("{system}[{frame_idx}] atom {atom_idx} fy"),
+                );
+                assert_force_close(
+                    a[2], e[2],
+                    &format!("{system}[{frame_idx}] atom {atom_idx} fz"),
+                );
+            }
+        }
+        if n_compare == 0 && !exp_forces.is_empty() {
+            panic!("{system}: expected {} force frames but got none", exp_forces.len());
+        }
+    }
+
     let _ = fs::remove_dir_all(&out);
 }
 
@@ -268,11 +354,13 @@ ref_test!(water_3_box,            "water_3_box");
 ref_test!(nacl_1water_box,        "nacl_1water_box");
 ref_test!(nacl_3water_box,        "nacl_3water_box");
 ref_test!(water_3_box_twinrange,  "water_3_box_twinrange");
+ref_test!(water_10_box,           "water_10_box");
+ref_test!(nacl_3water_cutoff,     "nacl_3water_cutoff");
+ref_test!(nacl_water_box,         "nacl_water_box");
+ref_test!(nacl_water_box_shifted, "nacl_water_box_shifted");
 
 // Known failures / TODO — run with: --include-ignored
 ref_test!(ignore: aladip_vacuum,       "aladip_vacuum");
-ref_test!(ignore: nacl_3water_cutoff,  "nacl_3water_cutoff");
-ref_test!(ignore: nacl_water_box,      "nacl_water_box");
 ref_test!(ignore: water_216_box,       "water_216_box");
 ref_test!(ignore: water_216_nvt,       "water_216_nvt");
 ref_test!(ignore: water_216_npt,       "water_216_npt");

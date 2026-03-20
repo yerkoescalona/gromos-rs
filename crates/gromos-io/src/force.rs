@@ -89,54 +89,69 @@ impl ForceWriter {
         forces: &[Vec3],
         constraint_forces: Option<&[Vec3]>,
     ) -> Result<(), IoError> {
-        // TIMESTEP block
+        // TIMESTEP block (gromosXX format: %15d%15.9f)
         writeln!(self.writer, "TIMESTEP")?;
-        writeln!(self.writer, "{:>10} {:15.6}", step, time)?;
+        writeln!(self.writer, "{:>15}{:>15.9}", step, time)?;
         writeln!(self.writer, "END")?;
 
         // FREEFORCERED block (normal forces)
+        let w = self.force_width;
+        let p = self.force_precision;
         writeln!(self.writer, "FREEFORCERED")?;
 
         for (i, force) in forces.iter().enumerate() {
+            // gromosXX format: three values packed at width 18, no separating space
             writeln!(
                 self.writer,
-                "{:width$.prec$} {:width$.prec$} {:width$.prec$}",
+                "{:>w$.p$}{:>w$.p$}{:>w$.p$}",
                 force.x,
                 force.y,
                 force.z,
-                width = self.force_width,
-                prec = self.force_precision
             )?;
 
-            // Add comment every 10 atoms (GROMOS md++ convention)
+            // Comment every 10 atoms (gromosXX convention)
             if (i + 1) % 10 == 0 {
                 writeln!(self.writer, "#{:>10}", i + 1)?;
             }
         }
         writeln!(self.writer, "END")?;
 
-        // CONSFORCERED block (constraint forces, optional)
+        // CONSFORCERED block (constraint forces)
+        // gromosXX always writes this block (zeros if no constraints)
         if self.write_constraint_forces {
-            if let Some(cons_forces) = constraint_forces {
-                writeln!(self.writer, "CONSFORCERED")?;
-
-                for (i, force) in cons_forces.iter().enumerate() {
-                    writeln!(
-                        self.writer,
-                        "{:width$.prec$} {:width$.prec$} {:width$.prec$}",
-                        force.x,
-                        force.y,
-                        force.z,
-                        width = self.force_width,
-                        prec = self.force_precision
-                    )?;
-
-                    if (i + 1) % 10 == 0 {
-                        writeln!(self.writer, "#{:>10}", i + 1)?;
+            writeln!(self.writer, "CONSFORCERED")?;
+            match constraint_forces {
+                Some(cons_data) => {
+                    for (i, force) in cons_data.iter().enumerate() {
+                        writeln!(
+                            self.writer,
+                            "{:>w$.p$}{:>w$.p$}{:>w$.p$}",
+                            force.x,
+                            force.y,
+                            force.z,
+                        )?;
+                        if (i + 1) % 10 == 0 {
+                            writeln!(self.writer, "#{:>10}", i + 1)?;
+                        }
                     }
                 }
-                writeln!(self.writer, "END")?;
+                None => {
+                    // Write zeros for each atom
+                    for i in 0..forces.len() {
+                        writeln!(
+                            self.writer,
+                            "{:>w$.p$}{:>w$.p$}{:>w$.p$}",
+                            0.0f64,
+                            0.0f64,
+                            0.0f64,
+                        )?;
+                        if (i + 1) % 10 == 0 {
+                            writeln!(self.writer, "#{:>10}", i + 1)?;
+                        }
+                    }
+                }
             }
+            writeln!(self.writer, "END")?;
         }
 
         self.frame_count += 1;

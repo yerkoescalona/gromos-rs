@@ -26,6 +26,7 @@ use gromos::{
         imd::read_imd_file,
         topology::{build_topology, read_topology_file},
         trajectory::TrajectoryWriter,
+        force::ForceWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
     math::{Periodicity, Rectangular, Vacuum, Vec3},
@@ -777,6 +778,22 @@ fn main() {
         },
     };
 
+    // Setup force trajectory writer (if @trf given)
+    let mut force_writer = if let Some(ref trf_file) = md_args.trf_file {
+        match ForceWriter::new(trf_file, "GROMOS-RS MD forces", true) {
+            Ok(w) => {
+                println!("  Force output:  {}", trf_file);
+                Some(w)
+            },
+            Err(e) => {
+                eprintln!("Error creating force file: {}", e);
+                process::exit(1);
+            },
+        }
+    } else {
+        None
+    };
+
     // Setup GaMD writers if enabled
     let mut gamd_stats_writer = if gamd_params.is_some() {
         let stats_file = "gamd_stats.dat";
@@ -1096,6 +1113,16 @@ fn main() {
             }
         }
 
+        // Write forces (same frequency as trajectory)
+        if let Some(ref mut fw) = force_writer {
+            if step % nstxout == 0 {
+                let forces = &conf.old().force;
+                if let Err(e) = fw.write_frame(step, time, forces, None) {
+                    eprintln!("Error writing forces: {}", e);
+                }
+            }
+        }
+
         // Advance simulation state for next step
         sim_state.advance();
     }
@@ -1127,6 +1154,15 @@ fn main() {
         eprintln!("Error finalizing energy file: {}", e);
     } else {
         log::debug!("Energy file finalized: {}", tre_file);
+    }
+
+    if let Some(ref mut fw) = force_writer {
+        if let Err(e) = fw.flush() {
+            log::error!("Failed to flush force file: {}", e);
+            eprintln!("Error flushing force file: {}", e);
+        } else if let Some(ref trf_file) = md_args.trf_file {
+            log::debug!("Force file finalized: {}", trf_file);
+        }
     }
 
     // Finalize GaMD writers if enabled

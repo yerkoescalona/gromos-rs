@@ -214,6 +214,9 @@ impl Algorithm for Forcefield {
             &self.periodicity,
             &mut self.nonbonded_storage,
         );
+        let e_lj_after_solute = self.nonbonded_storage.e_lj;
+        let e_crf_after_solute = self.nonbonded_storage.e_crf;
+        log::debug!("  After solute innerloop: e_lj={:.10e}, e_crf={:.10e}", e_lj_after_solute, e_crf_after_solute);
 
         // Short-range solvent-solvent interactions (shared PBC shift, no HEAVISIDE)
         if !self.pairlist_solvent_u32.is_empty() {
@@ -229,6 +232,11 @@ impl Algorithm for Forcefield {
                 &mut self.nonbonded_storage,
             );
         }
+        let e_lj_after_solvent = self.nonbonded_storage.e_lj;
+        let e_crf_after_solvent = self.nonbonded_storage.e_crf;
+        log::debug!("  After solvent innerloop: e_lj={:.10e}, e_crf={:.10e} (delta_lj={:.10e}, delta_crf={:.10e})",
+            e_lj_after_solvent, e_crf_after_solvent,
+            e_lj_after_solvent - e_lj_after_solute, e_crf_after_solvent - e_crf_after_solute);
 
         // Twin-range long-range forces: recalculate on pairlist update, reuse otherwise
         if self.twin_range_active {
@@ -250,10 +258,13 @@ impl Algorithm for Forcefield {
                         &mut lr_storage,
                     );
                 }
+                let lr_solute_e_lj = lr_storage.e_lj;
+                let lr_solute_e_crf = lr_storage.e_crf;
 
                 // Long-range solvent-solvent interactions
+                // Pairlist stores expanded atom pairs (per-atom nearest_image)
                 if !self.pairlist_solvent_long_u32.is_empty() {
-                    solvent_innerloop(
+                    lj_crf_innerloop(
                         &conf.current().pos,
                         &self.charges,
                         &self.iac_u32,
@@ -261,10 +272,14 @@ impl Algorithm for Forcefield {
                         &self.lj_params,
                         &self.crf_params,
                         &self.periodicity,
-                        self.atoms_per_solvent,
                         &mut lr_storage,
                     );
                 }
+                log::debug!("  LR solute: e_lj={:.10e}, e_crf={:.10e} ({} pairs)",
+                    lr_solute_e_lj, lr_solute_e_crf, self.pairlist_solute_long_u32.len());
+                log::debug!("  LR solvent: e_lj={:.10e}, e_crf={:.10e} ({} pairs)",
+                    lr_storage.e_lj - lr_solute_e_lj, lr_storage.e_crf - lr_solute_e_crf,
+                    self.pairlist_solvent_long_u32.len());
 
                 // Cache the long-range results
                 self.longrange_forces.clear();
@@ -272,6 +287,9 @@ impl Algorithm for Forcefield {
                 self.longrange_e_lj = lr_storage.e_lj;
                 self.longrange_e_crf = lr_storage.e_crf;
                 self.longrange_computed = true;
+                log::debug!("  Long-range (recomputed): lr_e_lj={:.10e}, lr_e_crf={:.10e}, solute_long={}, solvent_long={}",
+                    lr_storage.e_lj, lr_storage.e_crf,
+                    self.pairlist_solute_long_u32.len(), self.pairlist_solvent_long_u32.len());
             }
 
             // Add cached long-range forces to current step

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.9](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.8...v0.0.9) (2026-03-29)
+
+### Bug Fixes
+
+- **forces:** fix CRF energy mismatch (~3.82 kJ/mol) for systems with solvent near cutoff boundary
+  - Expand solvent long-range pairlist to all atom pairs (was: first-atom only with shared PBC shift)
+  - Remove HEAVISIDE truncation from `lj_crf_innerloop` to match gromosXX `#undef XXHEAVISIDE` default
+  - Long-range solvent now processed with `lj_crf_innerloop` (per-atom nearest_image) instead of `solvent_innerloop`
+
+### Features
+
+- **tests:** add water_10_box and nacl_water_box_shifted reference systems
+  - water_10_box: 2 ions + 10 SPC waters (32 atoms), positions away from cutoff boundaries
+  - nacl_water_box_shifted: nacl_water_box with perturbed positions near cutoff
+- **tests:** promote nacl_water_box, nacl_water_box_shifted, nacl_3water_cutoff from ignored to active
+  - 14 of 19 reference tests now pass (was 11)
+- **io:** add verbose logging and md_output.log capture to run_references.py
+- **io:** improve force trajectory writer robustness
+
 ## [0.0.8](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.7...v0.0.8) (2026-03-29)
 
 ### Features
