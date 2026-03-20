@@ -293,8 +293,6 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
     periodicity: &BC,
     storage: &mut ForceStorage,
 ) {
-    let cutoff2 = crf.cutoff_sq;
-
     // Serial version (baseline)
     for &(i, j) in pairlist {
         let i = i as usize;
@@ -307,11 +305,10 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
         // Apply periodic boundary conditions
         let r = periodicity.nearest_image(pos_i, pos_j);
 
-        // HEAVISIDE truncation: skip pairs beyond cutoff (gromosXX XXHEAVISIDE)
+        // Note: HEAVISIDE truncation disabled to match gromosXX built with
+        // #undef XXHEAVISIDE (default). Pairs beyond cutoff still get evaluated
+        // via the CRF formula; the chargegroup pairlist already filters by cutoff.
         let r2 = r.length_squared();
-        if r2 > cutoff2 {
-            continue;
-        }
 
         // Get interaction parameters
         let type_i = iac[i] as usize;

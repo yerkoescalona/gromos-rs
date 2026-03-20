@@ -269,7 +269,13 @@ impl StandardPairlistAlgorithm {
                 if dist2 > cutoff2_short {
                     log::debug!("  Solvent({},a{})-Solvent({},a{}) LONG dist={:.6}",
                         cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt());
-                    pairlist.solvent_long.push((first_atom_1, first_atom_2));
+                    // Long-range: expand to all atom pairs (gromosXX standard
+                    // mode uses per-atom nearest_image, not shared PBC shift)
+                    for &a1 in &topo.chargegroups[cg1].atoms {
+                        for &a2 in &topo.chargegroups[cg2].atoms {
+                            pairlist.solvent_long.push((a1, a2));
+                        }
+                    }
                     continue;
                 }
 

@@ -249,6 +249,30 @@ SYSTEMS = [
         "natoms": 11,
         "isolates": "CRF at short-range/long-range/outside cutoff boundaries",
     },
+    {
+        "name": "water_10_box",
+        "description": "Level 2: 10 SPC waters + 2 ions, positions away from cutoff boundaries",
+        "level": 2,
+        "dir": "water_10_box",
+        "topo": "water_10_box.topo",
+        "conf": "water_10_box.conf",
+        "input": "water_10_box.in",
+        "pttopo": None,
+        "natoms": 32,
+        "isolates": "medium solvent system with no pairs at cutoff boundary",
+    },
+    {
+        "name": "nacl_water_box_shifted",
+        "description": "Level 2: nacl_water_box with perturbed positions off cutoff boundaries",
+        "level": 2,
+        "dir": "nacl_water_box_shifted",
+        "topo": "nacl_water_box_shifted.topo",
+        "conf": "nacl_water_box_shifted.conf",
+        "input": "nacl_water_box_shifted.in",
+        "pttopo": None,
+        "natoms": 62,
+        "isolates": "same topology as nacl_water_box but no pairs at cutoff boundary",
+    },
 ]
 
 
@@ -275,7 +299,7 @@ def find_md_binary(hint=None):
     return None
 
 
-def run_gromosxx(md_binary, system, work_dir):
+def run_gromosxx(md_binary, system, work_dir, verbose=False):
     """Run gromosXX md on a system. Returns paths to output files or None on failure."""
     sys_dir = REFERENCES_DIR / system["dir"]
 
@@ -320,16 +344,39 @@ def run_gromosxx(md_binary, system, work_dir):
         timeout=300,
     )
 
+    # Save full md log (stdout + stderr) to work_dir for debugging
+    log_path = work_dir / "md_output.log"
+    with open(log_path, "w") as f:
+        f.write(f"# gromosXX md output for {system['name']}\n")
+        f.write(f"# Command: {' '.join(cmd)}\n")
+        f.write(f"# Return code: {result.returncode}\n\n")
+        f.write("=== STDOUT ===\n")
+        f.write(result.stdout)
+        f.write("\n=== STDERR ===\n")
+        f.write(result.stderr)
+
     if result.returncode != 0:
         print(f"  ERROR: md returned {result.returncode}")
-        # Show relevant error lines
-        for line in result.stdout.split("\n"):
-            if "ERROR" in line or "error" in line:
-                print(f"    {line.strip()}")
+        print(f"  Full log saved to: {log_path}")
+        if verbose:
+            print(f"  --- STDOUT (last 80 lines) ---")
+            for line in result.stdout.split("\n")[-80:]:
+                print(f"    {line}")
+            if result.stderr.strip():
+                print(f"  --- STDERR ---")
+                for line in result.stderr.split("\n")[-40:]:
+                    print(f"    {line}")
+        else:
+            # Show relevant error lines
+            for line in result.stdout.split("\n"):
+                if "ERROR" in line or "error" in line or "WARNING" in line:
+                    print(f"    {line.strip()}")
         return None
 
     return {
         "stdout": result.stdout,
+        "stderr": result.stderr,
+        "log": log_path,
         "fin": fin_path,
         "trc": trc_path,
         "trf": trf_path,
@@ -453,7 +500,7 @@ def generate_toml(system, run_output, key_values, step0_forces):
     return "\n".join(lines) + "\n"
 
 
-def process_system(md_binary, system):
+def process_system(md_binary, system, verbose=False):
     """Run one system and save raw outputs + TOML manifest."""
     sys_dir = REFERENCES_DIR / system["dir"]
     expected_dir = sys_dir / "expected"
@@ -463,9 +510,14 @@ def process_system(md_binary, system):
     work_dir = Path(tempfile.mkdtemp(prefix=f"gromos_ref_{system['name']}_"))
 
     try:
-        run_output = run_gromosxx(md_binary, system, work_dir)
+        run_output = run_gromosxx(md_binary, system, work_dir, verbose=verbose)
 
         if run_output is None:
+            # Even on failure, save the log to expected/ for inspection
+            log_src = work_dir / "md_output.log"
+            if log_src.is_file():
+                shutil.copy2(log_src, expected_dir / "md_output.log")
+                print(f"  Log saved to: {expected_dir / 'md_output.log'}")
             return False
 
         # Copy raw output files to expected/
@@ -474,6 +526,7 @@ def process_system(md_binary, system):
             ("tre", "energies.tre"),
             ("trc", "trajectory.trc"),
             ("fin", "final.conf"),
+            ("log", "md_output.log"),
         ]:
             src = run_output[src_name]
             dst = expected_dir / dst_name
@@ -530,6 +583,12 @@ def main():
         help="Run only specific systems (by name)",
         default=None,
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show full gromosXX output (especially on failure)",
+    )
 
     args = parser.parse_args()
 
@@ -563,7 +622,7 @@ def main():
         print(f" {system['name']} (Level {system['level']}): {system['isolates']}")
         print(f"{'─' * 60}")
 
-        ok = process_system(md_binary, system)
+        ok = process_system(md_binary, system, verbose=args.verbose)
         results[system["name"]] = ok
         print()
 
