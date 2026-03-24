@@ -13,9 +13,9 @@ default-members = [
 [workspace.package]
 version = "0.0.9"
 edition = "2021"
-authors = ["GROMOS Developers"]
-license = "GPL-2.0"
-repository = "https://github.com/gromos/gromos-rs"
+authors = ["Yerko Escalona"]
+license = "GPL-2.0-or-later"
+repository = "https://github.com/yerkoescalona/gromos-rs"
 rust-version = "1.75"
 
 [workspace.dependencies]

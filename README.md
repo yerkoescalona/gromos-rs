@@ -110,7 +110,7 @@ GROMOS is published under the GNU General Public License [(GPLv2)](https://www.g
 
 ### License
 
-**gromos-rs** is licensed under the GNU General Public License v2.0 (GPL-2.0), maintaining compatibility with the original GROMOS license.
+**gromos-rs** is licensed under the GNU General Public License v2.0 or later (GPL-2.0-or-later), matching the original gromosXX license.
 
 - Copyright (C) 2025 Yerko Escalona
 - Based on GROMOS software (Copyright by Biomos b.v. and GROMOS development team)
