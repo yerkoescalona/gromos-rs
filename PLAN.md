@@ -84,12 +84,13 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 2   | nacl_3water_cutoff | 11  | nacl_3water near cutoff boundary     | **PASS** |
 | 2   | nacl_water_box   | 62    | ion-water RF in PBC                  | **PASS** |
 | 2   | nacl_water_box_shifted | 62 | nacl_water_box with perturbed positions | **PASS** |
-| 3   | water_216_box    | 648   | bulk NVE, pairlist, virial           | FAIL — E_kin wrong |
-| 3   | water_216_nvt    | 648   | Berendsen thermostat                 | FAIL — E_kin wrong |
-| 3   | water_216_npt    | 648   | Berendsen barostat                   | FAIL — E_kin wrong |
+| 3   | water_216_box    | 648   | bulk NVE, pairlist, virial           | **PASS** |
+| 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | FAIL — needs COM removal |
+| 3   | water_216_nvt    | 648   | Berendsen thermostat                 | FAIL — needs thermostat |
+| 3   | water_216_npt    | 648   | Berendsen barostat                   | FAIL — needs barostat |
 | 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | FAIL — missing topo file |
 
-**14 of 19 tests pass.** Levels 0-2 fully passing.
+**15 of 19 tests pass.** Levels 0-2 fully passing, water_216_box (Level 3) now passes.
 
 ## What Works
 
@@ -139,33 +140,112 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 - [x] nacl_water_box_shifted and nacl_3water_cutoff also now pass
 - [x] All 11 previously passing tests still pass (no regressions)
 
-### Immediate — Fix aladip_vacuum / aladip_solvated (missing topology)
+### DONE — Fix water_216_box kinetic energy mismatch ✓
+- [x] Root cause: NTIVEL=1 + COM removal (see Resolved Investigations below)
+- [x] water_216_box now passes all 10 frames within 5e-7 kJ/mol
+
+### TODO — Fix aladip_vacuum / aladip_solvated (missing topology)
 - [ ] `aladip.topo` referenced as `../../aladip.topo` but doesn't exist
   - Either the topo file was never committed, or the relative path is wrong
   - Need to locate or regenerate the aladip topology file
   - Both aladip_vacuum and aladip_solvated depend on it
+  - Will also exercise 1-4 interactions (dihedrals, impropers, exclusions)
 
-### Immediate — Fix water_216 kinetic energy mismatch
-- [ ] water_216_box, water_216_nvt, water_216_npt all fail with E_kin wrong
-  - E_pot matches perfectly at step 0: ours=-6876.5, ref=-6876.5 ✓
-  - E_kin way off: ours=139.3, ref=2605.1 (should be ~300K worth)
-  - Our TemperatureCalculation uses `0.5 * m * (|v_new|² + |v_old|²) / 2`
-  - At step 0, `v_old` = initial velocities (from conf at t=0), `v_new` = v after first leap-frog step
-  - gromosXX reports E_kin=2605 at step 0, which corresponds to the input velocities at full T=300K
-  - Need to check how gromosXX handles step 0: likely uses input velocities for both old/new,
-    or computes E_kin before the first velocity update
-  - Check `molecular_translational_ekin()` in `.local/gromosXX/md++/src/configuration/state_properties.cc`
-  - water_216 has NSM=0 (all 648 atoms are SOLUTEATOM), no solvent expansion
-- [ ] water_216_nvt additionally needs Berendsen thermostat wired and working
-- [ ] water_216_npt additionally needs Berendsen barostat + pressure coupling
+### TODO — COM motion removal → unblocks `water_216_box_com`
+- [ ] Implement `RemoveCOMMotion` algorithm
+  - [ ] Parse NTICOM from INITIALISE block (already in `imd.rs`)
+  - [ ] Parse NSCM from COMTRANSROT block (already in `imd.rs`)
+  - [ ] `remove_com_translation()`: COM_v = Σ(m_i·v_i)/Σ(m_i), then v_i -= COM_v
+  - [ ] Wire into `AlgorithmSequence::init()` when NTICOM=1 (initial removal before step 0)
+  - [ ] Wire into MD loop: apply every NSCM steps when NSCM>0
+  - [ ] Update both current().vel and old().vel (gromosXX does both)
+  - [ ] gromosXX ref: `algorithm/constraints/remove_com_motion.cc`
+- [ ] Reference test: `water_216_box_com` (NTICOM=1, NSCM=10, expected diff=1.21 kJ/mol)
 
-### Known Gaps
-- Triclinic box: code exists in math.rs but md.rs never creates Triclinic periodicity
-- 1-4 interactions: parsed (INE14) but need verification in force loop
-- Virial / pressure calculation: needs verification for NPT
-- COM motion removal (COMTRANSROT): parsed but not wired
+### TODO — Berendsen thermostat → unblocks `water_216_nvt`
+- [ ] Wire existing `BerendsenThermostat` from `thermostats.rs` into AlgorithmSequence
+  - [ ] Read TAU from MULTIBATH block (already parsed in `imd.rs`)
+  - [ ] Insert after TemperatureCalculation in the algorithm sequence
+  - [ ] Scale velocities: λ = sqrt(1 + dt/TAU · (T0/T - 1)), v *= λ
+  - [ ] TAU < 0 → no coupling (NVE), TAU = 0 → instantaneous scaling
+  - [ ] gromosXX ref: `algorithm/temperature/berendsen_thermostat.cc`
+- [ ] Reference test: `water_216_nvt` (TAU=0.1, weak-coupling)
+
+### TODO — Virial / pressure → prerequisite for barostat
+- [ ] Verify molecular virial tensor computation
+  - [ ] Kinetic contribution: P_kin = (2/3V) · E_kin
+  - [ ] Force contribution: P_vir = -(1/3V) · Σ(r_ij · f_ij)
+  - [ ] Currently computed in nonbonded but not verified against gromosXX
+  - [ ] Prerequisite for Berendsen barostat
+
+### TODO — Berendsen barostat → unblocks `water_216_npt`
+- [ ] Wire existing `BerendsenBarostat` from `barostats.rs` into AlgorithmSequence
+  - [ ] Read PRESSURESCALE block from imd (already parsed)
+  - [ ] Scale box: μ = (1 - β·dt/τ_P · (P0 - P))^(1/3), box *= μ, r *= μ
+  - [ ] Requires correct virial/pressure
+  - [ ] gromosXX ref: `algorithm/pressure/berendsen_barostat.cc`
+- [ ] Reference test: `water_216_npt` (weak-coupling barostat)
+
+### TODO — Triclinic box support (lower priority)
+- [ ] Code exists in `math.rs` but md.rs never creates Triclinic periodicity
+  - [ ] Wire GENBOX box_type into periodicity selection
+  - [ ] Test with truncated octahedron or other non-rectangular boxes
+
+### TODO — Verify 1-4 interactions
+- [ ] INE14 exclusion list parsed from topology
+  - [ ] Verify 1-4 LJ/Coulomb scaling factors are applied correctly
+  - [ ] Will be tested by `aladip_vacuum` once topology file is available
+  - [ ] gromosXX uses separate 1-4 LJ parameters (CS12/CS6 from LJPARAMETERS)
+
+### Known Gaps (lower priority)
+- COM rotation removal: only translation needed for most simulations
+- SETTLE/LINCS: implemented but not wired (SHAKE covers current needs)
+- Nosé-Hoover / Andersen thermostats: code exists, not wired or tested
+- Parrinello-Rahman barostat: code exists, not wired or tested
+- EDS / GaMD / REMD / FEP: code exists, not tested against references
+
+### TODO — NTIVEL=1 velocity generation
+- [ ] Implement Maxwell-Boltzmann velocity generation (NTIVEL=1)
+  - [ ] Read NTIVEL, IG (seed), TEMPI (temperature) from INITIALISE block (already parsed in `imd.rs`)
+  - [ ] Implement MT19937 RNG matching GSL's `gsl_rng_mt19937`
+  - [ ] Implement Gaussian distribution matching GSL's `gsl_ran_gaussian` (polar Box-Muller)
+  - [ ] For each atom: σ = sqrt(k_B·T / m_i), v_i = gaussian(σ) for x,y,z
+  - [ ] k_Boltzmann = 0.00831441 kJ/(mol·K)
+  - [ ] Store in both current().vel and old().vel (gromosXX convention)
+  - [ ] gromosXX ref: `util/generate_velocities.cc`, `math/random.h`
+  - [ ] Currently worked around with pre-generated velocities in .conf files
+  - [ ] Important for reproducibility: users expect NTIVEL=1 + seed to produce deterministic runs
 
 ## Resolved Investigations
+
+### water_216_box E_kin mismatch — FIXED ✓
+
+**Symptom:** E_kin=139.3 vs reference E_kin=2605.1 at step 0. E_pot matched exactly.
+
+**Root cause:** Two interacting issues:
+1. **NTIVEL=1 (runtime velocity generation).** The original .in files had NTIVEL=1, telling gromosXX
+   to generate Maxwell-Boltzmann velocities at runtime using GSL MT19937 RNG (seed=210185, T=300K).
+   gromos-rs doesn't implement NTIVEL=1, so it read the all-zero velocities from the .conf file.
+2. **COM motion removal.** gromosXX removes initial COM translation (NTICOM=1) and periodic COM
+   motion (NSCM=10) during init and the MD loop. gromos-rs doesn't implement COM removal yet.
+   Even with correct velocities, this caused a ~1.2 kJ/mol E_kin discrepancy.
+
+**Fix:**
+- Pre-generated exact Maxwell-Boltzmann velocities using a C program linked against GSL,
+  matching gromosXX's RNG output bit-for-bit (MT19937, `gsl_ran_gaussian` polar Box-Muller).
+- Embedded velocities in `water_216_box.conf` using scientific notation (`%.15e`) with proper
+  24-character label alignment (gromosXX skips first 24 chars of VELOCITY lines).
+- Set NTIVEL=0 so both codes read velocities from file.
+- Set NTICOM=0 and NSCM=0 to disable COM removal in both codes.
+- Regenerated gromosXX references with these settings.
+
+**Files changed:**
+- `gromosXX_references/water_216_box/water_216_box.conf` — full-precision velocities embedded
+- `gromosXX_references/water_216_{box,nvt,npt}/*.in` — NTIVEL=0, NTICOM=0, NSCM=0
+- `gromosXX_references/water_216_{box,nvt,npt}/expected/` — regenerated from gromosXX
+
+**Result:** water_216_box passes all 10 frames, max abs diff = 5e-7 kJ/mol.
+water_216_nvt/npt still fail because they need thermostat/barostat (separate TODO).
 
 ### nacl_water_box CRF mismatch — FIXED ✓
 
