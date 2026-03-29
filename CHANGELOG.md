@@ -24,7 +24,7 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 - **io:** add verbose logging and md_output.log capture to run_references.py
 - **io:** improve force trajectory writer robustness
 
-## [0.0.8](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.7...v0.0.8) (2026-03-29)
+## [0.0.8](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.7...v0.0.8) (2026-03-08)
 
 ### Features
 
@@ -49,7 +49,7 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   - Solvent-solvent stores first-atom pairs only (expanded in innerloop)
   - Add debug logging for CG positions, distances, pair classification
 
-## [0.0.7](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.6...v0.0.7) (2026-02-22)
+## [0.0.7](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.6...v0.0.7) (2026-03-02)
 
 ### Refactor
 
@@ -64,7 +64,7 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   - LJ matrix now includes solvent IAC types at build time
   - All 6 reference tests pass (pair_lj, pair_lj_mixed, nacl_pair, water_single, benzene_vacuum, water_3_box)
 
-## [0.0.6](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.5...v0.0.6) (2026-02-22)
+## [0.0.6](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.5...v0.0.6) (2026-02-27)
 
 ### Features
 
@@ -80,7 +80,7 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   - Add shake_algorithm.rs module
   - Add ForceStorage to nonbonded for combined force+energy tracking
 
-## [0.0.5](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.4...v0.0.5) (2026-02-22)
+## [0.0.5](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.4...v0.0.5) (2026-02-27)
 
 ### Refactor
 
@@ -95,7 +95,7 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   - 9 new/updated tests for coordinate and IMD parsing
   - pair_lj reference still passes at ~1e-11 precision
 
-## [0.0.4](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.3...v0.0.4) (2026-02-22)
+## [0.0.4](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.3...v0.0.4) (2026-02-24)
 
 ### Refactor
 

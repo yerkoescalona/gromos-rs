@@ -8,9 +8,9 @@ SYSTEM
 END
 INITIALISE
 #  NTIVEL  NTISHK  NTINHT  NTINHB
-        1       0       0       0
+        0       0       0       0
 #  NTISHI  NTIRTC  NTICOM
-        1       0       1
+        1       0       0
 #  NTISTI
         0
 #      IG   TEMPI
@@ -37,7 +37,7 @@ MULTIBATH
 END
 COMTRANSROT
 #     NSCM
-       10
+        0
 END
 PRINTOUT
 #     NTPR      NTPP

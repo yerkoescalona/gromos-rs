@@ -359,9 +359,12 @@ ref_test!(nacl_3water_cutoff,     "nacl_3water_cutoff");
 ref_test!(nacl_water_box,         "nacl_water_box");
 ref_test!(nacl_water_box_shifted, "nacl_water_box_shifted");
 
+// Level 3 — bulk water, pairlist scaling, long-range
+ref_test!(water_216_box,       "water_216_box");
+
 // Known failures / TODO — run with: --include-ignored
 ref_test!(ignore: aladip_vacuum,       "aladip_vacuum");
-ref_test!(ignore: water_216_box,       "water_216_box");
+ref_test!(ignore: water_216_box_com,   "water_216_box_com");
 ref_test!(ignore: water_216_nvt,       "water_216_nvt");
 ref_test!(ignore: water_216_npt,       "water_216_npt");
 ref_test!(ignore: aladip_solvated,     "aladip_solvated");
