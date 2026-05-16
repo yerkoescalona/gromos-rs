@@ -216,6 +216,8 @@ pub struct State {
     pub constraint_force: Vec<Vec3>, // Forces from constraints
     pub box_config: Box,             // Simulation box
     pub virial_tensor: Mat3,         // Virial tensor (for pressure calculation)
+    pub kinetic_energy_tensor: Mat3, // KE tensor (for pressure calculation)
+    pub pressure_tensor: Mat3,       // Pressure tensor (computed by PressureCalculation)
     pub energies: Energy,            // Energy storage
 }
 
@@ -228,6 +230,8 @@ impl State {
             constraint_force: vec![Vec3::ZERO; n_atoms],
             box_config: Box::vacuum(),
             virial_tensor: Mat3::ZERO,
+            kinetic_energy_tensor: Mat3::ZERO,
+            pressure_tensor: Mat3::ZERO,
             energies: Energy::new(num_temperature_groups, num_energy_groups),
         }
     }
@@ -238,6 +242,7 @@ impl State {
             *f = Vec3::ZERO;
         }
         self.virial_tensor = Mat3::ZERO;
+        self.kinetic_energy_tensor = Mat3::ZERO;
     }
 
     /// Clear constraint forces

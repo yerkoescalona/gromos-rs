@@ -330,7 +330,7 @@ pub struct Topology {
 
     // Temperature and pressure coupling groups
     pub temperature_groups: Vec<Vec<usize>>, // Atoms in each T-coupling group
-    pub pressure_groups: Vec<Vec<usize>>,    // Atoms in each P-coupling group
+    pub pressure_groups: Vec<std::ops::Range<usize>>, // Pressure groups as atom ranges (gromosXX: PRESSUREGROUPS)
     pub atom_to_temperature_group: Vec<usize>,
     pub atom_to_pressure_group: Vec<usize>,
 
@@ -372,7 +372,7 @@ impl Topology {
             atom_to_chargegroup: Vec::new(),
             num_solute_chargegroups: 0,
             temperature_groups: Vec::new(),
-            pressure_groups: Vec::new(),
+            pressure_groups: Vec::new(),  // populated from PRESSUREGROUPS topology block
             atom_to_temperature_group: Vec::new(),
             atom_to_pressure_group: Vec::new(),
             energy_groups: Vec::new(),
@@ -526,6 +526,12 @@ impl Topology {
 
         let atoms_per_solvent = self.solvent_atom_template.len();
         let n_solute = self.solute.num_atoms();
+
+        // Add solute as one molecule (if it has atoms)
+        if n_solute > 0 && self.molecules.is_empty() {
+            self.molecules.push(0..n_solute);
+        }
+
         let n_solvent_atoms = atoms_per_solvent * nsm;
         let n_total = n_solute + n_solvent_atoms;
 
@@ -581,6 +587,10 @@ impl Topology {
         // Solvent intra-molecular exclusions: all atoms within each molecule exclude each other
         for mol in 0..nsm {
             let base = n_solute + mol * atoms_per_solvent;
+            // Populate molecules list
+            self.molecules.push(base..base + atoms_per_solvent);
+            // Each solvent molecule is its own pressure group (gromosXX convention)
+            self.pressure_groups.push(base..base + atoms_per_solvent);
             for a in 0..atoms_per_solvent {
                 for b in (a + 1)..atoms_per_solvent {
                     self.exclusions[base + a].insert(base + b);

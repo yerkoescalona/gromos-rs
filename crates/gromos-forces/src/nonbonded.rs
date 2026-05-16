@@ -126,6 +126,15 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
                 let force = r * (q_prod * crf.crf_cut3i);
                 storage.forces[i] += force;
                 storage.forces[j] -= force;
+
+                // Virial: gromosXX convention virial_tensor(b, a) += r(b) * force(a)
+                let rv = [r.x, r.y, r.z];
+                let fv = [force.x, force.y, force.z];
+                for a in 0..3 {
+                    for b in 0..3 {
+                        storage.virial[a][b] += rv[a] * fv[b];
+                    }
+                }
             }
         }
     }
@@ -329,10 +338,10 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
         storage.e_lj += e_lj;
         storage.e_crf += e_crf;
 
-        // Accumulate virial (for pressure calculation)
+        // Accumulate virial: gromosXX convention virial_tensor(b, a) += r(b) * force(a)
         for a in 0..3 {
             for b in 0..3 {
-                storage.virial[a][b] += r[b] * force[a];
+                storage.virial[a][b] += r[a] * force[b];
             }
         }
     }
@@ -404,9 +413,10 @@ pub fn solvent_innerloop<BC: BoundaryCondition>(
                 storage.e_lj += e_lj;
                 storage.e_crf += e_crf;
 
+                // gromosXX convention: virial_tensor(b, a) += r(b) * force(a)
                 for a in 0..3 {
                     for b in 0..3 {
-                        storage.virial[a][b] += r[b] * force[a];
+                        storage.virial[a][b] += r[a] * force[b];
                     }
                 }
             }
@@ -453,9 +463,10 @@ pub fn lj_crf_innerloop_parallel<BC: BoundaryCondition>(
                 local_storage.e_lj += e_lj;
                 local_storage.e_crf += e_crf;
 
+                // gromosXX convention: virial_tensor(b, a) += r(b) * force(a)
                 for a in 0..3 {
                     for b in 0..3 {
-                        local_storage.virial[a][b] += r[b] * force[a];
+                        local_storage.virial[a][b] += r[a] * force[b];
                     }
                 }
             }

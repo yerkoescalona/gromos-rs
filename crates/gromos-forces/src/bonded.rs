@@ -68,6 +68,9 @@ impl LambdaController {
 pub struct ForceEnergy {
     pub energy: f64,
     pub forces: Vec<Vec3>,
+    /// Virial tensor for pressure calculation.
+    /// virial[a][b] = Σ r[b] * f[a] (same convention as nonbonded storage)
+    pub virial: [[f64; 3]; 3],
 }
 
 /// Result of FEP force calculation: energy, forces, and lambda derivative
@@ -83,6 +86,7 @@ impl ForceEnergy {
         Self {
             energy: 0.0,
             forces: vec![Vec3::ZERO; num_atoms],
+            virial: [[0.0; 3]; 3],
         }
     }
 
@@ -90,6 +94,11 @@ impl ForceEnergy {
         self.energy += other.energy;
         for i in 0..self.forces.len().min(other.forces.len()) {
             self.forces[i] += other.forces[i];
+        }
+        for a in 0..3 {
+            for b in 0..3 {
+                self.virial[a][b] += other.virial[a][b];
+            }
         }
     }
 }
@@ -140,6 +149,15 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
         result.energy += energy;
         result.forces[bond.i] += force;
         result.forces[bond.j] -= force;
+
+        // gromosXX: virial_tensor(a, c) += v(a) * f(c)
+        let rv = [r_vec.x, r_vec.y, r_vec.z];
+        let fv = [force.x, force.y, force.z];
+        for a in 0..3 {
+            for c in 0..3 {
+                result.virial[a][c] += rv[a] * fv[c];
+            }
+        }
     }
 
     result
@@ -176,6 +194,15 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
         result.energy += energy;
         result.forces[bond.i] += force;
         result.forces[bond.j] -= force;
+
+        // gromosXX: virial_tensor(a, c) += v(a) * f(c)
+        let rv = [r_vec.x, r_vec.y, r_vec.z];
+        let fv = [force.x, force.y, force.z];
+        for a in 0..3 {
+            for c in 0..3 {
+                result.virial[a][c] += rv[a] * fv[c];
+            }
+        }
     }
 
     result
@@ -290,6 +317,17 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
         result.forces[angle.i] += f_i;
         result.forces[angle.j] += f_j;
         result.forces[angle.k] += f_k;
+
+        // gromosXX: virial_tensor(a, bb) += rij(a) * fi(bb) + rkj(a) * fk(bb)
+        let rij_v = [rij.x, rij.y, rij.z];
+        let rkj_v = [rkj.x, rkj.y, rkj.z];
+        let fi_v = [f_i.x, f_i.y, f_i.z];
+        let fk_v = [f_k.x, f_k.y, f_k.z];
+        for a in 0..3 {
+            for bb in 0..3 {
+                result.virial[a][bb] += rij_v[a] * fi_v[bb] + rkj_v[a] * fk_v[bb];
+            }
+        }
     }
 
     result
@@ -387,6 +425,17 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
         result.forces[angle.i] += f_i;
         result.forces[angle.j] += f_j;
         result.forces[angle.k] += f_k;
+
+        // gromosXX: virial_tensor(a, bb) += rij(a) * fi(bb) + rkj(a) * fk(bb)
+        let rij_v = [r_ij.x, r_ij.y, r_ij.z];
+        let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
+        let fi_v = [f_i.x, f_i.y, f_i.z];
+        let fk_v = [f_k.x, f_k.y, f_k.z];
+        for a in 0..3 {
+            for bb in 0..3 {
+                result.virial[a][bb] += rij_v[a] * fi_v[bb] + rkj_v[a] * fk_v[bb];
+            }
+        }
     }
 
     result
@@ -489,6 +538,23 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
         result.forces[dihedral.j] += f_j;
         result.forces[dihedral.k] += f_k;
         result.forces[dihedral.l] += f_l;
+
+        // gromosXX: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
+        // rlj = pos(l) - pos(j)
+        let r_lj = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.j];
+        let rij_v = [r_ij.x, r_ij.y, r_ij.z];
+        let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
+        let rlj_v = [r_lj.x, r_lj.y, r_lj.z];
+        let fi_v = [f_i.x, f_i.y, f_i.z];
+        let fk_v = [f_k.x, f_k.y, f_k.z];
+        let fl_v = [f_l.x, f_l.y, f_l.z];
+        for a in 0..3 {
+            for bb in 0..3 {
+                result.virial[a][bb] += rij_v[a] * fi_v[bb]
+                    + rkj_v[a] * fk_v[bb]
+                    + rlj_v[a] * fl_v[bb];
+            }
+        }
     }
 
     result
@@ -587,6 +653,23 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
         result.forces[improper.j] += f_j;
         result.forces[improper.k] += f_k;
         result.forces[improper.l] += f_l;
+
+        // gromosXX: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
+        // rlj = pos(l) - pos(j)
+        let r_lj = conf.current().pos[improper.l] - conf.current().pos[improper.j];
+        let rij_v = [r_ij.x, r_ij.y, r_ij.z];
+        let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
+        let rlj_v = [r_lj.x, r_lj.y, r_lj.z];
+        let fi_v = [f_i.x, f_i.y, f_i.z];
+        let fk_v = [f_k.x, f_k.y, f_k.z];
+        let fl_v = [f_l.x, f_l.y, f_l.z];
+        for a in 0..3 {
+            for bb in 0..3 {
+                result.virial[a][bb] += rij_v[a] * fi_v[bb]
+                    + rkj_v[a] * fk_v[bb]
+                    + rlj_v[a] * fl_v[bb];
+            }
+        }
     }
 
     result
@@ -682,8 +765,27 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         result.energy += energy;
         result.forces[dihedral.i] += f_i;
         result.forces[dihedral.j] += f_j;
+        result.energy += energy;
+        result.forces[dihedral.i] += f_i;
+        result.forces[dihedral.j] += f_j;
         result.forces[dihedral.k] += f_k;
         result.forces[dihedral.l] += f_l;
+
+        // gromosXX: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
+        let r_lj = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.j];
+        let rij_v = [r_ij.x, r_ij.y, r_ij.z];
+        let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
+        let rlj_v = [r_lj.x, r_lj.y, r_lj.z];
+        let fi_v = [f_i.x, f_i.y, f_i.z];
+        let fk_v = [f_k.x, f_k.y, f_k.z];
+        let fl_v = [f_l.x, f_l.y, f_l.z];
+        for a in 0..3 {
+            for bb in 0..3 {
+                result.virial[a][bb] += rij_v[a] * fi_v[bb]
+                    + rkj_v[a] * fk_v[bb]
+                    + rlj_v[a] * fl_v[bb];
+            }
+        }
     }
 
     result

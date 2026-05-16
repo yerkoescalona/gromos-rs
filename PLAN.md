@@ -87,10 +87,10 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 3   | water_216_box    | 648   | bulk NVE, pairlist, virial           | **PASS** |
 | 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
 | 3   | water_216_nvt    | 648   | Berendsen thermostat                 | **PASS** |
-| 3   | water_216_npt    | 648   | Berendsen barostat                   | FAIL — needs barostat |
+| 3   | water_216_npt    | 648   | Berendsen barostat                   | **PASS** |
 | 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | FAIL — missing topo file |
 
-**17 of 20 tests pass.** Levels 0-3 NVE/NVT fully passing.
+**18 of 20 tests pass.** Levels 0-3 (NVE/NVT/NPT) fully passing.
 
 ## What Works
 
@@ -116,7 +116,12 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
   - Translational COM velocity subtracted from all atom velocities
 - SETTLE, LINCS constraints (implemented but not wired)
 - Berendsen thermostat & barostat (parsed from MULTIBATH/PRESSURESCALE IMD blocks)
-- Topology parser: all block types including SOLUTEATOM exclusions, SOLVENTCONSTR, LJPARAMETERS
+- Pressure / virial architecture matching gromosXX:
+  - prepare_virial (KE tensor) + atomic_to_molecular_virial in Forcefield
+  - PressureCalculation algorithm: P = (KE + 0.5*virial) * 2/V
+  - BerendsenBarostat algorithm: isotropic box+position scaling
+  - Pressure groups parsed from PRESSUREGROUPS topology block
+- Topology parser: all block types including SOLUTEATOM exclusions, SOLVENTCONSTR, LJPARAMETERS, PRESSUREGROUPS
 - Solvent expansion: SOLVENTATOM/SOLVENTCONSTR parsed, NSM auto-computed from coord count
   - build_topology(parsed, n_coord_atoms) — no manual NSM parameter needed
   - Solvent atoms expanded into flat arrays (mass, charge, iac)
@@ -198,21 +203,39 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 - [x] DOF = 3·N_atoms - N_solvent_constraints - NDFMIN
 - [x] Reference test: `water_216_nvt` (TAU=0.1, weak-coupling) passes all 4 frames
 
-### TODO — Virial / pressure → prerequisite for barostat
+### DONE — Virial / pressure architecture (matching gromosXX) ✓
 - [x] Constraint virial contribution now computed in SHAKE (ref_r ⊗ ref_r · λ/dt²)
-- [ ] Verify full molecular virial tensor computation
-  - [ ] Kinetic contribution: P_kin = (2/3V) · E_kin
-  - [ ] Force contribution: P_vir = -(1/3V) · Σ(r_ij · f_ij)
-  - [ ] Nonbonded virial computed but not verified against gromosXX
-  - [ ] Prerequisite for Berendsen barostat
+- [x] Refactored to match gromosXX architecture:
+  - [x] `prepare_virial` in Forcefield: computes KE tensor on `conf.current()` at start of force calc
+    - Molecular: COM velocities per pressure group (KE_ij = 0.5 * v_COM_i * v_COM_j / M_total)
+    - Atomic: per-atom KE_ij = 0.5 * Σ m_k * v_ki * v_kj
+  - [x] `atomic_to_molecular_virial` in Forcefield: corrects virial at end of force calc
+    - For each pressure group: COM position via chain gather, corrP(b,a) += f(a) * r(b), virial -= corrP
+  - [x] `PressureCalculation` simplified: only computes P_tensor = (KE + 0.5*virial) * 2/V from conf.old()
+- [x] `nearest_image` already exists in math.rs (Periodicity enum with Rectangular/Triclinic/Vacuum)
+- [x] Pressure groups infrastructure:
+  - [x] Changed `topo.pressure_groups` from `Vec<Vec<usize>>` to `Vec<Range<usize>>` (like molecules)
+  - [x] Added PRESSUREGROUPS parser in topology reader (cumulative boundary vector format)
+  - [x] Solvent molecules added as individual pressure groups during `solvate()`
+  - [x] Fallback: all solute atoms as one pressure group if PRESSUREGROUPS block absent
+- [x] `Forcefield.virial_type` field wired from IMD PRESSURESCALE.VIRIAL setting
 
-### TODO — Berendsen barostat → unblocks `water_216_npt`
-- [ ] Wire existing `BerendsenBarostat` from `barostats.rs` into AlgorithmSequence
-  - [ ] Read PRESSURESCALE block from imd (already parsed)
-  - [ ] Scale box: μ = (1 - β·dt/τ_P · (P0 - P))^(1/3), box *= μ, r *= μ
-  - [ ] Requires correct virial/pressure
-  - [ ] gromosXX ref: `algorithm/pressure/berendsen_barostat.cc`
-- [ ] Reference test: `water_216_npt` (weak-coupling barostat)
+### DONE — Berendsen barostat → unblocks `water_216_npt` ✓
+- [x] `BerendsenBarostat` algorithm: isotropic scaling μ = (1 - κ·dt/τ·(P₀-P))^(1/3)
+- [x] Wired in md.rs: PressureCalculation → BerendsenBarostat in algorithm sequence
+- [x] PRESSURESCALE parser: keyword format (COUPLE/SCALE/COMP/TAUP/VIRIAL/SEMI/pres0)
+- [x] **Fixed: missing long-range virial in twin-range.**  When twin-range is active
+      (RCUTP < RCUTL), the long-range ForceStorage.virial was computed but never added
+      to the main nonbonded_storage. This caused the virial trace to be ~1000 kJ/mol
+      too small, producing wildly wrong pressures and barostat box-collapse.
+      Fix: cache `longrange_virial` alongside forces/energies, add it each step.
+- [x] **Fixed: stale periodicity under NPT.**  `Forcefield.periodicity` (Rectangular struct
+      caching box_size, half_box, inv_box) was set once at construction and never updated.
+      After the barostat scales the box, all subsequent PBC nearest_image calls used the
+      old box dimensions, causing subtly wrong forces and accumulating energy drift.
+      Fix: refresh `self.periodicity` from `conf.current().box_config` at the start of
+      every `Forcefield.apply()` call (guarded for vacuum/zero-dim boxes).
+- [x] Reference test: `water_216_npt` passes all 4 frames
 
 ### TODO — Triclinic box support (lower priority)
 - [ ] Code exists in `math.rs` but md.rs never creates Triclinic periodicity

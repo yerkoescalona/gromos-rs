@@ -383,29 +383,65 @@ fn parse_block(
             params.temp_bath = vec![bath];
         },
         "PRESSURESCALE" => {
-            // gromosXX format:
-            //   Line 0: COUPLE SCALE COMP VIRIAL
-            //   Line 1: PRES0 (3x3 matrix, 3 lines)
-            //   ...
+            // gromosXX PRESSURESCALE block format:
+            //   Line 0: COUPLE SCALE COMP TAUP VIRIAL
+            //     COUPLE: off/calc/scale (or 0/1/2)
+            //     SCALE: off/iso/aniso/full/semianiso (or 0/1/2/3/4)
+            //     COMP: compressibility value
+            //     TAUP: pressure coupling time
+            //     VIRIAL: none/atomic/molecular (or 0/1/2)
+            //   Line 1: SEMI (3 values, for semianisotropic)
+            //   Lines 2-4: reference pressure (3x3)
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    let couple = parse_i32(&v[0]);
+                    // Parse COUPLE keyword/number
+                    let couple = match v[0].to_lowercase().as_str() {
+                        "off" => 0,
+                        "calc" => 1,
+                        "scale" => 2,
+                        other => parse_i32(other),
+                    };
                     params.couple_pressure = couple > 0;
                     if couple > 0 {
+                        // Parse SCALE keyword
+                        let scale = if v.len() >= 2 {
+                            match v[1].to_lowercase().as_str() {
+                                "off" => 0,
+                                "iso" | "isotropic" => 1,
+                                "aniso" | "anisotropic" => 2,
+                                "full" | "full_anisotropic" => 3,
+                                "semianiso" | "semi_anisotropic" => 4,
+                                other => parse_i32(other),
+                            }
+                        } else { 0 };
+                        // Parse COMP (compressibility)
+                        let comp = if v.len() >= 3 { parse_f64(&v[2]) } else { 4.575e-4 };
+                        // Parse TAUP
+                        let tau_p = if v.len() >= 4 { parse_f64(&v[3]) } else { 0.5 };
+                        // Parse VIRIAL keyword
+                        let virial = if v.len() >= 5 {
+                            match v[4].to_lowercase().as_str() {
+                                "none" => 0,
+                                "atomic" => 1,
+                                "molecular" => 2,
+                                other => parse_i32(other),
+                            }
+                        } else { 0 };
+
                         let mut pp = PressureParameters {
-                            algorithm: couple,
+                            algorithm: scale, // store SCALE mode (iso/aniso/etc.)
                             pressure0: [[0.0; 3]; 3],
-                            compressibility: [[4.575e-4; 3]; 3],
-                            tau_p: 0.5,
-                            virial: 0,
+                            compressibility: [[comp; 3]; 3],
+                            tau_p,
+                            virial,
                         };
-                        if v.len() >= 4 {
-                            pp.virial = parse_i32(&v[3]);
-                        }
-                        // Parse reference pressure and compressibility from subsequent lines
-                        // Line 1-3: PRES0 (3x3), Line 4-6: COMP (3x3), Line 7: TAU
+
+                        // Line 1: SEMI (semianisotropic couplings), skip
                         let mut dl = 1;
+                        if dl < data_lines.len() { dl += 1; }
+
+                        // Lines 2-4: reference pressure (3x3)
                         for row in 0..3 {
                             if dl < data_lines.len() {
                                 let pv = parse_values(&data_lines[dl]);
@@ -413,21 +449,6 @@ fn parse_block(
                                     pp.pressure0[row][col] = parse_f64(&pv[col]);
                                 }
                                 dl += 1;
-                            }
-                        }
-                        for row in 0..3 {
-                            if dl < data_lines.len() {
-                                let cv = parse_values(&data_lines[dl]);
-                                for col in 0..3.min(cv.len()) {
-                                    pp.compressibility[row][col] = parse_f64(&cv[col]);
-                                }
-                                dl += 1;
-                            }
-                        }
-                        if dl < data_lines.len() {
-                            let tv = parse_values(&data_lines[dl]);
-                            if let Some(t) = tv.first() {
-                                pp.tau_p = parse_f64(t);
                             }
                         }
                         params.pressure_parameters = Some(pp);
