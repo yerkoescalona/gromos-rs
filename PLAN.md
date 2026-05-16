@@ -77,7 +77,7 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 1   | benzene_vacuum   | 12    | aromatic ring + improper + torsion   | **PASS** |
 | 1   | nacl_pair_box    | 2     | Coulomb + LJ in PBC with RF (no solvent) | **PASS** |
 | 1   | butane_vacuum    | 4     | dihedral + 1-4 LJ interaction        | **PASS** |
-| 1   | aladip_vacuum    | 12    | all bonded + exclusions + 1-4        | FAIL — improper dihedral bug |
+| 1   | aladip_vacuum    | 12    | all bonded + exclusions + 1-4        | **PASS** |
 | 2   | water_3_box      | 9     | PBC + min image + pairlist + CRF     | **PASS** |
 | 2   | nacl_1water_box  | 5     | minimal solute-solvent + SHAKE       | **PASS** |
 | 2   | nacl_3water_box  | 11    | multiple solvent + solute-solvent pairlist | **PASS** |
@@ -90,9 +90,9 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
 | 3   | water_216_nvt    | 648   | Berendsen thermostat                 | **PASS** |
 | 3   | water_216_npt    | 648   | Berendsen barostat                   | **PASS** |
-| 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | FAIL — improper dihedral bug |
+| 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | **PASS** |
 
-**19 of 21 tests pass.** Levels 0-3 (NVE/NVT/NPT) fully passing.
+**21 of 21 tests pass.** All levels fully passing.
 
 ## What Works
 
@@ -159,11 +159,12 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 - [x] Root cause: NTIVEL=1 + COM removal (see Resolved Investigations below)
 - [x] water_216_box now passes all 10 frames within 5e-7 kJ/mol
 
-### TODO — Fix aladip_vacuum / aladip_solvated (improper dihedral energy)
-- [ ] Improper dihedral energy mismatch: gromos-rs=4.5e-4 vs gromosXX=1.485 kJ/mol
-  - 1-4 interactions and all other nonbonded/bonded terms match exactly
-  - Root cause is in the improper dihedral calculation, not topology parsing
-  - Difference accounts for the full 1.58 kJ/mol E_total discrepancy
+### DONE — Fix aladip_vacuum / aladip_solvated (improper dihedral energy) ✓
+- [x] Root cause: improper dihedral force constant K not converted from kJ/(mol·deg²) to kJ/(mol·rad²)
+  - gromosXX multiplies K by (180/π)² ≈ 3283 during topology parsing (in_topology.cc:1055)
+  - gromos-rs was storing K raw, giving energies ~3283× too small
+- [x] Fix: multiply CQ by 180²/π² in parse_improper_dihedral_types()
+- [x] Both aladip_vacuum and aladip_solvated now pass
 
 ### DONE — COM motion removal → unblocks `water_216_box_com` ✓
 - [x] Implement `RemoveCOMMotion` algorithm

@@ -370,6 +370,5 @@ ref_test!(water_216_box_com,   "water_216_box_com");
 ref_test!(water_216_nvt,       "water_216_nvt");
 ref_test!(water_216_npt,       "water_216_npt");
 
-// Known failures / TODO — run with: --include-ignored
-ref_test!(ignore: aladip_vacuum,       "aladip_vacuum");
-ref_test!(ignore: aladip_solvated,     "aladip_solvated");
+ref_test!(aladip_vacuum,       "aladip_vacuum");
+ref_test!(aladip_solvated,     "aladip_solvated");
