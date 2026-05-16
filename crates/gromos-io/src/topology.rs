@@ -419,7 +419,7 @@ fn parse_angle_types<I: Iterator<Item = Result<String, std::io::Error>>>(
 
             angle_parameters.push(AngleParameters {
                 k_cosine,
-                k_harmonic,
+                k_harmonic: k_harmonic * 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI), // Convert from kJ/(mol·deg²) to kJ/(mol·rad²)
                 theta0: theta0_deg.to_radians(),
             });
         }
