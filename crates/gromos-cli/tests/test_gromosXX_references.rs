@@ -349,6 +349,9 @@ ref_test!(water_single,   "water_single");
 ref_test!(benzene_vacuum, "benzene_vacuum");
 ref_test!(nacl_pair_box,  "nacl_pair_box");
 
+// Level 1 — dihedral + 1-4 LJ interaction
+ref_test!(butane_vacuum,  "butane_vacuum");
+
 // Level 2 — PBC, pairlist, SHAKE, solvent, twin-range
 ref_test!(water_3_box,            "water_3_box");
 ref_test!(nacl_1water_box,        "nacl_1water_box");

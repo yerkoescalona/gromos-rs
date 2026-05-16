@@ -1,0 +1,172 @@
+TITLE
+United-atom butane in vacuum (CH3-CH2-CH2-CH3)
+GROMOS 45A3 parameters, 4 atoms
+Tests: bond + angle + dihedral + 1-4 LJ interaction
+END
+PHYSICALCONSTANTS
+# FPEPSI: 1.0/(4.0*PI*EPS0) (EPS0 is the permittivity of vacuum)
+138.9354
+# HBAR: Planck's constant HBAR = H/(2* PI)
+0.0635078
+# SPDL: Speed of light (nm/ps)
+299792.458
+# BOLTZ: Boltzmann's constant kB
+0.00831441
+END
+TOPVERSION
+2.0
+END
+ATOMTYPENAME
+# NRATT: number of van der Waals atom types
+2
+# TYPE: atom type names
+CH2
+CH3
+END
+RESNAME
+# NRAA2: number of residues in a solute molecule
+1
+# AANM: residue names
+BUT
+END
+SOLUTEATOM
+#   NRP: number of solute atoms
+   4
+#  ATNM: atom number
+#  MRES: residue number
+#  PANM: atom name of solute atom
+#   IAC: integer (van der Waals) atom type code
+#  MASS: mass of solute atom
+#    CG: charge of solute atom
+#   CGC: charge group code (0 or 1)
+#   INE: number of excluded atoms
+# INE14: number of 1-4 interactions
+# ATNM MRES PANM IAC     MASS       CG  CGC INE
+#                                           INE14
+     1    1  CH3   2   15.03500    0.00000  1  2     2     3
+                                              1     4
+     2    1  CH2   1   14.02700    0.00000  0  2     3     4
+                                              0
+     3    1  CH2   1   14.02700    0.00000  0  1     4
+                                              0
+     4    1  CH3   2   15.03500    0.00000  1  0
+                                              0
+END
+BONDSTRETCHTYPE
+#  NBTY: number of covalent bond types
+1
+#  CB:  quartic force constant
+#  CHB: harmonic force constant
+#  B0:  bond length at minimum energy
+#         CB         CHB         B0
+     7.15000e+06     3.34749e+05     1.53000e-01
+END
+BONDH
+#  NBONH: number of bonds involving H atoms in solute
+0
+END
+BOND
+#  NBON: number of bonds NOT involving H atoms in solute
+3
+#  IB, JB: atom sequence numbers of atoms forming a bond
+#  ICB: bond type code
+   1   2   1
+   2   3   1
+   3   4   1
+END
+BONDANGLEBENDTYPE
+#  NTTY: number of bond angle types
+1
+#  CT:  force constant
+#  CHT: force constant (harmonic)
+#  T0:  bond angle at minimum energy in degrees
+#         CT         CHT          T0
+     5.20000e+02     1.40521e-01     1.09500e+02
+END
+BONDANGLEH
+#  NTHEH: number of bond angles involving H atoms in solute
+0
+END
+BONDANGLE
+#  NTHE: number of bond angles NOT involving H atoms in solute
+2
+#  IT, JT, KT: atom sequence numbers
+#  ICT: angle type code
+   1   2   3   1
+   2   3   4   1
+END
+IMPDIHEDRALTYPE
+#  NQTY: number of improper dihedral types
+0
+END
+IMPDIHEDRALH
+#  NQHIH: number of improper dihedrals involving H atoms in the solute
+0
+END
+IMPDIHEDRAL
+#  NQHI: number of improper dihedrals NOT involving H atoms in solute
+0
+END
+TORSDIHEDRALTYPE
+#  NPTY: number of dihedral types
+1
+#  CP: force constant
+#  PD: phase-shift angle
+#  NP: multiplicity
+#       CP         PD  NP
+   5.92000    0.00000   3
+END
+DIHEDRALH
+#  NPHIH: number of dihedrals involving H atoms in solute
+0
+END
+DIHEDRAL
+#  NPHI: number of dihedrals NOT involving H atoms in solute
+1
+#  IP, JP, KP, LP: atom sequence numbers
+#  ICP: dihedral type code
+   1   2   3   4   1
+END
+CROSSDIHEDRALH
+#  NPHIH: number of cross dihedrals involving H atoms in solute
+0
+END
+CROSSDIHEDRAL
+#  NPPC: number of cross dihedrals NOT involving H atoms in solute
+0
+END
+LJPARAMETERS
+#  NRATT2: number of LJ interaction types = NRATT*(NRATT+1)/2
+3
+# IAC  JAC           C12            C6          CS12           CS6
+    1    1  3.396558e-05  7.468416e-03  4.741926e-06  4.723813e-03
+    1    2  3.008414e-05  8.473481e-03  5.347702e-06  5.689469e-03
+    2    2  2.664624e-05  9.613802e-03  6.030865e-06  6.852528e-03
+END
+SOLUTEMOLECULES
+# NSPM  NSP[1...NSPM]
+         1
+    4
+END
+TEMPERATUREGROUPS
+# NSTM  NST[1...NSTM]
+         1
+    4
+END
+PRESSUREGROUPS
+# NSVM  NSV[1...NSVM]
+         1
+    4
+END
+LJEXCEPTIONS
+# NEX: number of exceptions
+0
+END
+SOLVENTATOM
+#  NRAM: number of atoms per solvent molecule
+0
+END
+SOLVENTCONSTR
+#  NCONS: number of constraints
+0
+END

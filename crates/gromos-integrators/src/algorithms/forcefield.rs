@@ -14,8 +14,8 @@ use gromos_core::topology::Topology;
 
 use gromos_forces::bonded::calculate_bonded_forces_ntf;
 use gromos_forces::nonbonded::{
-    lj_crf_innerloop, rf_excluded_interactions, solvent_innerloop, CRFParameters, ForceStorage,
-    LJParameters,
+    lj_crf_innerloop, one_four_interaction_loop, rf_excluded_interactions, solvent_innerloop,
+    CRFParameters, ForceStorage, LJParameters,
 };
 
 use crate::algorithms::pressure_calculation::VirialType;
@@ -390,6 +390,22 @@ impl Algorithm for Forcefield {
             &mut self.nonbonded_storage,
             topo.num_solute_atoms(),
         );
+
+        // 1-4 interactions: LJ with cs6/cs12 + CRF with coulomb scaling
+        // gromosXX: computed separately from pairlist, no cutoff
+        if !topo.one_four_pairs.is_empty() {
+            one_four_interaction_loop(
+                &topo.one_four_pairs,
+                &conf.current().pos,
+                &self.charges,
+                &self.iac_u32,
+                &self.lj_params,
+                &self.crf_params,
+                &self.periodicity,
+                &mut self.nonbonded_storage,
+                1.0, // coulomb_scaling: 1.0 for standard GROMOS
+            );
+        }
 
         // --- 4. Assemble forces and energies ---
         {

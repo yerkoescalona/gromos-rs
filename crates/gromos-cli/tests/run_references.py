@@ -67,6 +67,18 @@ SYSTEMS = [
         "isolates": "bond + angle + intramolecular Coulomb",
     },
     {
+        "name": "butane_vacuum",
+        "description": "Level 1: United-atom butane in vacuum, dihedral + 1-4 LJ",
+        "level": 1,
+        "dir": "butane_vacuum",
+        "topo": "butane_vacuum.topo",
+        "conf": "butane_vacuum.conf",
+        "input": "butane_vacuum.in",
+        "pttopo": None,
+        "natoms": 4,
+        "isolates": "bond + angle + dihedral + 1-4 LJ interaction",
+    },
+    {
         "name": "aladip_vacuum",
         "description": "Level 1: Aladip in vacuum, all bonded + nonbonded intra",
         "level": 1,
