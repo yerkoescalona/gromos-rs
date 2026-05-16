@@ -480,6 +480,7 @@ fn main() {
         Some(ShakeParameters {
             tolerance: args.shake_tolerance,
             max_iterations: 1000,
+            ..Default::default()
         })
     } else {
         None

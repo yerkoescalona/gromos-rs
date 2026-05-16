@@ -481,6 +481,7 @@ fn main() -> Result<(), String> {
     let shake_params = ShakeParameters {
         tolerance: args.shake_tol,
         max_iterations: 1000,
+        ..Default::default()
     };
 
     println!("\n================================================================================");

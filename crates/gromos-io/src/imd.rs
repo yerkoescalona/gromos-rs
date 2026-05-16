@@ -115,6 +115,7 @@ pub struct ImdParameters {
     pub ntinht: i32, // Initial temperature assignment
     pub ntinhb: i32, // Initial bond constraints
     pub ntishi: i32, // Initial SHAKE iterations
+    pub nticom: i32, // Initial COM motion removal (0=off, 1=translation, 2=trans+rot)
     pub ig: i64,     // Random seed
     pub tempi: f64,  // Initial temperature (K)
 
@@ -197,6 +198,7 @@ impl Default for ImdParameters {
             ntinht: 0,
             ntinhb: 0,
             ntishi: 1000,
+            nticom: 0,
             ig: 12345,
             tempi: 300.0,
             ntwx: 100,
@@ -566,6 +568,7 @@ fn parse_block(
             if data_lines.len() >= 2 {
                 let v = parse_values(&data_lines[1]);
                 if v.len() >= 1 { params.ntishi = parse_i32(&v[0]); }
+                if v.len() >= 3 { params.nticom = parse_i32(&v[2]); }
             }
             // Line 2: NTISTI (skip)
             if data_lines.len() >= 4 {

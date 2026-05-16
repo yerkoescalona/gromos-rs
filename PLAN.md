@@ -42,7 +42,7 @@ py-gromos        → Python package (separate build)
 ## MD Loop (AlgorithmSequence)
 
 ```
-Forcefield → LeapFrogVelocity → LeapFrogPosition → SHAKE (if ntc>1) → TemperatureCalculation → EnergyCalculation
+RemoveCOMMotion (if NTICOM/NSCM) → Forcefield → LeapFrogVelocity → LeapFrogPosition → SHAKE (if ntc>1) → TemperatureCalculation → EnergyCalculation
 ```
 
 - Forcefield: pairlist update → bonded (NTF-controlled) → nonbonded (lj_crf_innerloop) → rf_excluded_interactions
@@ -85,12 +85,12 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 2   | nacl_water_box   | 62    | ion-water RF in PBC                  | **PASS** |
 | 2   | nacl_water_box_shifted | 62 | nacl_water_box with perturbed positions | **PASS** |
 | 3   | water_216_box    | 648   | bulk NVE, pairlist, virial           | **PASS** |
-| 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | FAIL — needs COM removal |
+| 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
 | 3   | water_216_nvt    | 648   | Berendsen thermostat                 | FAIL — needs thermostat |
 | 3   | water_216_npt    | 648   | Berendsen barostat                   | FAIL — needs barostat |
 | 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | FAIL — missing topo file |
 
-**15 of 19 tests pass.** Levels 0-2 fully passing, water_216_box (Level 3) now passes.
+**16 of 19 tests pass.** Levels 0-2 fully passing, water_216_box and water_216_box_com (Level 3) now pass.
 
 ## What Works
 
@@ -104,8 +104,16 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
   - Twin-range: short (RCUTP) and long (RCUTL) pairlists with force caching
 - Boundary conditions: Vacuum, Rectangular (minimum image), Triclinic (defined but not wired)
 - SHAKE constraints: solute bonds (NTC>1) + solvent constraints (NTCS>0)
+  - NtcMode enum: SolventOnly (NTC=1), HydrogenBonds (NTC=2), AllBonds (NTC=3)
+  - Constraint force accumulation into conf.old().constraint_force
+  - Virial tensor contribution: ref_r ⊗ ref_r · λ/dt²
+  - skip_now/skip_next optimization for converged constraints
+  - shake_positions() and shake_velocities() for initial configuration (NTISHK)
   - Iterates SOLVENTCONSTR template over all solvent molecules
   - Velocity correction applied to all constrained atoms
+- COM motion removal: NTICOM (initial) + NSCM (periodic every N steps)
+  - Placed first in algorithm sequence (before Forcefield), matching gromosXX convention
+  - Translational COM velocity subtracted from all atom velocities
 - SETTLE, LINCS constraints (implemented but not wired)
 - Berendsen thermostat & barostat (parsed from MULTIBATH/PRESSURESCALE IMD blocks)
 - Topology parser: all block types including SOLUTEATOM exclusions, SOLVENTCONSTR, LJPARAMETERS
@@ -151,16 +159,29 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
   - Both aladip_vacuum and aladip_solvated depend on it
   - Will also exercise 1-4 interactions (dihedrals, impropers, exclusions)
 
-### TODO — COM motion removal → unblocks `water_216_box_com`
-- [ ] Implement `RemoveCOMMotion` algorithm
-  - [ ] Parse NTICOM from INITIALISE block (already in `imd.rs`)
-  - [ ] Parse NSCM from COMTRANSROT block (already in `imd.rs`)
-  - [ ] `remove_com_translation()`: COM_v = Σ(m_i·v_i)/Σ(m_i), then v_i -= COM_v
-  - [ ] Wire into `AlgorithmSequence::init()` when NTICOM=1 (initial removal before step 0)
-  - [ ] Wire into MD loop: apply every NSCM steps when NSCM>0
-  - [ ] Update both current().vel and old().vel (gromosXX does both)
-  - [ ] gromosXX ref: `algorithm/constraints/remove_com_motion.cc`
-- [ ] Reference test: `water_216_box_com` (NTICOM=1, NSCM=10, expected diff=1.21 kJ/mol)
+### DONE — COM motion removal → unblocks `water_216_box_com` ✓
+- [x] Implement `RemoveCOMMotion` algorithm
+  - [x] Parse NTICOM from INITIALISE block (line 1, field 3)
+  - [x] Parse NSCM from COMTRANSROT block (already done)
+  - [x] `remove_com_translation()`: COM_v = Σ(m_i·v_i)/Σ(m_i), then v_i -= COM_v
+  - [x] Wire into AlgorithmSequence as FIRST algorithm (before Forcefield, gromosXX convention)
+  - [x] At step 0: apply if NTICOM>=1 (initial removal)
+  - [x] At step > 0: apply every NSCM steps when NSCM>0
+  - [x] Only modifies current().vel (gromosXX convention); placement before exchange_state ensures both states are COM-free
+  - [x] gromosXX ref: `algorithm/constraints/remove_com_motion.cc`, `algorithm/create_md_sequence.cc`
+- [x] Reference test: `water_216_box_com` (NTICOM=1, NSCM=10) passes
+
+### DONE — SHAKE constraint force, virial, NTC, skip optimization ✓
+- [x] Added `NtcMode` enum (SolventOnly, HydrogenBonds, AllBonds) for NTC 1–3 control
+- [x] Added `ntc` field to `ShakeParameters`
+- [x] Constraint force accumulation: f(c) = (r_new - r_uc) · m / dt², stored in `conf.old().constraint_force`
+- [x] Virial tensor contribution: ref_r ⊗ ref_r · λ/dt² added to virial
+- [x] skip_now/skip_next optimization: converged constraints skipped on next iteration
+- [x] `shake_positions()` and `shake_velocities()` for initial configuration shaking
+- [x] `shake_algorithm.rs`: `shake_initial_positions`/`shake_initial_velocities` flags, `init()` method
+- [x] `md.rs`: NTC mode from `imd.ntc`, NTISHK controls initial shaking (0=none, 1=pos, 2=vel, 3=both)
+- [x] Constraint forces passed to force trajectory writer (`@trf`)
+- [x] All 16 tests pass, zero regressions
 
 ### TODO — Berendsen thermostat → unblocks `water_216_nvt`
 - [ ] Wire existing `BerendsenThermostat` from `thermostats.rs` into AlgorithmSequence
@@ -172,10 +193,11 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 - [ ] Reference test: `water_216_nvt` (TAU=0.1, weak-coupling)
 
 ### TODO — Virial / pressure → prerequisite for barostat
-- [ ] Verify molecular virial tensor computation
+- [x] Constraint virial contribution now computed in SHAKE (ref_r ⊗ ref_r · λ/dt²)
+- [ ] Verify full molecular virial tensor computation
   - [ ] Kinetic contribution: P_kin = (2/3V) · E_kin
   - [ ] Force contribution: P_vir = -(1/3V) · Σ(r_ij · f_ij)
-  - [ ] Currently computed in nonbonded but not verified against gromosXX
+  - [ ] Nonbonded virial computed but not verified against gromosXX
   - [ ] Prerequisite for Berendsen barostat
 
 ### TODO — Berendsen barostat → unblocks `water_216_npt`
