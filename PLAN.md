@@ -42,7 +42,7 @@ py-gromos        → Python package (separate build)
 ## MD Loop (AlgorithmSequence)
 
 ```
-RemoveCOMMotion (if NTICOM/NSCM) → Forcefield → LeapFrogVelocity → LeapFrogPosition → SHAKE (if ntc>1) → TemperatureCalculation → EnergyCalculation
+RemoveCOMMotion (if NTICOM/NSCM) → Forcefield → LeapFrogVelocity → BerendsenThermostat (if TAU>0) → LeapFrogPosition → SHAKE (if ntc>1) → TemperatureCalculation → EnergyCalculation
 ```
 
 - Forcefield: pairlist update → bonded (NTF-controlled) → nonbonded (lj_crf_innerloop) → rf_excluded_interactions
@@ -86,11 +86,11 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 2   | nacl_water_box_shifted | 62 | nacl_water_box with perturbed positions | **PASS** |
 | 3   | water_216_box    | 648   | bulk NVE, pairlist, virial           | **PASS** |
 | 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
-| 3   | water_216_nvt    | 648   | Berendsen thermostat                 | FAIL — needs thermostat |
+| 3   | water_216_nvt    | 648   | Berendsen thermostat                 | **PASS** |
 | 3   | water_216_npt    | 648   | Berendsen barostat                   | FAIL — needs barostat |
 | 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | FAIL — missing topo file |
 
-**16 of 19 tests pass.** Levels 0-2 fully passing, water_216_box and water_216_box_com (Level 3) now pass.
+**17 of 20 tests pass.** Levels 0-3 NVE/NVT fully passing.
 
 ## What Works
 
@@ -183,14 +183,20 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 - [x] Constraint forces passed to force trajectory writer (`@trf`)
 - [x] All 16 tests pass, zero regressions
 
-### TODO — Berendsen thermostat → unblocks `water_216_nvt`
-- [ ] Wire existing `BerendsenThermostat` from `thermostats.rs` into AlgorithmSequence
-  - [ ] Read TAU from MULTIBATH block (already parsed in `imd.rs`)
-  - [ ] Insert after TemperatureCalculation in the algorithm sequence
-  - [ ] Scale velocities: λ = sqrt(1 + dt/TAU · (T0/T - 1)), v *= λ
-  - [ ] TAU < 0 → no coupling (NVE), TAU = 0 → instantaneous scaling
-  - [ ] gromosXX ref: `algorithm/temperature/berendsen_thermostat.cc`
-- [ ] Reference test: `water_216_nvt` (TAU=0.1, weak-coupling)
+### DONE — Berendsen thermostat → unblocks `water_216_nvt` ✓
+- [x] Implemented `BerendsenThermostat` as Algorithm trait in `berendsen_thermostat.rs`
+  - [x] Single-bath support with configurable T0, τ, DOF
+  - [x] Scale velocities: λ = sqrt(1 + dt/τ · (T₀/T_free - 1)), v *= λ
+  - [x] T_free = 2·E_kin_new / (DOF·k_B) using "new" kinetic energy (gromosXX: multibath.bath.ekin)
+  - [x] τ < 0 → no coupling (NVE), τ = 0 → instantaneous scaling
+  - [x] Placed between LeapFrogVelocity and LeapFrogPosition (gromosXX convention)
+- [x] Added `kinetic_energy_new` field to Energy struct for thermostat scaling
+- [x] `TemperatureCalculation::init()` calls `apply()` to pre-compute initial E_kin_new
+  - This matches gromosXX `Temperature_Calculation::init()` behavior — NOT a bug:
+    the thermostat needs real kinetic energy data at step 0 to compute the first
+    scaling factor. Without it, scale=1.0 at step 0 and the error cascades.
+- [x] DOF = 3·N_atoms - N_solvent_constraints - NDFMIN
+- [x] Reference test: `water_216_nvt` (TAU=0.1, weak-coupling) passes all 4 frames
 
 ### TODO — Virial / pressure → prerequisite for barostat
 - [x] Constraint virial contribution now computed in SHAKE (ref_r ⊗ ref_r · λ/dt²)

@@ -11,11 +11,11 @@
 use gromos::{
     algorithm::{
         BerendsenBarostatParameters,
-        BerendsenThermostatParameters, ShakeParameters, NtcMode,
+        ShakeParameters, NtcMode,
         AlgorithmSequence, SimulationState,
         Forcefield, LeapFrogVelocity, LeapFrogPosition,
         TemperatureCalculation, EnergyCalculation, ShakeAlgorithm,
-        RemoveCOMMotion,
+        RemoveCOMMotion, BerendsenThermostat,
     },
     configuration::{Box as SimBox, Configuration},
     interaction::{
@@ -680,6 +680,37 @@ fn main() {
     // 3. Leap-Frog velocity step (exchange_state + v update)
     md_sequence.push(Box::new(LeapFrogVelocity::new()));
 
+    // 3b. Berendsen thermostat (between velocity and position update, gromosXX convention)
+    if thermostat_on {
+        // Compute degrees of freedom: 3N - N_constraints - NDFMIN
+        let n_atoms = topo.num_atoms();
+        let n_solute = topo.num_solute_atoms();
+        let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
+            topo.solvent_atom_template.len()
+        } else {
+            1
+        };
+        let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
+            (n_atoms - n_solute) / atoms_per_solvent
+        } else {
+            0
+        };
+        let solvent_constraint_dof = if shake_enabled {
+            n_solvent_molecules * topo.solvent_constraint_template.len()
+        } else {
+            0
+        };
+        // TODO: solute constraint DOF for NTC=2,3
+        let solute_constraint_dof = 0usize;
+        let total_dof = (3 * n_atoms - solvent_constraint_dof - solute_constraint_dof) as f64
+            - imd.ndfmin as f64;
+        println!("  Thermostat DOF: {:.0} (3*{} - {} solvent_constr - {} NDFMIN)",
+            total_dof, n_atoms, solvent_constraint_dof, imd.ndfmin);
+        md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
+            temperature, thermostat_tau, total_dof, n_atoms,
+        )));
+    }
+
     // 4. Leap-Frog position step (r update)
     md_sequence.push(Box::new(LeapFrogPosition::new()));
 
@@ -722,20 +753,11 @@ fn main() {
         process::exit(1);
     });
 
-    // Setup thermostat (from MULTIBATH block: tau > 0 means coupling enabled)
-    let thermostat_params = if thermostat_on {
-        Some(BerendsenThermostatParameters {
-            target_temperature: temperature,
-            coupling_time: thermostat_tau,
-        })
-    } else {
-        None
-    };
-
-    if let Some(ref params) = thermostat_params {
+    // Thermostat is now wired into the algorithm sequence (above)
+    if thermostat_on {
         println!("Setting up thermostat: Berendsen");
-        println!("  Target temp:   {:.1} K", params.target_temperature);
-        println!("  Coupling time: {:.3} ps", params.coupling_time);
+        println!("  Target temp:   {:.1} K", temperature);
+        println!("  Coupling time: {:.3} ps", thermostat_tau);
         println!();
     }
 
@@ -920,13 +942,14 @@ fn main() {
     // Main MD loop using AlgorithmSequence
     //
     // The sequence runs per step:
-    //   1. Forcefield (pairlist + bonded + nonbonded forces)
-    //   2. Leap_Frog_Velocity (exchange_state + velocity update)
-    //   3. Leap_Frog_Position (position update)
-    //   4. TemperatureCalculation (kinetic energy)
-    //   5. EnergyCalculation (total energy finalization)
-    //
-    // TODO: Thermostat, Constraints (SHAKE), Barostat as Algorithm impls
+    //   1. RemoveCOMMotion (if NTICOM/NSCM)
+    //   2. Forcefield (pairlist + bonded + nonbonded forces)
+    //   3. Leap_Frog_Velocity (exchange_state + velocity update)
+    //   3b. BerendsenThermostat (if TAU > 0, velocity scaling)
+    //   4. Leap_Frog_Position (position update)
+    //   5. SHAKE constraints (if NTC > 0)
+    //   6. TemperatureCalculation (kinetic energy)
+    //   7. EnergyCalculation (total energy finalization)
     for step in 0..=n_steps {
         let time = step as f64 * dt;
 
