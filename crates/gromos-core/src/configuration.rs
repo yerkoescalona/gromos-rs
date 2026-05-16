@@ -107,6 +107,10 @@ pub struct Energy {
     pub sasa_total: f64, // Solvent accessible surface area
     pub constraint_total: f64,
 
+    // "New" kinetic energy from current velocities only (for thermostat scaling)
+    // gromosXX stores this in multibath.bath.ekin; we store it here
+    pub kinetic_energy_new: f64,
+
     // Per-group energies (for temperature/energy groups)
     pub kinetic_energy: Vec<f64>, // One per temperature group
 
@@ -136,6 +140,7 @@ impl Energy {
             special_total: 0.0,
             sasa_total: 0.0,
             constraint_total: 0.0,
+            kinetic_energy_new: 0.0,
             kinetic_energy: vec![0.0; num_temperature_groups],
             lj_energy: vec![vec![0.0; num_energy_groups]; num_energy_groups],
             crf_energy: vec![vec![0.0; num_energy_groups]; num_energy_groups],
@@ -179,6 +184,7 @@ impl Energy {
         self.special_total = 0.0;
         self.sasa_total = 0.0;
         self.constraint_total = 0.0;
+        self.kinetic_energy_new = 0.0;
         self.virial_total = 0.0;
 
         for ke in &mut self.kinetic_energy {

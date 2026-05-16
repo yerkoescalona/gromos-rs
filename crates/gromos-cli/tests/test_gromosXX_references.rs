@@ -363,8 +363,10 @@ ref_test!(nacl_water_box_shifted, "nacl_water_box_shifted");
 ref_test!(water_216_box,       "water_216_box");
 ref_test!(water_216_box_com,   "water_216_box_com");
 
+// Level 3 — thermostats / barostats
+ref_test!(water_216_nvt,       "water_216_nvt");
+
 // Known failures / TODO — run with: --include-ignored
 ref_test!(ignore: aladip_vacuum,       "aladip_vacuum");
-ref_test!(ignore: water_216_nvt,       "water_216_nvt");
 ref_test!(ignore: water_216_npt,       "water_216_npt");
 ref_test!(ignore: aladip_solvated,     "aladip_solvated");
