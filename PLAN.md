@@ -287,23 +287,43 @@ Design reference: `.local/polars` — study its Python API surface, docstrings, 
 DataFrame-style ergonomics, and how it wraps Rust internals via pyo3.
 
 #### Phase 1 — Rust bindings (pyo3-gromos)
-- [ ] Sync pyo3-gromos with current Rust core (currently exposes only Vec3, Energy, Frame)
-  - [ ] Expose Topology (read-only: atoms, bonds, angles, residues, LJ params, exclusions)
-  - [ ] Expose Configuration (positions, velocities, box) — read/write
-  - [ ] Expose ForceField evaluation (single-point energy/force calculation)
-  - [ ] Expose SHAKE / constraint info
-  - [ ] Expose energy decomposition (bonded, LJ, CRF, kinetic, pressure)
+
+##### DONE — Compositional Simulation API (OpenMM-inspired) ✓
+- [x] `Topology("system.topo")` — wraps Rust Topology, exposes n_atoms, masses, charges, solvate()
+- [x] `Configuration("initial.cnf")` — wraps coordinate data, exposes positions/velocities/box as numpy
+- [x] `InputParameters("run.imd")` — wraps ImdParameters, exposes dt, nstlim, nsm, cutoff, temperature, ntc, ntb, ntwx, ntwe
+- [x] `Simulation(topo, conf, params)` — compositional constructor from Python objects
+- [x] `Simulation("file.topo", "file.cnf", "file.imd")` — string-path constructor (backward-compatible)
+- [x] `Simulation.from_files(...)` — explicit static method alternative
+- [x] `sim.algorithm_names` — read-only list of algorithms in the MD sequence
+- [x] Shared `build_simulation()` function — single source of truth for both constructor paths
+- [x] Solvation handled automatically: topology solvated only if not already solvated
+- [x] All 62 Python reference tests pass (21 systems × 3 checks, 1 skip)
+
+##### DONE — Python reference tests via Simulation API ✓
+- [x] `test_gromosXX_references.py` — uses compositional API (Topology, Configuration, InputParameters)
+- [x] Energy, position, and force comparison against gromosXX reference data
+- [x] Write frequency parsing via `InputParameters.nstlim`/`.ntwe`/`.ntwx` (replaces regex)
+- [x] Minimum image convention for position comparison (handles periodic wrapping)
+- [x] 62 passed, 1 skipped (water_216_box_com positions — no reference trajectory)
+
+##### TODO — Additional binding types
+- [ ] Expose ForceField evaluation (single-point energy/force calculation)
+- [ ] Expose SHAKE / constraint info
+- [ ] Expose energy decomposition (bonded, LJ, CRF, kinetic, pressure)
+- [ ] `AlgorithmSequence` as standalone constructable Python object (advanced users)
+  - Currently exposed read-only via `sim.algorithm_names`
+  - Future: `seq = AlgorithmSequence(topo, params)` → modify → `Simulation.from_sequence(topo, conf, seq)`
 - [ ] Study Polars' pyo3 patterns: `PyDataFrame`, `PyExpr`, `PyLazyFrame` wrappers
   - Path: `.local/polars/py-polars/src/` — how they wrap Rust types into Python classes
   - Learn from: `__repr__`, `_repr_html_`, method chaining, `@staticmethod` constructors
 
 #### Phase 2 — Python API (py-gromos)
-- [ ] Redesign `py-gromos/python/gromos/` API surface inspired by Polars ergonomics:
-  - [ ] `gromos.read_topology("file.top")` → Topology object with nice `__repr__`
-  - [ ] `gromos.read_coordinates("file.cnf")` → Configuration with positions as numpy arrays
-  - [ ] `gromos.Simulation(topo, conf, params)` — high-level runner
-  - [ ] Method chaining where natural: `sim.run(steps=1000).energies().plot()`
-  - [ ] Energy timeseries as DataFrame (Polars or pandas interop)
+- [x] `gromos.Topology("file.topo")` → Topology object with `__repr__`, masses, charges
+- [x] `gromos.Configuration("file.cnf")` → Configuration with positions as numpy arrays
+- [x] `gromos.Simulation(topo, conf, params)` — high-level compositional runner
+- [ ] Method chaining where natural: `sim.run(steps=1000).energies().plot()`
+- [ ] Energy timeseries as DataFrame (Polars or pandas interop)
 - [ ] `md_runners.py` — review and simplify (currently wraps CLI `md` binary)
 - [ ] `analysis.py` — expose gromos-analysis functions to Python
 - [ ] Rich `__repr__` / `_repr_html_` for Jupyter display of Topology, Configuration, Energy

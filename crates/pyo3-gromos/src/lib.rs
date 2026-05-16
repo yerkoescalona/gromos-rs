@@ -20,6 +20,11 @@ use pyo3::prelude::*;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use glam::Vec3A as Vec3;
 
+pub mod topology;
+pub mod py_conf;
+pub mod parameters;
+mod simulation;
+
 // Re-export core types
 pub use gromos_core::{Configuration, Topology, Energy, State};
 pub use gromos_forces::{ForceEnergy, LJParameters};
@@ -303,6 +308,12 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFrame>()?;
     m.add_function(wrap_pyfunction!(rmsd, m)?)?;
     m.add_function(wrap_pyfunction!(rdf, m)?)?;
+    // Interactive simulation API
+    simulation::register_simulation(m)?;
+    // Compositional types
+    topology::register_topology(m)?;
+    py_conf::register_configuration(m)?;
+    parameters::register_parameters(m)?;
     Ok(())
 }
 
