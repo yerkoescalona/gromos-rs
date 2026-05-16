@@ -564,7 +564,7 @@ fn parse_improper_dihedral_types<I: Iterator<Item = Result<String, std::io::Erro
             let q0: f64 = parts[1].parse().map_err(|_| IoError::ParseError(format!("Invalid Q0: {}", parts[1])))?;
             params.push(ImproperDihedralParameters {
                 q0: q0 * std::f64::consts::PI / 180.0, // Convert to radians
-                k: cq,
+                k: cq * 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI), // Convert from kJ/(mol·deg²) to kJ/(mol·rad²)
             });
         }
     }
