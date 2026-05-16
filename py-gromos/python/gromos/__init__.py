@@ -98,122 +98,48 @@ See Also
 - Original GROMOS: http://www.gromos.net
 """
 
-# Import all classes from the Rust extension module
+# Import available classes from the Rust extension module
+# Import analysis module
+from . import analysis
 from .gromos import (
-    # Math types
-    Vec3,
-    Mat3,
-    # Core structures
-    Box,
-    Energy,
-    State,
     Configuration,
+    Energy,
+    Frame,
+    InputParameters,
+    Simulation,
     Topology,
-    # Binary I/O readers
-    DcdReader,
-    BinaryEnergyReader,
-    # NMR Restraints
-    JValueRestraint,
-    RDCRestraint,
-    # Virtual Atoms
-    VirtualAtom,
-    VirtualAtomManager,
-    # Local Elevation / Metadynamics
-    Umbrella,
-    LECoordinate,
-    CoordinateType,
-    # Polarization
-    PolarizationCalculator,
-    PolarizationModel,
-    PolarizabilityParameters,
-    # QM/MM
-    QMMMCalculator,
-    QMRegion,
-    QMMethod,
-    CouplingScheme,
-    # Free Energy Perturbation
-    LambdaController,
-    PerturbedAtom,
-    InteractionLambdas,
-    PerturbedLambdaParams,
-    # Analysis functions
-    calculate_rmsd,
-    calculate_rmsf,
-    calculate_rgyr,
-    analyze_trajectory,
-    # Conversion functions
-    convert_trajectory,
-    convert_energy,
-    # Perturbed nonbonded interactions
-    py_perturbed_lj_crf_interaction,
+    Vec3,
+    rdf,
+    rmsd,
 )
 
 # Import MD simulation runners
 from .md_runners import (
-    MDSimulation,
-    GaMDSimulation,
     EDSSimulation,
+    GaMDSimulation,
+    MDSimulation,
     REMDSimulation,
     TISimulation,
-    run_standard_md,
-    run_gamd,
     run_eds,
+    run_gamd,
     run_remd,
+    run_standard_md,
     run_ti,
 )
-
-# Import analysis module
-from . import analysis
 
 __version__ = "0.1.0"
 
 __all__ = [
-    # Math types
+    # Rust bindings
     "Vec3",
-    "Mat3",
-    # Core structures
-    "Box",
     "Energy",
-    "State",
-    "Configuration",
+    "Frame",
     "Topology",
-    # Binary I/O readers
-    "DcdReader",
-    "BinaryEnergyReader",
-    # NMR Restraints
-    "JValueRestraint",
-    "RDCRestraint",
-    # Virtual Atoms
-    "VirtualAtom",
-    "VirtualAtomManager",
-    # Local Elevation / Metadynamics
-    "Umbrella",
-    "LECoordinate",
-    "CoordinateType",
-    # Polarization
-    "PolarizationCalculator",
-    "PolarizationModel",
-    "PolarizabilityParameters",
-    # QM/MM
-    "QMMMCalculator",
-    "QMRegion",
-    "QMMethod",
-    "CouplingScheme",
-    # Free Energy Perturbation
-    "LambdaController",
-    "PerturbedAtom",
-    "InteractionLambdas",
-    "PerturbedLambdaParams",
-    # Analysis functions
-    "calculate_rmsd",
-    "calculate_rmsf",
-    "calculate_rgyr",
-    "analyze_trajectory",
-    # Conversion functions
-    "convert_trajectory",
-    "convert_energy",
-    # Perturbed nonbonded interactions
-    "py_perturbed_lj_crf_interaction",
+    "Configuration",
+    "InputParameters",
+    "Simulation",
+    "rmsd",
+    "rdf",
     # MD simulation classes
     "MDSimulation",
     "GaMDSimulation",

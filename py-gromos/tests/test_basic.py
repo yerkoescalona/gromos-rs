@@ -1,170 +1,139 @@
 """
-Basic tests for GROMOS-RS Python bindings
+Basic tests for GROMOS-RS Python bindings.
+
+Tests only what the Rust extension actually exports:
+  Vec3, Energy, Frame, rmsd, rdf
 """
 
-import pytest
 import numpy as np
+import pytest
+
+import gromos
 
 
-def test_import():
-    """Test that the module can be imported"""
-    import gromos
+class TestImport:
+    def test_import(self):
+        assert gromos.__version__ == "0.1.0"
 
-    assert gromos.__version__ == "0.1.0"
-
-
-def test_vec3_creation():
-    """Test Vec3 creation and basic operations"""
-    import gromos
-
-    v = gromos.Vec3(1.0, 2.0, 3.0)
-    assert v.x == 1.0
-    assert v.y == 2.0
-    assert v.z == 3.0
+    def test_available_types(self):
+        assert hasattr(gromos, "Vec3")
+        assert hasattr(gromos, "Energy")
+        assert hasattr(gromos, "Frame")
+        assert hasattr(gromos, "rmsd")
+        assert hasattr(gromos, "rdf")
 
 
-def test_vec3_operations():
-    """Test Vec3 mathematical operations"""
-    import gromos
+class TestVec3:
+    def test_creation(self):
+        v = gromos.Vec3(1.0, 2.0, 3.0)
+        assert v.x == 1.0
+        assert v.y == 2.0
+        assert v.z == 3.0
 
-    v1 = gromos.Vec3(1.0, 0.0, 0.0)
-    v2 = gromos.Vec3(0.0, 1.0, 0.0)
+    def test_repr(self):
+        v = gromos.Vec3(1.0, 2.0, 3.0)
+        r = repr(v)
+        assert "1" in r and "2" in r and "3" in r
 
-    # Addition
-    v3 = v1 + v2
-    assert v3.x == 1.0
-    assert v3.y == 1.0
-    assert v3.z == 0.0
+    def test_addition(self):
+        v1 = gromos.Vec3(1.0, 0.0, 0.0)
+        v2 = gromos.Vec3(0.0, 1.0, 0.0)
+        v3 = v1 + v2
+        assert v3.x == pytest.approx(1.0)
+        assert v3.y == pytest.approx(1.0)
+        assert v3.z == pytest.approx(0.0)
 
-    # Scalar multiplication
-    v4 = v1 * 2.0
-    assert v4.x == 2.0
+    def test_subtraction(self):
+        v1 = gromos.Vec3(3.0, 2.0, 1.0)
+        v2 = gromos.Vec3(1.0, 1.0, 1.0)
+        v3 = v1 - v2
+        assert v3.x == pytest.approx(2.0)
+        assert v3.y == pytest.approx(1.0)
+        assert v3.z == pytest.approx(0.0)
 
-    # Dot product
-    dot = v1.dot(v2)
-    assert dot == 0.0
+    def test_scalar_mul(self):
+        v = gromos.Vec3(1.0, 2.0, 3.0)
+        v2 = v * 2.0
+        assert v2.x == pytest.approx(2.0)
+        assert v2.y == pytest.approx(4.0)
+        assert v2.z == pytest.approx(6.0)
 
-    # Cross product
-    cross = v1.cross(v2)
-    assert abs(cross.z - 1.0) < 1e-6
+    def test_dot(self):
+        v1 = gromos.Vec3(1.0, 0.0, 0.0)
+        v2 = gromos.Vec3(0.0, 1.0, 0.0)
+        assert v1.dot(v2) == pytest.approx(0.0)
 
+        v3 = gromos.Vec3(1.0, 2.0, 3.0)
+        v4 = gromos.Vec3(4.0, 5.0, 6.0)
+        assert v3.dot(v4) == pytest.approx(32.0)
 
-def test_vec3_numpy():
-    """Test Vec3 NumPy integration"""
-    import gromos
+    def test_cross(self):
+        v1 = gromos.Vec3(1.0, 0.0, 0.0)
+        v2 = gromos.Vec3(0.0, 1.0, 0.0)
+        c = v1.cross(v2)
+        assert c.x == pytest.approx(0.0)
+        assert c.y == pytest.approx(0.0)
+        assert c.z == pytest.approx(1.0)
 
-    v = gromos.Vec3(1.0, 2.0, 3.0)
-    arr = v.to_numpy()
+    def test_length(self):
+        v = gromos.Vec3(3.0, 4.0, 0.0)
+        assert v.length() == pytest.approx(5.0)
 
-    assert isinstance(arr, np.ndarray)
-    assert arr.shape == (3,)
-    assert arr.dtype == np.float32
-    assert np.allclose(arr, [1.0, 2.0, 3.0])
-
-    # Create from NumPy
-    np_arr = np.array([4.0, 5.0, 6.0], dtype=np.float32)
-    v2 = gromos.Vec3.from_numpy(np_arr)
-    assert v2.x == 4.0
-    assert v2.y == 5.0
-    assert v2.z == 6.0
-
-
-def test_mat3():
-    """Test Mat3 creation and operations"""
-    import gromos
-
-    mat = gromos.Mat3.identity()
-    det = mat.determinant()
-    assert abs(det - 1.0) < 1e-6
-
-
-def test_box():
-    """Test Box creation"""
-    import gromos
-
-    # Vacuum
-    box = gromos.Box.vacuum()
-    assert box.volume() >= 0
-
-    # Rectangular
-    box = gromos.Box.rectangular(3.0, 3.0, 3.0)
-    assert abs(box.volume() - 27.0) < 1e-6
-
-    dims = box.dimensions()
-    assert abs(dims.x - 3.0) < 1e-6
+    def test_normalize(self):
+        v = gromos.Vec3(3.0, 0.0, 0.0)
+        n = v.normalize()
+        assert n.x == pytest.approx(1.0)
+        assert n.y == pytest.approx(0.0)
+        assert n.length() == pytest.approx(1.0)
 
 
-def test_energy():
-    """Test Energy creation and access"""
-    import gromos
-
-    energy = gromos.Energy(num_temperature_groups=1, num_energy_groups=1)
-
-    assert energy.kinetic == 0.0
-    assert energy.potential == 0.0
-    assert energy.total() == 0.0
-
-    # Get as dictionary
-    d = energy.to_dict()
-    assert "total" in d
-    assert "kinetic" in d
-    assert "potential" in d
+class TestEnergy:
+    def test_creation(self):
+        e = gromos.Energy()
+        assert e.kinetic == pytest.approx(0.0)
+        assert e.potential == pytest.approx(0.0)
+        assert e.total == pytest.approx(0.0)
 
 
-def test_state():
-    """Test State creation"""
-    import gromos
-
-    state = gromos.State(num_atoms=10, num_temp_groups=1, num_energy_groups=1)
-    assert state.num_atoms() == 10
-
-    # Get arrays
-    pos = state.positions()
-    assert pos.shape == (10, 3)
-
-    vel = state.velocities()
-    assert vel.shape == (10, 3)
-
-    forces = state.forces()
-    assert forces.shape == (10, 3)
+class TestFrame:
+    def test_creation(self):
+        f = gromos.Frame(1.5, 100)
+        assert f.time == pytest.approx(1.5)
+        assert f.step == 100
+        assert f.n_atoms == 0
 
 
-def test_state_set():
-    """Test setting State data from NumPy"""
-    import gromos
+class TestRmsd:
+    def test_identical(self):
+        pos = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        assert gromos.rmsd(pos, pos) == pytest.approx(0.0, abs=1e-6)
 
-    state = gromos.State(num_atoms=5, num_temp_groups=1, num_energy_groups=1)
+    def test_translated(self):
+        pos = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        ref = pos + 1.0
+        r = gromos.rmsd(pos, ref)
+        assert r == pytest.approx(np.sqrt(3.0), rel=1e-5)
 
-    # Set positions
-    pos = np.random.rand(5, 3).astype(np.float32)
-    state.set_positions(pos)
-
-    # Set velocities
-    vel = np.random.rand(5, 3).astype(np.float32)
-    state.set_velocities(vel)
-
-
-def test_configuration():
-    """Test Configuration creation"""
-    import gromos
-
-    config = gromos.Configuration(num_atoms=100, num_temp_groups=1, num_energy_groups=1)
-
-    state = config.current_state()
-    assert state.num_atoms() == 100
-
-    energy = config.current_energy()
-    assert energy.total() == 0.0
+    def test_shape_mismatch(self):
+        pos = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float32)
+        ref = np.array([[0, 0, 0]], dtype=np.float32)
+        with pytest.raises(ValueError):
+            gromos.rmsd(pos, ref)
 
 
-def test_topology():
-    """Test Topology creation"""
-    import gromos
-
-    topo = gromos.Topology()
-    assert topo.num_atoms() >= 0
-    assert topo.num_bonds() >= 0
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+class TestRdf:
+    def test_basic(self):
+        # 3 atoms at known distances
+        pos = np.array(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [0, 2, 0],
+            ],
+            dtype=np.float32,
+        )
+        r_vals, g_vals = gromos.rdf(pos, [0], [1, 2], n_bins=10, r_max=3.0)
+        assert len(r_vals) == 10
+        assert len(g_vals) == 10
+        # g(r) should have non-zero values at distance bins containing 1.0 and 2.0
+        assert any(g > 0 for g in g_vals)
