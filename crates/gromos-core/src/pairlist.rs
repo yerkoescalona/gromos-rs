@@ -163,7 +163,7 @@ impl StandardPairlistAlgorithm {
                 let a1 = cg1_atoms[ai];
                 for aj in (ai + 1)..cg1_atoms.len() {
                     let a2 = cg1_atoms[aj];
-                    if !topo.is_excluded(a1, a2) {
+                    if !topo.is_excluded_or_14(a1, a2) {
                         pairlist.solute_short.push((a1, a2));
                         n_intra_cg_pairs += 1;
                     }
@@ -198,7 +198,7 @@ impl StandardPairlistAlgorithm {
                 // Short-range with exclusion check
                 for &a1 in &topo.chargegroups[cg1].atoms {
                     for &a2 in &topo.chargegroups[cg2].atoms {
-                        if !topo.is_excluded(a1, a2) {
+                        if !topo.is_excluded_or_14(a1, a2) {
                             pairlist.solute_short.push((a1, a2));
                         } else {
                             log::debug!("    Excluded pair ({},{})", a1, a2);
@@ -312,7 +312,7 @@ impl StandardPairlistAlgorithm {
         for i in 0..n_atoms {
             for j in (i + 1)..n_atoms {
                 // Check exclusions
-                if topo.is_excluded(i, j) {
+                if topo.is_excluded_or_14(i, j) {
                     continue;
                 }
 
@@ -488,7 +488,7 @@ impl GridCellPairlistAlgorithm {
                 }
 
                 // Check exclusions
-                if topo.is_excluded(i, j) {
+                if topo.is_excluded_or_14(i, j) {
                     continue;
                 }
 
@@ -541,7 +541,7 @@ impl ParallelPairlistAlgorithm {
                 let periodicity = periodicity.clone();
 
                 for j in (i + 1)..n_atoms {
-                    if topo.is_excluded(i, j) {
+                    if topo.is_excluded_or_14(i, j) {
                         continue;
                     }
 

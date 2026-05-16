@@ -41,6 +41,7 @@ pub struct ParsedTopology {
     pub iac: Vec<usize>,
     pub chargegroup_codes: Vec<usize>, // CGC values: 1 = end of chargegroup
     pub exclusions: Vec<Vec<usize>>,
+    pub one_four_pairs: Vec<Vec<usize>>,   // 1-4 pairs from INE14 (0-based)
     pub bonds: Vec<(usize, usize, usize)>, // (i, j, type)
     pub bond_parameters: Vec<BondParameters>,
     pub angles: Vec<(usize, usize, usize, usize)>, // (i, j, k, type)
@@ -71,6 +72,7 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     let mut iac = Vec::new();
     let mut chargegroup_codes = Vec::new();
     let mut exclusions = Vec::new();
+    let mut one_four_pairs = Vec::new();
     let mut bonds = Vec::new();
     let mut bond_parameters = Vec::new();
     let mut angles = Vec::new();
@@ -104,6 +106,7 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
                     &mut iac,
                     &mut chargegroup_codes,
                     &mut exclusions,
+                    &mut one_four_pairs,
                 )?;
             },
             "BONDSTRETCHTYPE" => {
@@ -162,6 +165,7 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
         iac,
         chargegroup_codes,
         exclusions,
+        one_four_pairs,
         bonds,
         bond_parameters,
         angles,
@@ -187,6 +191,7 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
     iac: &mut Vec<usize>,
     chargegroup_codes: &mut Vec<usize>,
     exclusions: &mut Vec<Vec<usize>>,
+    one_four_pairs: &mut Vec<Vec<usize>>,
 ) -> Result<(), IoError> {
     // First line after SOLUTEATOM is atom count
     while let Some(Ok(line)) = lines.next() {
@@ -246,15 +251,28 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
             }
             exclusions.push(atom_exclusions);
 
-            // Skip the INE14 line (1-4 pairs) — always present after each atom
-            // Format: INE14 [pair1 pair2 ...]
-            // We consume it but don't use it (1-4 pairs are built from dihedrals)
+            // Parse the INE14 line (1-4 pairs) — always present after each atom
+            // Format: count [pair1 pair2 ...]
             while let Some(Ok(next_line)) = lines.next() {
                 let next_trimmed = next_line.trim();
                 if next_trimmed.is_empty() || next_trimmed.starts_with('#') {
                     continue;
                 }
-                // This is the INE14 line, consumed and discarded
+                // Parse INE14 line: first value is count, rest are 1-based atom indices
+                let ine14_parts: Vec<&str> = next_trimmed.split_whitespace().collect();
+                let mut atom_14_pairs = Vec::new();
+                if let Some(count_str) = ine14_parts.first() {
+                    if let Ok(n14) = count_str.parse::<usize>() {
+                        for idx in 1..=n14 {
+                            if idx < ine14_parts.len() {
+                                if let Ok(partner) = ine14_parts[idx].parse::<usize>() {
+                                    atom_14_pairs.push(partner - 1); // 1-based to 0-based
+                                }
+                            }
+                        }
+                    }
+                }
+                one_four_pairs.push(atom_14_pairs);
                 break;
             }
         }
@@ -595,11 +613,25 @@ fn parse_lj_parameters<I: Iterator<Item = Result<String, std::io::Error>>>(
                 .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid C6: {}", parts[3])))?;
 
-            lj_params.insert((iac, jac), LJParameters::new(c6, c12));
+            // Parse optional 1-4 parameters (CS12, CS6)
+            let (cs12, cs6) = if parts.len() >= 6 {
+                let cs12: f64 = parts[4]
+                    .parse()
+                    .map_err(|_| IoError::ParseError(format!("Invalid CS12: {}", parts[4])))?;
+                let cs6: f64 = parts[5]
+                    .parse()
+                    .map_err(|_| IoError::ParseError(format!("Invalid CS6: {}", parts[5])))?;
+                (cs12, cs6)
+            } else {
+                (c12, c6) // Default: same as normal
+            };
+
+            let params = LJParameters::new_with_14(c6, c12, cs6, cs12);
+            lj_params.insert((iac, jac), params);
 
             // LJ matrix is symmetric
             if iac != jac {
-                lj_params.insert((jac, iac), LJParameters::new(c6, c12));
+                lj_params.insert((jac, iac), params);
             }
         }
     }
@@ -888,6 +920,17 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         }
     }
 
+    // --- Store 1-4 pairs from INE14 and merge into exclusions ---
+    // gromosXX convention: 1-4 pairs are excluded from the regular pairlist
+    // (merged into all_exclusion) but computed separately with cs6/cs12.
+    // They are NOT included in topo.exclusions (used for RF excluded interactions).
+    topo.one_four_pairs = vec![Vec::new(); n_solute];
+    for (i, pairs_14) in parsed.one_four_pairs.iter().enumerate() {
+        for &j in pairs_14 {
+            topo.one_four_pairs[i].push(j);
+        }
+    }
+
     // Build bonds
     for (i, j, bond_type) in parsed.bonds {
         topo.solute.bonds.push(Bond { i, j, bond_type });
@@ -935,7 +978,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         if iac < n_types && jac < n_types {
             topo.lj_parameters[iac][jac] = params;
             topo.lj_parameters[jac][iac] = params;
-            log::debug!("LJ params[{}][{}]: c6={:.6e}, c12={:.6e}", iac, jac, params.c6, params.c12);
+            log::debug!("LJ params[{}][{}]: c6={:.6e}, c12={:.6e}, cs6={:.6e}, cs12={:.6e}", iac, jac, params.c6, params.c12, params.cs6, params.cs12);
         }
     }
 

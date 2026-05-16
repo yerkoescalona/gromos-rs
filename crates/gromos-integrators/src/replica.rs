@@ -187,6 +187,8 @@ impl Replica {
                     .map(|params| NBLJParams {
                         c6: params.c6,
                         c12: params.c12,
+                        cs6: params.cs6,
+                        cs12: params.cs12,
                     })
                     .collect()
             })

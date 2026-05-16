@@ -145,6 +145,11 @@ impl LJParameters {
         }
     }
 
+    /// Create LJ parameters with explicit 1-4 (cs6, cs12) values
+    pub fn new_with_14(c6: f64, c12: f64, cs6: f64, cs12: f64) -> Self {
+        Self { c6, c12, cs6, cs12 }
+    }
+
     /// Calculate sigma (size parameter) from C6 and C12
     /// sigma = (C12/C6)^(1/6)
     pub fn sigma(&self) -> f64 {
@@ -411,9 +416,25 @@ impl Topology {
     }
 
     /// Check if atoms i and j are excluded from nonbonded interactions
+    /// (1-2 and 1-3 bonded pairs only — used for RF excluded interactions)
     #[inline]
     pub fn is_excluded(&self, i: usize, j: usize) -> bool {
         self.exclusions[i].contains(&j) || self.exclusions[j].contains(&i)
+    }
+
+    /// Check if atoms i and j are excluded OR are a 1-4 pair.
+    /// Used for pairlist exclusion (gromosXX: all_exclusion).
+    #[inline]
+    pub fn is_excluded_or_14(&self, i: usize, j: usize) -> bool {
+        if self.exclusions[i].contains(&j) || self.exclusions[j].contains(&i) {
+            return true;
+        }
+        if !self.one_four_pairs.is_empty() {
+            if self.one_four_pairs[i].contains(&j) || self.one_four_pairs[j].contains(&i) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Get chargegroup index for atom i

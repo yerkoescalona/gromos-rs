@@ -18,6 +18,7 @@ New test systems: add a `ref_test!(name, "system_dir")` line in:
 Here you can find the gromosXX code: .local/gromosXX/md++/src
 Here you can find realistic tutorials: .local/gromos_tutorial_livecoms/tutorial_files
 Here you can find theory behind everything: .local/doc/gromos_book
+Here you can find forcefields: .local/gromosXX/forcefields
 
 
 ## Architecture
@@ -75,7 +76,8 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 1   | water_single     | 3     | bond + angle + intramolecular CRF    | **PASS** |
 | 1   | benzene_vacuum   | 12    | aromatic ring + improper + torsion   | **PASS** |
 | 1   | nacl_pair_box    | 2     | Coulomb + LJ in PBC with RF (no solvent) | **PASS** |
-| 1   | aladip_vacuum    | 12    | all bonded + exclusions + 1-4        | FAIL — missing topo file |
+| 1   | butane_vacuum    | 4     | dihedral + 1-4 LJ interaction        | **PASS** |
+| 1   | aladip_vacuum    | 12    | all bonded + exclusions + 1-4        | FAIL — improper dihedral bug |
 | 2   | water_3_box      | 9     | PBC + min image + pairlist + CRF     | **PASS** |
 | 2   | nacl_1water_box  | 5     | minimal solute-solvent + SHAKE       | **PASS** |
 | 2   | nacl_3water_box  | 11    | multiple solvent + solute-solvent pairlist | **PASS** |
@@ -88,13 +90,13 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 | 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
 | 3   | water_216_nvt    | 648   | Berendsen thermostat                 | **PASS** |
 | 3   | water_216_npt    | 648   | Berendsen barostat                   | **PASS** |
-| 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | FAIL — missing topo file |
+| 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | FAIL — improper dihedral bug |
 
-**18 of 20 tests pass.** Levels 0-3 (NVE/NVT/NPT) fully passing.
+**19 of 21 tests pass.** Levels 0-3 (NVE/NVT/NPT) fully passing.
 
 ## What Works
 
-- LJ + CRF nonbonded forces (vacuum and PBC code paths)
+- LJ + CRF nonbonded forces (vacuum and PBC code paths)\n- 1-4 interactions: cs6/cs12 LJ + scaled CRF, parsed from LJPARAMETERS (CS12/CS6) and SOLUTEATOM (INE14)
 - All bonded force types: quartic/harmonic bonds, cos-harmonic/harmonic angles, dihedrals, impropers, cross-dihedrals
 - NTF flag control for selective bonded force evaluation
 - RF excluded interactions (forces + energy + self-terms)
@@ -157,12 +159,11 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 - [x] Root cause: NTIVEL=1 + COM removal (see Resolved Investigations below)
 - [x] water_216_box now passes all 10 frames within 5e-7 kJ/mol
 
-### TODO — Fix aladip_vacuum / aladip_solvated (missing topology)
-- [ ] `aladip.topo` referenced as `../../aladip.topo` but doesn't exist
-  - Either the topo file was never committed, or the relative path is wrong
-  - Need to locate or regenerate the aladip topology file
-  - Both aladip_vacuum and aladip_solvated depend on it
-  - Will also exercise 1-4 interactions (dihedrals, impropers, exclusions)
+### TODO — Fix aladip_vacuum / aladip_solvated (improper dihedral energy)
+- [ ] Improper dihedral energy mismatch: gromos-rs=4.5e-4 vs gromosXX=1.485 kJ/mol
+  - 1-4 interactions and all other nonbonded/bonded terms match exactly
+  - Root cause is in the improper dihedral calculation, not topology parsing
+  - Difference accounts for the full 1.58 kJ/mol E_total discrepancy
 
 ### DONE — COM motion removal → unblocks `water_216_box_com` ✓
 - [x] Implement `RemoveCOMMotion` algorithm
@@ -242,11 +243,19 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
   - [ ] Wire GENBOX box_type into periodicity selection
   - [ ] Test with truncated octahedron or other non-rectangular boxes
 
-### TODO — Verify 1-4 interactions
-- [ ] INE14 exclusion list parsed from topology
-  - [ ] Verify 1-4 LJ/Coulomb scaling factors are applied correctly
-  - [ ] Will be tested by `aladip_vacuum` once topology file is available
-  - [ ] gromosXX uses separate 1-4 LJ parameters (CS12/CS6 from LJPARAMETERS)
+### DONE — 1-4 interactions (cs6/cs12 + INE14 parsing) ✓
+- [x] Parse CS12/CS6 (columns 5-6) from LJPARAMETERS block in topology
+- [x] Parse INE14 line from SOLUTEATOM block → stored in `Topology.one_four_pairs`
+- [x] Added `LJParameters::new_with_14(c6, c12, cs6, cs12)` constructor
+- [x] Separated exclusion lists (gromosXX convention):
+  - `exclusions` = 1-2 + 1-3 (used for RF excluded interactions)
+  - `is_excluded_or_14()` = 1-2 + 1-3 + 1-4 (used for pairlist exclusion)
+- [x] Implemented `one_four_interaction_loop` in nonbonded.rs:
+  - Uses cs6/cs12 for LJ, coulomb_scaling for CRF, no cutoff, full virial
+- [x] Wired into forcefield.rs after RF excluded interactions
+- [x] Added cs6/cs12 fields to nonbonded `LJParameters` struct
+- [x] Created `butane_vacuum` test system (4 UA atoms, gauche conformation)
+- [x] Reference tests: butane_vacuum and benzene_vacuum pass
 
 ### Known Gaps (lower priority)
 - COM rotation removal: only translation needed for most simulations
