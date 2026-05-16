@@ -11,10 +11,11 @@
 use gromos::{
     algorithm::{
         BerendsenBarostatParameters,
-        BerendsenThermostatParameters, ShakeParameters,
+        BerendsenThermostatParameters, ShakeParameters, NtcMode,
         AlgorithmSequence, SimulationState,
         Forcefield, LeapFrogVelocity, LeapFrogPosition,
         TemperatureCalculation, EnergyCalculation, ShakeAlgorithm,
+        RemoveCOMMotion,
     },
     configuration::{Box as SimBox, Configuration},
     interaction::{
@@ -653,7 +654,12 @@ fn main() {
     println!("Setting up algorithm sequence: Leap-Frog");
     let mut md_sequence = AlgorithmSequence::new();
 
-    // 1. Forcefield (bonded + nonbonded forces)
+    // 1. COM motion removal (gromosXX: first in sequence, before forcefield)
+    if imd.nticom >= 1 || imd.nscm > 0 {
+        md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
+    }
+
+    // 2. Forcefield (bonded + nonbonded forces)
     let mut forcefield = Forcefield::new(
         lj_params,
         crf_params,
@@ -671,24 +677,39 @@ fn main() {
     }
     md_sequence.push(Box::new(forcefield));
 
-    // 2. Leap-Frog velocity step (exchange_state + v update)
+    // 3. Leap-Frog velocity step (exchange_state + v update)
     md_sequence.push(Box::new(LeapFrogVelocity::new()));
 
-    // 3. Leap-Frog position step (r update)
+    // 4. Leap-Frog position step (r update)
     md_sequence.push(Box::new(LeapFrogPosition::new()));
 
-    // 4. SHAKE constraints (if enabled)
+    // 5. SHAKE constraints (if enabled)
     if shake_enabled {
-        md_sequence.push(Box::new(ShakeAlgorithm::new(ShakeParameters {
+        let ntc_mode = match imd.ntc {
+            3 => NtcMode::AllBonds,
+            2 => NtcMode::HydrogenBonds,
+            _ => NtcMode::SolventOnly,
+        };
+        let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
             tolerance: shake_tolerance,
             max_iterations: 1000,
-        })));
+            ntc: ntc_mode,
+        });
+        // gromosXX: NTISHK controls initial position/velocity shaking
+        // NTISHK=1: shake positions, NTISHK=2: shake positions + velocities
+        if imd.ntishk >= 1 {
+            shake_alg.shake_initial_positions = true;
+        }
+        if imd.ntishk >= 2 {
+            shake_alg.shake_initial_velocities = true;
+        }
+        md_sequence.push(Box::new(shake_alg));
     }
 
-    // 5. Temperature/kinetic energy calculation
+    // 6. Temperature/kinetic energy calculation
     md_sequence.push(Box::new(TemperatureCalculation::new()));
 
-    // 5. Energy finalization
+    // 7. Energy finalization
     md_sequence.push(Box::new(EnergyCalculation::new()));
 
     println!("  Sequence: {}", md_sequence.algorithm_names().join(" → "));
@@ -740,9 +761,15 @@ fn main() {
 
     // Setup SHAKE constraints
     let shake_params = if shake_enabled {
+        let ntc_mode = match imd.ntc {
+            3 => NtcMode::AllBonds,
+            2 => NtcMode::HydrogenBonds,
+            _ => NtcMode::SolventOnly,
+        };
         Some(ShakeParameters {
             tolerance: shake_tolerance,
             max_iterations: 1000,
+            ntc: ntc_mode,
         })
     } else {
         None
@@ -750,6 +777,7 @@ fn main() {
 
     if let Some(ref params) = shake_params {
         println!("Setting up constraints: SHAKE");
+        println!("  NTC mode:      {:?}", params.ntc);
         println!("  Tolerance:     {:.6}", params.tolerance);
         println!("  Max iter:      {}", params.max_iterations);
         println!();
@@ -1117,7 +1145,12 @@ fn main() {
         if let Some(ref mut fw) = force_writer {
             if step % nstxout == 0 {
                 let forces = &conf.old().force;
-                if let Err(e) = fw.write_frame(step, time, forces, None) {
+                let constraint_forces = if shake_enabled {
+                    Some(conf.old().constraint_force.as_slice())
+                } else {
+                    None
+                };
+                if let Err(e) = fw.write_frame(step, time, forces, constraint_forces) {
                     eprintln!("Error writing forces: {}", e);
                 }
             }

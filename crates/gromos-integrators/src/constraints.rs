@@ -15,11 +15,23 @@ use gromos_core::configuration::Configuration;
 use gromos_core::math::{Mat3, Vec3};
 use gromos_core::topology::Topology;
 
+/// NTC constraint mode (which bonds to constrain)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NtcMode {
+    /// NTC=1: no solute constraints (solvent only if NTCS>0)
+    SolventOnly,
+    /// NTC=2: constrain bonds involving hydrogen atoms
+    HydrogenBonds,
+    /// NTC=3: constrain all bonds
+    AllBonds,
+}
+
 /// SHAKE algorithm parameters
 #[derive(Debug, Clone)]
 pub struct ShakeParameters {
     pub tolerance: f64,        // Convergence tolerance for constraint satisfaction
     pub max_iterations: usize, // Maximum number of iterations
+    pub ntc: NtcMode,         // Which solute bonds to constrain
 }
 
 impl Default for ShakeParameters {
@@ -27,6 +39,7 @@ impl Default for ShakeParameters {
         Self {
             tolerance: 1e-4,      // GROMOS default: 0.0001
             max_iterations: 1000, // GROMOS default
+            ntc: NtcMode::HydrogenBonds, // NTC=2
         }
     }
 }
@@ -80,18 +93,18 @@ pub struct ConstraintResult {
 /// The SHAKE algorithm (Ryckaert, Ciccotti & Berendsen, 1977) iteratively
 /// adjusts atomic positions to satisfy bond length constraints.
 ///
-/// Algorithm:
-/// 1. For each constrained bond i-j with target distance d_ij:
-/// 2. Calculate current distance r_current
-/// 3. Calculate constraint error: Δ = (r_current² - d_ij²) / (2 * r_current²)
-/// 4. Apply position corrections scaled by inverse masses
-/// 5. Repeat until all constraints satisfied within tolerance
+/// Features matching gromosXX:
+/// - NTC control: 1=solvent only, 2=H-bonds, 3=all bonds
+/// - Constraint forces stored in conf.old().constraint_force
+/// - Virial tensor contribution accumulated in conf.old().virial_tensor
+/// - skip_now/skip_next optimization to avoid re-checking converged constraints
+/// - Velocity correction: v = (pos_new - pos_old) / dt
 ///
 /// # Parameters
 /// - `topo`: Molecular topology containing constraint information
 /// - `conf`: Configuration with current and old positions
 /// - `dt`: Time step size
-/// - `params`: SHAKE parameters (tolerance, max iterations)
+/// - `params`: SHAKE parameters (tolerance, max iterations, NTC mode)
 ///
 /// # Returns
 /// - `ConstraintResult` with convergence status and statistics
@@ -102,67 +115,138 @@ pub fn shake(
     params: &ShakeParameters,
 ) -> ConstraintResult {
     let tolerance = params.tolerance;
+    let dt2 = dt * dt;
 
     // Collect constrained atom indices for velocity correction
     let mut constrained_atoms = std::collections::HashSet::new();
 
+    // Build the list of solute constraints based on NTC mode
+    let solute_constraints: Vec<(usize, usize, f64)> = match params.ntc {
+        NtcMode::SolventOnly => Vec::new(), // NTC=1: no solute constraints
+        NtcMode::HydrogenBonds => {
+            // NTC=2: only bonds involving hydrogen (mass < 2.0)
+            topo.solute.bonds.iter().filter_map(|bond| {
+                let constraint_length = topo.bond_parameters[bond.bond_type].r0;
+                if constraint_length < 1e-10 {
+                    return None;
+                }
+                let mass_i = topo.mass[bond.i];
+                let mass_j = topo.mass[bond.j];
+                if mass_i > 2.0 && mass_j > 2.0 {
+                    return None;
+                }
+                Some((bond.i, bond.j, constraint_length))
+            }).collect()
+        }
+        NtcMode::AllBonds => {
+            // NTC=3: all bonds
+            topo.solute.bonds.iter().filter_map(|bond| {
+                let constraint_length = topo.bond_parameters[bond.bond_type].r0;
+                if constraint_length < 1e-10 {
+                    return None;
+                }
+                Some((bond.i, bond.j, constraint_length))
+            }).collect()
+        }
+    };
+
+    // Build solvent constraints list
+    let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
+    if !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
+        let n_solute = topo.solute.num_atoms();
+        let atoms_per_solvent = topo.solvent_atom_template.len();
+        let num_molecules = topo.solvents[0].num_molecules;
+
+        for mol in 0..num_molecules {
+            let base = n_solute + mol * atoms_per_solvent;
+            for constr in &topo.solvent_constraint_template {
+                solvent_constraints.push((base + constr.i, base + constr.j, constr.length));
+            }
+        }
+    }
+
+    let total_constraints = solute_constraints.len() + solvent_constraints.len();
+    if total_constraints == 0 {
+        return ConstraintResult {
+            converged: true,
+            iterations: 0,
+            max_error: 0.0,
+        };
+    }
+
+    // Collect all constraint atom indices for constraint force zeroing
+    for &(i, j, _) in solute_constraints.iter().chain(solvent_constraints.iter()) {
+        constrained_atoms.insert(i);
+        constrained_atoms.insert(j);
+    }
+
+    // Zero constraint forces for constrained atoms (gromosXX: done before SHAKE iterations)
+    for &atom in &constrained_atoms {
+        conf.old_mut().constraint_force[atom] = Vec3::ZERO;
+    }
+
+    // skip_now/skip_next optimization: avoid re-checking converged constraints
+    // For solute: indexed by local solute atom index
+    let n_solute_atoms = topo.solute.num_atoms();
+    let n_total_atoms = topo.num_atoms();
+    let mut skip_now = vec![false; n_total_atoms];
+    let mut skip_next = vec![true; n_total_atoms];
+
     let mut converged = false;
     let mut iteration = 0;
 
-    // Iterate until convergence or max iterations
     while iteration < params.max_iterations && !converged {
         converged = true;
         iteration += 1;
 
-        // === Solute bonds ===
-        for bond in &topo.solute.bonds {
-            let constraint_length = topo.bond_parameters[bond.bond_type].r0;
-            if constraint_length < 1e-10 {
+        // === Solute constraints ===
+        for &(i, j, constraint_length) in &solute_constraints {
+            // skip optimization: if both atoms can be skipped, skip
+            if skip_now[i] && skip_now[j] {
+                continue;
+            }
+            // skip if both masses are zero (fixed atoms)
+            if topo.inverse_mass[i] == 0.0 && topo.inverse_mass[j] == 0.0 {
                 continue;
             }
 
-            let i = bond.i;
-            let j = bond.j;
-
-            // Only constrain bonds involving hydrogen (mass < 2.0)
-            // This corresponds to NTC=2 in GROMOS
-            let mass_i = topo.mass[i];
-            let mass_j = topo.mass[j];
-            if mass_i > 2.0 && mass_j > 2.0 {
-                continue;
-            }
-
-            if !shake_one_constraint(
-                conf, topo, i, j, constraint_length, tolerance, &mut constrained_atoms,
+            if !shake_one_constraint_full(
+                conf, topo, i, j, constraint_length, tolerance, dt2,
+                &mut skip_next,
             ) {
                 converged = false;
             }
         }
 
         // === Solvent constraints ===
-        // gromosXX: solvent constraints are applied to ALL solvent molecules
-        // using the template from SOLVENTCONSTR block
-        if !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
-            let n_solute = topo.solute.num_atoms();
-            let atoms_per_solvent = topo.solvent_atom_template.len();
-            let num_molecules = topo.solvents[0].num_molecules;
+        for &(i, j, constraint_length) in &solvent_constraints {
+            if skip_now[i] && skip_now[j] {
+                continue;
+            }
 
-            for mol in 0..num_molecules {
-                let base = n_solute + mol * atoms_per_solvent;
-
-                for constr in &topo.solvent_constraint_template {
-                    let i = base + constr.i;
-                    let j = base + constr.j;
-                    let constraint_length = constr.length;
-
-                    if !shake_one_constraint(
-                        conf, topo, i, j, constraint_length, tolerance, &mut constrained_atoms,
-                    ) {
-                        converged = false;
-                    }
-                }
+            if !shake_one_constraint_full(
+                conf, topo, i, j, constraint_length, tolerance, dt2,
+                &mut skip_next,
+            ) {
+                converged = false;
             }
         }
+
+        // Swap skip arrays for next iteration
+        std::mem::swap(&mut skip_now, &mut skip_next);
+        skip_next.iter_mut().for_each(|s| *s = true);
+    }
+
+    // Finalize constraint forces: scale by 1/dt² (gromosXX convention)
+    // Solute constraint forces
+    for &(i, j, _) in &solute_constraints {
+        conf.old_mut().constraint_force[i] *= 1.0 / dt2;
+        conf.old_mut().constraint_force[j] *= 1.0 / dt2;
+    }
+    // Solvent constraint forces
+    for &(i, j, _) in &solvent_constraints {
+        conf.old_mut().constraint_force[i] *= 1.0 / dt2;
+        conf.old_mut().constraint_force[j] *= 1.0 / dt2;
     }
 
     // gromosXX velocity correction: vel = (pos_new - pos_old) / dt
@@ -179,16 +263,19 @@ pub fn shake(
     }
 }
 
-/// Apply SHAKE to a single distance constraint. Returns true if already converged.
+/// Apply SHAKE to a single distance constraint with full gromosXX features.
+/// Returns true if already converged.
+/// Accumulates constraint force (pre-1/dt² scaling) and virial tensor.
 #[inline]
-fn shake_one_constraint(
+fn shake_one_constraint_full(
     conf: &mut Configuration,
     topo: &Topology,
     i: usize,
     j: usize,
     constraint_length: f64,
     tolerance: f64,
-    constrained_atoms: &mut std::collections::HashSet<usize>,
+    dt2: f64,
+    skip_next: &mut [bool],
 ) -> bool {
     let constr_length2 = constraint_length * constraint_length;
 
@@ -220,14 +307,99 @@ fn shake_one_constraint(
     // gromosXX: lambda = diff / (sp * 2.0 * inv_mass_sum)
     let lambda = diff / (sp * 2.0 * inv_mass_sum);
 
+    // Accumulate constraint force (gromosXX: cons_force = lambda * ref_r)
+    // Note: final scaling by 1/dt² is done after all iterations
+    let cons_force = ref_r * lambda;
+    conf.old_mut().constraint_force[i] += cons_force;
+    conf.old_mut().constraint_force[j] -= cons_force;
+
+    // Virial tensor contribution (gromosXX: virial_tensor(a,aa) += ref_r(a) * ref_r(aa) * lambda / dt2)
+    let lambda_over_dt2 = lambda / dt2;
+    let vt = &mut conf.old_mut().virial_tensor;
+    vt.x_axis.x += ref_r.x * ref_r.x * lambda_over_dt2;
+    vt.x_axis.y += ref_r.x * ref_r.y * lambda_over_dt2;
+    vt.x_axis.z += ref_r.x * ref_r.z * lambda_over_dt2;
+    vt.y_axis.x += ref_r.y * ref_r.x * lambda_over_dt2;
+    vt.y_axis.y += ref_r.y * ref_r.y * lambda_over_dt2;
+    vt.y_axis.z += ref_r.y * ref_r.z * lambda_over_dt2;
+    vt.z_axis.x += ref_r.z * ref_r.x * lambda_over_dt2;
+    vt.z_axis.y += ref_r.z * ref_r.y * lambda_over_dt2;
+    vt.z_axis.z += ref_r.z * ref_r.z * lambda_over_dt2;
+
     // Update positions
     let correction = ref_r * lambda;
     conf.current_mut().pos[i] += correction * inv_mass_i;
     conf.current_mut().pos[j] -= correction * inv_mass_j;
 
-    constrained_atoms.insert(i);
-    constrained_atoms.insert(j);
+    // Mark atoms as needing re-check in next iteration
+    skip_next[i] = false;
+    skip_next[j] = false;
+
     false // not yet converged
+}
+
+/// Shake initial positions to satisfy constraints (gromosXX: sim.param().start.shake_pos).
+///
+/// Uses current positions as both reference and unconstrained positions.
+/// After shaking, old positions are set equal to the shaken current positions.
+pub fn shake_positions(
+    topo: &Topology,
+    conf: &mut Configuration,
+    dt: f64,
+    params: &ShakeParameters,
+) -> ConstraintResult {
+    // Set old = current (reference = unconstrained = same positions)
+    let n = topo.num_atoms();
+    for i in 0..n {
+        conf.old_mut().pos[i] = conf.current().pos[i];
+        conf.old_mut().vel[i] = conf.current().vel[i];
+    }
+
+    // Shake current positions
+    let result = shake(topo, conf, dt, params);
+
+    // Restore velocities and set old = shaken current
+    for i in 0..n {
+        conf.current_mut().vel[i] = conf.old().vel[i];
+        conf.old_mut().pos[i] = conf.current().pos[i];
+    }
+
+    result
+}
+
+/// Shake initial velocities to satisfy velocity constraints (gromosXX: sim.param().start.shake_vel).
+///
+/// Ensures velocity components along constrained bonds are zero.
+/// Must be called after shake_positions.
+pub fn shake_velocities(
+    topo: &Topology,
+    conf: &mut Configuration,
+    dt: f64,
+    params: &ShakeParameters,
+) -> ConstraintResult {
+    let n = topo.num_atoms();
+
+    // Step 1: compute unconstrained positions from current velocities
+    // r_uc(t+dt) = r(t) + v(t+dt/2) * dt
+    for i in 0..n {
+        conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().vel[i] * dt;
+    }
+
+    // Step 2: SHAKE these positions
+    let result = shake(topo, conf, dt, params);
+
+    // Step 3: recover constrained velocities and restore positions
+    // v(t+dt/2) = (r_constrained(t+dt) - r(t)) / dt
+    // Velocities are already corrected by shake() itself for constrained atoms.
+    // For unconstrained atoms, restore original positions.
+    for i in 0..n {
+        conf.current_mut().pos[i] = conf.old().pos[i];
+        // Negate velocity direction (gromosXX convention for init shake_vel)
+        conf.current_mut().vel[i] = -conf.current().vel[i];
+        conf.old_mut().vel[i] = conf.current().vel[i];
+    }
+
+    result
 }
 
 /// M-SHAKE: Mass-weighted SHAKE variant

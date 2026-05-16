@@ -21,9 +21,11 @@ mod temperature;
 mod energy;
 mod forcefield;
 mod shake_algorithm;
+mod remove_com_motion;
 
 pub use leap_frog::{LeapFrogVelocity, LeapFrogPosition};
 pub use temperature::TemperatureCalculation;
 pub use energy::EnergyCalculation;
 pub use forcefield::Forcefield;
 pub use shake_algorithm::ShakeAlgorithm;
+pub use remove_com_motion::RemoveCOMMotion;
