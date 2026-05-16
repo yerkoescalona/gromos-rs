@@ -258,14 +258,66 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
 - [x] Created `butane_vacuum` test system (4 UA atoms, gauche conformation)
 - [x] Reference tests: butane_vacuum and benzene_vacuum pass
 
-### Known Gaps (lower priority)
-- COM rotation removal: only translation needed for most simulations
-- SETTLE/LINCS: implemented but not wired (SHAKE covers current needs)
-- Nosé-Hoover / Andersen thermostats: code exists, not wired or tested
-- Parrinello-Rahman barostat: code exists, not wired or tested
-- EDS / GaMD / REMD / FEP: code exists, not tested against references
+### TODO — Unit conversion audit (topology parsing)
+- [x] IMPDIHEDRALTYPE: CQ converted from kJ/(mol·deg²) to kJ/(mol·rad²) — ×(180/π)²
+- [x] BONDANGLEBENDTYPE: CHT (k_harmonic) converted — ×(180/π)²
+- [ ] HARMBONDANGLETYPE: if/when parsed, must also convert CHT — ×(180/π)²
+- gromosXX converts ALL angle force constants at parse time (in_topology.cc)
+- No conversion needed for: CT (cosine angle K), CP (dihedral K), bond K, LJ, charges
+- Reference: gromosXX in_topology.cc lines 854, 928, 1055
 
-### TODO — NTIVEL=1 velocity generation
+### TODO — Code quality & consistency
+- [ ] Fix clippy warnings (~390 total: gromos-forces 89, gromos-integrators 77, gromos-io 31, gromos-core 15)
+  - Mechanical fixes (auto-fixable): borrowed refs, double parens, legacy constants, assign ops
+  - Manual: unused variables, dead imports, loop indexing → iterators
+- [ ] Run `cargo clippy --fix --workspace` for auto-fixable warnings, review manually after
+- [ ] Replace bare `unwrap()` in non-test code with `.expect("msg")` or `?` (2 in CLI arg parsing)
+- [ ] Add missing `#[test]` for constraints (SHAKE unit tests — currently 0)
+- [ ] Add `#[test]` for improper dihedral (bonded tests missing this)
+- [ ] Review large files for possible splitting:
+  - `nonbonded.rs` (~1500 LOC) — SIMD / parallel / serial inner loops could be submodules
+  - `bonded.rs` (~1300 LOC) — each force type could be its own file
+  - `topology.rs` (gromos-io, ~1200 LOC) — parser per block type could be submodules
+- [ ] Consistent error types: unify `Result<T, String>` in CLI → proper error enum
+- [ ] Audit `pub` visibility — many internal functions are unnecessarily public
+
+### PRIORITY — py-gromos API improvement
+Goal: a polished, ergonomic Python API for education and notebooks.
+Design reference: `.local/polars` — study its Python API surface, docstrings, method chaining,
+DataFrame-style ergonomics, and how it wraps Rust internals via pyo3.
+
+#### Phase 1 — Rust bindings (pyo3-gromos)
+- [ ] Sync pyo3-gromos with current Rust core (currently exposes only Vec3, Energy, Frame)
+  - [ ] Expose Topology (read-only: atoms, bonds, angles, residues, LJ params, exclusions)
+  - [ ] Expose Configuration (positions, velocities, box) — read/write
+  - [ ] Expose ForceField evaluation (single-point energy/force calculation)
+  - [ ] Expose SHAKE / constraint info
+  - [ ] Expose energy decomposition (bonded, LJ, CRF, kinetic, pressure)
+- [ ] Study Polars' pyo3 patterns: `PyDataFrame`, `PyExpr`, `PyLazyFrame` wrappers
+  - Path: `.local/polars/py-polars/src/` — how they wrap Rust types into Python classes
+  - Learn from: `__repr__`, `_repr_html_`, method chaining, `@staticmethod` constructors
+
+#### Phase 2 — Python API (py-gromos)
+- [ ] Redesign `py-gromos/python/gromos/` API surface inspired by Polars ergonomics:
+  - [ ] `gromos.read_topology("file.top")` → Topology object with nice `__repr__`
+  - [ ] `gromos.read_coordinates("file.cnf")` → Configuration with positions as numpy arrays
+  - [ ] `gromos.Simulation(topo, conf, params)` — high-level runner
+  - [ ] Method chaining where natural: `sim.run(steps=1000).energies().plot()`
+  - [ ] Energy timeseries as DataFrame (Polars or pandas interop)
+- [ ] `md_runners.py` — review and simplify (currently wraps CLI `md` binary)
+- [ ] `analysis.py` — expose gromos-analysis functions to Python
+- [ ] Rich `__repr__` / `_repr_html_` for Jupyter display of Topology, Configuration, Energy
+
+#### Phase 3 — Notebooks & education
+- [ ] Rewrite `py-gromos/notebooks/` as clean educational notebooks using the new API
+  - [ ] 01: Load topology + coordinates, inspect atoms/bonds, compute single-point energy
+  - [ ] 02: Run short MD, plot energy conservation, visualize trajectory
+  - [ ] 03: Compare NVE vs NVT vs NPT ensembles, thermostat/barostat effects
+- [ ] Rewrite `py-gromos/examples/` to use the new API (currently 17 example scripts)
+- [ ] Fix/update Python tests (`test_basic.py`, `test_advanced_features.py`)
+- [ ] Verify `maturin develop` builds and tests pass
+
+### TODO — NTIVEL=1 velocity generation (small)
 - [ ] Implement Maxwell-Boltzmann velocity generation (NTIVEL=1)
   - [ ] Read NTIVEL, IG (seed), TEMPI (temperature) from INITIALISE block (already parsed in `imd.rs`)
   - [ ] Implement MT19937 RNG matching GSL's `gsl_rng_mt19937`
@@ -276,6 +328,83 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
   - [ ] gromosXX ref: `util/generate_velocities.cc`, `math/random.h`
   - [ ] Currently worked around with pre-generated velocities in .conf files
   - [ ] Important for reproducibility: users expect NTIVEL=1 + seed to produce deterministic runs
+
+### TODO — Benchmarking infrastructure
+Goal: track performance evolution over time, have a reference baseline for regressions.
+
+Existing benchmarks (Criterion):
+- `crates/gromos-forces/benches/nonbonded_bench.rs` — nonbonded innerloop
+- `crates/gromos-core/benches/math_bench.rs` — Vec3 / math ops
+- `crates/gromos-integrators/benches/thermostat_bench.rs` — thermostat scaling
+- `crates/gromos-io/benches/io_bench.rs` — topology/coordinate parsing
+- `scripts/benchmark.sh` — wrapper for `cargo bench --workspace`
+
+- [ ] Run current benchmarks and save a baseline: `cargo bench --workspace -- --save-baseline v0.1`
+- [ ] Add end-to-end MD step benchmark (full forcefield + integrator for water_216_box)
+- [ ] Add pairlist construction benchmark (chargegroup-based and atom-based)
+- [ ] Add SHAKE constraint benchmark (water_216 system)
+- [ ] Add bonded forces benchmark (aladip_solvated — all bonded types)
+- [ ] Consider `criterion-compare` or CI integration for automated regression tracking
+- [ ] Add Python benchmark: pyo3-gromos single-point energy call overhead
+- [ ] Document how to run and compare: `cargo bench -- --baseline v0.1` in CONTRIBUTING.md
+
+### Known Gaps — Future Features
+
+#### TODO — COM rotation removal (medium)
+- [ ] Currently only translational COM removal is implemented
+- [ ] Need: angular momentum L = Σ mᵢ × rᵢ × (vᵢ - v_com), inertia tensor I (3×3), ω = I⁻¹·L
+- [ ] Remove rotation: vᵢ -= ω × rᵢ
+- [ ] gromosXX ref: `algorithm/constraints/remove_com_motion.cc`
+
+#### TODO — SETTLE constraints for rigid water (small)
+- [ ] Analytical solver for 3-site rigid water (SPC/TIP3P) — no iteration
+- [ ] Much faster than SHAKE for water: O(N_water) per step, single-pass
+- [ ] Code exists in gromos-rs but not wired
+- [ ] gromosXX ref: `algorithm/constraints/settle.cc` (Miyamoto & Kollman 1992)
+
+#### TODO — LINCS constraints (medium)
+- [ ] Linear constraint solver using recursion order parameter
+- [ ] Alternative to SHAKE — better for long chains, parallelizable
+- [ ] Code exists in gromos-rs but not wired
+- [ ] gromosXX ref: `algorithm/constraints/lincs.cc`
+
+#### TODO — Nosé-Hoover thermostat (medium)
+- [ ] Single bath: ζ̇ = (1/τ²)(T/T₀ - 1), scale = 1 - ζ·dt
+- [ ] Chain variant: M coupled thermostats for ergodicity
+- [ ] Code exists in gromos-rs but not wired or tested
+- [ ] gromosXX ref: `algorithm/temperature/nosehoover_thermostat.cc`
+
+#### TODO — Triclinic box support (medium)
+- [ ] Code exists in `math.rs` (Triclinic periodicity) but md.rs never creates it
+- [ ] Wire GENBOX box_type into periodicity selection
+- [ ] Test with truncated octahedron or other non-rectangular boxes
+
+#### TODO — EDS — Enveloping Distribution Sampling (medium)
+- [ ] Multi-state Boltzmann averaging: V_mixed = -1/β · ln(Σ exp(-β(Eᵢ - eir_i)))
+- [ ] Per-state force evaluation + blending
+- [ ] Adaptive EDS (AEDS) with emax/emin boundaries
+- [ ] Code exists in gromos-rs, not tested against references
+- [ ] gromosXX ref: `algorithm/integration/eds.cc`
+
+#### TODO — GaMD — Gaussian Accelerated MD (medium)
+- [ ] Boost potential: V_boost = k·(V - E_threshold)² when V > E_threshold
+- [ ] Welford algorithm for running statistics (mean, variance)
+- [ ] Three boost forms: dihedral-only, total-potential, dual
+- [ ] Code exists in gromos-rs, not tested against references
+- [ ] gromosXX ref: `algorithm/integration/gamd.cc`
+
+#### TODO — FEP / TI — Free Energy Perturbation (medium)
+- [ ] Lambda interpolation: K(λ) = (1-λ)K_A + λK_B for all interaction types
+- [ ] TI derivative: ∂V/∂λ for thermodynamic integration
+- [ ] Soft-core LJ to avoid singularities during atom appearance/disappearance
+- [ ] Code exists in gromos-rs (perturbed bond forces), needs testing
+- [ ] gromosXX ref: `interaction/bonded/perturbed_*.cc`
+
+#### TODO — REMD — Replica Exchange MD (large)
+- [ ] MPI-based parallel tempering across temperature/lambda ladders
+- [ ] Exchange acceptance: Δ = (β₁ - β₂)(E₁ - E₂), accept if rand < exp(-Δ)
+- [ ] Requires MPI infrastructure (feature-gated)
+- [ ] gromosXX ref: `algorithm/integration/replicaExchange/`
 
 ## Resolved Investigations
 
