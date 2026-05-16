@@ -51,8 +51,10 @@ pub struct ParsedTopology {
     pub improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
     pub lj_parameters: HashMap<(usize, usize), LJParameters>,
     pub temperature_groups: Vec<usize>, // Last atom index of each group
+    pub pressure_groups: Vec<usize>,   // Last atom index of each pressure group (gromosXX: PRESSUREGROUPS)
     pub solvent_atoms: Vec<ParsedSolventAtom>,
     pub solvent_constraints: Vec<ParsedSolventConstraint>,
+    pub solute_molecules: Vec<usize>, // last atom index of each molecule
 }
 
 /// Read GROMOS topology file
@@ -75,12 +77,14 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     let mut angle_parameters = Vec::new();
     let mut lj_parameters = HashMap::new();
     let mut temperature_groups = Vec::new();
+    let mut pressure_groups = Vec::new();
     let mut proper_dihedrals = Vec::new();
     let mut dihedral_parameters = Vec::new();
     let mut improper_dihedrals = Vec::new();
     let mut improper_dihedral_parameters = Vec::new();
     let mut solvent_atoms = Vec::new();
     let mut solvent_constraints = Vec::new();
+    let mut solute_molecules = Vec::new();
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
@@ -132,11 +136,17 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
             "TEMPERATUREGROUPS" => {
                 parse_temperature_groups(&mut lines, &mut temperature_groups)?;
             },
+            "PRESSUREGROUPS" => {
+                parse_pressure_groups(&mut lines, &mut pressure_groups)?;
+            },
             "SOLVENTATOM" => {
                 parse_solventatom(&mut lines, &mut solvent_atoms)?;
             },
             "SOLVENTCONSTR" => {
                 parse_solventconstr(&mut lines, &mut solvent_constraints)?;
+            },
+            "SOLUTEMOLECULES" => {
+                parse_solutemolecules(&mut lines, &mut solute_molecules)?;
             },
             _ => {
                 // Skip unknown blocks
@@ -162,8 +172,10 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
         improper_dihedral_parameters,
         lj_parameters,
         temperature_groups,
+        pressure_groups,
         solvent_atoms,
         solvent_constraints,
+        solute_molecules,
     })
 }
 
@@ -632,6 +644,45 @@ fn parse_temperature_groups<I: Iterator<Item = Result<String, std::io::Error>>>(
     Ok(())
 }
 
+/// Parse PRESSUREGROUPS block — cumulative last-atom indices (1-indexed).
+/// gromosXX format: first line = count, then last atom of each group.
+fn parse_pressure_groups<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    pressure_groups: &mut Vec<usize>,
+) -> Result<(), IoError> {
+    let mut n_groups = 0;
+
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed == "END" {
+            break;
+        }
+
+        // First data line is group count
+        if n_groups == 0 {
+            n_groups = trimmed.parse().map_err(|_| {
+                IoError::ParseError(format!("Invalid pressure group count: {}", trimmed))
+            })?;
+            continue;
+        }
+
+        // Subsequent lines contain last atom indices (1-indexed, cumulative)
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        for part in parts {
+            if let Ok(last_atom) = part.parse::<usize>() {
+                pressure_groups.push(last_atom); // Keep 1-indexed; convert in build_topology
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn parse_solventatom<I: Iterator<Item = Result<String, std::io::Error>>>(
     lines: &mut I,
     solvent_atoms: &mut Vec<ParsedSolventAtom>,
@@ -703,6 +754,32 @@ fn parse_solventconstr<I: Iterator<Item = Result<String, std::io::Error>>>(
                 length,
             });
         }
+    }
+    Ok(())
+}
+
+/// Parse SOLUTEMOLECULES block: NSPM followed by last-atom indices for each molecule.
+fn parse_solutemolecules<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    molecules: &mut Vec<usize>,
+) -> Result<(), IoError> {
+    let mut nspm: usize = 0;
+
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+        if trimmed == "END" { break; }
+
+        if nspm == 0 {
+            nspm = trimmed.parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid NSPM: {}", trimmed)))?;
+            continue;
+        }
+
+        // Each line has the last atom index of the molecule (1-based)
+        let last_atom: usize = trimmed.trim().parse()
+            .map_err(|_| IoError::ParseError(format!("Invalid molecule end: {}", trimmed)))?;
+        molecules.push(last_atom);
     }
     Ok(())
 }
@@ -789,6 +866,16 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         topo.num_solute_chargegroups = topo.chargegroups.len();
     }
 
+    // --- Populate solute molecules from SOLUTEMOLECULES block ---
+    if !parsed.solute_molecules.is_empty() {
+        let mut start = 0usize;
+        for &last_atom in &parsed.solute_molecules {
+            // last_atom is 1-based; convert to 0-based exclusive range
+            topo.molecules.push(start..last_atom);
+            start = last_atom;
+        }
+    }
+
     // --- Initialize exclusions for solute atoms ---
     topo.exclusions = vec![std::collections::HashSet::new(); n_solute];
 
@@ -855,6 +942,24 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     log::debug!("Built topology: {} solute atoms, {} chargegroups, LJ {}x{}, solvent template: {} atoms",
         n_solute, topo.chargegroups.len(), n_types, n_types,
         topo.solvent_atom_template.len());
+
+    // --- Populate solute pressure groups from PRESSUREGROUPS block ---
+    // gromosXX: pressure_groups is a boundary vector [last_atom_1, last_atom_2, ...]
+    // Convert to Vec<Range<usize>>
+    if !parsed.pressure_groups.is_empty() {
+        let mut start = 0usize;
+        for &last_atom in &parsed.pressure_groups {
+            topo.pressure_groups.push(start..last_atom);
+            start = last_atom;
+        }
+        log::debug!("Parsed {} solute pressure groups from topology", topo.pressure_groups.len());
+    } else {
+        // Default: all solute atoms as one pressure group (gromosXX fallback)
+        if n_solute > 0 {
+            topo.pressure_groups.push(0..n_solute);
+            log::debug!("Default pressure group: all {} solute atoms", n_solute);
+        }
+    }
 
     topo
 }

@@ -8,7 +8,7 @@
 
 use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
-use gromos_core::math::{Periodicity, Vec3};
+use gromos_core::math::{Mat3, Periodicity, Vec3};
 use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
 
@@ -17,6 +17,8 @@ use gromos_forces::nonbonded::{
     lj_crf_innerloop, rf_excluded_interactions, solvent_innerloop, CRFParameters, ForceStorage,
     LJParameters,
 };
+
+use crate::algorithms::pressure_calculation::VirialType;
 
 /// Forcefield algorithm that performs the complete force calculation each step.
 ///
@@ -44,6 +46,8 @@ pub struct Forcefield {
     pub ntf_dihedral: bool,
     /// Number of atoms per solvent molecule (e.g. 3 for water)
     pub atoms_per_solvent: usize,
+    /// Virial type: None, Atomic, or Molecular (controls KE tensor + virial correction)
+    pub virial_type: VirialType,
     /// Reusable nonbonded force storage (avoids allocation per step)
     nonbonded_storage: ForceStorage,
     /// Cached solute pairlist in (u32, u32) format
@@ -64,6 +68,9 @@ pub struct Forcefield {
     longrange_e_lj: f64,
     /// Cached long-range CRF energy
     longrange_e_crf: f64,
+    /// Cached long-range virial tensor (twin-range: reused between pairlist updates)
+    /// Must be added to nonbonded_storage.virial each step, just like forces/energies.
+    longrange_virial: [[f64; 3]; 3],
     /// Whether twin-range is active (RCUTP < RCUTL)
     twin_range_active: bool,
     /// Whether long-range forces have been computed at least once
@@ -92,6 +99,7 @@ impl Forcefield {
             ntf_improper: true,
             ntf_dihedral: true,
             atoms_per_solvent: 3,
+            virial_type: VirialType::None,
             nonbonded_storage: ForceStorage::new(0),
             pairlist_solute_u32: Vec::new(),
             pairlist_solvent_u32: Vec::new(),
@@ -102,6 +110,7 @@ impl Forcefield {
             longrange_forces: Vec::new(),
             longrange_e_lj: 0.0,
             longrange_e_crf: 0.0,
+            longrange_virial: [[0.0; 3]; 3],
             twin_range_active,
             longrange_computed: false,
         }
@@ -145,6 +154,41 @@ impl Algorithm for Forcefield {
             self.charges = topo.charge.clone();
             self.iac_u32 = topo.iac.iter().map(|&i| i as u32).collect();
             self.longrange_forces = vec![Vec3::ZERO; n_atoms];
+        }
+
+        // IMPORTANT: Update periodicity from current box each step.
+        // Under NPT, the barostat scales the box at the end of the previous step,
+        // so self.periodicity (which caches box_size, half_box, inv_box) must be
+        // refreshed before any force/pairlist/virial calculation uses it.
+        // Without this, all PBC nearest_image calls use stale box dimensions.
+        if !matches!(self.periodicity, Periodicity::Vacuum(_)) {
+            use gromos_core::configuration::BoxType;
+            use gromos_core::math::Rectangular;
+            let box_cfg = &conf.current().box_config;
+            match box_cfg.box_type {
+                BoxType::Rectangular => {
+                    let dims = box_cfg.dimensions();
+                    if dims.x > 0.0 && dims.y > 0.0 && dims.z > 0.0 {
+                        self.periodicity = Periodicity::Rectangular(Rectangular::new(dims));
+                    }
+                }
+                BoxType::Triclinic => {
+                    use gromos_core::math::Triclinic;
+                    self.periodicity = Periodicity::Triclinic(Triclinic::new(box_cfg.vectors));
+                }
+                _ => {}
+            }
+        }
+
+        // --- prepare_virial: compute kinetic energy tensor (gromosXX: before force calc) ---
+        // Uses current velocities and positions; stored in current().kinetic_energy_tensor
+        if self.virial_type != VirialType::None {
+            let ke_tensor = if self.virial_type == VirialType::Molecular && !topo.pressure_groups.is_empty() {
+                compute_molecular_ke_tensor(topo, conf, &self.periodicity)
+            } else {
+                compute_atomic_ke_tensor(topo, conf, n_atoms)
+            };
+            conf.current_mut().kinetic_energy_tensor = ke_tensor;
         }
 
         // --- 1. Update pairlist if needed ---
@@ -286,18 +330,27 @@ impl Algorithm for Forcefield {
                 self.longrange_forces.extend_from_slice(&lr_storage.forces);
                 self.longrange_e_lj = lr_storage.e_lj;
                 self.longrange_e_crf = lr_storage.e_crf;
+                self.longrange_virial = lr_storage.virial;
                 self.longrange_computed = true;
                 log::debug!("  Long-range (recomputed): lr_e_lj={:.10e}, lr_e_crf={:.10e}, solute_long={}, solvent_long={}",
                     lr_storage.e_lj, lr_storage.e_crf,
                     self.pairlist_solute_long_u32.len(), self.pairlist_solvent_long_u32.len());
             }
 
-            // Add cached long-range forces to current step
+            // Add cached long-range forces, energies, and virial to current step.
+            // IMPORTANT: The virial from long-range pairs MUST be included here.
+            // Without it, the virial trace is ~1000 kJ/mol too small, causing
+            // wildly wrong pressures and barostat box-collapse under NPT.
             for i in 0..n_atoms {
                 self.nonbonded_storage.forces[i] += self.longrange_forces[i];
             }
             self.nonbonded_storage.e_lj += self.longrange_e_lj;
             self.nonbonded_storage.e_crf += self.longrange_e_crf;
+            for a in 0..3 {
+                for b in 0..3 {
+                    self.nonbonded_storage.virial[a][b] += self.longrange_virial[a][b];
+                }
+            }
         } else {
             // No twin-range: evaluate long-range pairs as short-range (same as before)
             if !self.pairlist_solute_long_u32.is_empty() {
@@ -339,22 +392,40 @@ impl Algorithm for Forcefield {
         );
 
         // --- 4. Assemble forces and energies ---
-        let state = conf.current_mut();
-        let has_bonded = !bonded_result.forces.is_empty();
-        for i in 0..n_atoms {
-            let bonded_f = if has_bonded { bonded_result.forces[i] } else { gromos_core::math::Vec3::ZERO };
-            state.force[i] = bonded_f + self.nonbonded_storage.forces[i];
+        {
+            let state = conf.current_mut();
+            let has_bonded = !bonded_result.forces.is_empty();
+            for i in 0..n_atoms {
+                let bonded_f = if has_bonded { bonded_result.forces[i] } else { gromos_core::math::Vec3::ZERO };
+                state.force[i] = bonded_f + self.nonbonded_storage.forces[i];
+            }
+
+            state.energies.bond_total = bonded_result.energy;
+            state.energies.lj_total = self.nonbonded_storage.e_lj;
+            state.energies.crf_total = self.nonbonded_storage.e_crf;
+            state.energies.update_potential_total();
+
+            // Transfer virial tensor to configuration (nonbonded + bonded)
+            // gromosXX convention: virial[a][b] = Σ r[a] * force[b]
+            let vir = &self.nonbonded_storage.virial;
+            let bvir = &bonded_result.virial;
+            state.virial_tensor = Mat3::from_cols(
+                Vec3::new(vir[0][0] + bvir[0][0], vir[1][0] + bvir[1][0], vir[2][0] + bvir[2][0]),
+                Vec3::new(vir[0][1] + bvir[0][1], vir[1][1] + bvir[1][1], vir[2][1] + bvir[2][1]),
+                Vec3::new(vir[0][2] + bvir[0][2], vir[1][2] + bvir[1][2], vir[2][2] + bvir[2][2]),
+            );
+
+            // Debug: show force magnitudes
+            let f_max = state.force.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
+            log::debug!("  Bond: {:.10e}  LJ: {:.10e}  CRF: {:.10e}", bonded_result.energy, self.nonbonded_storage.e_lj, self.nonbonded_storage.e_crf);
+            log::debug!("  Max |force|: {:.10e}, solute_pairs: {}, solvent_pairs: {}", f_max, self.pairlist_solute_u32.len(), self.pairlist_solvent_u32.len());
         }
 
-        state.energies.bond_total = bonded_result.energy;
-        state.energies.lj_total = self.nonbonded_storage.e_lj;
-        state.energies.crf_total = self.nonbonded_storage.e_crf;
-        state.energies.update_potential_total();
-
-        // Debug: show force magnitudes
-        let f_max = state.force.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
-        log::debug!("  Bond: {:.10e}  LJ: {:.10e}  CRF: {:.10e}", bonded_result.energy, self.nonbonded_storage.e_lj, self.nonbonded_storage.e_crf);
-        log::debug!("  Max |force|: {:.10e}, solute_pairs: {}, solvent_pairs: {}", f_max, self.pairlist_solute_u32.len(), self.pairlist_solvent_u32.len());
+        // --- 5. atomic_to_molecular_virial: correct virial from atomic to molecular ---
+        // gromosXX: last interaction in forcefield, subtracts intramolecular virial contributions
+        if self.virial_type == VirialType::Molecular && !topo.pressure_groups.is_empty() {
+            apply_molecular_virial_correction(topo, conf, &self.periodicity);
+        }
 
         Ok(())
     }
@@ -362,6 +433,133 @@ impl Algorithm for Forcefield {
     fn name(&self) -> &str {
         "Forcefield"
     }
+}
+
+// === Virial helper functions (gromosXX: prepare_virial.cc) ===
+
+/// Compute atomic kinetic energy tensor: KE_ij = 0.5 * Σ_k m_k * v_k_i * v_k_j
+/// Uses conf.current().vel (gromosXX convention: computed before force calc)
+fn compute_atomic_ke_tensor(topo: &Topology, conf: &Configuration, n_atoms: usize) -> Mat3 {
+    let vel = &conf.current().vel;
+    let mut ke = [[0.0f64; 3]; 3];
+    for k in 0..n_atoms {
+        let m = topo.mass[k];
+        let v = vel[k];
+        let vv = [v.x, v.y, v.z];
+        for a in 0..3 {
+            for b in 0..3 {
+                ke[a][b] += 0.5 * m * vv[a] * vv[b];
+            }
+        }
+    }
+    Mat3::from_cols(
+        Vec3::new(ke[0][0], ke[1][0], ke[2][0]),
+        Vec3::new(ke[0][1], ke[1][1], ke[2][1]),
+        Vec3::new(ke[0][2], ke[1][2], ke[2][2]),
+    )
+}
+
+/// Compute molecular kinetic energy tensor using COM velocities per pressure group.
+/// gromosXX: prepare_virial.cc _centre_of_mass with chain-gathering.
+/// Uses conf.current().vel and conf.current().pos.
+fn compute_molecular_ke_tensor(topo: &Topology, conf: &Configuration, _periodicity: &Periodicity) -> Mat3 {
+    let vel = &conf.current().vel;
+    let mut ke = [[0.0f64; 3]; 3];
+
+    for pg in &topo.pressure_groups {
+        let mut mv = [0.0f64; 3]; // mass-weighted velocity sum
+        let mut m_total = 0.0f64;
+
+        for i in pg.clone() {
+            let m = topo.mass[i];
+            m_total += m;
+            mv[0] += m * vel[i].x;
+            mv[1] += m * vel[i].y;
+            mv[2] += m * vel[i].z;
+        }
+        if m_total > 0.0 {
+            for a in 0..3 {
+                for b in 0..3 {
+                    ke[a][b] += 0.5 * mv[a] * mv[b] / m_total;
+                }
+            }
+        }
+    }
+    Mat3::from_cols(
+        Vec3::new(ke[0][0], ke[1][0], ke[2][0]),
+        Vec3::new(ke[0][1], ke[1][1], ke[2][1]),
+        Vec3::new(ke[0][2], ke[1][2], ke[2][2]),
+    )
+}
+
+/// Apply molecular virial correction: transform atomic virial to molecular virial.
+/// gromosXX: atomic_to_molecular_virial in prepare_virial.cc
+///
+/// For each pressure group: compute COM position (chain-gathered), then for each atom:
+///   r = nearest_image(pos_atom, com_pos)
+///   corrP(b, a) += force(a) * r(b)
+/// Finally: virial -= corrP
+///
+/// Operates on conf.current() (gromosXX convention).
+fn apply_molecular_virial_correction(topo: &Topology, conf: &mut Configuration, periodicity: &Periodicity) {
+    let pos = &conf.current().pos;
+    let force = &conf.current().force;
+
+    let mut corr = [[0.0f64; 3]; 3];
+
+    for pg in &topo.pressure_groups {
+        // Chain-gather COM position (gromosXX: _centre_of_mass)
+        let first = pg.start;
+        let mut com = [0.0f64; 3];
+        let mut m_total = 0.0f64;
+        let mut prev = pos[first];
+
+        for i in pg.clone() {
+            let m = topo.mass[i];
+            m_total += m;
+            // nearest_image returns (pos[i] - prev) with PBC
+            let p = periodicity.nearest_image(pos[i], prev);
+            // gathered position = p + prev
+            let gathered = p + prev;
+            com[0] += m * gathered.x;
+            com[1] += m * gathered.y;
+            com[2] += m * gathered.z;
+            prev = gathered; // chain: advance reference to gathered position
+        }
+        if m_total > 0.0 {
+            com[0] /= m_total;
+            com[1] /= m_total;
+            com[2] /= m_total;
+        }
+
+        let com_vec = Vec3::new(com[0], com[1], com[2]);
+
+        // Accumulate correction: corrP(b,a) += f(a) * (pos - com)(b)
+        for i in pg.clone() {
+            let r = periodicity.nearest_image(pos[i], com_vec);
+            let f = force[i];
+            let rv = [r.x, r.y, r.z];
+            let fv = [f.x, f.y, f.z];
+            for a in 0..3 {
+                for b in 0..3 {
+                    corr[b][a] += fv[a] * rv[b];
+                }
+            }
+        }
+    }
+
+    // virial -= corrP
+    let corr_mat = Mat3::from_cols(
+        Vec3::new(corr[0][0], corr[1][0], corr[2][0]),
+        Vec3::new(corr[0][1], corr[1][1], corr[2][1]),
+        Vec3::new(corr[0][2], corr[1][2], corr[2][2]),
+    );
+    let state = conf.current_mut();
+    state.virial_tensor = Mat3::from_cols(
+        state.virial_tensor.x_axis - corr_mat.x_axis,
+        state.virial_tensor.y_axis - corr_mat.y_axis,
+        state.virial_tensor.z_axis - corr_mat.z_axis,
+    );
 }
 
 #[cfg(test)]

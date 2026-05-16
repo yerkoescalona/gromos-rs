@@ -16,6 +16,8 @@ use gromos::{
         Forcefield, LeapFrogVelocity, LeapFrogPosition,
         TemperatureCalculation, EnergyCalculation, ShakeAlgorithm,
         RemoveCOMMotion, BerendsenThermostat,
+        PressureCalculation, VirialType,
+        BerendsenBarostat, BerendsenBarostatParams,
     },
     configuration::{Box as SimBox, Configuration},
     interaction::{
@@ -675,6 +677,14 @@ fn main() {
     if !topo.solvent_atom_template.is_empty() {
         forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
     }
+    // Set virial type for prepare_virial + molecular virial correction
+    if imd.couple_pressure {
+        forcefield.virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
+            2 => VirialType::Molecular,
+            1 => VirialType::Atomic,
+            _ => VirialType::None,
+        };
+    }
     md_sequence.push(Box::new(forcefield));
 
     // 3. Leap-Frog velocity step (exchange_state + v update)
@@ -740,7 +750,24 @@ fn main() {
     // 6. Temperature/kinetic energy calculation
     md_sequence.push(Box::new(TemperatureCalculation::new()));
 
-    // 7. Energy finalization
+    // 7. Pressure calculation and barostat (if pressure coupling is on)
+    if imd.couple_pressure {
+        let virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
+            2 => VirialType::Molecular,
+            1 => VirialType::Atomic,
+            _ => VirialType::None,
+        };
+        md_sequence.push(Box::new(PressureCalculation::new(virial_type)));
+
+        let pp = imd.pressure_parameters.as_ref();
+        md_sequence.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
+            pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
+            compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
+            tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
+        })));
+    }
+
+    // 8. Energy finalization
     md_sequence.push(Box::new(EnergyCalculation::new()));
 
     println!("  Sequence: {}", md_sequence.algorithm_names().join(" → "));
