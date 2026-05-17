@@ -16,7 +16,7 @@
 //! gromos --install ~/.local/bin
 //! ```
 
-use clap::{Command, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use std::path::Path;
 
 mod commands;
@@ -46,30 +46,24 @@ enum Commands {
     // Simulation commands
     // ============================================================
     /// Run molecular dynamics simulation
-    #[cfg(feature = "cmd-md")]
     Md(commands::simulation::MdArgs),
 
     /// Energy minimization
-    #[cfg(feature = "cmd-minimize")]
     Minimize(commands::simulation::MinimizeArgs),
 
     // ============================================================
     // Analysis commands
     // ============================================================
     /// Calculate radial distribution function
-    #[cfg(feature = "cmd-rdf")]
     Rdf(commands::analysis::RdfArgs),
 
     /// Calculate RMSD
-    #[cfg(feature = "cmd-rmsd")]
     Rmsd(commands::analysis::RmsdArgs),
 
     /// Hydrogen bond analysis
-    #[cfg(feature = "cmd-hbond")]
     Hbond(commands::analysis::HbondArgs),
 
     /// Radius of gyration
-    #[cfg(feature = "cmd-gyrate")]
     Gyrate(commands::analysis::GyrateArgs),
 }
 
@@ -106,22 +100,16 @@ fn main() {
 
 fn dispatch_command(cmd: Commands) {
     match cmd {
-        #[cfg(feature = "cmd-md")]
         Commands::Md(args) => commands::simulation::run_md(args),
 
-        #[cfg(feature = "cmd-minimize")]
         Commands::Minimize(args) => commands::simulation::run_minimize(args),
 
-        #[cfg(feature = "cmd-rdf")]
         Commands::Rdf(args) => commands::analysis::run_rdf(args),
 
-        #[cfg(feature = "cmd-rmsd")]
         Commands::Rmsd(args) => commands::analysis::run_rmsd(args),
 
-        #[cfg(feature = "cmd-hbond")]
         Commands::Hbond(args) => commands::analysis::run_hbond(args),
 
-        #[cfg(feature = "cmd-gyrate")]
         Commands::Gyrate(args) => commands::analysis::run_gyrate(args),
     }
 }
@@ -130,27 +118,21 @@ fn dispatch_multicall(cmd: &str, args: &[String]) {
     // Map legacy/short names to commands
     match cmd {
         "md" | "gromos-md" => {
-            #[cfg(feature = "cmd-md")]
-            {
-                let full_args = std::iter::once("gromos".to_string())
-                    .chain(std::iter::once("md".to_string()))
-                    .chain(args.iter().cloned());
-                let cli = Cli::parse_from(full_args);
-                if let Some(Commands::Md(args)) = cli.command {
-                    commands::simulation::run_md(args);
-                }
+            let full_args = std::iter::once("gromos".to_string())
+                .chain(std::iter::once("md".to_string()))
+                .chain(args.iter().cloned());
+            let cli = Cli::parse_from(full_args);
+            if let Some(Commands::Md(args)) = cli.command {
+                commands::simulation::run_md(args);
             }
         }
         "rdf" | "g_rdf" => {
-            #[cfg(feature = "cmd-rdf")]
-            {
-                let full_args = std::iter::once("gromos".to_string())
-                    .chain(std::iter::once("rdf".to_string()))
-                    .chain(args.iter().cloned());
-                let cli = Cli::parse_from(full_args);
-                if let Some(Commands::Rdf(args)) = cli.command {
-                    commands::analysis::run_rdf(args);
-                }
+            let full_args = std::iter::once("gromos".to_string())
+                .chain(std::iter::once("rdf".to_string()))
+                .chain(args.iter().cloned());
+            let cli = Cli::parse_from(full_args);
+            if let Some(Commands::Rdf(args)) = cli.command {
+                commands::analysis::run_rdf(args);
             }
         }
         // Add more tool mappings here
