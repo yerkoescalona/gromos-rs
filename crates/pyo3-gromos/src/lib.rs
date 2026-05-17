@@ -24,6 +24,7 @@ pub mod topology;
 pub mod py_conf;
 pub mod parameters;
 mod simulation;
+pub mod algorithm_sequence;
 
 // Re-export core types
 pub use gromos_core::{Configuration, Topology, Energy, State};
@@ -314,6 +315,8 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     topology::register_topology(m)?;
     py_conf::register_configuration(m)?;
     parameters::register_parameters(m)?;
+    // Algorithm sequence API
+    algorithm_sequence::register_algorithm_sequence(m)?;
     Ok(())
 }
 

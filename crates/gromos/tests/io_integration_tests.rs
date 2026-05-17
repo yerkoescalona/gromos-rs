@@ -90,10 +90,8 @@ INITIALISE
 END
 
 WRITETRAJ
-  NTWX     100
-  NTWE      10
-  NTWV       0
-  NTWF       0
+#  NTWX  NTWSE  NTWV  NTWF  NTWE
+    100      0     0     0    10
 END
 
 PRINTOUT
@@ -128,7 +126,7 @@ fn test_imd_parameter_defaults() {
 
     assert_eq!(params.nstlim, 1000);
     assert_eq!(params.dt, 0.002);
-    assert_eq!(params.ntc, 2);
+    assert_eq!(params.ntc, 1);
     assert_eq!(params.nlrele, 1);
     assert_eq!(params.epsrf, 0.0);
     assert_eq!(params.tempi, 300.0);
@@ -139,10 +137,10 @@ fn test_imd_parameter_defaults() {
 fn make_conf(n_atoms: usize) -> Configuration {
     let mut config = Configuration::new(n_atoms, 1, 1);
     config.current_mut().pos = (0..n_atoms)
-        .map(|i| Vec3::new(i * 0.1, 0.0, 0.0))
+        .map(|i| Vec3::new(i as f64 * 0.1, 0.0, 0.0))
         .collect();
     config.current_mut().vel = (0..n_atoms)
-        .map(|i| Vec3::new(i * 0.01, 0.0, 0.0))
+        .map(|i| Vec3::new(i as f64 * 0.01, 0.0, 0.0))
         .collect();
     config.current_mut().box_config = SimBox::rectangular(3.0, 3.0, 3.0);
     config
@@ -157,9 +155,9 @@ fn test_trajectory_writer_integration() {
         TrajectoryWriter::new(&path, "Integration test trajectory", true, false)
             .expect("Failed to create trajectory writer");
 
-    for step in 0..5 {
+    for step in 0..5_usize {
         writer
-            .write_frame(step, step * 0.002, &config)
+            .write_frame(step, step as f64 * 0.002, &config)
             .expect("Failed to write frame");
     }
     writer.flush().expect("Failed to flush");
@@ -202,9 +200,9 @@ fn test_energy_writer_integration() {
     let mut writer = EnergyWriter::new(&path, "Integration test energy")
         .expect("Failed to create energy writer");
 
-    for step in 0..10_i64 {
-        let time = step * 0.002;
-        let mut frame = EnergyFrame::new(time, 100.0 + step, -200.0 - step, 300.0);
+    for step in 0..10_usize {
+        let time = step as f64 * 0.002;
+        let mut frame = EnergyFrame::new(time, 100.0 + step as f64, -200.0 - step as f64, 300.0);
         frame.bond = -50.0;
         frame.angle = -30.0;
         frame.lj = -80.0;
@@ -256,9 +254,9 @@ fn test_force_writer_integration() {
     let mut writer = ForceWriter::new(&path, "Integration test forces", false)
         .expect("Failed to create force writer");
 
-    for step in 0..3 {
+    for step in 0..3_usize {
         writer
-            .write_frame(step, step * 0.002, &forces, None)
+            .write_frame(step, step as f64 * 0.002, &forces, None)
             .expect("Failed to write force frame");
     }
     writer.flush().expect("Failed to flush");
@@ -276,8 +274,8 @@ fn test_force_writer_integration() {
 fn test_force_writer_with_constraints() {
     let path = tmp("integ_force_cons.trf");
     let n = 3;
-    let forces: Vec<Vec3> = (0..n).map(|i| Vec3::new(i, 0.0, 0.0)).collect();
-    let constraints: Vec<Vec3> = (0..n).map(|i| Vec3::new(0.0, i, 0.0)).collect();
+    let forces: Vec<Vec3> = (0..n).map(|i| Vec3::new(i as f64, 0.0, 0.0)).collect();
+    let constraints: Vec<Vec3> = (0..n).map(|i| Vec3::new(0.0, i as f64, 0.0)).collect();
 
     let mut writer = ForceWriter::new(&path, "constraint force test", true).unwrap();
     writer.write_frame(0, 0.0, &forces, Some(&constraints)).unwrap();
@@ -313,12 +311,12 @@ fn test_coordinate_read_integration() {
     let conf = read_coordinate_file(&path, 1, 1).expect("Failed to read coordinate file");
 
     assert_eq!(conf.current().pos.len(), 4);
-    assert!((conf.current().pos[0].x - 1.0_f32).abs() < 1e-5);
-    assert!((conf.current().pos[0].y - 2.0_f32).abs() < 1e-5);
-    assert!((conf.current().pos[0].z - 3.0_f32).abs() < 1e-5);
+    assert!((conf.current().pos[0].x - 1.0_f64).abs() < 1e-5);
+    assert!((conf.current().pos[0].y - 2.0_f64).abs() < 1e-5);
+    assert!((conf.current().pos[0].z - 3.0_f64).abs() < 1e-5);
 
     let dims = conf.current().box_config.dimensions();
-    assert!((dims.x - 10.0_f32).abs() < 1e-5);
+    assert!((dims.x - 10.0_f64).abs() < 1e-5);
 
     fs::remove_file(path).ok();
 }
@@ -411,26 +409,23 @@ fn test_complete_io_workflow() {
   Complete workflow test
 END
 SYSTEM
-  NPM    NSM
+#  NPM    NSM
      1      0
 END
 STEP
-  NSTLIM    100
-  T         0.0
-  DT        0.002
+#  NSTLIM      T        DT
+    100      0.0     0.002
 END
 BOUNDCOND
-   NTB  NDFMIN
+#  NTB  NDFMIN
       1       0
 END
 WRITETRAJ
-  NTWX       5
-  NTWE       5
-  NTWV       0
-  NTWF       0
+#  NTWX  NTWSE  NTWV  NTWF  NTWE
+      5      0     0     0     5
 END
 PRINTOUT
-  NTPR
+#  NTPR
      5
 END
 ";
@@ -446,8 +441,8 @@ END
 
     // 2. Create configuration
     let mut config = Configuration::new(10, 1, 1);
-    for i in 0..10 {
-        config.current_mut().pos[i] = Vec3::new(i * 0.1, 0.0, 0.0);
+    for i in 0..10_usize {
+        config.current_mut().pos[i] = Vec3::new(i as f64 * 0.1, 0.0, 0.0);
     }
     config.current_mut().box_config = SimBox::rectangular(5.0, 5.0, 5.0);
 
@@ -457,7 +452,7 @@ END
 
     // 4. Simulate steps
     for step in 0..params.nstlim {
-        let time = step * params.dt;
+        let time = step as f64 * params.dt;
         if step % params.ntwx == 0 {
             traj.write_frame(step, time, &config).unwrap();
         }

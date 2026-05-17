@@ -3062,7 +3062,7 @@ mod tests {
 
         let n_lambda = 11;
         for i in 0..n_lambda {
-            let lambda = i / (n_lambda - 1);
+            let lambda = i as f64 / (n_lambda - 1) as f64;
             let lambda_ctrl = LambdaController::new().with_lambda(lambda);
             let result = calculate_perturbed_angle_forces(&topo, &conf, &lambda_ctrl);
             println!(

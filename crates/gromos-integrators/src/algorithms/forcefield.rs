@@ -601,7 +601,7 @@ mod tests {
         topo.exclusions = vec![HashSet::new(), HashSet::new()];
 
         // LJ parameter matrix (1x1 for single atom type)
-        let lj = LJParameters { c6: 6.2647e-3, c12: 9.847e-6 };
+        let lj = LJParameters { c6: 6.2647e-3, c12: 9.847e-6, cs6: 6.2647e-3, cs12: 9.847e-6 };
         let lj_params = vec![vec![lj]];
 
         // CRF params (epsilon=1, rf_epsilon=1 => pure Coulomb cutoff, but charges=0)

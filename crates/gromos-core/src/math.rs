@@ -168,9 +168,10 @@ mod tests {
         let rj = Vec3::new(1.0, 2.0, 3.0);
 
         let r = bc.nearest_image(ri, rj);
-        assert_relative_eq!(r.x, 1.0);
-        assert_relative_eq!(r.y, 2.0);
-        assert_relative_eq!(r.z, 3.0);
+        // r = ri - rj = (0,0,0) - (1,2,3) = (-1,-2,-3)
+        assert_relative_eq!(r.x, -1.0);
+        assert_relative_eq!(r.y, -2.0);
+        assert_relative_eq!(r.z, -3.0);
     }
 
     #[test]
@@ -180,7 +181,7 @@ mod tests {
         let rj = Vec3::new(0.5, 0.0, 0.0);
 
         let r = bc.nearest_image(ri, rj);
-        // Should wrap: 0.5 - 9.5 = -9.0, nearest = 1.0
-        assert_relative_eq!(r.x, 1.0, epsilon = 1e-6);
+        // ri - rj = 9.5 - 0.5 = 9.0, nearest image wraps to -1.0
+        assert_relative_eq!(r.x, -1.0, epsilon = 1e-6);
     }
 }

@@ -889,6 +889,8 @@ mod tests {
         let lj_params = vec![vec![LJParameters {
             c6: 0.001,
             c12: 0.0001,
+            cs6: 0.001,
+            cs12: 0.0001,
         }]];
         let crf = CRFParameters {
             crf_cut: 1.4,
@@ -935,6 +937,8 @@ mod tests {
         let lj_params = vec![vec![LJParameters {
             c6: 0.001,
             c12: 0.0001,
+            cs6: 0.001,
+            cs12: 0.0001,
         }]];
         let crf = CRFParameters {
             crf_cut: 1.4,
@@ -1024,6 +1028,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.364431 / 2.0,
             crf_cut3i: 0.364431 / 2.0 / 1.4,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         let (force, e_lj, e_crf, de_lj, de_crf) = perturbed_lj_crf_interaction(
@@ -1082,6 +1087,7 @@ mod tests {
             crf_cut: 1.4,
             crf_2cut3i: 0.364431 / 2.0,
             crf_cut3i: 0.364431 / 2.0 / 1.4,
+            cutoff_sq: 1.4_f64.powi(2),
         };
 
         let (force, e_lj, e_crf, de_lj, de_crf) = perturbed_lj_crf_interaction(

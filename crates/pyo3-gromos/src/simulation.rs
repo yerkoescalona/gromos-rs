@@ -51,6 +51,7 @@ use super::PyEnergy;
 use super::topology::PyTopology;
 use super::py_conf::PyConfiguration;
 use super::parameters::PyInputParameters;
+use super::algorithm_sequence::{PyAlgorithmSequence, resolve_algorithm_sequence};
 
 // ============================================================================
 // Shared build logic — constructs a fully initialized simulation from parts
@@ -250,6 +251,87 @@ fn build_simulation(
 
     // 8. Energy calculation
     md_sequence.push(Box::new(EnergyCalculation::new()));
+
+    // Initialize sequence
+    let mut sim_state = SimulationState::new(dt, n_steps);
+    md_sequence
+        .init(&topo, &mut conf, &sim_state)
+        .map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to initialize algorithm sequence: {}",
+                e
+            ))
+        })?;
+
+    // Run step 0 (initial force evaluation, gromosXX convention)
+    md_sequence
+        .run_step(&topo, &mut conf, &sim_state)
+        .map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Error at step 0: {}",
+                e
+            ))
+        })?;
+    sim_state.advance();
+
+    Ok(PySimulation {
+        topology: topo,
+        configuration: conf,
+        md_sequence,
+        sim_state,
+        dt,
+        n_atoms,
+    })
+}
+
+/// Build a simulation from a user-provided algorithm sequence.
+///
+/// The sequence descriptors are resolved into real Rust algorithms using
+/// the topology, configuration, and IMD parameters for context.
+fn build_simulation_from_sequence(
+    mut topo: Topology,
+    positions: Vec<Vec3>,
+    velocities: Vec<Vec3>,
+    box_dims: Vec3,
+    imd: &ImdParameters,
+    sequence: &PyAlgorithmSequence,
+) -> PyResult<PySimulation> {
+    // Solvate topology if not already solvated
+    if topo.num_atoms() == topo.num_solute_atoms() && imd.nsm > 0 {
+        topo.solvate(imd.nsm);
+    }
+
+    let n_atoms = topo.num_atoms();
+    if positions.len() != n_atoms {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Atom count mismatch: topology={}, coordinates={}",
+            n_atoms,
+            positions.len()
+        )));
+    }
+
+    // Build Configuration (double-buffered state)
+    let mut conf = Configuration::new(n_atoms, 1, 1);
+    conf.current_mut().pos = positions;
+    conf.current_mut().vel = if velocities.len() == n_atoms {
+        velocities
+    } else {
+        vec![Vec3::ZERO; n_atoms]
+    };
+    conf.current_mut().box_config = SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z);
+    conf.copy_current_to_old();
+
+    let dt = imd.dt;
+    let n_steps = imd.nstlim;
+
+    // Resolve descriptors into real algorithms
+    let mut md_sequence = resolve_algorithm_sequence(sequence, &topo, &conf, imd, box_dims)
+        .map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to resolve algorithm sequence: {}",
+                e
+            ))
+        })?;
 
     // Initialize sequence
     let mut sim_state = SimulationState::new(dt, n_steps);
@@ -522,6 +604,39 @@ impl PySimulation {
     #[getter]
     fn n_solvent_atoms(&self) -> usize {
         self.n_atoms - self.topology.num_solute_atoms()
+    }
+
+    /// Create a simulation with a custom algorithm sequence.
+    ///
+    /// This is the most flexible constructor — full control over the MD step.
+    /// The sequence determines exactly what happens each step and in what order.
+    ///
+    /// Args:
+    ///     topo: Topology object
+    ///     conf: Configuration object
+    ///     params: InputParameters (still needed for dt, nstlim, and defaults)
+    ///     sequence: AlgorithmSequence defining the MD step
+    ///
+    /// Example:
+    ///     seq = AlgorithmSequence.nvt(topo, params)
+    ///     seq.remove("RemoveCOMMotion")  # customize
+    ///     sim = Simulation.from_sequence(topo, conf, params, seq)
+    ///     sim.step(1000)
+    #[staticmethod]
+    fn from_sequence(
+        topo: &PyTopology,
+        conf: &PyConfiguration,
+        params: &PyInputParameters,
+        sequence: &PyAlgorithmSequence,
+    ) -> PyResult<Self> {
+        build_simulation_from_sequence(
+            topo.inner.clone(),
+            conf.pos_data.clone(),
+            conf.vel_data.clone(),
+            conf.box_dims,
+            &params.inner,
+            sequence,
+        )
     }
 
     fn __repr__(&self) -> String {
