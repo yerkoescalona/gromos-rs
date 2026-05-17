@@ -1,0 +1,39 @@
+[package]
+name = "gromos-md"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "GROMOS-RS simulation engines (md, remd, eds, gamd)"
+
+[dependencies]
+gromos = { workspace = true }
+gromos-core = { workspace = true }
+gromos-forces = { workspace = true }
+gromos-integrators = { workspace = true }
+gromos-io = { workspace = true }
+
+# Logging
+log = { workspace = true }
+env_logger = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# Random number generation
+rand = { workspace = true }
+rand_distr = { workspace = true }
+
+# MPI support (optional)
+mpi = { workspace = true, optional = true }
+
+# CUDA support (optional)
+cudarc = { workspace = true, optional = true }
+
+[features]
+default = []
+use-mpi = ["mpi", "gromos-forces/use-mpi"]
+use-cuda = ["cudarc"]

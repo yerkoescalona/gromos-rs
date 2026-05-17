@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.10] (2026-05-17)
+
+### Refactor
+
+- **workspace:** restructure crates into focused responsibilities
+  - `gromos-md`: 8 simulation engine binaries (md, md_mpi, md_mpi_cuda, mdf, remd, repex_mpi, eds, gamd) + integration tests
+  - `gromos-tools`: 30 system construction binaries organized in subdirectories (topology/, box/, conversion/, utilities/)
+  - `gromos-analysis`: 66 analysis binaries organized in subdirectories (structural/, energy/, distribution/, dynamics/, free_energy/, trajectory/, noe/, clustering/, xray/, special/) + existing library code
+  - `gromos-cli`: slimmed to thin unified `gromos` multicall binary (clap only)
+  - `gromos` facade: removed `gromos-analysis` re-export to avoid circular dependency; analysis bins use `gromos_core`/`gromos_io` directly
+  - All 21 reference tests pass, workspace compiles clean
+
 ## [0.0.9](https://github.com/yerkoescalona/gromos-rs/compare/v0.0.8...v0.0.9) (2026-03-29)
 
 ### Bug Fixes

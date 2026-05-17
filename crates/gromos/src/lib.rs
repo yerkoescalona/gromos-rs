@@ -27,7 +27,8 @@ pub use gromos_core as core;
 pub use gromos_forces as forces;
 pub use gromos_integrators as integrators;
 pub use gromos_io as io;
-pub use gromos_analysis as analysis;
+// NOTE: gromos-analysis is NOT re-exported here to avoid circular dependencies.
+// Use `gromos_analysis` directly when needed.
 
 // Also re-export with common names for compatibility with existing code
 pub mod math {

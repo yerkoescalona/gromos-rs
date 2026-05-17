@@ -11,7 +11,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.0.9"
+version = "0.0.10"
 edition = "2021"
 authors = ["Yerko Escalona"]
 license = "GPL-2.0-or-later"
@@ -28,6 +28,8 @@ gromos-integrators = { path = "crates/gromos-integrators" }
 gromos-io = { path = "crates/gromos-io" }
 gromos-analysis = { path = "crates/gromos-analysis" }
 gromos-cli = { path = "crates/gromos-cli" }
+gromos-md = { path = "crates/gromos-md" }
+gromos-tools = { path = "crates/gromos-tools" }
 # Facade crate that re-exports everything
 gromos = { path = "crates/gromos" }
 # PyO3 bindings (low-level)

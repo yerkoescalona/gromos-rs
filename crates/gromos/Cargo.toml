@@ -15,7 +15,8 @@ gromos-core = { workspace = true }
 gromos-forces = { workspace = true }
 gromos-integrators = { workspace = true }
 gromos-io = { workspace = true }
-gromos-analysis = { workspace = true }
+# NOTE: gromos-analysis is NOT re-exported here to avoid circular dependencies.
+# Analysis bins live in the gromos-analysis crate and depend on gromos-core/gromos-io directly.
 
 # Optional features passed through
 mpi = { workspace = true, optional = true }

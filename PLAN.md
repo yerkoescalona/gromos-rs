@@ -247,14 +247,15 @@ Programs needed for tutorials t_01 through t_06 (in pipeline order):
 | X-ray/crystallography | `r_factor`, `r_real_factor`, `structure_factor`, `xray_map`, `xrayts`, `cry`, `cry_rms` |
 | Special | `disicl`, `ditrans`, `solute_entropy`, `m_widom`, `shake_analysis`, `swd`, `epath`, `pairlist` |
 
-**Migration plan:**
-- [ ] Rename `crates/gromos-cli/` → `crates/gromos-md/` (keep only simulation engines + integration tests)
-- [ ] Create `crates/gromos-tools/` (move topology/box/conversion/utility bins)
-- [ ] Move analysis bins from gromos-md into `crates/gromos-analysis/` as `[[bin]]` targets
-- [ ] Shared library code (parsers, atom selection, fitting) stays in gromos-io / gromos-core
-- [ ] gromos-analysis already has library implementations: `rdf`, `rmsd`, `hbond`, `gyration`, `diffusion`
-  → analysis bins should call into those library functions, not duplicate logic
-- [ ] Do NOT move yet — keep all in gromos-cli until methodologies validated against tutorials
+**Migration plan:** ✅ DONE
+- [x] Created `crates/gromos-md/` with simulation engines (8 bins) + integration tests
+- [x] Created `crates/gromos-tools/` with system construction bins (30 bins, subdirs: topology/box/conversion/utilities)
+- [x] Moved analysis bins into `crates/gromos-analysis/` as `[[bin]]` targets (66 bins, subdirs: structural/energy/distribution/dynamics/free_energy/trajectory/noe/clustering/xray/special)
+- [x] Removed `gromos-analysis` from `gromos` facade to avoid circular dependency; analysis bins use `gromos_core`/`gromos_io` directly
+- [x] `crates/gromos-cli/` kept as thin unified `gromos` multicall binary (clap only)
+- [x] Shared library code stays in gromos-io / gromos-core
+- [x] gromos-analysis library implementations (`rdf`, `rmsd`, `hbond`, `gyration`, `diffusion`) available for bins to call into
+- [x] All 21 reference tests pass, workspace compiles clean
 
 **Target directory structure:**
 
