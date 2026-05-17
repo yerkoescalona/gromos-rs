@@ -271,6 +271,9 @@ Ref data: `crates/gromos-cli/tests/gromosXX_references/`
   - Mechanical fixes (auto-fixable): borrowed refs, double parens, legacy constants, assign ops
   - Manual: unused variables, dead imports, loop indexing → iterators
 - [ ] Run `cargo clippy --fix --workspace` for auto-fixable warnings, review manually after
+- [x] Fix test compilation: integer-to-float casts (`i as f64`), f32→f64 literal suffixes,
+      cs6/cs12 fields in LJParameters test constructors, IMD block format (keyword→positional),
+      nearest_image test assertions (ri-rj direction), bspline loop bound cast
 - [ ] Replace bare `unwrap()` in non-test code with `.expect("msg")` or `?` (2 in CLI arg parsing)
 - [ ] Add missing `#[test]` for constraints (SHAKE unit tests — currently 0)
 - [ ] Add `#[test]` for improper dihedral (bonded tests missing this)
@@ -307,13 +310,32 @@ DataFrame-style ergonomics, and how it wraps Rust internals via pyo3.
 - [x] Minimum image convention for position comparison (handles periodic wrapping)
 - [x] 62 passed, 1 skipped (water_216_box_com positions — no reference trajectory)
 
+##### DONE — Compositional AlgorithmSequence API ✓
+- [x] `AlgorithmSequence` — Python-constructable, ordered list of algorithm descriptors
+- [x] Individual algorithm descriptor classes: `Forcefield`, `LeapFrogIntegrator`,
+      `LeapFrogVelocity`, `LeapFrogPosition`, `BerendsenThermostat`, `BerendsenBarostat`,
+      `ShakeConstraints`, `TemperatureCalculation`, `PressureCalculation`, `EnergyCalculation`,
+      `RemoveCOMMotion`
+- [x] Each algorithm has typed keyword parameters with defaults from `InputParameters`
+- [x] Sequence manipulation: `add()`, `insert_after()`, `insert_before()`, `remove()`, `replace()`
+- [x] Preset constructors: `AlgorithmSequence.nve(topo, params)`, `.nvt()`, `.npt()`, `.from_parameters()`
+- [x] `Simulation.from_sequence(topo, conf, params, sequence)` — creates simulation with custom sequence
+- [x] Advanced Leap-Frog split: `LeapFrogVelocity` + `LeapFrogPosition` for thermostat placement
+- [x] Descriptor resolution: lightweight Python objects → real Rust algorithms at Simulation creation
+- [x] `__repr__`, `__len__`, `__contains__`, `.names` for inspection
+- [x] Validated: identical results between standard `Simulation()` and `Simulation.from_sequence()`
+
+##### DONE — Type stubs for static analysis ✓
+- [x] `gromos.pyi` stub file: type signatures for all PyO3 bindings (Vec3, Energy, Frame,
+      Topology, Configuration, InputParameters, Simulation, AlgorithmSequence, all algorithm
+      descriptor classes, rmsd, rdf)
+- [x] Resolves `ty`/`mypy`/`pyright` "Cannot resolve imported module `.gromos`" error
+- [x] Pattern follows Polars: `.pyi` stub alongside native `.abi3.so` extension module
+
 ##### TODO — Additional binding types
 - [ ] Expose ForceField evaluation (single-point energy/force calculation)
 - [ ] Expose SHAKE / constraint info
 - [ ] Expose energy decomposition (bonded, LJ, CRF, kinetic, pressure)
-- [ ] `AlgorithmSequence` as standalone constructable Python object (advanced users)
-  - Currently exposed read-only via `sim.algorithm_names`
-  - Future: `seq = AlgorithmSequence(topo, params)` → modify → `Simulation.from_sequence(topo, conf, seq)`
 - [ ] Study Polars' pyo3 patterns: `PyDataFrame`, `PyExpr`, `PyLazyFrame` wrappers
   - Path: `.local/polars/py-polars/src/` — how they wrap Rust types into Python classes
   - Learn from: `__repr__`, `_repr_html_`, method chaining, `@staticmethod` constructors

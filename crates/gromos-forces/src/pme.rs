@@ -144,7 +144,7 @@ mod tests {
         let mut sum = 0.0;
         let dx = 0.01;
         let mut x = 0.0;
-        while x < order {
+        while x < order as f64 {
             sum += bspline(order, x) * dx;
             x += dx;
         }

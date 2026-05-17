@@ -690,7 +690,7 @@ mod tests {
             .force
             .iter()
             .map(|f| f.length())
-            .fold(0.0f32, f32::max);
+            .fold(0.0_f64, f64::max);
         assert!(
             max_force < 1e-3,
             "Forces should be ~0 at equilibrium, max={}",
@@ -833,7 +833,7 @@ mod tests {
 
         // Set up multiple trans dihedrals
         for i in 0..8 {
-            conf.current_mut().pos[i] = Vec3::new(i, 0.0, 0.0);
+            conf.current_mut().pos[i] = Vec3::new(i as f64, 0.0, 0.0);
         }
 
         let mut restraints = DihedralRestraints::new();

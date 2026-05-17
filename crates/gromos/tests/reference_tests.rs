@@ -169,6 +169,8 @@ fn convert_lj_params(
                 .map(|p| gromos::forces::nonbonded::LJParameters {
                     c6: p.c6,
                     c12: p.c12,
+                    cs6: p.cs6,
+                    cs12: p.cs12,
                 })
                 .collect()
         })
