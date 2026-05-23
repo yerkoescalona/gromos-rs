@@ -12,6 +12,10 @@
 pub mod coordinate;
 pub mod dlg;
 pub mod energy;
+pub mod ifp;
+pub mod jobs;
+pub mod mk_script;
+pub mod mtb;
 pub mod energy_binary;
 pub mod force;
 pub mod g96;
@@ -19,17 +23,20 @@ pub mod imd;
 pub mod input;
 pub mod output;
 pub mod pdb;
+pub mod posres;
 pub mod ptp;
+pub mod script_template;
 pub mod topology;
 pub mod trajectory;
 pub mod trajectory_binary;
 
 // Re-export commonly used types
-pub use coordinate::{CoordinateData, read_coordinates};
+pub use coordinate::{CoordinateData, G96Atom, LabeledCoordinateData, read_coordinates, read_g96_labeled};
 pub use dlg::{DlgWriter, LambdaDerivativeFrame};
 pub use energy::{EnergyBlock, EnergyFrame, EnergyReader, EnergyWriter};
 pub use energy_binary::{BinaryEnergyReader, BinaryEnergyWriter};
 pub use force::ForceWriter;
+pub use g96::{write_por, write_rpr};
 pub use imd::{ImdParameters, PressureParameters, TempBathParameters};
 pub use input::{EdsBlock, GamdBlock, ReplicaBlock};
 pub use output::{EdsStatsWriter, EdsVrWriter, GamdBoostWriter, GamdStatsWriter};
@@ -70,3 +77,51 @@ impl std::fmt::Display for IoError {
 }
 
 impl std::error::Error for IoError {}
+
+/// Pre-process argv to support GROMOS `@key` conventions.
+///
+/// Converts `@key` → `--key` and expands `@f argfile` contents inline.
+/// Blank lines and `#` comments in argfiles are skipped.
+/// This allows using clap with the standard GROMOS argument syntax.
+pub fn gromos_args() -> Vec<String> {
+    let raw: Vec<String> = std::env::args().collect();
+    let mut expanded = vec![raw[0].clone()];
+
+    let mut i = 1;
+    while i < raw.len() {
+        if raw[i] == "@f" {
+            i += 1;
+            if i >= raw.len() {
+                eprintln!("Error: @f requires a filename");
+                std::process::exit(1);
+            }
+            match std::fs::read_to_string(&raw[i]) {
+                Ok(content) => {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if line.is_empty() || line.starts_with('#') {
+                            continue;
+                        }
+                        for token in line.split_whitespace() {
+                            if let Some(key) = token.strip_prefix('@') {
+                                expanded.push(format!("--{}", key));
+                            } else {
+                                expanded.push(token.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: cannot read argfile '{}': {}", raw[i], e);
+                    std::process::exit(1);
+                }
+            }
+        } else if let Some(key) = raw[i].strip_prefix('@') {
+            expanded.push(format!("--{}", key));
+        } else {
+            expanded.push(raw[i].clone());
+        }
+        i += 1;
+    }
+    expanded
+}

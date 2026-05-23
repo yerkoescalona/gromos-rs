@@ -36,6 +36,10 @@ pub struct ParsedSolventConstraint {
 #[derive(Debug)]
 pub struct ParsedTopology {
     pub n_atoms: usize,
+    pub atom_names: Vec<String>,      // PANM from SOLUTEATOM
+    pub residue_numbers: Vec<usize>,  // MRES from SOLUTEATOM
+    pub residue_names: Vec<String>,   // from RESNAME block
+    pub atom_type_names: Vec<String>, // from ATOMTYPENAME block
     pub masses: Vec<f64>,
     pub charges: Vec<f64>,
     pub iac: Vec<usize>,
@@ -67,6 +71,10 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     let mut lines = reader.lines();
 
     let mut n_atoms = 0;
+    let mut atom_names = Vec::new();
+    let mut residue_numbers = Vec::new();
+    let mut residue_names = Vec::new();
+    let mut atom_type_names = Vec::new();
     let mut masses = Vec::new();
     let mut charges = Vec::new();
     let mut iac = Vec::new();
@@ -97,10 +105,18 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
         }
 
         match trimmed {
+            "ATOMTYPENAME" => {
+                parse_name_block(&mut lines, &mut atom_type_names)?;
+            },
+            "RESNAME" => {
+                parse_name_block(&mut lines, &mut residue_names)?;
+            },
             "SOLUTEATOM" => {
                 parse_soluteatom(
                     &mut lines,
                     &mut n_atoms,
+                    &mut atom_names,
+                    &mut residue_numbers,
                     &mut masses,
                     &mut charges,
                     &mut iac,
@@ -121,13 +137,13 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
             "BONDANGLE" | "BONDANGLEH" => {
                 parse_angles(&mut lines, &mut angles)?;
             },
-            "TORSDIHEDRALTYPE" => {
+            "TORSDIHEDRALTYPE" | "TORSDIHEDRALTYPECODE" => {
                 parse_dihedral_types(&mut lines, &mut dihedral_parameters)?;
             },
             "DIHEDRAL" | "DIHEDRALH" => {
                 parse_dihedrals(&mut lines, &mut proper_dihedrals)?;
             },
-            "IMPDIHEDRALTYPE" => {
+            "IMPDIHEDRALTYPE" | "IMPDIHEDRALTYPECODE" => {
                 parse_improper_dihedral_types(&mut lines, &mut improper_dihedral_parameters)?;
             },
             "IMPDIHEDRAL" | "IMPDIHEDRALH" => {
@@ -160,6 +176,10 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
 
     Ok(ParsedTopology {
         n_atoms,
+        atom_names,
+        residue_numbers,
+        residue_names,
+        atom_type_names,
         masses,
         charges,
         iac,
@@ -183,9 +203,35 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     })
 }
 
+/// Parse ATOMTYPENAME or RESNAME block: count line, then one name per line.
+fn parse_name_block<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    names: &mut Vec<String>,
+) -> Result<(), IoError> {
+    let mut count_read = false;
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
+        if !count_read {
+            // First non-comment line is the count — skip it
+            count_read = true;
+            continue;
+        }
+        names.push(trimmed.to_string());
+    }
+    Ok(())
+}
+
 fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
     lines: &mut I,
     n_atoms: &mut usize,
+    atom_names: &mut Vec<String>,
+    residue_numbers: &mut Vec<usize>,
     masses: &mut Vec<f64>,
     charges: &mut Vec<f64>,
     iac: &mut Vec<usize>,
@@ -217,6 +263,9 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
         if parts.len() >= 8 {
+            let mres: usize = parts[1]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid MRES: {}", parts[1])))?;
             let atom_iac: usize = parts[3]
                 .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid IAC: {}", parts[3])))?;
@@ -233,6 +282,8 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
                 IoError::ParseError(format!("Invalid exclusion count: {}", parts[7]))
             })?;
 
+            atom_names.push(parts[2].to_string());
+            residue_numbers.push(mres);
             iac.push(atom_iac);
             masses.push(mass);
             charges.push(charge);
@@ -469,6 +520,15 @@ fn parse_angles<I: Iterator<Item = Result<String, std::io::Error>>>(
             let angle_type: usize = parts[3]
                 .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid angle type: {}", parts[3])))?;
+
+            // Skip angles with duplicate atoms (invalid topology entries)
+            if i == j || i == k || j == k {
+                log::warn!(
+                    "Skipping invalid angle with duplicate atoms: {}-{}-{} (type {})",
+                    i, j, k, angle_type
+                );
+                continue;
+            }
 
             // Convert from 1-indexed to 0-indexed
             angles.push((i - 1, j - 1, k - 1, angle_type - 1));
@@ -833,10 +893,18 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     topo.iac = parsed.iac.clone();
 
     for i in 0..n_solute {
+        let atom_name = parsed.atom_names.get(i).cloned()
+            .unwrap_or_else(|| format!("ATOM{}", i + 1));
+        let res_nr = parsed.residue_numbers.get(i).copied().unwrap_or(1);
+        let res_name = if res_nr > 0 && res_nr <= parsed.residue_names.len() {
+            parsed.residue_names[res_nr - 1].clone()
+        } else {
+            "UNK".to_string()
+        };
         topo.solute.atoms.push(Atom {
-            name: format!("ATOM{}", i + 1),
-            residue_nr: 1,
-            residue_name: "UNK".to_string(),
+            name: atom_name,
+            residue_nr: res_nr,
+            residue_name: res_name,
             iac: parsed.iac[i],
             mass: parsed.masses[i],
             charge: parsed.charges[i],
@@ -1306,5 +1374,73 @@ END
         }
 
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_parse_angles_filters_duplicate_atoms() {
+        // Topology with angles that have duplicate atoms (e.g., from bad make_top C-terminus)
+        let topo_str = "\
+TITLE
+  test duplicate-atom angles
+END
+SOLUTEATOM
+4
+    1    1   C     6  12.000000  0.000000  0  0
+    2    1   O     8  16.000000  0.000000  0  0
+    3    1   O2    8  16.000000  0.000000  0  0
+    4    1   CA    6  12.000000  0.000000  0  0
+END
+BONDSTRETCHTYPE
+1
+  1000.000  500.000   0.150
+END
+BOND
+3
+  4   1   1
+  1   2   1
+  1   3   1
+END
+BONDANGLEBENDTYPE
+1
+   50.000  100.000  109.500
+END
+BONDANGLE
+# includes two invalid angles (duplicate atoms) that should be filtered
+5
+  4   1   2   1
+  4   1   3   1
+  2   1   3   1
+  1   1   2   1
+  1   1   3   1
+END
+";
+        let path = write_tmp(topo_str, "dup_angle_topo");
+        let parsed = read_topology_file(&path).unwrap();
+
+        // Only 3 valid angles should remain (the two with atom 1 repeated are filtered)
+        assert_eq!(parsed.angles.len(), 3);
+        // Verify none of the parsed angles have duplicate atoms
+        for (i, j, k, _) in &parsed.angles {
+            assert_ne!(i, j, "angle has i==j");
+            assert_ne!(i, k, "angle has i==k");
+            assert_ne!(j, k, "angle has j==k");
+        }
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_parse_angles_internal_function() {
+        // Test parse_angles directly with duplicate-atom entries
+        let input = "5\n  1  2  3  1\n  2  2  3  1\n  1  3  3  1\n  4  1  2  1\n  1  1  3  1\n";
+        let mut lines = input.lines().map(|l| Ok(l.to_string()));
+        let mut angles = Vec::new();
+
+        parse_angles(&mut lines, &mut angles).unwrap();
+
+        // 5 entries declared, but 3 have duplicate atoms → only 2 valid
+        assert_eq!(angles.len(), 2);
+        assert_eq!(angles[0], (0, 1, 2, 0)); // 1-2-3 → 0-1-2
+        assert_eq!(angles[1], (3, 0, 1, 0)); // 4-1-2 → 3-0-1
     }
 }

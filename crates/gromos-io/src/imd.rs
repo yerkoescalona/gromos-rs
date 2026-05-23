@@ -129,6 +129,30 @@ pub struct ImdParameters {
     // PRINTOUT block
     pub ntpr: usize, // Print frequency
 
+    // POSITIONRES block
+    /// Position restraints (0=off, 1=restrain with CPOR, 2=use B-factors, 3=constrain)
+    pub ntpor: i32,
+    /// Position restraint read B-factors (0=no, 1=yes)
+    pub ntporb: i32,
+    /// Position restraint scaling (0=off, 1=on)
+    pub ntpors: i32,
+    /// Position restraint force constant (kJ mol⁻¹ nm⁻²)
+    pub cpor: f64,
+
+    // ENERGYMIN block
+    /// Energy minimization method (0=off, 1=steepest descent, 2=Fletcher-Reeves CG)
+    pub ntem: i32,
+    /// Minimum steps before convergence check
+    pub nmin: usize,
+    /// Energy convergence tolerance (kJ/mol)
+    pub dele: f64,
+    /// Initial step size (nm)
+    pub dx0: f64,
+    /// Maximum step size (nm)
+    pub dxm: f64,
+    /// Maximum force magnitude limit (0=unlimited)
+    pub flim: f64,
+
     /// Raw blocks for custom parsing
     pub raw_blocks: HashMap<String, Vec<String>>,
 }
@@ -207,6 +231,16 @@ impl Default for ImdParameters {
             ntwf: false,
             ntwe_special: false,
             ntpr: 100,
+            ntpor: 0,
+            ntporb: 0,
+            ntpors: 0,
+            cpor: 0.0,
+            ntem: 0,
+            nmin: 1,
+            dele: 0.1,
+            dx0: 0.01,
+            dxm: 0.05,
+            flim: 0.0,
             raw_blocks: HashMap::new(),
         }
     }
@@ -623,6 +657,31 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 { params.nscm = parse_usize(&v[0]); }
+            }
+        },
+        "POSITIONRES" => {
+            // gromosXX format:
+            //   Line 0: NTPOR NTPORB NTPORS CPOR
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntpor = parse_i32(&v[0]); }
+                if v.len() >= 2 { params.ntporb = parse_i32(&v[1]); }
+                if v.len() >= 3 { params.ntpors = parse_i32(&v[2]); }
+                if v.len() >= 4 { params.cpor = parse_f64(&v[3]); }
+            }
+        },
+        "ENERGYMIN" => {
+            // gromosXX format:
+            //   Line 0: NTEM NCYC DELE DX0 DXM NMIN FLIM
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntem = parse_i32(&v[0]); }
+                // NCYC at v[1] - conjugate gradient cycles, skip
+                if v.len() >= 3 { params.dele = parse_f64(&v[2]); }
+                if v.len() >= 4 { params.dx0 = parse_f64(&v[3]); }
+                if v.len() >= 5 { params.dxm = parse_f64(&v[4]); }
+                if v.len() >= 6 { params.nmin = parse_usize(&v[5]); }
+                if v.len() >= 7 { params.flim = parse_f64(&v[6]); }
             }
         },
         _ => {

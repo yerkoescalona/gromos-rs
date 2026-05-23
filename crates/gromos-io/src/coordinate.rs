@@ -165,6 +165,124 @@ pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoErr
     })
 }
 
+/// An atom with its label information and coordinates, as read from a G96 file.
+#[derive(Debug, Clone)]
+pub struct G96Atom {
+    pub res_num: usize,
+    pub res_name: String,
+    pub atom_name: String,
+    pub atom_num: usize,
+    pub pos: Vec3,
+}
+
+/// Coordinate data with full atom labels, as read from a G96 file.
+#[derive(Debug, Clone)]
+pub struct LabeledCoordinateData {
+    pub atoms: Vec<G96Atom>,
+    pub box_dims: Vec3,
+    pub box_type: i32,
+}
+
+/// Read a GROMOS coordinate file, preserving atom labels (residue number, name, atom name).
+///
+/// This is the labeled counterpart to [`read_coordinates`]. Use this when downstream
+/// code needs to know which atom is which (e.g. sim_box, ion, pdb2g96).
+pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData, IoError> {
+    let file = File::open(path.as_ref())
+        .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
+    let reader = BufReader::new(file);
+
+    let mut atoms = Vec::new();
+    let mut box_dims = Vec3::ZERO;
+    let mut box_type: i32 = -1;
+
+    #[derive(PartialEq)]
+    enum Section { None, Position, Box, GenBox, Skip }
+    let mut section = Section::None;
+    let mut genbox_line_num: usize = 0;
+
+    for line in reader.lines() {
+        let line = line?;
+        let trimmed = line.trim();
+
+        match trimmed {
+            "POSITION" | "POSITIONRED" => { section = Section::Position; continue; }
+            "BOX" => { section = Section::Box; continue; }
+            "GENBOX" => { section = Section::GenBox; genbox_line_num = 0; continue; }
+            "END" => { section = Section::None; continue; }
+            "TITLE" | "VELOCITY" | "VELOCITYRED" | "REFPOSITION" | "POSRESSPEC" | "LATTICESHIFTS" | "STOCHINT" => {
+                section = Section::Skip;
+                continue;
+            }
+            _ => {}
+        }
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        match section {
+            Section::Position => {
+                // Parse using whitespace splitting (robust for varying column widths)
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 7 {
+                    let n = parts.len();
+                    let res_num: usize = parts[0].parse().unwrap_or(1);
+                    let res_name = parts[1].to_string();
+                    let atom_name = parts[2].to_string();
+                    let atom_num: usize = parts[3].parse().unwrap_or(0);
+                    let x: f64 = parts[n - 3].parse().map_err(|_| {
+                        IoError::ParseError(format!("Invalid x: {}", parts[n - 3]))
+                    })?;
+                    let y: f64 = parts[n - 2].parse().map_err(|_| {
+                        IoError::ParseError(format!("Invalid y: {}", parts[n - 2]))
+                    })?;
+                    let z: f64 = parts[n - 1].parse().map_err(|_| {
+                        IoError::ParseError(format!("Invalid z: {}", parts[n - 1]))
+                    })?;
+                    atoms.push(G96Atom {
+                        res_num, res_name, atom_name, atom_num,
+                        pos: Vec3::new(x, y, z),
+                    });
+                }
+            }
+            Section::Box => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    box_dims = parse_vec3(&parts[..3])?;
+                    if box_type < 0 {
+                        box_type = if box_dims == Vec3::ZERO { 0 } else { 1 };
+                    }
+                }
+            }
+            Section::GenBox => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                match genbox_line_num {
+                    0 => {
+                        box_type = parts[0].parse::<i32>().map_err(|_| {
+                            IoError::ParseError(format!("Invalid GENBOX type: {}", parts[0]))
+                        })?;
+                    }
+                    1 => {
+                        if parts.len() >= 3 {
+                            box_dims = parse_vec3(&parts[..3])?;
+                        }
+                    }
+                    _ => {}
+                }
+                genbox_line_num += 1;
+            }
+            _ => {}
+        }
+    }
+
+    if atoms.is_empty() {
+        return Err(IoError::FormatError("No positions found in coordinate file".to_string()));
+    }
+
+    Ok(LabeledCoordinateData { atoms, box_dims, box_type })
+}
+
 fn parse_vec3(parts: &[&str]) -> Result<Vec3, IoError> {
     let x: f64 = parts[0].parse().map_err(|_| {
         IoError::ParseError(format!("Invalid coordinate: {}", parts[0]))
