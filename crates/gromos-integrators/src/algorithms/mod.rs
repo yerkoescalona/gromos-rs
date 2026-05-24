@@ -25,6 +25,7 @@ mod remove_com_motion;
 mod berendsen_thermostat;
 mod pressure_calculation;
 mod berendsen_barostat;
+mod steepest_descent;
 
 pub use leap_frog::{LeapFrogVelocity, LeapFrogPosition};
 pub use temperature::TemperatureCalculation;
@@ -35,3 +36,4 @@ pub use remove_com_motion::RemoveCOMMotion;
 pub use berendsen_thermostat::{BerendsenThermostat, BerendsenThermostatParams};
 pub use pressure_calculation::{PressureCalculation, VirialType};
 pub use berendsen_barostat::{BerendsenBarostat, BerendsenBarostatParams};
+pub use steepest_descent::SteepestDescentAlgorithm;

@@ -17,6 +17,7 @@ use gromos_forces::nonbonded::{
     lj_crf_innerloop, one_four_interaction_loop, rf_excluded_interactions, solvent_innerloop,
     CRFParameters, ForceStorage, LJParameters,
 };
+use gromos_forces::restraints::PositionRestraints;
 
 use crate::algorithms::pressure_calculation::VirialType;
 
@@ -75,6 +76,8 @@ pub struct Forcefield {
     twin_range_active: bool,
     /// Whether long-range forces have been computed at least once
     longrange_computed: bool,
+    /// Position restraints (empty = none)
+    pub position_restraints: PositionRestraints,
 }
 
 impl Forcefield {
@@ -113,6 +116,7 @@ impl Forcefield {
             longrange_virial: [[0.0; 3]; 3],
             twin_range_active,
             longrange_computed: false,
+            position_restraints: PositionRestraints::new(),
         }
     }
 
@@ -435,6 +439,14 @@ impl Algorithm for Forcefield {
             let f_max = state.force.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
             log::debug!("  Bond: {:.10e}  LJ: {:.10e}  CRF: {:.10e}", bonded_result.energy, self.nonbonded_storage.e_lj, self.nonbonded_storage.e_crf);
             log::debug!("  Max |force|: {:.10e}, solute_pairs: {}, solvent_pairs: {}", f_max, self.pairlist_solute_u32.len(), self.pairlist_solvent_u32.len());
+        }
+
+        // --- 4b. Position restraints (special interaction) ---
+        if !self.position_restraints.restraints.is_empty() {
+            let e_posres = self.position_restraints.calculate_all(conf, &self.periodicity);
+            conf.current_mut().energies.special_total = e_posres;
+            log::debug!("  Position restraints: {:.10e} kJ/mol ({} atoms)",
+                e_posres, self.position_restraints.restraints.len());
         }
 
         // --- 5. atomic_to_molecular_virial: correct virial from atomic to molecular ---
