@@ -51,6 +51,21 @@ fn toml_str(content: &str, key: &str) -> String {
     panic!("{key} not found in input.toml");
 }
 
+fn toml_str_opt(content: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key} = ");
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with(&prefix) {
+            if let (Some(a), Some(b)) = (t.find('"'), t.rfind('"')) {
+                if a < b {
+                    return Some(t[a + 1..b].to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 // ─── Energy frame ───────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -230,23 +245,24 @@ fn run_reference(system: &str) {
     let trf = out.join("forces.trf");
 
     // Run md binary
-    let result = Command::new(md_bin())
-        .arg("@topo")
-        .arg(&topo)
-        .arg("@conf")
-        .arg(&conf)
-        .arg("@input")
-        .arg(&params)
-        .arg("@fin")
-        .arg(out.join("final.conf"))
-        .arg("@tre")
-        .arg(&tre)
-        .arg("@trf")
-        .arg(&trf)
-        .arg("@trc")
-        .arg(out.join("trajectory.trc"))
-        .output()
-        .expect("failed to execute md");
+    let mut cmd = Command::new(md_bin());
+    cmd.arg("@topo").arg(&topo)
+        .arg("@conf").arg(&conf)
+        .arg("@input").arg(&params)
+        .arg("@fin").arg(out.join("final.conf"))
+        .arg("@tre").arg(&tre)
+        .arg("@trf").arg(&trf)
+        .arg("@trc").arg(out.join("trajectory.trc"));
+
+    // Optional position restraints
+    if let Some(por) = toml_str_opt(&toml, "posresspec") {
+        cmd.arg("@posresspec").arg(sys_dir.join(por));
+    }
+    if let Some(rpr) = toml_str_opt(&toml, "refpos") {
+        cmd.arg("@refpos").arg(sys_dir.join(rpr));
+    }
+
+    let result = cmd.output().expect("failed to execute md");
 
     assert!(
         result.status.success(),
@@ -372,3 +388,11 @@ ref_test!(water_216_npt,       "water_216_npt");
 
 ref_test!(aladip_vacuum,       "aladip_vacuum");
 ref_test!(aladip_solvated,     "aladip_solvated");
+
+// Energy minimization
+ref_test!(aladip_vacuum_em,            "aladip_vacuum_em");
+ref_test!(aladip_vacuum_em_shake,      "aladip_vacuum_em_shake");
+ref_test!(aladip_solvated_em_noshake,  "aladip_solvated_em_noshake");
+ref_test!(aladip_solvated_em_shake,    "aladip_solvated_em_shake");
+ref_test!(aladip_solvated_em_posres,   "aladip_solvated_em_posres");
+ref_test!(aladip_solvated_em,          "aladip_solvated_em");

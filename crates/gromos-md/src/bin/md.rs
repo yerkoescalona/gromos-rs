@@ -18,6 +18,7 @@ use gromos::{
         RemoveCOMMotion, BerendsenThermostat,
         PressureCalculation, VirialType,
         BerendsenBarostat, BerendsenBarostatParams,
+        SteepestDescentAlgorithm,
     },
     configuration::{Box as SimBox, Configuration},
     interaction::{
@@ -27,6 +28,7 @@ use gromos::{
         coordinate::read_coordinates,
         energy::{EnergyFrame, EnergyWriter},
         imd::read_imd_file,
+        posres::{read_posresspec, read_refpos, build_posres_entries},
         topology::{build_topology, read_topology_file},
         trajectory::TrajectoryWriter,
         force::ForceWriter,
@@ -357,7 +359,45 @@ fn main() {
 
     // gromosXX convention: read_topology() then topo.solvate(0, nsm)
     let mut topo = build_topology(topo_data);
-    topo.solvate(imd.nsm);
+
+    // === 2. Load coordinates (read_configuration) ===
+    // Load coordinates BEFORE solvation so we can determine actual NSM
+    println!("Loading coordinates: {}", md_args.conf_file);
+    log::debug!("Reading coordinate file: {}", md_args.conf_file);
+    let _timer = Timer::new("Coordinate loading");
+
+    let coord_data = match read_coordinates(&md_args.conf_file) {
+        Ok(data) => data,
+        Err(e) => {
+            log::error!("Failed to read coordinates: {}", e);
+            eprintln!("Error reading coordinates: {}", e);
+            process::exit(1);
+        },
+    };
+
+    let positions = coord_data.positions;
+    let velocities = coord_data.velocities;
+    let box_dims = coord_data.box_dims;
+
+    // Determine actual NSM from coordinate file if solvent template exists
+    let actual_nsm = if imd.nsm > 0 && !topo.solvent_atom_template.is_empty() {
+        let atoms_per_solvent = topo.solvent_atom_template.len();
+        let n_solute = topo.solute.num_atoms();
+        let remaining = positions.len().saturating_sub(n_solute);
+        if remaining % atoms_per_solvent != 0 {
+            eprintln!("Error: ({} coords - {} solute) is not divisible by {} atoms/solvent",
+                positions.len(), n_solute, atoms_per_solvent);
+            process::exit(1);
+        }
+        let nsm_from_coords = remaining / atoms_per_solvent;
+        if nsm_from_coords != imd.nsm {
+            println!("  Adjusting NSM: {} (imd) -> {} (from coordinates)", imd.nsm, nsm_from_coords);
+        }
+        nsm_from_coords
+    } else {
+        imd.nsm
+    };
+    topo.solvate(actual_nsm);
 
     println!("  Solute atoms: {}", topo.solute.num_atoms());
     if !topo.solvents.is_empty() {
@@ -390,24 +430,6 @@ fn main() {
     } else {
         log::debug!("Topology validation passed");
     }
-
-    // === 2. Load coordinates (read_configuration) ===
-    println!("Loading coordinates: {}", md_args.conf_file);
-    log::debug!("Reading coordinate file: {}", md_args.conf_file);
-    let _timer = Timer::new("Coordinate loading");
-
-    let coord_data = match read_coordinates(&md_args.conf_file) {
-        Ok(data) => data,
-        Err(e) => {
-            log::error!("Failed to read coordinates: {}", e);
-            eprintln!("Error reading coordinates: {}", e);
-            process::exit(1);
-        },
-    };
-
-    let positions = coord_data.positions;
-    let velocities = coord_data.velocities;
-    let box_dims = coord_data.box_dims;
 
     println!("  Positions loaded: {}", positions.len());
     if !velocities.is_empty() {
@@ -652,123 +674,251 @@ fn main() {
     println!("  Initial pairlist: {} pairs", pairlist.total_pairs());
     println!();
 
+    // Load position restraints if requested
+    let posres = if imd.ntpor > 0 {
+        if let Some(ref por_file) = md_args.posresspec_file {
+            use gromos::interaction::restraints::{PositionRestraint, PositionRestraints};
+
+            // Read restrained atom indices from POSRESSPEC
+            let restrained_atoms = read_posresspec(por_file).unwrap_or_else(|e| {
+                eprintln!("Error reading position restraint spec: {}", e);
+                process::exit(1);
+            });
+
+            // Get reference positions:
+            // NTPORB=1: from @refpos file
+            // NTPORB=0: from startup configuration (positions)
+            let ref_positions = if imd.ntporb >= 1 {
+                if let Some(ref rpr_file) = md_args.refpos_file {
+                    read_refpos(rpr_file).unwrap_or_else(|e| {
+                        eprintln!("Error reading reference positions: {}", e);
+                        process::exit(1);
+                    })
+                } else {
+                    eprintln!("NTPORB={} but no @refpos file specified", imd.ntporb);
+                    process::exit(1);
+                }
+            } else {
+                // Use startup positions as reference
+                positions.clone()
+            };
+
+            // Build entries combining atom indices with reference positions
+            let entries = build_posres_entries(&restrained_atoms, &ref_positions);
+
+            let mut pr = PositionRestraints::new();
+            for entry in &entries {
+                pr.add_restraint(PositionRestraint::new(
+                    entry.atom,
+                    entry.reference_pos,
+                    imd.cpor,
+                ));
+            }
+            println!("  Position restraints: {} atoms, CPOR={:.1} kJ/(mol·nm²)",
+                entries.len(), imd.cpor);
+            Some(pr)
+        } else {
+            eprintln!("NTPOR={} but no @posresspec file specified", imd.ntpor);
+            process::exit(1);
+        }
+    } else {
+        None
+    };
+
     // === Build Algorithm Sequence (gromosXX pattern) ===
-    println!("Setting up algorithm sequence: Leap-Frog");
+    let is_minimization = imd.ntem > 0;
+
+    if is_minimization {
+        println!("Setting up algorithm sequence: Steepest Descent Energy Minimization");
+        println!("  NTEM:  {} (steepest descent)", imd.ntem);
+        println!("  DELE:  {:.6} kJ/mol", imd.dele);
+        println!("  DX0:   {:.6} nm", imd.dx0);
+        println!("  DXM:   {:.6} nm", imd.dxm);
+        println!("  NMIN:  {}", imd.nmin);
+        println!("  FLIM:  {:.6}", imd.flim);
+        println!();
+    } else {
+        println!("Setting up algorithm sequence: Leap-Frog");
+    }
     let mut md_sequence = AlgorithmSequence::new();
 
-    // 1. COM motion removal (gromosXX: first in sequence, before forcefield)
-    if imd.nticom >= 1 || imd.nscm > 0 {
-        md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
-    }
+    if is_minimization {
+        // Energy minimization sequence:
+        //   1. Forcefield (compute forces)
+        //   2. SteepestDescent (exchange + position update along force direction)
+        //   3. EnergyCalculation (finalize energies)
 
-    // 2. Forcefield (bonded + nonbonded forces)
-    let mut forcefield = Forcefield::new(
-        lj_params,
-        crf_params,
-        periodicity,
-        pairlist,
-        pairlist_algorithm,
-    );
-    forcefield.ntf_bond = ntf_bond;
-    forcefield.ntf_angle = ntf_angle;
-    forcefield.ntf_improper = ntf_improper;
-    forcefield.ntf_dihedral = ntf_dihedral;
-    // Set atoms per solvent molecule for solvent innerloop
-    if !topo.solvent_atom_template.is_empty() {
-        forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
-    }
-    // Set virial type for prepare_virial + molecular virial correction
-    if imd.couple_pressure {
-        forcefield.virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
-            2 => VirialType::Molecular,
-            1 => VirialType::Atomic,
-            _ => VirialType::None,
-        };
-    }
-    md_sequence.push(Box::new(forcefield));
+        // Forcefield (bonded + nonbonded forces)
+        let mut forcefield = Forcefield::new(
+            lj_params,
+            crf_params,
+            periodicity,
+            pairlist,
+            pairlist_algorithm,
+        );
+        forcefield.ntf_bond = ntf_bond;
+        forcefield.ntf_angle = ntf_angle;
+        forcefield.ntf_improper = ntf_improper;
+        forcefield.ntf_dihedral = ntf_dihedral;
+        if !topo.solvent_atom_template.is_empty() {
+            forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
+        }
+        if let Some(pr) = posres.clone() {
+            forcefield.position_restraints = pr;
+        }
+        md_sequence.push(Box::new(forcefield));
+
+        // Steepest Descent minimizer
+        let sd = SteepestDescentAlgorithm::new()
+            .with_tolerance(imd.dele)
+            .with_step_sizes(imd.dx0, imd.dxm)
+            .with_min_steps(imd.nmin)
+            .with_force_limit(imd.flim);
+        md_sequence.push(Box::new(sd));
+
+        // SHAKE constraints (gromosXX applies constraints even during minimization)
+        if shake_enabled {
+            let ntc_mode = match imd.ntc {
+                3 => NtcMode::AllBonds,
+                2 => NtcMode::HydrogenBonds,
+                _ => NtcMode::SolventOnly,
+            };
+            let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
+                tolerance: shake_tolerance,
+                max_iterations: 1000,
+                ntc: ntc_mode,
+            });
+            if imd.ntishk >= 1 {
+                shake_alg.shake_initial_positions = true;
+            }
+            if imd.ntishk >= 2 {
+                shake_alg.shake_initial_velocities = true;
+            }
+            md_sequence.push(Box::new(shake_alg));
+        }
+
+        // Energy calculation (finalize totals)
+        // Note: TemperatureCalculation is NOT included for EM — gromosXX EM
+        // does not compute kinetic energy (E_total = E_pot).
+        md_sequence.push(Box::new(EnergyCalculation::new()));
+    } else {
+        // Standard MD sequence
+
+        // 1. COM motion removal (gromosXX: first in sequence, before forcefield)
+        if imd.nticom >= 1 || imd.nscm > 0 {
+            md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
+        }
+
+        // 2. Forcefield (bonded + nonbonded forces)
+        let mut forcefield = Forcefield::new(
+            lj_params,
+            crf_params,
+            periodicity,
+            pairlist,
+            pairlist_algorithm,
+        );
+        forcefield.ntf_bond = ntf_bond;
+        forcefield.ntf_angle = ntf_angle;
+        forcefield.ntf_improper = ntf_improper;
+        forcefield.ntf_dihedral = ntf_dihedral;
+        if !topo.solvent_atom_template.is_empty() {
+            forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
+        }
+        if imd.couple_pressure {
+            forcefield.virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
+                2 => VirialType::Molecular,
+                1 => VirialType::Atomic,
+                _ => VirialType::None,
+            };
+        }
+        if let Some(pr) = posres {
+            forcefield.position_restraints = pr;
+        }
+        md_sequence.push(Box::new(forcefield));
 
     // 3. Leap-Frog velocity step (exchange_state + v update)
-    md_sequence.push(Box::new(LeapFrogVelocity::new()));
+        md_sequence.push(Box::new(LeapFrogVelocity::new()));
 
-    // 3b. Berendsen thermostat (between velocity and position update, gromosXX convention)
-    if thermostat_on {
-        // Compute degrees of freedom: 3N - N_constraints - NDFMIN
-        let n_atoms = topo.num_atoms();
-        let n_solute = topo.num_solute_atoms();
-        let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
-            topo.solvent_atom_template.len()
-        } else {
-            1
-        };
-        let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
-            (n_atoms - n_solute) / atoms_per_solvent
-        } else {
-            0
-        };
-        let solvent_constraint_dof = if shake_enabled {
-            n_solvent_molecules * topo.solvent_constraint_template.len()
-        } else {
-            0
-        };
-        // TODO: solute constraint DOF for NTC=2,3
-        let solute_constraint_dof = 0usize;
-        let total_dof = (3 * n_atoms - solvent_constraint_dof - solute_constraint_dof) as f64
-            - imd.ndfmin as f64;
-        println!("  Thermostat DOF: {:.0} (3*{} - {} solvent_constr - {} NDFMIN)",
-            total_dof, n_atoms, solvent_constraint_dof, imd.ndfmin);
-        md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
-            temperature, thermostat_tau, total_dof, n_atoms,
-        )));
-    }
-
-    // 4. Leap-Frog position step (r update)
-    md_sequence.push(Box::new(LeapFrogPosition::new()));
-
-    // 5. SHAKE constraints (if enabled)
-    if shake_enabled {
-        let ntc_mode = match imd.ntc {
-            3 => NtcMode::AllBonds,
-            2 => NtcMode::HydrogenBonds,
-            _ => NtcMode::SolventOnly,
-        };
-        let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
-            tolerance: shake_tolerance,
-            max_iterations: 1000,
-            ntc: ntc_mode,
-        });
-        // gromosXX: NTISHK controls initial position/velocity shaking
-        // NTISHK=1: shake positions, NTISHK=2: shake positions + velocities
-        if imd.ntishk >= 1 {
-            shake_alg.shake_initial_positions = true;
+        // 3b. Berendsen thermostat (between velocity and position update, gromosXX convention)
+        if thermostat_on {
+            // Compute degrees of freedom: 3N - N_constraints - NDFMIN
+            let n_atoms = topo.num_atoms();
+            let n_solute = topo.num_solute_atoms();
+            let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
+                topo.solvent_atom_template.len()
+            } else {
+                1
+            };
+            let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
+                (n_atoms - n_solute) / atoms_per_solvent
+            } else {
+                0
+            };
+            let solvent_constraint_dof = if shake_enabled {
+                n_solvent_molecules * topo.solvent_constraint_template.len()
+            } else {
+                0
+            };
+            // TODO: solute constraint DOF for NTC=2,3
+            let solute_constraint_dof = 0usize;
+            let total_dof = (3 * n_atoms - solvent_constraint_dof - solute_constraint_dof) as f64
+                - imd.ndfmin as f64;
+            println!("  Thermostat DOF: {:.0} (3*{} - {} solvent_constr - {} NDFMIN)",
+                total_dof, n_atoms, solvent_constraint_dof, imd.ndfmin);
+            md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
+                temperature, thermostat_tau, total_dof, n_atoms,
+            )));
         }
-        if imd.ntishk >= 2 {
-            shake_alg.shake_initial_velocities = true;
+
+        // 4. Leap-Frog position step (r update)
+        md_sequence.push(Box::new(LeapFrogPosition::new()));
+
+        // 5. SHAKE constraints (if enabled)
+        if shake_enabled {
+            let ntc_mode = match imd.ntc {
+                3 => NtcMode::AllBonds,
+                2 => NtcMode::HydrogenBonds,
+                _ => NtcMode::SolventOnly,
+            };
+            let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
+                tolerance: shake_tolerance,
+                max_iterations: 1000,
+                ntc: ntc_mode,
+            });
+            // gromosXX: NTISHK controls initial position/velocity shaking
+            // NTISHK=1: shake positions, NTISHK=2: shake positions + velocities
+            if imd.ntishk >= 1 {
+                shake_alg.shake_initial_positions = true;
+            }
+            if imd.ntishk >= 2 {
+                shake_alg.shake_initial_velocities = true;
+            }
+            md_sequence.push(Box::new(shake_alg));
         }
-        md_sequence.push(Box::new(shake_alg));
-    }
 
-    // 6. Temperature/kinetic energy calculation
-    md_sequence.push(Box::new(TemperatureCalculation::new()));
+        // 6. Temperature/kinetic energy calculation
+        md_sequence.push(Box::new(TemperatureCalculation::new()));
 
-    // 7. Pressure calculation and barostat (if pressure coupling is on)
-    if imd.couple_pressure {
-        let virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
-            2 => VirialType::Molecular,
-            1 => VirialType::Atomic,
-            _ => VirialType::None,
-        };
-        md_sequence.push(Box::new(PressureCalculation::new(virial_type)));
+        // 7. Pressure calculation and barostat (if pressure coupling is on)
+        if imd.couple_pressure {
+            let virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
+                2 => VirialType::Molecular,
+                1 => VirialType::Atomic,
+                _ => VirialType::None,
+            };
+            md_sequence.push(Box::new(PressureCalculation::new(virial_type)));
 
-        let pp = imd.pressure_parameters.as_ref();
-        md_sequence.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
-            pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
-            compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
-            tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
-        })));
-    }
+            let pp = imd.pressure_parameters.as_ref();
+            md_sequence.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
+                pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
+                compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
+                tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
+            })));
+        }
 
-    // 8. Energy finalization
-    md_sequence.push(Box::new(EnergyCalculation::new()));
+        // 8. Energy finalization
+        md_sequence.push(Box::new(EnergyCalculation::new()));
+    } // end of MD vs minimization branch
 
     println!("  Sequence: {}", md_sequence.algorithm_names().join(" → "));
     println!();
@@ -939,44 +1089,58 @@ fn main() {
         None
     };
 
-    // MD parameters summary
-    println!("MD Parameters:");
-    println!("  Steps:         {}", n_steps);
-    println!("  Time step:     {} ps", dt);
-    println!(
-        "  Total time:    {} ps",
-        n_steps as f64 * dt
-    );
-    println!("  Temperature:   {} K", temperature);
-    println!("  Traj output:   {}", trc_file);
-    println!("  Energy output: {}", tre_file);
-    println!();
+    // Parameters summary
+    if is_minimization {
+        println!("Energy Minimization Parameters:");
+        println!("  Max steps:     {}", n_steps);
+        println!("  Tolerance:     {} kJ/mol", imd.dele);
+        println!("  Step size:     {} nm (max {})", imd.dx0, imd.dxm);
+        println!("  Traj output:   {}", trc_file);
+        println!("  Energy output: {}", tre_file);
+        println!();
 
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║                   Starting MD Simulation                     ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║              Starting Energy Minimization                    ║");
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
 
-    log::info!(
-        "Starting MD simulation: {} steps, dt={} ps",
-        n_steps,
-        dt
-    );
+        log::info!(
+            "Starting energy minimization: max {} steps, dele={} kJ/mol",
+            n_steps,
+            imd.dele
+        );
+    } else {
+        println!("MD Parameters:");
+        println!("  Steps:         {}", n_steps);
+        println!("  Time step:     {} ps", dt);
+        println!(
+            "  Total time:    {} ps",
+            n_steps as f64 * dt
+        );
+        println!("  Temperature:   {} K", temperature);
+        println!("  Traj output:   {}", trc_file);
+        println!("  Energy output: {}", tre_file);
+        println!();
+
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║                   Starting MD Simulation                     ║");
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
+
+        log::info!(
+            "Starting MD simulation: {} steps, dt={} ps",
+            n_steps,
+            dt
+        );
+    }
 
     let start_time = Instant::now();
     let mut energy_history: Vec<(f64, f64, f64)> = Vec::new();
+    let mut minimization_converged = false;
+    let mut prev_min_energy = f64::MAX;
+    let mut actual_steps: usize = 0;
 
-    // Main MD loop using AlgorithmSequence
-    //
-    // The sequence runs per step:
-    //   1. RemoveCOMMotion (if NTICOM/NSCM)
-    //   2. Forcefield (pairlist + bonded + nonbonded forces)
-    //   3. Leap_Frog_Velocity (exchange_state + velocity update)
-    //   3b. BerendsenThermostat (if TAU > 0, velocity scaling)
-    //   4. Leap_Frog_Position (position update)
-    //   5. SHAKE constraints (if NTC > 0)
-    //   6. TemperatureCalculation (kinetic energy)
-    //   7. EnergyCalculation (total energy finalization)
+    // Main simulation loop
     for step in 0..=n_steps {
         let time = step as f64 * dt;
 
@@ -1139,11 +1303,49 @@ fn main() {
             state.energies.total(),
         ));
 
+        actual_steps = step;
+
+        // Track per-step energy change for minimization display
+        let min_de = if is_minimization {
+            let current_pot = state.energies.potential_total + state.energies.special_total;
+            let de = if prev_min_energy < f64::MAX / 2.0 {
+                current_pot - prev_min_energy
+            } else {
+                0.0
+            };
+            prev_min_energy = current_pot;
+            de
+        } else {
+            0.0
+        };
+
+        // Minimization convergence check (mirrors gromosXX: compare potential_total + special_total)
+        if is_minimization && step > imd.nmin {
+            if min_de.abs() < imd.dele {
+                minimization_converged = true;
+                println!();
+                println!("*** Energy minimization CONVERGED at step {} ***", step);
+                println!("    dE = {:.6e} kJ/mol (tolerance: {:.6e})", min_de.abs(), imd.dele);
+                println!("    E_pot = {:.10e} kJ/mol", state.energies.potential_total);
+                println!();
+                // Write final frame before breaking
+                if let Err(e) = traj_writer.write_frame(step, time, &conf) {
+                    eprintln!("Error writing final trajectory frame: {}", e);
+                }
+                break;
+            }
+        }
+
         // Log progress
         if step % nstlog == 0 {
-            println!("Step {:6}  Time: {:8.3} ps  E_pot: {:18.10e}  E_kin: {:18.10e}  E_tot: {:18.10e}  T: {:6.1} K",
-                step, time, state.energies.potential_total, state.energies.kinetic_total,
-                state.energies.total(), temp);
+            if is_minimization {
+                println!("Step {:6}  E_pot: {:18.10e}  dE: {:12.4e}",
+                    step, state.energies.potential_total, min_de);
+            } else {
+                println!("Step {:6}  Time: {:8.3} ps  E_pot: {:18.10e}  E_kin: {:18.10e}  E_tot: {:18.10e}  T: {:6.1} K",
+                    step, time, state.energies.potential_total, state.energies.kinetic_total,
+                    state.energies.total(), temp);
+            }
             log::debug!(
                 "  Bond: {:.10e}  LJ: {:.10e}  CRF: {:.10e}",
                 state.energies.bond_total,
@@ -1210,7 +1412,20 @@ fn main() {
         sim_state.advance();
     }
 
-    log::info!("MD loop completed - {} steps", n_steps);
+    if is_minimization {
+        if minimization_converged {
+            log::info!("Energy minimization converged at step {}", actual_steps);
+        } else {
+            log::warn!("Energy minimization did NOT converge within {} steps", n_steps);
+            println!();
+            println!("*** WARNING: Energy minimization did NOT converge ***");
+            println!("    Max steps reached: {}", n_steps);
+            println!("    Consider increasing NSTLIM or adjusting DELE");
+            println!();
+        }
+    } else {
+        log::info!("MD loop completed - {} steps", n_steps);
+    }
 
     // Check energy drift
     log::debug!("Checking energy drift over trajectory");
@@ -1286,20 +1501,47 @@ fn main() {
         }
     }
 
+    // Write final configuration if @fin was specified
+    if let Some(ref fin_path) = md_args.fin_file {
+        let positions = &conf.current().pos;
+        let velocities = &conf.current().vel;
+        let box_vec = conf.current().box_config.dimensions();
+        let vels = if velocities.iter().any(|v| *v != Vec3::ZERO) {
+            Some(velocities.as_slice())
+        } else {
+            None
+        };
+        let box_opt = if box_vec.x > 0.0 { Some(box_vec) } else { None };
+        let title = format!("Final configuration after {} steps", actual_steps);
+        if let Err(e) = gromos::io::g96::write_g96(fin_path, &title, positions, vels, box_opt, Some(&topo)) {
+            eprintln!("Error writing final configuration: {}", e);
+        } else {
+            log::info!("Final configuration written to: {}", fin_path);
+        }
+    }
+
     let elapsed = start_time.elapsed();
     log::info!("Simulation wall time: {:.2} s", elapsed.as_secs_f64());
 
     println!();
     println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║                   Simulation Complete                        ║");
+    if is_minimization {
+        println!("║              Energy Minimization Complete                    ║");
+    } else {
+        println!("║                   Simulation Complete                        ║");
+    }
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
     println!("Statistics:");
-    println!("  Total steps:     {}", n_steps);
-    println!(
-        "  Simulation time: {:.3} ps",
-        n_steps as f64 * dt
-    );
+    println!("  Total steps:     {}", actual_steps);
+    if is_minimization {
+        println!("  Converged:       {}", if minimization_converged { "YES" } else { "NO" });
+    } else {
+        println!(
+            "  Simulation time: {:.3} ps",
+            n_steps as f64 * dt
+        );
+    }
     println!("  Wall time:       {:.2} s", elapsed.as_secs_f64());
     println!(
         "  Performance:     {:.1} ns/day",
@@ -1307,6 +1549,9 @@ fn main() {
     );
     println!();
     println!("Output files:");
+    if let Some(ref fin_path) = md_args.fin_file {
+        println!("  Final conf: {}", fin_path);
+    }
     println!("  Trajectory: {}", trc_file);
     println!("  Energies:   {}", tre_file);
     println!();

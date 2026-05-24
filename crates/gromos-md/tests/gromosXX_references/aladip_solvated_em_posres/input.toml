@@ -1,0 +1,22 @@
+# Aladip solvated SD EM with position restraints, NO SHAKE (NTC=1)
+# gromosXX v1.6.0, double precision, 72 atoms
+
+[system]
+name = "aladip_solvated_em_posres"
+description = "Level 4: Aladip solvated, SD EM with posres, no SHAKE"
+level = 4
+natoms = 72
+isolates = "steepest descent + posres + solvent (no SHAKE)"
+
+[input]
+topology = "../../aladip.topo"
+configuration = "../../aladip.conf"
+parameters = "aladip_solvated_em_posres.in"
+posresspec = "aladip_solvated_em_posres.por"
+refpos = "aladip_solvated_em_posres.rpr"
+
+[expected]
+forces = "expected/forces.trf"
+energies = "expected/energies.tre"
+trajectory = "expected/trajectory.trc"
+final_conf = "expected/final.conf"
