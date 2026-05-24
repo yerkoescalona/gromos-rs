@@ -1,0 +1,20 @@
+# Auto-generated for aladip vacuum steepest descent minimization
+# gromosXX v1.6.0, double precision, 12 atoms
+
+[system]
+name = "aladip_vacuum_em"
+description = "Level 1: Aladip in vacuum, steepest descent energy minimization"
+level = 1
+natoms = 12
+isolates = "steepest descent minimization with all bonded + nonbonded"
+
+[input]
+topology = "../../aladip.topo"
+configuration = "aladip_vacuum_em.conf"
+parameters = "aladip_vacuum_em.in"
+
+[expected]
+forces = "expected/forces.trf"
+energies = "expected/energies.tre"
+trajectory = "expected/trajectory.trc"
+final_conf = "expected/final.conf"

@@ -1,0 +1,20 @@
+# Aladip vacuum steepest descent EM with SHAKE (NTC=3)
+# gromosXX v1.6.0, double precision, 12 atoms
+
+[system]
+name = "aladip_vacuum_em_shake"
+description = "Level 2: Aladip vacuum, SD EM with SHAKE (all bonds constrained)"
+level = 2
+natoms = 12
+isolates = "steepest descent + SHAKE interaction (no solvent, no posres)"
+
+[input]
+topology = "../../aladip.topo"
+configuration = "../aladip_vacuum_em/aladip_vacuum_em.conf"
+parameters = "aladip_vacuum_em_shake.in"
+
+[expected]
+forces = "expected/forces.trf"
+energies = "expected/energies.tre"
+trajectory = "expected/trajectory.trc"
+final_conf = "expected/final.conf"

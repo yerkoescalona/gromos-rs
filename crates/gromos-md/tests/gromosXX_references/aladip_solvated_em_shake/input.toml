@@ -1,0 +1,20 @@
+# Aladip solvated steepest descent EM with SHAKE (NTC=3), no position restraints
+# gromosXX v1.6.0, double precision, 72 atoms
+
+[system]
+name = "aladip_solvated_em_shake"
+description = "Level 4: Aladip solvated, SD EM with SHAKE, no posres"
+level = 4
+natoms = 72
+isolates = "steepest descent + SHAKE + solvent (no posres)"
+
+[input]
+topology = "../../aladip.topo"
+configuration = "../../aladip.conf"
+parameters = "aladip_solvated_em_shake.in"
+
+[expected]
+forces = "expected/forces.trf"
+energies = "expected/energies.tre"
+trajectory = "expected/trajectory.trc"
+final_conf = "expected/final.conf"
