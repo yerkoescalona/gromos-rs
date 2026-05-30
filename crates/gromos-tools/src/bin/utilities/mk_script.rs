@@ -1,348 +1,282 @@
-//! Generate GROMOS simulation scripts and input files
+//! mk_script - Generate GROMOS simulation scripts from job lists and templates
 //!
-//! This is a Rust port of GROMOS++ mk_script functionality,
-//! focusing on IMD file generation and basic validation.
+//! Two modes of operation:
+//!   @joblist mode:  Read a .jobs file with per-job parameter overrides
+//!                   (equilibration, custom protocols)
+//!   @script mode:   Generate N identical sequential scripts
+//!                   (production runs)
 //!
 //! Usage:
-//!   mk_script --topo system.top --coord system.cnf --output sim.imd [options]
+//!   mk_script @sys eq_GB3 @bin ./md @dir ./eq @files topo t.top input eq.imd
+//!             coord c.cnf posresspec c.por refpos c.rpr
+//!             @template mk_script.lib @joblist equilibration.jobs
+//!
+//!   mk_script @sys md_GB3 @bin ./md @dir ./md @files topo t.top input md.imd
+//!             coord c.cnf @template mk_script.lib @script 1 21
 
-use clap::Parser;
-use std::fs::File;
-use std::io::Write;
-use std::path::PathBuf;
+use gromos_io::gromos_args;
+use gromos_io::jobs::read_joblist;
+use gromos_io::mk_script::{apply_job_overrides, generate_run_script, MkScriptConfig};
+use gromos_io::script_template::read_script_template;
+use std::collections::HashMap;
+use std::fs;
+use std::process;
 
-/// Generate GROMOS simulation scripts and input files (GROMOS++ mk_script port)
-#[derive(Parser, Debug)]
-#[command(name = "mk_script")]
-#[command(about = "Generate GROMOS simulation scripts and input files", long_about = None)]
-struct Args {
-    /// Topology file (.top)
-    #[arg(short = 't', long)]
-    topo: PathBuf,
+fn print_usage() {
+    eprintln!("mk_script - Generate GROMOS simulation scripts");
+    eprintln!();
+    eprintln!("Usage:");
+    eprintln!("  mk_script @sys <name> @bin <md_binary> @dir <workdir>");
+    eprintln!("            @files topo <file> input <file> coord <file>");
+    eprintln!("                   [posresspec <file>] [refpos <file>]");
+    eprintln!("            @template <mk_script.lib>");
+    eprintln!("            @joblist <jobs_file>      (equilibration mode)");
+    eprintln!("       or:  @script <first> <last>    (production mode)");
+}
 
-    /// Coordinate file (.cnf)
-    #[arg(short = 'c', long)]
-    coord: PathBuf,
+/// Parse the @-style arguments for mk_script.
+/// This tool uses its own parser because @files takes sub-key/value pairs.
+fn parse_mk_args(argv: &[String]) -> Result<MkScriptArgs, String> {
+    let mut args = MkScriptArgs::default();
+    let mut i = 1;
 
-    /// Output IMD file
-    #[arg(short = 'o', long)]
-    output: PathBuf,
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--sys" => {
+                i += 1;
+                args.system = argv.get(i).cloned().ok_or("Missing @sys value")?;
+            }
+            "--bin" => {
+                i += 1;
+                args.bin = argv.get(i).cloned().ok_or("Missing @bin value")?;
+            }
+            "--dir" => {
+                i += 1;
+                args.dir = argv.get(i).cloned().ok_or("Missing @dir value")?;
+            }
+            "--files" => {
+                // Read key-value pairs until we hit another --flag
+                i += 1;
+                while i < argv.len() && !argv[i].starts_with("--") {
+                    let key = argv[i].clone();
+                    i += 1;
+                    let val = argv
+                        .get(i)
+                        .cloned()
+                        .ok_or(format!("Missing value for @files key '{}'", key))?;
+                    args.files.insert(key, val);
+                    i += 1;
+                }
+                continue; // Don't increment i again
+            }
+            "--template" => {
+                i += 1;
+                args.template = argv.get(i).cloned().ok_or("Missing @template value")?;
+            }
+            "--version" => {
+                i += 1;
+                args.version = argv.get(i).cloned().ok_or("Missing @version value")?;
+            }
+            "--joblist" => {
+                i += 1;
+                args.joblist = argv.get(i).cloned();
+            }
+            "--script" => {
+                i += 1;
+                let first: usize = argv
+                    .get(i)
+                    .ok_or("Missing @script first")?
+                    .parse()
+                    .map_err(|_| "Invalid @script first")?;
+                i += 1;
+                let last: usize = argv
+                    .get(i)
+                    .ok_or("Missing @script last")?
+                    .parse()
+                    .map_err(|_| "Invalid @script last")?;
+                args.script_range = Some((first, last));
+            }
+            "-h" | "--help" => {
+                print_usage();
+                process::exit(0);
+            }
+            other => {
+                return Err(format!("Unknown argument: {}", other));
+            }
+        }
+        i += 1;
+    }
 
-    /// Simulation title
-    #[arg(long, default_value = "GROMOS simulation")]
-    title: String,
+    if args.system.is_empty() {
+        return Err("Missing required argument: @sys".to_string());
+    }
+    if args.template.is_empty() {
+        return Err("Missing required argument: @template".to_string());
+    }
+    if args.joblist.is_none() && args.script_range.is_none() {
+        return Err("Either @joblist or @script must be specified".to_string());
+    }
 
-    /// Number of MD steps
-    #[arg(long, default_value_t = 10000)]
-    nstlim: usize,
+    Ok(args)
+}
 
-    /// Time step (ps)
-    #[arg(long, default_value_t = 0.002)]
-    dt: f64,
-
-    /// Initial temperature (K)
-    #[arg(long, default_value_t = 300.0)]
-    temp: f64,
-
-    /// Temperature coupling time (ps)
-    #[arg(long, default_value_t = 0.1)]
-    tau_t: f64,
-
-    /// Pressure coupling (0=no, 1=isotropic, 2=anisotropic)
-    #[arg(long, default_value_t = 0)]
-    pcouple: i32,
-
-    /// Reference pressure (bar)
-    #[arg(long, default_value_t = 1.01325)]
-    pres: f64,
-
-    /// Pressure coupling time (ps)
-    #[arg(long, default_value_t = 0.5)]
-    tau_p: f64,
-
-    /// SHAKE constraints (1=none, 2=H-bonds, 3=all)
-    #[arg(long, default_value_t = 2)]
-    ntc: i32,
-
-    /// Long-range electrostatics (0=cutoff, 1=RF, 2=PME)
-    #[arg(long, default_value_t = 1)]
-    nlrele: i32,
-
-    /// Reaction field permittivity (0.0 = infinity)
-    #[arg(long, default_value_t = 0.0)]
-    epsrf: f64,
-
-    /// Short-range cutoff (nm)
-    #[arg(long, default_value_t = 0.8)]
-    rcutp: f64,
-
-    /// Long-range cutoff (nm)
-    #[arg(long, default_value_t = 1.4)]
-    rcutl: f64,
-
-    /// Trajectory output frequency (steps)
-    #[arg(long, default_value_t = 100)]
-    ntwx: usize,
-
-    /// Energy output frequency (steps)
-    #[arg(long, default_value_t = 10)]
-    ntwe: usize,
-
-    /// Random seed
-    #[arg(long, default_value_t = 12345)]
-    seed: i64,
-
-    /// Initial velocities (0=read, 1=generate)
-    #[arg(long, default_value_t = 1)]
-    ntivel: i32,
+#[derive(Default)]
+struct MkScriptArgs {
+    system: String,
+    bin: String,
+    dir: String,
+    files: HashMap<String, String>,
+    template: String,
+    version: String,
+    joblist: Option<String>,
+    script_range: Option<(usize, usize)>,
 }
 
 fn main() {
-    let args = Args::parse();
+    let argv = gromos_args();
 
-    // Validate input files exist
-    if !args.topo.exists() {
-        eprintln!("Error: Topology file not found: {}", args.topo.display());
-        std::process::exit(1);
+    if argv.len() < 2 {
+        print_usage();
+        process::exit(1);
     }
 
-    if !args.coord.exists() {
-        eprintln!("Error: Coordinate file not found: {}", args.coord.display());
-        std::process::exit(1);
-    }
-
-    println!("Generating IMD file:");
-    println!("  Topology:    {}", args.topo.display());
-    println!("  Coordinates: {}", args.coord.display());
-    println!("  Output:      {}", args.output.display());
-    println!();
-
-    // Generate IMD file
-    match generate_imd(&args) {
-        Ok(()) => {
-            println!("✓ Successfully generated: {}", args.output.display());
-            println!();
-            print_summary(&args);
-        },
+    let mk_args = match parse_mk_args(&argv) {
+        Ok(a) => a,
         Err(e) => {
-            eprintln!("Error generating IMD file: {}", e);
-            std::process::exit(1);
-        },
-    }
-}
+            eprintln!("Error: {}", e);
+            print_usage();
+            process::exit(1);
+        }
+    };
 
-fn generate_imd(args: &Args) -> std::io::Result<()> {
-    let mut file = File::create(&args.output)?;
+    // Read template library
+    let template = match read_script_template(&mk_args.template) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error reading template: {}", e);
+            process::exit(1);
+        }
+    };
 
-    // TITLE block
-    writeln!(file, "TITLE")?;
-    writeln!(file, "  {}", args.title)?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
+    // Read base IMD
+    let imd_path = mk_args
+        .files
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| "input.imd".to_string());
+    let base_imd = match fs::read_to_string(&imd_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading IMD file '{}': {}", imd_path, e);
+            process::exit(1);
+        }
+    };
 
-    // SYSTEM block (would parse from topology in full implementation)
-    writeln!(file, "SYSTEM")?;
-    writeln!(file, "#  NPM    NSM")?;
-    writeln!(file, "     1      0")?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
+    let config = MkScriptConfig {
+        system: mk_args.system.clone(),
+        bin: mk_args.bin.clone(),
+        dir: mk_args.dir.clone(),
+        files: mk_args.files.clone(),
+    };
 
-    // STEP block
-    writeln!(file, "STEP")?;
-    writeln!(file, "#  NSTLIM      T        DT")?;
-    writeln!(file, "  {:>7}    0.0    {:>8.5}", args.nstlim, args.dt)?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
+    eprintln!("mk_script: system={}", mk_args.system);
 
-    // BOUNDCOND block
-    writeln!(file, "BOUNDCOND")?;
-    writeln!(file, "#   NTB  NDFMIN")?;
-    writeln!(file, "      1       0")?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // MULTIBATH block (temperature coupling)
-    writeln!(file, "MULTIBATH")?;
-    writeln!(file, "#  ALGORITHM")?;
-    writeln!(file, "          1")?;
-    writeln!(file, "#  NUM")?;
-    writeln!(file, "      1")?;
-    writeln!(file, "#  TEMP0         TAU")?;
-    writeln!(file, "  {:>6.2}      {:>6.4}", args.temp, args.tau_t)?;
-    writeln!(file, "#  DOFSET: num, last_atom_index")?;
-    writeln!(file, "      1     0")?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // PRESSURESCALE block (if requested)
-    if args.pcouple > 0 {
-        writeln!(file, "PRESSURESCALE")?;
-        writeln!(file, "#  COUPLE  SCALE  COMP       TAUP   VIRIAL")?;
-        writeln!(
-            file,
-            "        {}      1     1   {:>8.5}        2",
-            args.pcouple, args.tau_p
-        )?;
-        writeln!(file, "#  SEMIANISOTROPIC COUPLINGS(X, Y, Z)")?;
-        writeln!(file, "      1     1     1")?;
-        writeln!(file, "#  PRES0(1...3,1...3)")?;
-        writeln!(file, "  {:>10.5}    0.00000    0.00000", args.pres)?;
-        writeln!(file, "    0.00000  {:>10.5}    0.00000", args.pres)?;
-        writeln!(file, "    0.00000    0.00000  {:>10.5}", args.pres)?;
-        writeln!(file, "END")?;
-        writeln!(file)?;
-    }
-
-    // FORCE block
-    writeln!(file, "FORCE")?;
-    writeln!(file, "# NTF array")?;
-    writeln!(
-        file,
-        "# 1: bonds, 2: angles, 3: imp. dihedrals, 4: dihedrals,"
-    )?;
-    writeln!(file, "# 5: electrostatic, 6: Lennard-Jones")?;
-    writeln!(file, "#  bonds  angles  impdih  dih     ele     LJ")?;
-    if args.ntc >= 2 {
-        writeln!(file, "      0      1       1      1       1      1")?;
-    } else {
-        writeln!(file, "      1      1       1      1       1      1")?;
-    }
-    writeln!(file, "# NRE(1..2)")?;
-    writeln!(file, "#  NRE: last_atom_index(1), last_atom_index(2)")?;
-    writeln!(file, "    0       0")?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // CONSTRAINT block
-    writeln!(file, "CONSTRAINT")?;
-    writeln!(file, "#  NTC  NTCP  NTCP0(1)  NTCS  NTCS0(1)")?;
-    writeln!(file, "    {}     0         0      1         0", args.ntc)?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // PAIRLIST block
-    writeln!(file, "PAIRLIST")?;
-    writeln!(file, "#  ALGORITHM  NSNB  RCUTP   RCUTL     SIZE  TYPE")?;
-    writeln!(
-        file,
-        "          0     5  {:>5.2}   {:>5.2}    {:>5.2}     0",
-        args.rcutp,
-        args.rcutl,
-        args.rcutp / 2.0
-    )?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // NONBONDED block
-    writeln!(file, "NONBONDED")?;
-    writeln!(file, "#  NLRELE  APPAK    RCRF   EPSRF  NSLFEXCL")?;
-    writeln!(
-        file,
-        "       {}    0.0   {:>5.2}  {:>6.1}         1",
-        args.nlrele, args.rcutl, args.epsrf
-    )?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // INITIALISE block
-    writeln!(file, "INITIALISE")?;
-    writeln!(
-        file,
-        "#  NTIVEL  NTISHK  NTINHT  NTINHB  NTISHI     NTIRTC  NTICOM"
-    )?;
-    writeln!(
-        file,
-        "        {}       0       0       0       0          0       0",
-        args.ntivel
-    )?;
-    writeln!(file, "#  NTIR    NTIG      IG     TEMPI")?;
-    writeln!(
-        file,
-        "      0       0  {:>6}  {:>6.2}",
-        args.seed, args.temp
-    )?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // WRITETRAJ block
-    writeln!(file, "WRITETRAJ")?;
-    writeln!(file, "#  NTWX  NTWE  NTWV  NTWF  NTWE_SPEC")?;
-    writeln!(
-        file,
-        "  {:>5} {:>5}     0     0          0",
-        args.ntwx, args.ntwe
-    )?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    // PRINTOUT block
-    writeln!(file, "PRINTOUT")?;
-    writeln!(file, "#  NTPR")?;
-    writeln!(file, "  {:>5}", args.ntwe)?;
-    writeln!(file, "END")?;
-    writeln!(file)?;
-
-    Ok(())
-}
-
-fn print_summary(args: &Args) {
-    println!("Simulation Parameters:");
-    println!("  Steps:       {}", args.nstlim);
-    println!("  Time step:   {} ps", args.dt);
-    println!("  Total time:  {:.2} ps", args.nstlim as f64 * args.dt);
-    println!();
-    println!("Temperature:");
-    println!("  Target:      {} K", args.temp);
-    println!("  Coupling:    {} ps", args.tau_t);
-    println!();
-    if args.pcouple > 0 {
-        println!("Pressure:");
-        println!("  Target:      {} bar", args.pres);
-        println!("  Coupling:    {} ps", args.tau_p);
-        println!(
-            "  Type:        {}",
-            match args.pcouple {
-                1 => "Isotropic",
-                2 => "Anisotropic",
-                _ => "Unknown",
+    if let Some(joblist_path) = &mk_args.joblist {
+        // === Joblist mode (equilibration) ===
+        let joblist = match read_joblist(joblist_path) {
+            Ok(jl) => jl,
+            Err(e) => {
+                eprintln!("Error reading joblist '{}': {}", joblist_path, e);
+                process::exit(1);
             }
+        };
+
+        eprintln!(
+            "  {} jobs from {}, headers: {:?}",
+            joblist.jobs.len(),
+            joblist_path,
+            joblist.headers
         );
-        println!();
-    }
-    println!("Constraints:");
-    println!(
-        "  Type:        {}",
-        match args.ntc {
-            1 => "None",
-            2 => "H-bonds",
-            3 => "All bonds",
-            _ => "Unknown",
-        }
-    );
-    println!();
-    println!("Electrostatics:");
-    println!(
-        "  Method:      {}",
-        match args.nlrele {
-            0 => "Cutoff",
-            1 => "Reaction Field",
-            2 => "PME",
-            _ => "Unknown",
-        }
-    );
-    if args.nlrele == 1 {
-        println!(
-            "  RF epsilon:  {}",
-            if args.epsrf == 0.0 {
-                "infinity (conducting)".to_string()
+
+        for (idx, job) in joblist.jobs.iter().enumerate() {
+            let prev = if idx > 0 {
+                Some(&joblist.jobs[idx - 1])
             } else {
-                args.epsrf.to_string()
+                None
+            };
+
+            // Generate modified IMD
+            let modified_imd = apply_job_overrides(&base_imd, job);
+            let imd_name = template.expanded_filename("input", &mk_args.system, job.job_id);
+            if let Err(e) = fs::write(&imd_name, &modified_imd) {
+                eprintln!("Error writing IMD '{}': {}", imd_name, e);
+                process::exit(1);
             }
-        );
+
+            // Generate run script
+            let script = generate_run_script(&config, &template, job, prev);
+            let script_name = template.expanded_filename("script", &mk_args.system, job.job_id);
+            if let Err(e) = fs::write(&script_name, &script) {
+                eprintln!("Error writing script '{}': {}", script_name, e);
+                process::exit(1);
+            }
+
+            // Make script executable
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&script_name, fs::Permissions::from_mode(0o755));
+            }
+
+            eprintln!("  Job {}: {} + {}", job.job_id, imd_name, script_name);
+        }
+    } else if let Some((first, last)) = mk_args.script_range {
+        // === Script mode (production) ===
+        eprintln!("  Scripts {} to {}", first, last);
+
+        for num in first..=last {
+            // For production: no IMD overrides, just generate sequential scripts
+            let dummy_job = gromos_io::jobs::JobSpec {
+                job_id: num,
+                params: HashMap::new(),
+                subdir: ".".to_string(),
+                run_after: if num > first { num - 1 } else { 0 },
+            };
+            let prev = if num > first {
+                Some(gromos_io::jobs::JobSpec {
+                    job_id: num - 1,
+                    params: HashMap::new(),
+                    subdir: ".".to_string(),
+                    run_after: 0,
+                })
+            } else {
+                None
+            };
+
+            // Copy base IMD as-is for each job
+            let imd_name = template.expanded_filename("input", &mk_args.system, num);
+            if let Err(e) = fs::write(&imd_name, &base_imd) {
+                eprintln!("Error writing IMD '{}': {}", imd_name, e);
+                process::exit(1);
+            }
+
+            let script =
+                generate_run_script(&config, &template, &dummy_job, prev.as_ref());
+            let script_name = template.expanded_filename("script", &mk_args.system, num);
+            if let Err(e) = fs::write(&script_name, &script) {
+                eprintln!("Error writing script '{}': {}", script_name, e);
+                process::exit(1);
+            }
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&script_name, fs::Permissions::from_mode(0o755));
+            }
+        }
+
+        eprintln!("  Generated {} scripts", last - first + 1);
     }
-    println!("  Cutoff:      {} nm", args.rcutl);
-    println!();
-    println!("Output:");
-    println!("  Trajectory:  every {} steps", args.ntwx);
-    println!("  Energy:      every {} steps", args.ntwe);
+
+    eprintln!("Done!");
 }

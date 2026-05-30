@@ -9,11 +9,9 @@
 //! 3. Removing solvent molecules that clash with the solute
 //! 4. Writing the solvated system to stdout
 
-use gromos::io::g96::write_g96;
 use gromos::math::Vec3;
+use gromos_io::{read_g96_labeled, G96Atom};
 use std::env;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::process;
 
 fn print_usage() {
@@ -194,109 +192,38 @@ fn parse_args(args: Vec<String>) -> Result<SimBoxArgs, String> {
     Ok(sb_args)
 }
 
-/// Simple coordinate file reader that also parses box
-fn read_coords_with_box(path: &str) -> Result<(Vec<Vec3>, Option<Vec3>), String> {
-    let file = File::open(path).map_err(|e| format!("Cannot open {}: {}", path, e))?;
-    let reader = BufReader::new(file);
-
-    let mut positions = Vec::new();
-    let mut box_dims: Option<Vec3> = None;
-    let mut in_position = false;
-    let mut in_box = false;
-
-    for line in reader.lines() {
-        let line = line.map_err(|e| format!("Read error: {}", e))?;
-        let trimmed = line.trim();
-
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "TITLE" {
-            continue;
-        }
-
-        if trimmed == "POSITION" || trimmed == "POSITIONRED" {
-            in_position = true;
-            in_box = false;
-            continue;
-        } else if trimmed == "BOX" {
-            in_position = false;
-            in_box = true;
-            continue;
-        } else if trimmed == "END" {
-            in_position = false;
-            in_box = false;
-            continue;
-        }
-
-        if in_position && line.len() >= 24 {
-            let coords = &line[24..];
-            let parts: Vec<&str> = coords.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let x: f64 = parts[0]
-                    .parse()
-                    .map_err(|_| format!("Invalid x coordinate: {}", parts[0]))?;
-                let y: f64 = parts[1]
-                    .parse()
-                    .map_err(|_| format!("Invalid y coordinate: {}", parts[1]))?;
-                let z: f64 = parts[2]
-                    .parse()
-                    .map_err(|_| format!("Invalid z coordinate: {}", parts[2]))?;
-                positions.push(Vec3::new(x, y, z));
-            }
-        } else if in_box {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let lx: f64 = parts[0]
-                    .parse()
-                    .map_err(|_| format!("Invalid box x: {}", parts[0]))?;
-                let ly: f64 = parts[1]
-                    .parse()
-                    .map_err(|_| format!("Invalid box y: {}", parts[1]))?;
-                let lz: f64 = parts[2]
-                    .parse()
-                    .map_err(|_| format!("Invalid box z: {}", parts[2]))?;
-                box_dims = Some(Vec3::new(lx, ly, lz));
-            }
-        }
-    }
-
-    if positions.is_empty() {
-        return Err(format!("No positions found in {}", path));
-    }
-
-    Ok((positions, box_dims))
-}
-
 /// Calculate center of geometry
-fn calc_cog(positions: &[Vec3]) -> Vec3 {
+fn calc_cog(atoms: &[G96Atom]) -> Vec3 {
     let mut cog = Vec3::ZERO;
-    for pos in positions {
-        cog = cog + *pos;
+    for a in atoms {
+        cog = cog + a.pos;
     }
-    cog / positions.len() as f64
+    cog / atoms.len() as f64
 }
 
 /// Shift all positions by a vector
-fn shift_positions(positions: &mut [Vec3], shift: Vec3) {
-    for pos in positions {
-        *pos = *pos + shift;
+fn shift_atoms(atoms: &mut [G96Atom], shift: Vec3) {
+    for a in atoms {
+        a.pos = a.pos + shift;
     }
 }
 
 /// Calculate maximum extent of solute in each dimension
-fn calc_max_extent(positions: &[Vec3]) -> Vec3 {
-    if positions.is_empty() {
+fn calc_max_extent(atoms: &[G96Atom]) -> Vec3 {
+    if atoms.is_empty() {
         return Vec3::ZERO;
     }
 
-    let mut min = positions[0];
-    let mut max = positions[0];
+    let mut min = atoms[0].pos;
+    let mut max = atoms[0].pos;
 
-    for pos in positions {
-        min.x = min.x.min(pos.x);
-        min.y = min.y.min(pos.y);
-        min.z = min.z.min(pos.z);
-        max.x = max.x.max(pos.x);
-        max.y = max.y.max(pos.y);
-        max.z = max.z.max(pos.z);
+    for a in atoms {
+        min.x = min.x.min(a.pos.x);
+        min.y = min.y.min(a.pos.y);
+        min.z = min.z.min(a.pos.z);
+        max.x = max.x.max(a.pos.x);
+        max.y = max.y.max(a.pos.y);
+        max.z = max.z.max(a.pos.z);
     }
 
     Vec3::new(max.x - min.x, max.y - min.y, max.z - min.z)
@@ -336,19 +263,25 @@ fn main() {
 
     // Read solute coordinates
     eprintln!("Reading solute coordinates...");
-    let (mut solute_pos, solute_box) = match read_coords_with_box(&sb_args.pos) {
-        Ok(data) => data,
+    let (mut solute_atoms, solute_box) = match read_g96_labeled(&sb_args.pos) {
+        Ok(data) => {
+            let box_opt = if data.box_dims == Vec3::ZERO { None } else { Some(data.box_dims) };
+            (data.atoms, box_opt)
+        },
         Err(e) => {
             eprintln!("Error reading solute: {}", e);
             process::exit(1);
         },
     };
-    eprintln!("  Solute: {} atoms", solute_pos.len());
+    eprintln!("  Solute: {} atoms", solute_atoms.len());
 
     // Read solvent coordinates
     eprintln!("Reading solvent coordinates...");
-    let (solvent_pos_orig, solvent_box_opt) = match read_coords_with_box(&sb_args.solvent) {
-        Ok(data) => data,
+    let (solvent_atoms_orig, solvent_box_opt) = match read_g96_labeled(&sb_args.solvent) {
+        Ok(data) => {
+            let box_opt = if data.box_dims == Vec3::ZERO { None } else { Some(data.box_dims) };
+            (data.atoms, box_opt)
+        },
         Err(e) => {
             eprintln!("Error reading solvent: {}", e);
             process::exit(1);
@@ -364,7 +297,7 @@ fn main() {
     };
     eprintln!(
         "  Solvent: {} atoms in box ({:.3}, {:.3}, {:.3}) nm",
-        solvent_pos_orig.len(),
+        solvent_atoms_orig.len(),
         solvent_box.x,
         solvent_box.y,
         solvent_box.z
@@ -388,7 +321,7 @@ fn main() {
         }
     } else {
         // Calculate from solute extent + minwall
-        let extent = calc_max_extent(&solute_pos);
+        let extent = calc_max_extent(&solute_atoms);
         eprintln!(
             "  Solute extent: ({:.3}, {:.3}, {:.3}) nm",
             extent.x, extent.y, extent.z
@@ -423,9 +356,9 @@ fn main() {
     };
 
     // Move solute to center
-    let solute_cog = calc_cog(&solute_pos);
+    let solute_cog = calc_cog(&solute_atoms);
     let shift_to_origin = Vec3::ZERO - solute_cog;
-    shift_positions(&mut solute_pos, shift_to_origin);
+    shift_atoms(&mut solute_atoms, shift_to_origin);
     eprintln!("  Shifted solute to origin");
 
     // Calculate how many solvent boxes needed in each dimension
@@ -438,7 +371,7 @@ fn main() {
     eprintln!("  Need {} x {} x {} = {} boxes", nx, ny, nz, nx * ny * nz);
 
     // Replicate solvent boxes
-    let mut all_solvent = Vec::new();
+    let mut all_solvent: Vec<G96Atom> = Vec::new();
     let half_box = target_box * 0.5;
 
     // Center the replicated grid
@@ -454,8 +387,10 @@ fn main() {
                     start_y + iy as f64 * solvent_box.y,
                     start_z + iz as f64 * solvent_box.z,
                 );
-                for pos in &solvent_pos_orig {
-                    all_solvent.push(*pos + shift);
+                for atom in &solvent_atoms_orig {
+                    let mut shifted = atom.clone();
+                    shifted.pos = atom.pos + shift;
+                    all_solvent.push(shifted);
                 }
             }
         }
@@ -473,16 +408,16 @@ fn main() {
 
     // Filter solvent molecules
     eprintln!("Filtering solvent molecules...");
-    let mut kept_solvent = Vec::new();
+    let mut kept_solvent: Vec<G96Atom> = Vec::new();
     let thresh2 = sb_args.thresh * sb_args.thresh;
 
     for mol_idx in 0..num_molecules {
         let start_atom = mol_idx * atoms_per_molecule;
         let end_atom = start_atom + atoms_per_molecule;
-        let mol_positions = &all_solvent[start_atom..end_atom];
+        let mol_atoms = &all_solvent[start_atom..end_atom];
 
         // Calculate center of geometry of this solvent molecule
-        let mol_cog = calc_cog(mol_positions);
+        let mol_cog = calc_cog(mol_atoms);
 
         // Check if inside target box (rectangular PBC)
         if mol_cog.x.abs() > half_box.x
@@ -494,10 +429,10 @@ fn main() {
 
         // Check minimum distance to solute atoms
         let mut min_dist2 = f64::MAX;
-        for solute_atom in &solute_pos {
-            let dx = mol_cog.x - solute_atom.x;
-            let dy = mol_cog.y - solute_atom.y;
-            let dz = mol_cog.z - solute_atom.z;
+        for solute_atom in &solute_atoms {
+            let dx = mol_cog.x - solute_atom.pos.x;
+            let dy = mol_cog.y - solute_atom.pos.y;
+            let dz = mol_cog.z - solute_atom.pos.z;
             let dist2 = dx * dx + dy * dy + dz * dz;
             if dist2 < min_dist2 {
                 min_dist2 = dist2;
@@ -506,8 +441,8 @@ fn main() {
 
         // Keep if far enough from solute
         if min_dist2 > thresh2 {
-            for atom_pos in mol_positions {
-                kept_solvent.push(*atom_pos);
+            for atom in mol_atoms {
+                kept_solvent.push(atom.clone());
             }
         }
     }
@@ -524,16 +459,16 @@ fn main() {
     );
 
     // Combine solute and solvent
-    let mut final_positions = solute_pos.clone();
-    final_positions.extend(kept_solvent);
+    let mut final_atoms = solute_atoms.clone();
+    final_atoms.extend(kept_solvent);
 
     eprintln!();
     eprintln!("Final system:");
-    eprintln!("  Total atoms: {}", final_positions.len());
-    eprintln!("  Solute atoms: {}", solute_pos.len());
+    eprintln!("  Total atoms: {}", final_atoms.len());
+    eprintln!("  Solute atoms: {}", solute_atoms.len());
     eprintln!(
         "  Solvent atoms: {}",
-        final_positions.len() - solute_pos.len()
+        final_atoms.len() - solute_atoms.len()
     );
     eprintln!(
         "  Box: ({:.3}, {:.3}, {:.3}) nm",
@@ -542,22 +477,26 @@ fn main() {
     eprintln!();
 
     // Write to stdout
-    let title = format!(
+    println!("TITLE");
+    println!(
         "Solvated system: {} in {}\nBox: {:.3} x {:.3} x {:.3} nm",
         sb_args.pos, sb_args.solvent, target_box.x, target_box.y, target_box.z
     );
+    println!("END");
 
-    if let Err(e) = write_g96(
-        "/dev/stdout",
-        &title,
-        &final_positions,
-        None,
-        Some(target_box),
-        None,
-    ) {
-        eprintln!("Error writing output: {}", e);
-        process::exit(1);
+    println!("POSITION");
+    for (i, atom) in final_atoms.iter().enumerate() {
+        println!(
+            "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
+            atom.res_num, atom.res_name, atom.atom_name, i + 1,
+            atom.pos.x, atom.pos.y, atom.pos.z
+        );
     }
+    println!("END");
+
+    println!("BOX");
+    println!("{:15.9}{:15.9}{:15.9}", target_box.x, target_box.y, target_box.z);
+    println!("END");
 
     eprintln!("Done!");
 }
