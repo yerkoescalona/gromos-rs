@@ -148,5 +148,9 @@ name = "prep_noe"
 path = "src/bin/utilities/prep_noe.rs"
 
 [[bin]]
+name = "prep_posres"
+path = "src/bin/utilities/prep_posres.rs"
+
+[[bin]]
 name = "prep_xray"
 path = "src/bin/utilities/prep_xray.rs"

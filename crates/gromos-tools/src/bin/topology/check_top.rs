@@ -1,6 +1,7 @@
 //! check_top - Validate GROMOS topology file consistency
 //!
-//! Usage: check_top <input.top>
+//! Usage: check_top @topo <input.top> [@build <mtb>] [@param <ifp>]
+//!    or: check_top @f <argfile>
 //!
 //! Performs comprehensive checks on topology files:
 //! - Atom numbering and types
@@ -9,26 +10,30 @@
 //! - Exclusion consistency
 //! - Charge group validity
 
+use clap::Parser;
 use gromos::io::topology::{build_topology, read_topology_file};
 use gromos::topology::Topology;
-use std::env;
+use gromos_io::gromos_args;
 use std::process;
 
-fn print_usage() {
-    eprintln!("Usage: check_top <input.top>");
-    eprintln!();
-    eprintln!("Validate GROMOS topology file consistency");
-    eprintln!();
-    eprintln!("Arguments:");
-    eprintln!("  input.top    Input topology file to check");
-    eprintln!();
-    eprintln!("Checks performed:");
-    eprintln!("  - Atom numbering and indices");
-    eprintln!("  - Bond/angle/dihedral validity");
-    eprintln!("  - Force field parameter references");
-    eprintln!("  - Exclusion list consistency");
-    eprintln!("  - Charge neutrality warnings");
+/// Validate GROMOS topology file consistency.
+#[derive(Parser)]
+#[command(name = "check_top", version, about)]
+struct Args {
+    /// Topology file to check
+    #[arg(long)]
+    topo: String,
+
+    /// Building block (MTB) file for cross-validation (optional)
+    #[arg(long)]
+    build: Option<String>,
+
+    /// Force field parameter (IFP) file for cross-validation (optional)
+    #[arg(long)]
+    param: Option<String>,
 }
+
+
 
 struct TopologyChecker {
     warnings: Vec<String>,
@@ -517,19 +522,12 @@ impl TopologyChecker {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args = Args::parse_from(gromos_args());
 
-    if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
-        print_usage();
-        process::exit(if args.len() < 2 { 1 } else { 0 });
-    }
-
-    let input_file = &args[1];
-
-    println!("Checking topology file: {}\n", input_file);
+    eprintln!("Checking topology file: {}\n", args.topo);
 
     // Read topology
-    let topo = match read_topology_file(input_file) {
+    let topo = match read_topology_file(&args.topo) {
         Ok(parsed) => {
             println!("Successfully parsed topology file\n");
             build_topology(parsed)
