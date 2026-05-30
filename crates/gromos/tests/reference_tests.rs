@@ -28,12 +28,12 @@ fn init_logging() {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Path to gromosXX_references (in gromos-cli/tests/)
+/// Path to gromosXX_references (in gromos-md/tests/)
 fn ref_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("gromos-cli/tests/gromosXX_references")
+        .join("gromos-md/tests/gromosXX_references")
 }
 
 /// Parse the FREEFORCERED block from forces.trf at a given step

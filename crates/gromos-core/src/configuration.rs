@@ -148,12 +148,12 @@ impl Energy {
         }
     }
 
-    /// Total energy (kinetic + potential)
+    /// Total energy (kinetic + potential + special)
     pub fn total(&self) -> f64 {
-        self.kinetic_total + self.potential_total
+        self.kinetic_total + self.potential_total + self.special_total
     }
 
-    /// Update potential total from components
+    /// Update potential total from components (bonded + nonbonded, without special)
     pub fn update_potential_total(&mut self) {
         self.potential_total = self.bond_total
             + self.angle_total
@@ -163,7 +163,6 @@ impl Energy {
             + self.lj_total
             + self.crf_total
             + self.ls_total
-            + self.special_total
             + self.sasa_total;
     }
 
