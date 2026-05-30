@@ -34,20 +34,18 @@ impl PositionRestraint {
 
     /// Calculate restraint energy and forces
     pub fn calculate(&self, conf: &mut Configuration, periodicity: &Periodicity) -> f64 {
-        // Get displacement vector using periodic boundary conditions
-        // nearest_image returns (reference - current), but we need (current - reference)
-        let displacement =
-            periodicity.nearest_image(self.reference_pos, conf.current().pos[self.atom]);
+        // nearest_image(ri, rj) returns ri - rj
+        // v = pos - ref (same as gromosXX)
+        let v =
+            periodicity.nearest_image(conf.current().pos[self.atom], self.reference_pos);
 
-        let dist_sq = displacement.length_squared();
-        let dist = (dist_sq).sqrt();
+        let dist_sq = v.length_squared();
 
         // Energy: 0.5 * k * r²
         let energy = 0.5 * self.force_constant * dist_sq;
 
-        // Force: F = -k * (r - r0) = -k * displacement
-        let force_magnitude = -self.force_constant;
-        let force = displacement * (force_magnitude);
+        // Force: F = -k * (pos - ref)
+        let force = v * (-self.force_constant);
 
         conf.current_mut().force[self.atom] += force;
 
