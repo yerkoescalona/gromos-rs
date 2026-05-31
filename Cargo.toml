@@ -27,7 +27,6 @@ gromos-forces = { path = "crates/gromos-forces" }
 gromos-integrators = { path = "crates/gromos-integrators" }
 gromos-io = { path = "crates/gromos-io" }
 gromos-analysis = { path = "crates/gromos-analysis" }
-gromos-cli = { path = "crates/gromos-cli" }
 gromos-md = { path = "crates/gromos-md" }
 gromos-tools = { path = "crates/gromos-tools" }
 # Facade crate that re-exports everything

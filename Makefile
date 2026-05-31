@@ -58,7 +58,7 @@ test-rust: ## Run Rust tests
 
 .PHONY: test-references
 test-references: ## Run gromosXX reference tests
-	cargo test -p gromos-cli --test test_gromosXX_references
+	cargo test -p gromos-md --test test_gromosXX_references
 
 .PHONY: test-python
 test-python: build-python ## Run Python tests

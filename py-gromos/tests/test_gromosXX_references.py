@@ -23,7 +23,7 @@ from gromos import Configuration, InputParameters, Simulation, Topology
 
 # Paths
 REPO_ROOT = Path(__file__).parent.parent.parent
-REF_DIR = REPO_ROOT / "crates" / "gromos-cli" / "tests" / "gromosXX_references"
+REF_DIR = REPO_ROOT / "crates" / "gromos-md" / "tests" / "gromosXX_references"
 
 # Tolerances (same as Rust tests)
 ENERGY_REL_TOL = 1e-8
