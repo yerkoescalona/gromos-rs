@@ -125,7 +125,7 @@ opt-level = 3                    # Optimize proc-macros (syn, quote)
 
 [profile.release]
 opt-level = 3
-lto = "thin"                     # Balance: good optimization, reasonable compile
+lto = "fat"                      # Full cross-crate inlining (innerloop in gromos-forces → forcefield)
 codegen-units = 1                # Best runtime performance
 strip = "symbols"
 panic = "abort"

@@ -262,7 +262,11 @@ fn run_reference(system: &str) {
         cmd.arg("@refpos").arg(sys_dir.join(rpr));
     }
 
+    let t0 = std::time::Instant::now();
     let result = cmd.output().expect("failed to execute md");
+    let elapsed = t0.elapsed();
+
+    eprintln!("  {system}: {:.3}ms", elapsed.as_secs_f64() * 1000.0);
 
     assert!(
         result.status.success(),

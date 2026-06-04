@@ -4,7 +4,7 @@ use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
 
-use crate::constraints::{shake, shake_positions, shake_velocities, ShakeParameters};
+use crate::constraints::{shake, shake_buffered, shake_positions, shake_velocities, ShakeBuffers, ShakeParameters};
 
 /// SHAKE constraint algorithm for the MD sequence.
 ///
@@ -16,6 +16,8 @@ pub struct ShakeAlgorithm {
     pub shake_initial_positions: bool,
     /// Whether to shake initial velocities on init (gromosXX: sim.param().start.shake_vel)
     pub shake_initial_velocities: bool,
+    /// Precomputed constraint data and reusable buffers (initialized in init())
+    buffers: Option<ShakeBuffers>,
 }
 
 impl ShakeAlgorithm {
@@ -24,6 +26,7 @@ impl ShakeAlgorithm {
             params,
             shake_initial_positions: false,
             shake_initial_velocities: false,
+            buffers: None,
         }
     }
 }
@@ -35,6 +38,9 @@ impl Algorithm for ShakeAlgorithm {
         conf: &mut Configuration,
         sim: &SimulationState,
     ) -> Result<(), String> {
+        // Precompute constraint lists and allocate reusable buffers
+        self.buffers = Some(ShakeBuffers::new(topo, self.params.ntc));
+
         if self.shake_initial_positions {
             log::info!("SHAKE: shaking initial positions");
             let result = shake_positions(topo, conf, sim.dt, &self.params);
@@ -65,7 +71,12 @@ impl Algorithm for ShakeAlgorithm {
         conf: &mut Configuration,
         sim: &SimulationState,
     ) -> Result<(), String> {
-        let result = shake(topo, conf, sim.dt, &self.params);
+        let result = if let Some(ref mut buffers) = self.buffers {
+            shake_buffered(topo, conf, sim.dt, &self.params, buffers)
+        } else {
+            // Fallback if init() wasn't called (shouldn't happen in normal flow)
+            shake(topo, conf, sim.dt, &self.params)
+        };
         if result.converged {
             Ok(())
         } else {

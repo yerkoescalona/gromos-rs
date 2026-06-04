@@ -260,6 +260,7 @@ fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
 }
 
 fn main() {
+    let t_total = Instant::now();
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
@@ -760,6 +761,7 @@ fn main() {
         forcefield.ntf_angle = ntf_angle;
         forcefield.ntf_improper = ntf_improper;
         forcefield.ntf_dihedral = ntf_dihedral;
+        forcefield.parallel_nonbonded = topo.num_atoms() > 100;
         if !topo.solvent_atom_template.is_empty() {
             forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
         }
@@ -821,6 +823,7 @@ fn main() {
         forcefield.ntf_angle = ntf_angle;
         forcefield.ntf_improper = ntf_improper;
         forcefield.ntf_dihedral = ntf_dihedral;
+        forcefield.parallel_nonbonded = topo.num_atoms() > 100;
         if !topo.solvent_atom_template.is_empty() {
             forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
         }
@@ -1135,6 +1138,8 @@ fn main() {
     }
 
     let start_time = Instant::now();
+    let init_elapsed = t_total.elapsed();
+    log::info!("Initialization wall time: {:.3} s", init_elapsed.as_secs_f64());
     let mut energy_history: Vec<(f64, f64, f64)> = Vec::new();
     let mut minimization_converged = false;
     let mut prev_min_energy = f64::MAX;
@@ -1521,7 +1526,10 @@ fn main() {
     }
 
     let elapsed = start_time.elapsed();
+    let total_elapsed = t_total.elapsed();
     log::info!("Simulation wall time: {:.2} s", elapsed.as_secs_f64());
+    log::info!("Total wall time: {:.3} s (init: {:.3} s, sim: {:.3} s)",
+        total_elapsed.as_secs_f64(), init_elapsed.as_secs_f64(), elapsed.as_secs_f64());
 
     println!();
     println!("╔══════════════════════════════════════════════════════════════╗");

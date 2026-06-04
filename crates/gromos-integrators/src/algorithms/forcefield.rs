@@ -14,8 +14,14 @@ use gromos_core::topology::Topology;
 
 use gromos_forces::bonded::calculate_bonded_forces_ntf;
 use gromos_forces::nonbonded::{
-    lj_crf_innerloop, one_four_interaction_loop, rf_excluded_interactions, solvent_innerloop,
-    CRFParameters, ForceStorage, LJParameters,
+    lj_crf_innerloop, lj_crf_innerloop_novirial,
+    lj_crf_innerloop_parallel, lj_crf_innerloop_parallel_novirial,
+    lj_crf_innerloop_cg_grouped, lj_crf_innerloop_cg_grouped_novirial,
+    lj_crf_innerloop_cg_grouped_parallel, lj_crf_innerloop_cg_grouped_parallel_novirial,
+    one_four_interaction_loop, rf_excluded_interactions,
+    solvent_innerloop, solvent_innerloop_novirial,
+    solvent_innerloop_parallel, solvent_innerloop_parallel_novirial,
+    CGPairGroup, CRFParameters, ForceStorage, LJParamMatrix, LJParameters,
 };
 use gromos_forces::restraints::PositionRestraints;
 
@@ -26,8 +32,8 @@ use crate::algorithms::pressure_calculation::VirialType;
 /// Owns all the nonbonded interaction parameters and pairlist state.
 /// After `apply()`, `conf.current()` has updated forces and potential energies.
 pub struct Forcefield {
-    /// Lennard-Jones parameter matrix [type_i][type_j]
-    pub lj_params: Vec<Vec<LJParameters>>,
+    /// Flat Lennard-Jones parameter matrix (cache-friendly contiguous layout)
+    pub lj_params: LJParamMatrix,
     /// Coulomb reaction field parameters
     pub crf_params: CRFParameters,
     /// Boundary conditions
@@ -53,6 +59,8 @@ pub struct Forcefield {
     nonbonded_storage: ForceStorage,
     /// Cached solute pairlist in (u32, u32) format
     pairlist_solute_u32: Vec<(u32, u32)>,
+    /// CG-pair group metadata for the solute shortrange pairlist
+    solute_cg_groups: Vec<CGPairGroup>,
     /// Cached solvent pairlist in (u32, u32) format
     pairlist_solvent_u32: Vec<(u32, u32)>,
     /// Cached long-range solute pairlist (u32, u32)
@@ -76,6 +84,8 @@ pub struct Forcefield {
     twin_range_active: bool,
     /// Whether long-range forces have been computed at least once
     longrange_computed: bool,
+    /// Whether CG-grouped solute innerloop is safe (box large enough relative to cutoff + CG size)
+    use_cg_grouped_solute: bool,
     /// Position restraints (empty = none)
     pub position_restraints: PositionRestraints,
 }
@@ -90,7 +100,7 @@ impl Forcefield {
     ) -> Self {
         let twin_range_active = pairlist.short_range_cutoff < pairlist.long_range_cutoff - 1e-10;
         Self {
-            lj_params,
+            lj_params: LJParamMatrix::from_nested(&lj_params),
             crf_params,
             periodicity,
             pairlist,
@@ -105,6 +115,7 @@ impl Forcefield {
             virial_type: VirialType::None,
             nonbonded_storage: ForceStorage::new(0),
             pairlist_solute_u32: Vec::new(),
+            solute_cg_groups: Vec::new(),
             pairlist_solvent_u32: Vec::new(),
             pairlist_solute_long_u32: Vec::new(),
             pairlist_solvent_long_u32: Vec::new(),
@@ -116,6 +127,7 @@ impl Forcefield {
             longrange_virial: [[0.0; 3]; 3],
             twin_range_active,
             longrange_computed: false,
+            use_cg_grouped_solute: false, // computed at init when box size is known
             position_restraints: PositionRestraints::new(),
         }
     }
@@ -184,6 +196,23 @@ impl Algorithm for Forcefield {
             }
         }
 
+        // Determine if CG-grouped solute innerloop is safe for this box.
+        // Safety condition: half_box_min > cutoff_long + max_cg_diameter
+        // When this fails, atom pairs near the half-box boundary can get
+        // different periodic image rounding than their CG reference atoms.
+        let cg_data_available = topo.atom_to_chargegroup.len() == topo.num_atoms()
+            && !topo.chargegroups.is_empty();
+        self.use_cg_grouped_solute = cg_data_available && match &self.periodicity {
+            Periodicity::Vacuum(_) => true, // no PBC → shift is always 0, safe
+            Periodicity::Rectangular(rect) => {
+                let half_min = rect.half_box.x.min(rect.half_box.y).min(rect.half_box.z);
+                let cutoff = self.pairlist.long_range_cutoff + self.pairlist.skin;
+                // Conservative CG diameter estimate (0.3nm covers water + most molecular CGs)
+                half_min > cutoff + 0.3
+            }
+            Periodicity::Triclinic(_) => false, // be conservative for triclinic
+        };
+
         // --- prepare_virial: compute kinetic energy tensor (gromosXX: before force calc) ---
         // Uses current velocities and positions; stored in current().kinetic_energy_tensor
         if self.virial_type != VirialType::None {
@@ -198,44 +227,88 @@ impl Algorithm for Forcefield {
         // --- 1. Update pairlist if needed ---
         let pairlist_updated = self.pairlist.needs_update();
         if pairlist_updated {
+            let t_pl = std::time::Instant::now();
             self.pairlist_algorithm
                 .update(topo, conf, &mut self.pairlist, &self.periodicity);
+            log::trace!("    pairlist update: {:.3} ms", t_pl.elapsed().as_secs_f64() * 1000.0);
         }
         self.pairlist.step();
 
-        // Cache short-range solute pairlist as (u32, u32)
-        self.pairlist_solute_u32.clear();
-        self.pairlist_solute_u32.extend(
-            self.pairlist
-                .solute_short
-                .iter()
-                .map(|&(i, j)| (i as u32, j as u32)),
-        );
+        // Cache short-range solute pairlist as (u32, u32) — only on pairlist update or first call
+        if pairlist_updated || self.pairlist_solute_u32.is_empty() {
+            self.pairlist_solute_u32.clear();
+            self.pairlist_solute_u32.extend(
+                self.pairlist
+                    .solute_short
+                    .iter()
+                    .map(|&(i, j)| (i as u32, j as u32)),
+            );
 
-        // Cache short-range solvent pairlist as (u32, u32)
-        self.pairlist_solvent_u32.clear();
-        self.pairlist_solvent_u32.extend(
-            self.pairlist
-                .solvent_short
-                .iter()
-                .map(|&(i, j)| (i as u32, j as u32)),
-        );
+            // Build CG-pair group metadata only if we'll use the CG-grouped kernel.
+            self.solute_cg_groups.clear();
+            if self.use_cg_grouped_solute && !self.pairlist_solute_u32.is_empty() {
+                let atom_to_cg = &topo.atom_to_chargegroup;
+                let mut start = 0u32;
+                let (first_i, first_j) = self.pairlist_solute_u32[0];
+                let mut cur_cg_i = atom_to_cg[first_i as usize];
+                let mut cur_cg_j = atom_to_cg[first_j as usize];
+                let mut ref_atom_i = topo.chargegroups[cur_cg_i].atoms[0] as u32;
+                let mut ref_atom_j = topo.chargegroups[cur_cg_j].atoms[0] as u32;
 
-        // Cache long-range pairlists
-        self.pairlist_solute_long_u32.clear();
-        self.pairlist_solute_long_u32.extend(
-            self.pairlist
-                .solute_long
-                .iter()
-                .map(|&(i, j)| (i as u32, j as u32)),
-        );
-        self.pairlist_solvent_long_u32.clear();
-        self.pairlist_solvent_long_u32.extend(
-            self.pairlist
-                .solvent_long
-                .iter()
-                .map(|&(i, j)| (i as u32, j as u32)),
-        );
+                for idx in 1..self.pairlist_solute_u32.len() {
+                    let (ii, jj) = self.pairlist_solute_u32[idx];
+                    let cg_i = atom_to_cg[ii as usize];
+                    let cg_j = atom_to_cg[jj as usize];
+                    if cg_i != cur_cg_i || cg_j != cur_cg_j {
+                        // Close current group
+                        self.solute_cg_groups.push(CGPairGroup {
+                            ref_atom_i,
+                            ref_atom_j,
+                            start,
+                            end: idx as u32,
+                        });
+                        // Start new group
+                        start = idx as u32;
+                        cur_cg_i = cg_i;
+                        cur_cg_j = cg_j;
+                        ref_atom_i = topo.chargegroups[cg_i].atoms[0] as u32;
+                        ref_atom_j = topo.chargegroups[cg_j].atoms[0] as u32;
+                    }
+                }
+                // Close final group
+                self.solute_cg_groups.push(CGPairGroup {
+                    ref_atom_i,
+                    ref_atom_j,
+                    start,
+                    end: self.pairlist_solute_u32.len() as u32,
+                });
+            }
+
+            // Cache short-range solvent pairlist as (u32, u32)
+            self.pairlist_solvent_u32.clear();
+            self.pairlist_solvent_u32.extend(
+                self.pairlist
+                    .solvent_short
+                    .iter()
+                    .map(|&(i, j)| (i as u32, j as u32)),
+            );
+
+            // Cache long-range pairlists
+            self.pairlist_solute_long_u32.clear();
+            self.pairlist_solute_long_u32.extend(
+                self.pairlist
+                    .solute_long
+                    .iter()
+                    .map(|&(i, j)| (i as u32, j as u32)),
+            );
+            self.pairlist_solvent_long_u32.clear();
+            self.pairlist_solvent_long_u32.extend(
+                self.pairlist
+                    .solvent_long
+                    .iter()
+                    .map(|&(i, j)| (i as u32, j as u32)),
+            );
+        }
 
         // --- 2. Calculate bonded forces (conditional on NTF flags) ---
         let any_bonded = self.ntf_bond || self.ntf_angle || self.ntf_improper || self.ntf_dihedral;
@@ -250,36 +323,177 @@ impl Algorithm for Forcefield {
 
         // --- 3. Calculate nonbonded forces ---
         self.nonbonded_storage.clear();
+        let need_virial = self.virial_type != VirialType::None;
 
-        // Short-range solute interactions (with HEAVISIDE truncation)
-        lj_crf_innerloop(
-            &conf.current().pos,
-            &self.charges,
-            &self.iac_u32,
-            &self.pairlist_solute_u32,
-            &self.lj_params,
-            &self.crf_params,
-            &self.periodicity,
-            &mut self.nonbonded_storage,
-        );
+        // Short-range solute interactions
+        let t_solute = std::time::Instant::now();
+        if self.use_cg_grouped_solute {
+            // CG-grouped: compute nearest_image once per CG pair (fast path for large boxes)
+            if self.parallel_nonbonded {
+                let result = if need_virial {
+                    lj_crf_innerloop_cg_grouped_parallel(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solute_u32,
+                        &self.solute_cg_groups,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        n_atoms,
+                    )
+                } else {
+                    lj_crf_innerloop_cg_grouped_parallel_novirial(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solute_u32,
+                        &self.solute_cg_groups,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        n_atoms,
+                    )
+                };
+                self.nonbonded_storage.merge(&result);
+            } else if need_virial {
+                lj_crf_innerloop_cg_grouped(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solute_u32,
+                    &self.solute_cg_groups,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    &mut self.nonbonded_storage,
+                );
+            } else {
+                lj_crf_innerloop_cg_grouped_novirial(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solute_u32,
+                    &self.solute_cg_groups,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    &mut self.nonbonded_storage,
+                );
+            }
+        } else {
+            // Per-atom nearest_image fallback (exact, for small boxes)
+            if self.parallel_nonbonded {
+                let result = if need_virial {
+                    lj_crf_innerloop_parallel(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solute_u32,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        n_atoms,
+                    )
+                } else {
+                    lj_crf_innerloop_parallel_novirial(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solute_u32,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        n_atoms,
+                    )
+                };
+                self.nonbonded_storage.merge(&result);
+            } else if need_virial {
+                lj_crf_innerloop(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solute_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    &mut self.nonbonded_storage,
+                );
+            } else {
+                lj_crf_innerloop_novirial(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solute_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    &mut self.nonbonded_storage,
+                );
+            }
+        }
         let e_lj_after_solute = self.nonbonded_storage.e_lj;
         let e_crf_after_solute = self.nonbonded_storage.e_crf;
+        log::trace!("    solute forces: {:.3} ms ({} pairs)", t_solute.elapsed().as_secs_f64() * 1000.0, self.pairlist_solute_u32.len());
         log::debug!("  After solute innerloop: e_lj={:.10e}, e_crf={:.10e}", e_lj_after_solute, e_crf_after_solute);
 
-        // Short-range solvent-solvent interactions (shared PBC shift, no HEAVISIDE)
+        // Short-range solvent-solvent interactions (shared PBC shift)
+        let t_solvent = std::time::Instant::now();
         if !self.pairlist_solvent_u32.is_empty() {
-            solvent_innerloop(
-                &conf.current().pos,
-                &self.charges,
-                &self.iac_u32,
-                &self.pairlist_solvent_u32,
-                &self.lj_params,
-                &self.crf_params,
-                &self.periodicity,
-                self.atoms_per_solvent,
-                &mut self.nonbonded_storage,
-            );
+            if self.parallel_nonbonded {
+                let result = if need_virial {
+                    solvent_innerloop_parallel(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solvent_u32,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        self.atoms_per_solvent,
+                        n_atoms,
+                    )
+                } else {
+                    solvent_innerloop_parallel_novirial(
+                        &conf.current().pos,
+                        &self.charges,
+                        &self.iac_u32,
+                        &self.pairlist_solvent_u32,
+                        &self.lj_params,
+                        &self.crf_params,
+                        &self.periodicity,
+                        self.atoms_per_solvent,
+                        n_atoms,
+                    )
+                };
+                self.nonbonded_storage.merge(&result);
+            } else if need_virial {
+                solvent_innerloop(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solvent_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    self.atoms_per_solvent,
+                    &mut self.nonbonded_storage,
+                );
+            } else {
+                solvent_innerloop_novirial(
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.pairlist_solvent_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &self.periodicity,
+                    self.atoms_per_solvent,
+                    &mut self.nonbonded_storage,
+                );
+            }
         }
+        log::trace!("    solvent forces: {:.3} ms ({} pairs)", t_solvent.elapsed().as_secs_f64() * 1000.0, self.pairlist_solvent_u32.len());
         let e_lj_after_solvent = self.nonbonded_storage.e_lj;
         let e_crf_after_solvent = self.nonbonded_storage.e_crf;
         log::debug!("  After solvent innerloop: e_lj={:.10e}, e_crf={:.10e} (delta_lj={:.10e}, delta_crf={:.10e})",
@@ -609,8 +823,7 @@ mod tests {
         topo.iac = vec![0, 0];
 
         // Exclusions: neither atom excludes the other
-        use std::collections::HashSet;
-        topo.exclusions = vec![HashSet::new(), HashSet::new()];
+        topo.exclusions = vec![Vec::new(), Vec::new()];
 
         // LJ parameter matrix (1x1 for single atom type)
         let lj = LJParameters { c6: 6.2647e-3, c12: 9.847e-6, cs6: 6.2647e-3, cs12: 9.847e-6 };

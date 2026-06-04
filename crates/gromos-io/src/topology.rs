@@ -977,13 +977,13 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     }
 
     // --- Initialize exclusions for solute atoms ---
-    topo.exclusions = vec![std::collections::HashSet::new(); n_solute];
+    topo.exclusions = vec![Vec::new(); n_solute];
 
     for (i, excl_list) in parsed.exclusions.iter().enumerate() {
         for &j in excl_list {
-            topo.exclusions[i].insert(j);
+            topo.exclusions[i].push(j);
             if j < n_solute {
-                topo.exclusions[j].insert(i);
+                topo.exclusions[j].push(i);
             }
         }
     }
@@ -1002,8 +1002,8 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // Build bonds
     for (i, j, bond_type) in parsed.bonds {
         topo.solute.bonds.push(Bond { i, j, bond_type });
-        topo.exclusions[i].insert(j);
-        topo.exclusions[j].insert(i);
+        topo.exclusions[i].push(j);
+        topo.exclusions[j].push(i);
     }
 
     topo.bond_parameters = parsed.bond_parameters;
@@ -1013,8 +1013,8 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         topo.solute.angles.push(Angle {
             i, j, k, angle_type,
         });
-        topo.exclusions[i].insert(k);
-        topo.exclusions[k].insert(i);
+        topo.exclusions[i].push(k);
+        topo.exclusions[k].push(i);
     }
 
     topo.angle_parameters = parsed.angle_parameters;
@@ -1070,6 +1070,12 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
             topo.pressure_groups.push(0..n_solute);
             log::debug!("Default pressure group: all {} solute atoms", n_solute);
         }
+    }
+
+    // Sort and deduplicate exclusions for fast binary_search lookups
+    for excl in &mut topo.exclusions {
+        excl.sort_unstable();
+        excl.dedup();
     }
 
     topo

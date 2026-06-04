@@ -765,9 +765,6 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         result.energy += energy;
         result.forces[dihedral.i] += f_i;
         result.forces[dihedral.j] += f_j;
-        result.energy += energy;
-        result.forces[dihedral.i] += f_i;
-        result.forces[dihedral.j] += f_j;
         result.forces[dihedral.k] += f_k;
         result.forces[dihedral.l] += f_l;
 
@@ -1955,10 +1952,10 @@ mod tests {
             expected_energy
         );
 
-        // Check force magnitude (should be attractive = negative x-direction on atom 0)
+        // Check force magnitude (should be attractive = positive x-direction on atom 0, toward atom 1 at x=0.20)
         assert!(
-            result.forces[0].x < 0.0,
-            "Force should be attractive (negative x)"
+            result.forces[0].x > 0.0,
+            "Force should be attractive (positive x, toward atom 1)"
         );
         assert!(
             (result.forces[0].length() - expected_force_mag).abs() < 1e-5,

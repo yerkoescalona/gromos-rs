@@ -35,5 +35,5 @@ pub use bonded::{
     calculate_dihedral_forces, calculate_improper_dihedral_forces,
 };
 pub use nonbonded::{
-    LJParameters, CRFParameters, ForceStorage, lj_crf_interaction,
+    LJParameters, LJParamMatrix, CRFParameters, ForceStorage, lj_crf_interaction,
 };

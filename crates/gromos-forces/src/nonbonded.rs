@@ -19,6 +19,40 @@ impl From<&gromos_core::topology::LJParameters> for LJParameters {
     }
 }
 
+/// Flat LJ parameter matrix for cache-friendly access.
+///
+/// Stores parameters in a contiguous array indexed as `[type_i * n_types + type_j]`.
+/// Eliminates the double indirection of `Vec<Vec<LJParameters>>`.
+#[derive(Debug, Clone)]
+pub struct LJParamMatrix {
+    data: Vec<LJParameters>,
+    n_types: usize,
+}
+
+impl LJParamMatrix {
+    /// Create from a nested Vec (converts from legacy format).
+    pub fn from_nested(nested: &[Vec<LJParameters>]) -> Self {
+        let n_types = nested.len();
+        let mut data = Vec::with_capacity(n_types * n_types);
+        for row in nested {
+            assert_eq!(row.len(), n_types, "LJ parameter matrix must be square");
+            data.extend_from_slice(row);
+        }
+        Self { data, n_types }
+    }
+
+    /// Get parameters for atom type pair (i, j).
+    #[inline(always)]
+    pub fn get(&self, type_i: usize, type_j: usize) -> LJParameters {
+        unsafe { *self.data.get_unchecked(type_i * self.n_types + type_j) }
+    }
+
+    /// Number of atom types.
+    pub fn n_types(&self) -> usize {
+        self.n_types
+    }
+}
+
 /// Coulomb constant: 1/(4*pi*eps0) in GROMOS units [kJ*nm/(mol*e^2)]
 pub const FOUR_PI_EPS_I: f64 = 138.9354;
 
@@ -93,7 +127,7 @@ impl CRFParameters {
 ///   Only energy: `E = -qi*qj * FPEPSI * crf_2cut3i * r²` (distance-dependent part only)
 pub fn rf_excluded_interactions<BC: BoundaryCondition>(
     charges: &[f64],
-    exclusions: &[std::collections::HashSet<usize>],
+    exclusions: &[Vec<usize>],
     positions: &[Vec3],
     crf: &CRFParameters,
     boundary: &BC,
@@ -188,7 +222,7 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
     positions: &[Vec3],
     charges: &[f64],
     iac: &[u32],
-    lj_params: &[Vec<LJParameters>],
+    lj_params: &LJParamMatrix,
     crf: &CRFParameters,
     boundary: &BC,
     storage: &mut ForceStorage,
@@ -214,7 +248,7 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
 
             let type_i = iac[i] as usize;
             let type_j = iac[j] as usize;
-            let lj = &lj_params[type_i][type_j];
+            let lj = lj_params.get(type_i, type_j);
 
             let inv_r2 = 1.0 / r2;
             let inv_r6 = inv_r2 * inv_r2 * inv_r2;
@@ -280,6 +314,20 @@ impl ForceStorage {
         self.e_lj = 0.0;
         self.e_crf = 0.0;
         self.virial = [[0.0; 3]; 3];
+    }
+
+    /// Accumulate another ForceStorage into this one (thread-local reduction).
+    pub fn merge(&mut self, other: &ForceStorage) {
+        for (dst, src) in self.forces.iter_mut().zip(other.forces.iter()) {
+            *dst += *src;
+        }
+        self.e_lj += other.e_lj;
+        self.e_crf += other.e_crf;
+        for a in 0..3 {
+            for b in 0..3 {
+                self.virial[a][b] += other.virial[a][b];
+            }
+        }
     }
 }
 
@@ -377,87 +425,183 @@ pub fn lj_crf_interaction_simd_x4(
     (force_array, e_lj_array, e_crf_array)
 }
 
-/// Inner loop for nonbonded interactions (solute-solute and solute-solvent).
+/// A group of atom pairs sharing the same PBC shift (same charge-group pair).
 ///
-/// This is the hottest function in MD simulations!
-/// Processes pairlist and accumulates forces, energies, and virial.
-/// Applies HEAVISIDE truncation: if atom-atom dist² > cutoff², skip the pair.
-/// (gromosXX XXHEAVISIDE in nonbonded_term.cc)
-pub fn lj_crf_innerloop<BC: BoundaryCondition>(
+/// The `ref_atom_i` and `ref_atom_j` are used to compute nearest_image once;
+/// all atom pairs in the group then use the resulting shift offset.
+#[derive(Debug, Clone, Copy)]
+pub struct CGPairGroup {
+    /// Reference atom from CG i (typically first atom in the CG)
+    pub ref_atom_i: u32,
+    /// Reference atom from CG j (typically first atom in the CG)
+    pub ref_atom_j: u32,
+    /// Start index into the flat pair array
+    pub start: u32,
+    /// End index (exclusive) into the flat pair array
+    pub end: u32,
+}
+
+/// CG-grouped kernel: compute nearest_image once per charge-group pair,
+/// then process all atom pairs in that group using simple subtraction + shift.
+///
+/// This eliminates per-atom-pair nearest_image calls (expensive floor/branch ops)
+/// and replaces them with cheap additions. For 3-atom CGs (water), this is ~3x fewer
+/// nearest_image calls.
+#[inline]
+fn process_pairs_cg_grouped<BC: BoundaryCondition, const VIRIAL: bool>(
+    pairs: &[(u32, u32)],
+    groups: &[CGPairGroup],
     positions: &[Vec3],
     charges: &[f64],
-    iac: &[u32], // Integer atom codes (atom types)
-    pairlist: &[(u32, u32)],
-    lj_params: &[Vec<LJParameters>],
+    iac: &[u32],
+    lj_params: &LJParamMatrix,
     crf: &CRFParameters,
     periodicity: &BC,
     storage: &mut ForceStorage,
 ) {
-    // Serial version (baseline)
-    for &(i, j) in pairlist {
-        let i = i as usize;
-        let j = j as usize;
+    for group in groups {
+        let ri = positions[group.ref_atom_i as usize];
+        let rj = positions[group.ref_atom_j as usize];
 
-        // Get positions
-        let pos_i = positions[i];
-        let pos_j = positions[j];
+        // Compute nearest_image ONCE for the CG pair reference atoms
+        let r_ref = periodicity.nearest_image(ri, rj);
+        // Extract the PBC shift (same pattern as solvent innerloop)
+        let tx = r_ref.x - ri.x + rj.x;
+        let ty = r_ref.y - ri.y + rj.y;
+        let tz = r_ref.z - ri.z + rj.z;
 
-        // Apply periodic boundary conditions
-        let r = periodicity.nearest_image(pos_i, pos_j);
+        // Process all atom pairs in this group using the shared shift
+        let block = &pairs[group.start as usize..group.end as usize];
+        for &(ii, jj) in block {
+            let i = ii as usize;
+            let j = jj as usize;
 
-        // Note: HEAVISIDE truncation disabled to match gromosXX built with
-        // #undef XXHEAVISIDE (default). Pairs beyond cutoff still get evaluated
-        // via the CRF formula; the chargegroup pairlist already filters by cutoff.
-        let r2 = r.length_squared();
+            // r = (pos_i + shift) - pos_j (same as solvent innerloop pattern)
+            let r = Vec3::new(
+                positions[i].x + tx - positions[j].x,
+                positions[i].y + ty - positions[j].y,
+                positions[i].z + tz - positions[j].z,
+            );
 
-        // Get interaction parameters
-        let type_i = iac[i] as usize;
-        let type_j = iac[j] as usize;
-        let lj = lj_params[type_i][type_j];
+            let type_i = iac[i] as usize;
+            let type_j = iac[j] as usize;
+            let lj = lj_params.get(type_i, type_j);
+            let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
 
-        let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
+            let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
 
-        // Calculate interaction
-        let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
+            let force = r * f_mag;
+            storage.forces[i] += force;
+            storage.forces[j] -= force;
 
-        // Accumulate forces
-        let force = r * f_mag;
-        storage.forces[i] += force;
-        storage.forces[j] -= force;
+            storage.e_lj += e_lj;
+            storage.e_crf += e_crf;
 
-        // Accumulate energies
-        storage.e_lj += e_lj;
-        storage.e_crf += e_crf;
-
-        // Accumulate virial: gromosXX convention virial_tensor(b, a) += r(b) * force(a)
-        for a in 0..3 {
-            for b in 0..3 {
-                storage.virial[a][b] += r[a] * force[b];
+            if VIRIAL {
+                let r = [r.x, r.y, r.z];
+                let f = [force.x, force.y, force.z];
+                for a in 0..3 {
+                    for b in 0..3 {
+                        storage.virial[a][b] += r[a] * f[b];
+                    }
+                }
             }
         }
     }
 }
 
-/// Solvent-solvent innerloop with shared PBC shift (gromosXX convention).
+/// Shared kernel: process a slice of atom pairs into a ForceStorage.
 ///
-/// For each solvent-solvent CG pair, the PBC shift is computed once from
-/// the first atoms (typically O-O for water) and reused for all atom pairs.
-/// No HEAVISIDE truncation is applied (gromosXX solvent_innerloop.cc doesn't use it).
-///
-/// The pairlist stores pairs of first-atom indices (one per solvent molecule).
-/// `atoms_per_solvent` defines the molecule size (e.g. 3 for water).
-pub fn solvent_innerloop<BC: BoundaryCondition>(
+/// This is the single source of truth for the nonbonded innerloop physics.
+/// Both serial and parallel paths call this — no code duplication.
+#[inline]
+fn process_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
+    pairs: &[(u32, u32)],
     positions: &[Vec3],
     charges: &[f64],
     iac: &[u32],
-    pairlist: &[(u32, u32)],
-    lj_params: &[Vec<LJParameters>],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    storage: &mut ForceStorage,
+) {
+    for &(i, j) in pairs {
+        let i = i as usize;
+        let j = j as usize;
+
+        let pos_i = positions[i];
+        let pos_j = positions[j];
+        let r = periodicity.nearest_image(pos_i, pos_j);
+
+        let type_i = iac[i] as usize;
+        let type_j = iac[j] as usize;
+        let lj = lj_params.get(type_i, type_j);
+        let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
+
+        let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
+
+        let force = r * f_mag;
+        storage.forces[i] += force;
+        storage.forces[j] -= force;
+
+        storage.e_lj += e_lj;
+        storage.e_crf += e_crf;
+
+        if VIRIAL {
+            for a in 0..3 {
+                for b in 0..3 {
+                    storage.virial[a][b] += r[a] * force[b];
+                }
+            }
+        }
+    }
+}
+
+/// Shared kernel: process a slice of solvent molecule pairs into a ForceStorage.
+///
+/// Single source of truth for solvent-solvent interactions with shared PBC shift.
+/// Precomputes LJ params and charge products for the N×N atom type combinations
+/// within a solvent molecule (gromosXX optimization: avoids repeated lookups).
+#[inline]
+fn process_solvent_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
+    pairs: &[(u32, u32)],
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    lj_params: &LJParamMatrix,
     crf: &CRFParameters,
     periodicity: &BC,
     atoms_per_solvent: usize,
     storage: &mut ForceStorage,
 ) {
-    for &(i_first, j_first) in pairlist {
+    if pairs.is_empty() {
+        return;
+    }
+
+    // Precompute LJ params and charge products for all atom_i × atom_j combinations
+    // within a solvent molecule. All solvent molecules have the same atom types,
+    // so we only need to look these up once using the first molecule.
+    let first_mol = pairs[0].0 as usize;
+    let n = atoms_per_solvent;
+    // Stack-allocated arrays for up to 4-site water models (covers SPC, SPC/E, TIP4P)
+    assert!(n <= 4, "solvent with >4 atoms not supported in optimized path");
+    let mut lj_c6 = [[0.0f64; 4]; 4];
+    let mut lj_c12 = [[0.0f64; 4]; 4];
+    let mut q_prod = [[0.0f64; 4]; 4];
+
+    for ai in 0..n {
+        let type_i = iac[first_mol + ai] as usize;
+        let qi = charges[first_mol + ai];
+        for aj in 0..n {
+            let type_j = iac[first_mol + aj] as usize;
+            let lj = lj_params.get(type_i, type_j);
+            lj_c6[ai][aj] = lj.c6;
+            lj_c12[ai][aj] = lj.c12;
+            q_prod[ai][aj] = qi * charges[first_mol + aj] * FOUR_PI_EPS_I;
+        }
+    }
+
+    for &(i_first, j_first) in pairs {
         let i_first = i_first as usize;
         let j_first = j_first as usize;
 
@@ -466,36 +610,28 @@ pub fn solvent_innerloop<BC: BoundaryCondition>(
 
         // Compute PBC shift from first-atom nearest image (O-O for water)
         let r_first = periodicity.nearest_image(pos_i0, pos_j0);
-        // shift = r_first - (pos_i0 - pos_j0) = the PBC translation applied
-        // In gromosXX: tx = r(0) - pos_i(0) + pos_j(0)
         let tx = r_first.x - pos_i0.x + pos_j0.x;
         let ty = r_first.y - pos_i0.y + pos_j0.y;
         let tz = r_first.z - pos_i0.z + pos_j0.z;
 
-        // Loop over all atom pairs in the two molecules
-        for atom_i in 0..atoms_per_solvent {
+        for atom_i in 0..n {
             let i = i_first + atom_i;
-            // Apply shared shift to atom_i position
             let xi = positions[i].x + tx;
             let yi = positions[i].y + ty;
             let zi = positions[i].z + tz;
 
-            for atom_j in 0..atoms_per_solvent {
+            for atom_j in 0..n {
                 let j = j_first + atom_j;
 
-                // Distance using shared PBC shift
                 let x = xi - positions[j].x;
                 let y = yi - positions[j].y;
                 let z = zi - positions[j].z;
                 let r = Vec3::new(x, y, z);
 
-                let type_i = iac[i] as usize;
-                let type_j = iac[j] as usize;
-                let lj = lj_params[type_i][type_j];
-                let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
-
-                // No HEAVISIDE truncation for solvent-solvent
-                let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
+                let (f_mag, e_lj, e_crf) = lj_crf_interaction(
+                    r, lj_c6[atom_i][atom_j], lj_c12[atom_i][atom_j],
+                    q_prod[atom_i][atom_j], crf,
+                );
 
                 let force = r * f_mag;
                 storage.forces[i] += force;
@@ -504,10 +640,11 @@ pub fn solvent_innerloop<BC: BoundaryCondition>(
                 storage.e_lj += e_lj;
                 storage.e_crf += e_crf;
 
-                // gromosXX convention: virial_tensor(b, a) += r(b) * force(a)
-                for a in 0..3 {
-                    for b in 0..3 {
-                        storage.virial[a][b] += r[a] * force[b];
+                if VIRIAL {
+                    for a in 0..3 {
+                        for b in 0..3 {
+                            storage.virial[a][b] += r[a] * force[b];
+                        }
                     }
                 }
             }
@@ -515,73 +652,309 @@ pub fn solvent_innerloop<BC: BoundaryCondition>(
     }
 }
 
-/// Parallel version of innerloop using Rayon
+/// Minimum pairlist size to justify parallel overhead.
+const PARALLEL_THRESHOLD: usize = 2048;
+
+/// Inner loop for nonbonded interactions (solute-solute and solute-solvent).
+///
+/// This is the hottest function in MD simulations!
+/// Processes pairlist and accumulates forces, energies, and virial.
+pub fn lj_crf_innerloop<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    storage: &mut ForceStorage,
+) {
+    process_pairs::<BC, true>(pairlist, positions, charges, iac, lj_params, crf, periodicity, storage);
+}
+
+/// Inner loop without virial computation (for NVE/NVT without pressure coupling).
+pub fn lj_crf_innerloop_novirial<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    storage: &mut ForceStorage,
+) {
+    process_pairs::<BC, false>(pairlist, positions, charges, iac, lj_params, crf, periodicity, storage);
+}
+
+/// CG-grouped innerloop with virial (for NPT).
+pub fn lj_crf_innerloop_cg_grouped<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    groups: &[CGPairGroup],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    storage: &mut ForceStorage,
+) {
+    process_pairs_cg_grouped::<BC, true>(pairlist, groups, positions, charges, iac, lj_params, crf, periodicity, storage);
+}
+
+/// CG-grouped innerloop without virial (for NVE/NVT).
+pub fn lj_crf_innerloop_cg_grouped_novirial<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    groups: &[CGPairGroup],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    storage: &mut ForceStorage,
+) {
+    process_pairs_cg_grouped::<BC, false>(pairlist, groups, positions, charges, iac, lj_params, crf, periodicity, storage);
+}
+
+/// Parallel CG-grouped innerloop with virial.
+pub fn lj_crf_innerloop_cg_grouped_parallel<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    groups: &[CGPairGroup],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    n_atoms: usize,
+) -> ForceStorage {
+    lj_crf_innerloop_cg_grouped_parallel_virial::<BC, true>(positions, charges, iac, pairlist, groups, lj_params, crf, periodicity, n_atoms)
+}
+
+/// Parallel CG-grouped innerloop without virial.
+pub fn lj_crf_innerloop_cg_grouped_parallel_novirial<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    groups: &[CGPairGroup],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    n_atoms: usize,
+) -> ForceStorage {
+    lj_crf_innerloop_cg_grouped_parallel_virial::<BC, false>(positions, charges, iac, pairlist, groups, lj_params, crf, periodicity, n_atoms)
+}
+
+fn lj_crf_innerloop_cg_grouped_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    groups: &[CGPairGroup],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    n_atoms: usize,
+) -> ForceStorage {
+    use rayon::prelude::*;
+
+    let mut result = ForceStorage::new(n_atoms);
+    if groups.len() < 64 {
+        process_pairs_cg_grouped::<BC, VIRIAL>(pairlist, groups, positions, charges, iac, lj_params, crf, periodicity, &mut result);
+        return result;
+    }
+
+    result = groups
+        .par_chunks(groups.len() / rayon::current_num_threads().max(1))
+        .fold(
+            || ForceStorage::new(n_atoms),
+            |mut local_storage, chunk| {
+                process_pairs_cg_grouped::<BC, VIRIAL>(pairlist, chunk, positions, charges, iac, lj_params, crf, periodicity, &mut local_storage);
+                local_storage
+            },
+        )
+        .reduce(
+            || ForceStorage::new(n_atoms),
+            |mut a, b| {
+                a.merge(&b);
+                a
+            },
+        );
+
+    result
+}
+
+/// Parallel nonbonded innerloop — same physics as `lj_crf_innerloop`.
+///
+/// Uses Rayon fold/reduce with thread-local ForceStorage buffers (gromosXX pattern:
+/// per-thread Nonbonded_Set with private force arrays, sequential reduction).
+///
+/// Automatically falls back to serial for small pairlists.
 pub fn lj_crf_innerloop_parallel<BC: BoundaryCondition>(
     positions: &[Vec3],
     charges: &[f64],
     iac: &[u32],
     pairlist: &[(u32, u32)],
-    lj_params: &[Vec<LJParameters>],
+    lj_params: &LJParamMatrix,
     crf: &CRFParameters,
     periodicity: &BC,
     n_atoms: usize,
 ) -> ForceStorage {
-    // Thread-local accumulation to avoid data races
-    let results: Vec<ForceStorage> = pairlist
-        .par_chunks(1024) // Process in chunks for better cache locality
-        .map(|chunk| {
-            let mut local_storage = ForceStorage::new(n_atoms);
+    lj_crf_innerloop_parallel_virial::<BC, true>(positions, charges, iac, pairlist, lj_params, crf, periodicity, n_atoms)
+}
 
-            for &(i, j) in chunk {
-                let i = i as usize;
-                let j = j as usize;
+/// Parallel nonbonded innerloop without virial (for NVE/NVT).
+pub fn lj_crf_innerloop_parallel_novirial<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    n_atoms: usize,
+) -> ForceStorage {
+    lj_crf_innerloop_parallel_virial::<BC, false>(positions, charges, iac, pairlist, lj_params, crf, periodicity, n_atoms)
+}
 
-                let pos_i = positions[i];
-                let pos_j = positions[j];
-                let r = periodicity.nearest_image(pos_i, pos_j);
-
-                let type_i = iac[i] as usize;
-                let type_j = iac[j] as usize;
-                let lj = lj_params[type_i][type_j];
-                let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
-
-                let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
-
-                let force = r * f_mag;
-                local_storage.forces[i] += force;
-                local_storage.forces[j] -= force;
-
-                local_storage.e_lj += e_lj;
-                local_storage.e_crf += e_crf;
-
-                // gromosXX convention: virial_tensor(b, a) += r(b) * force(a)
-                for a in 0..3 {
-                    for b in 0..3 {
-                        local_storage.virial[a][b] += r[a] * force[b];
-                    }
-                }
-            }
-
-            local_storage
-        })
-        .collect();
-
-    // Reduce all thread-local results
-    let mut final_storage = ForceStorage::new(n_atoms);
-    for local in results {
-        for (f_final, f_local) in final_storage.forces.iter_mut().zip(local.forces.iter()) {
-            *f_final += *f_local;
-        }
-        final_storage.e_lj += local.e_lj;
-        final_storage.e_crf += local.e_crf;
-        for a in 0..3 {
-            for b in 0..3 {
-                final_storage.virial[a][b] += local.virial[a][b];
-            }
-        }
+fn lj_crf_innerloop_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    n_atoms: usize,
+) -> ForceStorage {
+    let mut result = ForceStorage::new(n_atoms);
+    if pairlist.len() < PARALLEL_THRESHOLD {
+        process_pairs::<BC, VIRIAL>(pairlist, positions, charges, iac, lj_params, crf, periodicity, &mut result);
+        return result;
     }
 
-    final_storage
+    result = pairlist
+        .par_chunks(1024)
+        .fold(
+            || ForceStorage::new(n_atoms),
+            |mut acc, chunk| {
+                process_pairs::<BC, VIRIAL>(chunk, positions, charges, iac, lj_params, crf, periodicity, &mut acc);
+                acc
+            },
+        )
+        .reduce(
+            || ForceStorage::new(n_atoms),
+            |mut a, b| { a.merge(&b); a },
+        );
+    result
+}
+
+/// Solvent-solvent innerloop with shared PBC shift (gromosXX convention).
+///
+/// For each solvent-solvent CG pair, the PBC shift is computed once from
+/// the first atoms (typically O-O for water) and reused for all atom pairs.
+///
+/// The pairlist stores pairs of first-atom indices (one per solvent molecule).
+/// `atoms_per_solvent` defines the molecule size (e.g. 3 for water).
+pub fn solvent_innerloop<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    atoms_per_solvent: usize,
+    storage: &mut ForceStorage,
+) {
+    process_solvent_pairs::<BC, true>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, storage);
+}
+
+/// Solvent-solvent innerloop without virial computation (for NVE/NVT).
+pub fn solvent_innerloop_novirial<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    atoms_per_solvent: usize,
+    storage: &mut ForceStorage,
+) {
+    process_solvent_pairs::<BC, false>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, storage);
+}
+
+/// Parallel solvent-solvent innerloop — same physics as `solvent_innerloop`.
+///
+/// Uses Rayon fold/reduce with thread-local buffers. Falls back to serial
+/// for small pairlists.
+pub fn solvent_innerloop_parallel<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    atoms_per_solvent: usize,
+    n_atoms: usize,
+) -> ForceStorage {
+    let mut result = ForceStorage::new(n_atoms);
+    if pairlist.len() < PARALLEL_THRESHOLD {
+        process_solvent_pairs::<BC, true>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut result);
+        return result;
+    }
+
+    result = pairlist
+        .par_chunks(512)
+        .fold(
+            || ForceStorage::new(n_atoms),
+            |mut acc, chunk| {
+                process_solvent_pairs::<BC, true>(chunk, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut acc);
+                acc
+            },
+        )
+        .reduce(
+            || ForceStorage::new(n_atoms),
+            |mut a, b| { a.merge(&b); a },
+        );
+    result
+}
+
+/// Parallel solvent-solvent innerloop without virial (for NVE/NVT).
+pub fn solvent_innerloop_parallel_novirial<BC: BoundaryCondition>(
+    positions: &[Vec3],
+    charges: &[f64],
+    iac: &[u32],
+    pairlist: &[(u32, u32)],
+    lj_params: &LJParamMatrix,
+    crf: &CRFParameters,
+    periodicity: &BC,
+    atoms_per_solvent: usize,
+    n_atoms: usize,
+) -> ForceStorage {
+    let mut result = ForceStorage::new(n_atoms);
+    if pairlist.len() < PARALLEL_THRESHOLD {
+        process_solvent_pairs::<BC, false>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut result);
+        return result;
+    }
+
+    result = pairlist
+        .par_chunks(512)
+        .fold(
+            || ForceStorage::new(n_atoms),
+            |mut acc, chunk| {
+                process_solvent_pairs::<BC, false>(chunk, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut acc);
+                acc
+            },
+        )
+        .reduce(
+            || ForceStorage::new(n_atoms),
+            |mut a, b| { a.merge(&b); a },
+        );
+    result
 }
 
 /// Lambda-dependent parameters for perturbed nonbonded interactions
@@ -886,12 +1259,12 @@ mod tests {
         let iac = vec![0, 0];
         let pairlist = vec![(0, 1)];
 
-        let lj_params = vec![vec![LJParameters {
+        let lj_params = LJParamMatrix::from_nested(&[vec![LJParameters {
             c6: 0.001,
             c12: 0.0001,
             cs6: 0.001,
             cs12: 0.0001,
-        }]];
+        }]]);
         let crf = CRFParameters {
             crf_cut: 1.4,
             crf_2cut3i: 0.364431, // 2 / 1.4^3
@@ -934,12 +1307,12 @@ mod tests {
         let iac = vec![0, 0];
         let pairlist = vec![(0, 1)];
 
-        let lj_params = vec![vec![LJParameters {
+        let lj_params = LJParamMatrix::from_nested(&[vec![LJParameters {
             c6: 0.001,
             c12: 0.0001,
             cs6: 0.001,
             cs12: 0.0001,
-        }]];
+        }]]);
         let crf = CRFParameters {
             crf_cut: 1.4,
             crf_2cut3i: 0.0,
@@ -1382,7 +1755,7 @@ pub mod mpi_nonbonded {
         charges: &mut [f64],
         iac: &[u32],
         pairlist: &[(u32, u32)],
-        lj_params: &[Vec<LJParameters>],
+        lj_params: &LJParamMatrix,
         crf: &CRFParameters,
         periodicity: &BC,
         box_matrix: &mut [f64; 9],
