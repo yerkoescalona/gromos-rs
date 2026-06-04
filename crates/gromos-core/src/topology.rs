@@ -6,7 +6,6 @@
 //! - md++/src/topology/solvent.h
 
 use crate::math::Vec3;
-use std::collections::HashSet;
 
 /// Atom properties
 #[derive(Debug, Clone)]
@@ -184,9 +183,10 @@ impl Default for LJParameters {
 
 /// Exclusion list for an atom (atoms that don't interact via nonbonded forces)
 ///
-/// Uses HashSet for fast O(1) lookups. In GROMOS C++, this is a sorted vector
-/// with binary search (O(log n)), but HashSet is more idiomatic in Rust.
-pub type Exclusions = HashSet<usize>;
+/// Uses a sorted Vec for fast binary-search lookups. Matches the GROMOS C++
+/// convention (sorted vector with binary search). For typical exclusion counts
+/// (2-6 per atom), this is much faster than HashSet due to cache locality.
+pub type Exclusions = Vec<usize>;
 
 /// Chargegroup - atoms whose charge sum is zero (or small)
 ///
@@ -419,14 +419,14 @@ impl Topology {
     /// (1-2 and 1-3 bonded pairs only — used for RF excluded interactions)
     #[inline]
     pub fn is_excluded(&self, i: usize, j: usize) -> bool {
-        self.exclusions[i].contains(&j) || self.exclusions[j].contains(&i)
+        self.exclusions[i].binary_search(&j).is_ok() || self.exclusions[j].binary_search(&i).is_ok()
     }
 
     /// Check if atoms i and j are excluded OR are a 1-4 pair.
     /// Used for pairlist exclusion (gromosXX: all_exclusion).
     #[inline]
     pub fn is_excluded_or_14(&self, i: usize, j: usize) -> bool {
-        if self.exclusions[i].contains(&j) || self.exclusions[j].contains(&i) {
+        if self.exclusions[i].binary_search(&j).is_ok() || self.exclusions[j].binary_search(&i).is_ok() {
             return true;
         }
         if !self.one_four_pairs.is_empty() {
@@ -463,25 +463,25 @@ impl Topology {
     /// - Optionally 1-4 dihedral neighbors (or use special 1-4 scaling)
     pub fn build_exclusions(&mut self, exclude_14: bool) {
         let n_atoms = self.num_atoms();
-        self.exclusions = vec![HashSet::new(); n_atoms];
+        self.exclusions = vec![Vec::new(); n_atoms];
 
         // Exclude bonded neighbors (1-2)
         for bond in &self.solute.bonds {
-            self.exclusions[bond.i].insert(bond.j);
-            self.exclusions[bond.j].insert(bond.i);
+            self.exclusions[bond.i].push(bond.j);
+            self.exclusions[bond.j].push(bond.i);
         }
 
         // Exclude angle neighbors (1-3)
         for angle in &self.solute.angles {
-            self.exclusions[angle.i].insert(angle.k);
-            self.exclusions[angle.k].insert(angle.i);
+            self.exclusions[angle.i].push(angle.k);
+            self.exclusions[angle.k].push(angle.i);
         }
 
         // Optionally exclude or mark 1-4 pairs
         if exclude_14 {
             for dihedral in &self.solute.proper_dihedrals {
-                self.exclusions[dihedral.i].insert(dihedral.l);
-                self.exclusions[dihedral.l].insert(dihedral.i);
+                self.exclusions[dihedral.i].push(dihedral.l);
+                self.exclusions[dihedral.l].push(dihedral.i);
             }
         } else {
             // Store as special 1-4 pairs
@@ -490,6 +490,12 @@ impl Topology {
                 self.one_four_pairs[dihedral.i].push(dihedral.l);
                 self.one_four_pairs[dihedral.l].push(dihedral.i);
             }
+        }
+
+        // Sort and deduplicate for fast binary_search lookups
+        for excl in &mut self.exclusions {
+            excl.sort_unstable();
+            excl.dedup();
         }
     }
 
@@ -518,7 +524,7 @@ impl Topology {
         self.mass.resize(n_atoms, 0.0);
         self.inverse_mass.resize(n_atoms, 0.0);
         self.charge.resize(n_atoms, 0.0);
-        self.exclusions.resize(n_atoms, HashSet::new());
+        self.exclusions.resize(n_atoms, Vec::new());
         self.one_four_pairs.resize(n_atoms, Vec::new());
         self.atom_to_chargegroup.resize(n_atoms, 0);
         self.atom_to_temperature_group.resize(n_atoms, 0);
@@ -603,7 +609,7 @@ impl Topology {
         }
 
         // Extend exclusions for solvent atoms
-        self.exclusions.resize(n_total, HashSet::new());
+        self.exclusions.resize(n_total, Vec::new());
 
         // Solvent intra-molecular exclusions: all atoms within each molecule exclude each other
         for mol in 0..nsm {
@@ -614,10 +620,15 @@ impl Topology {
             self.pressure_groups.push(base..base + atoms_per_solvent);
             for a in 0..atoms_per_solvent {
                 for b in (a + 1)..atoms_per_solvent {
-                    self.exclusions[base + a].insert(base + b);
-                    self.exclusions[base + b].insert(base + a);
+                    self.exclusions[base + a].push(base + b);
+                    self.exclusions[base + b].push(base + a);
                 }
             }
+        }
+
+        // Sort solvent exclusions for binary_search
+        for i in n_solute..n_total {
+            self.exclusions[i].sort_unstable();
         }
 
         // Rebuild LJ matrix if solvent introduces new IAC types

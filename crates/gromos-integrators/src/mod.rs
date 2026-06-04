@@ -12,7 +12,7 @@ pub mod thermostats;
 pub mod virtual_atoms;
 
 // Re-export commonly used items
-pub use constraints::{m_shake, settle, shake, ConstraintResult, ShakeParameters};
+pub use constraints::{m_shake, settle, shake, shake_buffered, ConstraintResult, ShakeBuffers, ShakeParameters};
 
 pub use thermostats::{
     andersen_thermostat, berendsen_thermostat, nose_hoover_thermostat,

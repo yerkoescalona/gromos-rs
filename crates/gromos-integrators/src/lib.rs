@@ -32,7 +32,7 @@ pub mod remd_mpi;
 
 // Re-export main types
 pub use integrator::{Integrator, LeapFrog, VelocityVerlet, StochasticDynamics, SteepestDescent};
-pub use constraints::{ShakeParameters, LincsParameters, ConstraintResult, NtcMode, shake, shake_positions, shake_velocities, lincs, settle};
+pub use constraints::{ShakeParameters, LincsParameters, ConstraintResult, NtcMode, shake, shake_buffered, shake_positions, shake_velocities, lincs, settle, ShakeBuffers};
 pub use thermostats::{BerendsenThermostatParameters, NoseHooverThermostatParameters, AndersenThermostatParameters};
 pub use thermostats::{berendsen_thermostat, nose_hoover_thermostat, andersen_thermostat};
 pub use barostats::{BerendsenBarostatParameters, ParrinelloRahmanBarostatParameters};

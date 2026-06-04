@@ -13,7 +13,7 @@
 //!   Level 3: water_216_box, water_216_nvt, water_216_npt
 //!   Level 4: aladip_solvated
 
-use gromos::forces::nonbonded::{lj_crf_interaction, lj_crf_innerloop, CRFParameters, ForceStorage};
+use gromos::forces::nonbonded::{lj_crf_interaction, lj_crf_innerloop, CRFParameters, ForceStorage, LJParamMatrix};
 use gromos::io::coordinate::read_coordinate_file;
 use gromos::io::topology::{build_topology, read_topology_file};
 use gromos::math::Vec3;
@@ -161,8 +161,8 @@ struct EnergyValues {
 /// Convert topology LJ parameters to the nonbonded format
 fn convert_lj_params(
     topo_lj: &[Vec<LJParameters>],
-) -> Vec<Vec<gromos::forces::nonbonded::LJParameters>> {
-    topo_lj
+) -> LJParamMatrix {
+    let nested: Vec<Vec<gromos::forces::nonbonded::LJParameters>> = topo_lj
         .iter()
         .map(|row| {
             row.iter()
@@ -174,7 +174,8 @@ fn convert_lj_params(
                 })
                 .collect()
         })
-        .collect()
+        .collect();
+    LJParamMatrix::from_nested(&nested)
 }
 
 /// Assert two Vec3 are approximately equal (absolute tolerance)

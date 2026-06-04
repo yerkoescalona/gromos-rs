@@ -1505,9 +1505,9 @@ mod tests {
 
         // Position should have moved forward
         assert!(conf.current().pos[0].x > 0.0);
-        // In LeapFrog, after step() the updated velocity is in old() (due to internal exchange)
-        // The velocity update is: v_new = v_old + a*dt = 1.0 + 1.0*0.001 = 1.001
-        assert!(conf.old().vel[0].x > 1.0);
+        // After step(), velocity_step() internally calls exchange_state(), then writes updated
+        // velocity into current(). So the new velocity (1.0 + a*dt = 1.001) is in current().
+        assert!(conf.current().vel[0].x > 1.0);
     }
 
     #[test]

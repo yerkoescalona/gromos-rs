@@ -113,7 +113,12 @@ impl AlgorithmSequence {
         sim: &SimulationState,
     ) -> Result<(), String> {
         for alg in &mut self.algorithms {
+            let t = std::time::Instant::now();
             alg.apply(topo, conf, sim)?;
+            let dt = t.elapsed().as_nanos();
+            if dt > 0 {
+                log::trace!("  algo {:20} {:>9} ns", alg.name(), dt);
+            }
         }
         Ok(())
     }

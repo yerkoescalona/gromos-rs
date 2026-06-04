@@ -15,6 +15,97 @@ use gromos_core::configuration::Configuration;
 use gromos_core::math::{Mat3, Vec3};
 use gromos_core::topology::Topology;
 
+/// Precomputed constraint data and reusable buffers for SHAKE.
+///
+/// Avoids per-step allocations by precomputing constraint lists from the topology
+/// and reusing skip arrays across iterations.
+#[derive(Debug, Clone)]
+pub struct ShakeBuffers {
+    /// Precomputed solute constraints: (atom_i, atom_j, constraint_length)
+    pub solute_constraints: Vec<(usize, usize, f64)>,
+    /// Precomputed solvent constraints: (atom_i, atom_j, constraint_length)
+    pub solvent_constraints: Vec<(usize, usize, f64)>,
+    /// Sorted list of constrained atom indices (replaces HashSet)
+    pub constrained_atoms: Vec<usize>,
+    /// Reusable buffer: skip optimization for current iteration
+    skip_now: Vec<bool>,
+    /// Reusable buffer: skip optimization for next iteration
+    skip_next: Vec<bool>,
+}
+
+impl ShakeBuffers {
+    /// Precompute constraint lists from topology and NTC mode.
+    /// Call once at initialization, reuse across all MD steps.
+    pub fn new(topo: &Topology, ntc: NtcMode) -> Self {
+        let solute_constraints: Vec<(usize, usize, f64)> = match ntc {
+            NtcMode::SolventOnly => Vec::new(),
+            NtcMode::HydrogenBonds => {
+                topo.solute.bonds.iter().filter_map(|bond| {
+                    let constraint_length = topo.bond_parameters[bond.bond_type].r0;
+                    if constraint_length < 1e-10 {
+                        return None;
+                    }
+                    let mass_i = topo.mass[bond.i];
+                    let mass_j = topo.mass[bond.j];
+                    if mass_i > 2.0 && mass_j > 2.0 {
+                        return None;
+                    }
+                    Some((bond.i, bond.j, constraint_length))
+                }).collect()
+            }
+            NtcMode::AllBonds => {
+                topo.solute.bonds.iter().filter_map(|bond| {
+                    let constraint_length = topo.bond_parameters[bond.bond_type].r0;
+                    if constraint_length < 1e-10 {
+                        return None;
+                    }
+                    Some((bond.i, bond.j, constraint_length))
+                }).collect()
+            }
+        };
+
+        let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
+        if !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
+            let n_solute = topo.solute.num_atoms();
+            let atoms_per_solvent = topo.solvent_atom_template.len();
+            let num_molecules = topo.solvents[0].num_molecules;
+
+            for mol in 0..num_molecules {
+                let base = n_solute + mol * atoms_per_solvent;
+                for constr in &topo.solvent_constraint_template {
+                    solvent_constraints.push((base + constr.i, base + constr.j, constr.length));
+                }
+            }
+        }
+
+        // Collect constrained atoms (deduplicated + sorted, replaces HashSet)
+        let mut constrained_atoms: Vec<usize> = Vec::new();
+        for &(i, j, _) in solute_constraints.iter().chain(solvent_constraints.iter()) {
+            constrained_atoms.push(i);
+            constrained_atoms.push(j);
+        }
+        constrained_atoms.sort_unstable();
+        constrained_atoms.dedup();
+
+        let n_total_atoms = topo.num_atoms();
+        let skip_now = vec![false; n_total_atoms];
+        let skip_next = vec![true; n_total_atoms];
+
+        Self {
+            solute_constraints,
+            solvent_constraints,
+            constrained_atoms,
+            skip_now,
+            skip_next,
+        }
+    }
+
+    /// Returns true if there are no constraints at all.
+    pub fn is_empty(&self) -> bool {
+        self.solute_constraints.is_empty() && self.solvent_constraints.is_empty()
+    }
+}
+
 /// NTC constraint mode (which bonds to constrain)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NtcMode {
@@ -252,6 +343,103 @@ pub fn shake(
     // gromosXX velocity correction: vel = (pos_new - pos_old) / dt
     // Done AFTER all SHAKE iterations converge
     for &atom in &constrained_atoms {
+        conf.current_mut().vel[atom] =
+            (conf.current().pos[atom] - conf.old().pos[atom]) * (1.0 / dt);
+    }
+
+    ConstraintResult {
+        converged,
+        iterations: iteration,
+        max_error: 0.0,
+    }
+}
+
+/// Apply SHAKE using precomputed buffers (zero per-step allocations).
+///
+/// This is the performance-critical version called every MD step.
+/// All constraint lists are precomputed in `ShakeBuffers`, and skip arrays are reused.
+pub fn shake_buffered(
+    topo: &Topology,
+    conf: &mut Configuration,
+    dt: f64,
+    params: &ShakeParameters,
+    buffers: &mut ShakeBuffers,
+) -> ConstraintResult {
+    if buffers.is_empty() {
+        return ConstraintResult {
+            converged: true,
+            iterations: 0,
+            max_error: 0.0,
+        };
+    }
+
+    let tolerance = params.tolerance;
+    let dt2 = dt * dt;
+
+    // Zero constraint forces for constrained atoms
+    for &atom in &buffers.constrained_atoms {
+        conf.old_mut().constraint_force[atom] = Vec3::ZERO;
+    }
+
+    // Reset skip buffers
+    buffers.skip_now.iter_mut().for_each(|s| *s = false);
+    buffers.skip_next.iter_mut().for_each(|s| *s = true);
+
+    let mut converged = false;
+    let mut iteration = 0;
+
+    while iteration < params.max_iterations && !converged {
+        converged = true;
+        iteration += 1;
+
+        // === Solute constraints ===
+        for &(i, j, constraint_length) in &buffers.solute_constraints {
+            if buffers.skip_now[i] && buffers.skip_now[j] {
+                continue;
+            }
+            if topo.inverse_mass[i] == 0.0 && topo.inverse_mass[j] == 0.0 {
+                continue;
+            }
+
+            if !shake_one_constraint_full(
+                conf, topo, i, j, constraint_length, tolerance, dt2,
+                &mut buffers.skip_next,
+            ) {
+                converged = false;
+            }
+        }
+
+        // === Solvent constraints ===
+        for &(i, j, constraint_length) in &buffers.solvent_constraints {
+            if buffers.skip_now[i] && buffers.skip_now[j] {
+                continue;
+            }
+
+            if !shake_one_constraint_full(
+                conf, topo, i, j, constraint_length, tolerance, dt2,
+                &mut buffers.skip_next,
+            ) {
+                converged = false;
+            }
+        }
+
+        // Swap skip arrays for next iteration
+        std::mem::swap(&mut buffers.skip_now, &mut buffers.skip_next);
+        buffers.skip_next.iter_mut().for_each(|s| *s = true);
+    }
+
+    // Finalize constraint forces: scale by 1/dt²
+    for &(i, j, _) in &buffers.solute_constraints {
+        conf.old_mut().constraint_force[i] *= 1.0 / dt2;
+        conf.old_mut().constraint_force[j] *= 1.0 / dt2;
+    }
+    for &(i, j, _) in &buffers.solvent_constraints {
+        conf.old_mut().constraint_force[i] *= 1.0 / dt2;
+        conf.old_mut().constraint_force[j] *= 1.0 / dt2;
+    }
+
+    // Velocity correction
+    for &atom in &buffers.constrained_atoms {
         conf.current_mut().vel[atom] =
             (conf.current().pos[atom] - conf.old().pos[atom]) * (1.0 / dt);
     }

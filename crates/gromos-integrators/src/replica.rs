@@ -10,7 +10,7 @@ use crate::fep::LambdaController;
 use crate::integrator::Integrator;
 use gromos_forces::bonded::calculate_bonded_forces;
 use gromos_forces::nonbonded::{
-    lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage,
+    lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage, LJParamMatrix,
 };
 use gromos_core::math::Rectangular;
 use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
@@ -179,7 +179,7 @@ impl Replica {
 
         // Convert LJ parameters to nonbonded format
         use gromos_forces::nonbonded::LJParameters as NBLJParams;
-        let lj_params: Vec<Vec<NBLJParams>> = topology
+        let lj_params_nested: Vec<Vec<NBLJParams>> = topology
             .lj_parameters
             .iter()
             .map(|row| {
@@ -193,6 +193,7 @@ impl Replica {
                     .collect()
             })
             .collect();
+        let lj_params = LJParamMatrix::from_nested(&lj_params_nested);
 
         // Nonbonded forces (LJ + CRF)
         let mut nonbonded_storage = if self.parallel_forces {
