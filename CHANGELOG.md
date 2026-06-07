@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.11] (2026-06-07)
+
+### Features
+
+- **gromos-integrators:** add steepest descent energy minimization algorithm
+- **gromos-md:** add energy minimization reference tests (vacuum + solvated, with/without SHAKE)
+- **gromos-io:** add IFP, MTB, posres, mk_script, jobs, and script_template parsers (~2,600 lines)
+- **gromos-tools:** add `prep_posres` utility; rewrite `ion`, `sim_box`, `pdb2g96`, `com_top`, `make_top`, and `mk_script` against the new parsers
+- **gromos-tools:** implement `build_box` (replaces hardcoded placeholder) — generates a condensed-phase system on a regular grid sized to a target density, matching gromosXX `build_box.cc`
+- **core/forces:** update configuration and position restraints handling
+
+### Performance
+
+- **forces/shake:** optimize nonbonded hot path and SHAKE with cache-friendly data structures
+  - Replace `HashSet` exclusions with sorted `Vec` + binary search in topology
+  - Flatten LJ parameter matrix into a contiguous `LJParamMatrix` (removes double indirection)
+  - Add `ShakeBuffers` for precomputed constraint lists and reusable skip arrays
+  - Add CG-grouped nonbonded kernel (`CGPairGroup`): compute PBC nearest-image once per charge-group pair
+  - Add parallel (`_parallel`) and no-virial (`_novirial`) innerloop variants and `ForceStorage::merge` for thread-local reduction
+  - Add Criterion benchmark suite (`gromos-md/benches/md_bench.rs`)
+  - Fix duplicate energy/force accumulation in `calculate_dihedral_new_forces`
+
+### Refactor
+
+- **workspace:** remove the `gromos-cli` crate (superseded by the per-crate binary layout from the 0.0.10 restructure)
+- **workspace:** condense and reorganize `PLAN.md` into a priority-ordered roadmap (MD engine physics → analysis foundations → py-gromos/education → code quality)
+
+### Bug Fixes
+
+- **ci:** fix Rust workflow steps using an incorrect `working-directory: gromos-rs` (the workspace lives at the repo root); fix coverage lcov output path and the crates.io publish job directory (`crates/gromos`)
+
+### Chores
+
+- **workspace:** clean up workspace `Cargo.toml`, `Makefile`, and update `py-gromos` reference test paths
+
 ## [0.0.10] (2026-05-17)
 
 ### Refactor

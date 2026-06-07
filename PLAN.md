@@ -5,7 +5,8 @@ On commit: update CHANGELOG.md and Cargo.toml version.
 DON'T modify `gromosXX_references/*/expected/` — those are ground truth.
 
 References:
-- gromosXX source: `.local/gromosXX/md++/src`
+- gromosXX source (MD engine, "md++"): `.local/gromosXX/md++/src`
+- gromosPlsPls source (analysis/tools, "gromos++"): `.local/gromosPlsPls/gromos++/src`
 - Tutorials: `.local/gromos_tutorial_livecoms/tutorial_files`
 - Theory: `.local/doc/gromos_book`
 - Force fields: `.local/gromosXX/forcefields`
@@ -17,7 +18,7 @@ Doc style: Rust → KaTeX + `[^label]` footnotes; Python → NumPy docstrings + 
 
 | Crate | Role |
 |-------|------|
-| gromos-core | Types, math (Vec3), BoundaryCondition, Topology, Configuration, Algorithm trait |
+| gromos-core | Types, math (Vec3), BoundaryCondition, Topology, Configuration, Algorithm trait, AtomSelection |
 | gromos-forces | Bonded, nonbonded (LJ+CRF), pairlist, restraints, PME/QM-MM (stubs) |
 | gromos-integrators | LeapFrog, SteepestDescent, SHAKE/SETTLE/LINCS, thermostats, barostats, EDS/GaMD/REMD/FEP |
 | gromos-io | All file I/O: topology, coordinates, IMD, trajectories, energy, MTB/IFP, PDB, posres |
@@ -27,7 +28,15 @@ Doc style: Rust → KaTeX + `[^label]` footnotes; Python → NumPy docstrings + 
 | pyo3-gromos | Python bindings (PyO3) |
 | py-gromos | Python package (separate maturin build) |
 
-**Design rule:** All file format parsing/writing lives exclusively in `gromos-io`. No duplication across crates.
+**Design rules:**
+- All file format parsing/writing lives exclusively in `gromos-io`. No duplication across crates.
+- **Seamless gromosXX ↔ gromosPlsPls merge, no code duplication.** Shared primitives (math,
+  boundary/PBC, topology, atom selection, rotational fit, statistics, single-point energy) live in
+  the lower crates and are consumed by *both* the MD engine (gromosXX = forces/integrators/md) and
+  the analysis/tools suite (gromosPlsPls = analysis/tools). The gromos++-style API is a **facade**
+  over the gromosXX primitives: internally it uses the engine libraries; to the user it behaves like
+  gromosPlsPls. In practice this means `gromos-analysis` should reuse engine code (energy eval,
+  geometry, selection) rather than reimplement it — today it only depends on `gromos-core` + `gromos-io`.
 
 ## Decisions Taken
 
@@ -42,6 +51,12 @@ Doc style: Rust → KaTeX + `[^label]` footnotes; Python → NumPy docstrings + 
 - CLI arg parsing: use clap `#[derive(Parser)]` with a `gromos_args()` pre-processor that translates `@key` → `--key` and expands `@f argfile`. No custom arg parsers.
 - File format parsers (MTB, IFP, topology, coordinates, etc.) live exclusively in `gromos-io` — no duplication in tool binaries.
 - Crate restructuring: gromos-md (simulation engines), gromos-tools (system construction), gromos-analysis (trajectory analysis)
+- **AtomSpecifier strategy:** solve the gromosXX-level atom/topology primitives first (queryable
+  per-atom metadata, including solvent), then build the gromos++ `AtomSpecifier` grammar as a facade
+  on top of those primitives — zero duplication, facade behaves like gromosPlsPls.
+- **Reference tests for analysis/tools:** hand-craft *minimal* systems inspired by the tutorials and
+  compare against the C++ reference, mirroring the MD `gromosXX_references/` harness. (Full tutorial
+  end-to-end runs are compute-limited and deferred to last.)
 
 ## Reference Test Status
 
@@ -82,11 +97,15 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 
 **27 of 27 tests pass.** All levels fully passing.
 
+(No reference tests yet for `gromos-analysis` / `gromos-tools` — see Roadmap Priority 2 + the
+cross-cutting minimal-reference-test theme.)
+
 ## What Works
 
 ### gromos-core
 - Boundary conditions: Vacuum, Rectangular (minimum image), Triclinic (defined but not wired)
 - Topology struct with solvent expansion: NSM auto-computed, chargegroups from CGC codes, intra-molecular exclusions
+- AtomSelection: basic grammar only (atom/residue/molecule-1/all-solvent) — **underbuilt**, see Roadmap P2
 
 ### gromos-forces
 - LJ + CRF nonbonded (vacuum and PBC), 1-4 interactions (cs6/cs12 + scaled CRF)
@@ -117,188 +136,133 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 ### gromos-tools
 - make_top: MTB + IFP → topology (end groups, exclusions, 1-4 pairs, LJ matrix, combining rules)
   - Tested: GB3 (56 res, 457 atoms) + Na+ with 54A7
+- System building done: make_top, com_top, check_top, pdb2g96, sim_box, ion, mk_script, make_pt_top, prep_posres, build_box
 
-## TODO
+---
 
-### PRIORITY — System Construction Programs (tutorial-ready)
-Goal: make the molecular system construction pipeline work end-to-end so users can follow
-the realistic tutorials at `.local/gromos_tutorial_livecoms/tutorial_files/`.
+## Roadmap (priority order)
 
-Programs needed for tutorials t_01 through t_06 (in pipeline order):
+Overarching principle: **gromosXX as the reference, no duplication between the engine (gromosXX) and
+the analysis/tools facade (gromosPlsPls).** Every feature lands with a minimal gromosXX reference test.
 
-#### System building (critical path)
-Done: make_top, com_top, check_top, pdb2g96, sim_box, ion, mk_script, make_pt_top, prep_posres
+### Priority 1 — MD engine physics (gromosXX-faithful, reference-tested)
+Wire the already-coded-but-unwired physics; keep implementations in `gromos-forces`/`gromos-integrators`
+(reusable), never duplicated into binaries. Each item gets a minimal reference test.
 
-- [ ] **build_box** — PARTIAL, hardcodes water/3-atom; needs real solute file reading
-  - Must: read solute coordinates, replicate to fill box at target density
-  - Tutorial: used for creating pure solvent boxes
-
-#### Analysis programs (needed by tutorials)
-Done: ene_ana, rmsd, rmsf, rdf, hbond, frameout, tser, trs_ana, bar, reweight, filter
-
-- [ ] **ext_ti_ana** — PARTIAL, falls back to placeholder if no input
-- [ ] **nhoparam** — verify implementation status (NHO order parameters, t_01)
-
-#### Validation plan
-- [ ] Run tutorial t_01 (protein MD) end-to-end with gromos-rs binaries
-  - Pipeline: make_top → com_top → check_top → pdb2g96 → sim_box → ion → md → ene_ana/rmsd/rmsf
-- [ ] Compare output of each step against gromosXX++ reference output
-- [ ] Document which tutorial steps work and which are blocked
-
-
-
-### TODO — Triclinic box support (lower priority)
-- [ ] Code exists in `math.rs` but md.rs never creates Triclinic periodicity
-  - [ ] Wire GENBOX box_type into periodicity selection
-  - [ ] Test with truncated octahedron or other non-rectangular boxes
-
-### TODO — Unit conversion audit (topology parsing)
-- [ ] HARMBONDANGLETYPE: if/when parsed, must also convert CHT — ×(180/π)²
-- Note: IMPDIHEDRALTYPE and BONDANGLEBENDTYPE already converted
-- gromosXX converts ALL angle force constants at parse time (in_topology.cc)
-- No conversion needed for: CT (cosine angle K), CP (dihedral K), bond K, LJ, charges
-- Reference: gromosXX in_topology.cc lines 854, 928, 1055
-
-### TODO — Code quality & consistency
-- [ ] Fix clippy warnings (~390 total: gromos-forces 89, gromos-integrators 77, gromos-io 31, gromos-core 15)
-  - Mechanical fixes (auto-fixable): borrowed refs, double parens, legacy constants, assign ops
-  - Manual: unused variables, dead imports, loop indexing → iterators
-- [ ] Run `cargo clippy --fix --workspace` for auto-fixable warnings, review manually after
-- [ ] Replace bare `unwrap()` in non-test code with `.expect("msg")` or `?` (2 in CLI arg parsing)
-- [ ] Add missing `#[test]` for constraints (SHAKE unit tests — currently 0)
-- [ ] Add `#[test]` for improper dihedral (bonded tests missing this)
-- [ ] Review large files for possible splitting:
-  - `nonbonded.rs` (~1500 LOC) — SIMD / parallel / serial inner loops could be submodules
-  - `bonded.rs` (~1300 LOC) — each force type could be its own file
-  - `topology.rs` (gromos-io, ~1200 LOC) — parser per block type could be submodules
-- [ ] Consistent error types: unify `Result<T, String>` in CLI → proper error enum
-- [ ] Audit `pub` visibility — many internal functions are unnecessarily public
-
-### PRIORITY — py-gromos API improvement
-Goal: a polished, ergonomic Python API for education and notebooks.
-Design reference: `.local/polars` — study its Python API surface, docstrings, method chaining,
-DataFrame-style ergonomics, and how it wraps Rust internals via pyo3.
-
-#### Phase 1 — Rust bindings (pyo3-gromos)
-
-Done: Compositional Simulation API (Topology, Configuration, InputParameters, Simulation),
-AlgorithmSequence API (preset constructors, sequence manipulation, descriptor resolution),
-Python reference tests (62 passed), type stubs (.pyi) for static analysis.
-
-##### TODO — Additional binding types
-- [ ] Expose ForceField evaluation (single-point energy/force calculation)
-- [ ] Expose SHAKE / constraint info
-- [ ] Expose energy decomposition (bonded, LJ, CRF, kinetic, pressure)
-- [ ] Study Polars' pyo3 patterns: `PyDataFrame`, `PyExpr`, `PyLazyFrame` wrappers
-  - Path: `.local/polars/py-polars/src/` — how they wrap Rust types into Python classes
-  - Learn from: `__repr__`, `_repr_html_`, method chaining, `@staticmethod` constructors
-
-#### Phase 2 — Python API (py-gromos)
-Done: Topology, Configuration, Simulation wrappers with `__repr__` and numpy interop.
-
-- [ ] Method chaining where natural: `sim.run(steps=1000).energies().plot()`
-- [ ] Energy timeseries as DataFrame (Polars or pandas interop)
-- [ ] `md_runners.py` — review and simplify (currently wraps CLI `md` binary)
-- [ ] `analysis.py` — expose gromos-analysis functions to Python
-- [ ] Rich `__repr__` / `_repr_html_` for Jupyter display of Topology, Configuration, Energy
-
-#### Phase 3 — Notebooks & education
-- [ ] Rewrite `py-gromos/notebooks/` as clean educational notebooks using the new API
-  - [ ] 01: Load topology + coordinates, inspect atoms/bonds, compute single-point energy
-  - [ ] 02: Run short MD, plot energy conservation, visualize trajectory
-  - [ ] 03: Compare NVE vs NVT vs NPT ensembles, thermostat/barostat effects
-- [ ] Rewrite `py-gromos/examples/` to use the new API (currently 17 example scripts)
-- [ ] Fix/update Python tests (`test_basic.py`, `test_advanced_features.py`)
-- [ ] Verify `maturin develop` builds and tests pass
-
-### TODO — NTIVEL=1 velocity generation (small)
-- [ ] Implement Maxwell-Boltzmann velocity generation (NTIVEL=1)
-  - [ ] Read NTIVEL, IG (seed), TEMPI (temperature) from INITIALISE block (already parsed in `imd.rs`)
-  - [ ] Implement MT19937 RNG matching GSL's `gsl_rng_mt19937`
-  - [ ] Implement Gaussian distribution matching GSL's `gsl_ran_gaussian` (polar Box-Muller)
-  - [ ] For each atom: σ = sqrt(k_B·T / m_i), v_i = gaussian(σ) for x,y,z
-  - [ ] k_Boltzmann = 0.00831441 kJ/(mol·K)
+**1.1 — Reproducibility & correctness (small, do first)**
+- [ ] **NTIVEL=1 velocity generation** (Maxwell-Boltzmann)
+  - [ ] Read NTIVEL, IG (seed), TEMPI from INITIALISE block (already parsed in `imd.rs`)
+  - [ ] MT19937 RNG matching GSL's `gsl_rng_mt19937`; Gaussian matching `gsl_ran_gaussian` (polar Box-Muller)
+  - [ ] Per atom: σ = sqrt(k_B·T / m_i), v_i = gaussian(σ) for x,y,z; k_B = 0.00831441 kJ/(mol·K)
   - [ ] Store in both current().vel and old().vel (gromosXX convention)
-  - [ ] gromosXX ref: `util/generate_velocities.cc`, `math/random.h`
-  - [ ] Currently worked around with pre-generated velocities in .conf files
-  - [ ] Important for reproducibility: users expect NTIVEL=1 + seed to produce deterministic runs
+  - [ ] Refs: `util/generate_velocities.cc`, `math/random.h`. Currently worked around with pre-gen velocities.
+- [ ] **Unit-conversion audit (topology parsing)**
+  - [ ] HARMBONDANGLETYPE: if/when parsed, also convert CHT — ×(180/π)²
+  - Already converted: IMPDIHEDRALTYPE, BONDANGLEBENDTYPE. No conversion: CT, CP, bond K, LJ, charges.
+  - Ref: gromosXX `in_topology.cc` lines 854, 928, 1055
 
-### TODO — Benchmarking infrastructure
-Goal: track performance evolution over time, have a reference baseline for regressions.
+**1.2 — Constraints (code exists, wire + test)**
+- [ ] **SETTLE** for rigid water — analytical 3-site solver, O(N_water), single-pass; code exists, not wired.
+  - Ref: `algorithm/constraints/settle.cc` (Miyamoto & Kollman 1992)
+- [ ] **LINCS** — linear constraint solver (recursion order param); better for long chains; code exists, not wired.
+  - Ref: `algorithm/constraints/lincs.cc`
+- [ ] **COM rotation removal** — currently only translational. Need L = Σ mᵢ·rᵢ×(vᵢ−v_com), inertia I (3×3),
+  ω = I⁻¹·L, then vᵢ −= ω×rᵢ. Ref: `algorithm/constraints/remove_com_motion.cc`
 
-Existing benchmarks (Criterion):
-- `crates/gromos-forces/benches/nonbonded_bench.rs` — nonbonded innerloop
-- `crates/gromos-core/benches/math_bench.rs` — Vec3 / math ops
-- `crates/gromos-integrators/benches/thermostat_bench.rs` — thermostat scaling
-- `crates/gromos-io/benches/io_bench.rs` — topology/coordinate parsing
-- `scripts/benchmark.sh` — wrapper for `cargo bench --workspace`
+**1.3 — Thermostat**
+- [ ] **Nosé-Hoover** — single bath: ζ̇ = (1/τ²)(T/T₀−1), scale = 1−ζ·dt; chain variant: M coupled baths.
+  Code exists, not wired/tested. Ref: `algorithm/temperature/nosehoover_thermostat.cc`
 
-- [ ] Run current benchmarks and save a baseline: `cargo bench --workspace -- --save-baseline v0.1`
-- [ ] Add end-to-end MD step benchmark (full forcefield + integrator for water_216_box)
-- [ ] Add pairlist construction benchmark (chargegroup-based and atom-based)
-- [ ] Add SHAKE constraint benchmark (water_216 system)
-- [ ] Add bonded forces benchmark (aladip_solvated — all bonded types)
-- [ ] Consider `criterion-compare` or CI integration for automated regression tracking
-- [ ] Add Python benchmark: pyo3-gromos single-point energy call overhead
-- [ ] Document how to run and compare: `cargo bench -- --baseline v0.1` in CONTRIBUTING.md
+**1.4 — Boundary**
+- [ ] **Triclinic box** — code exists in `math.rs` but md.rs never creates Triclinic periodicity.
+  - [ ] Wire GENBOX box_type into periodicity selection
+  - [ ] Test with truncated octahedron / non-rectangular boxes
 
-### Known Gaps — Future Features
+**1.5 — Advanced sampling (bigger; code exists, untested)**
+- [ ] **EDS** — V_mixed = −1/β·ln(Σ exp(−β(Eᵢ−eir_i))); per-state force eval + blending; AEDS emax/emin.
+  Ref: `algorithm/integration/eds.cc`
+- [ ] **GaMD** — V_boost = k·(V−E_threshold)² when V>E_threshold; Welford running stats; dihedral/total/dual.
+  Ref: `algorithm/integration/gamd.cc`
+- [ ] **FEP / TI** — K(λ) = (1−λ)K_A + λK_B; ∂V/∂λ; soft-core LJ. Perturbed bond forces exist, need testing.
+  Ref: `interaction/bonded/perturbed_*.cc`
+- [ ] **REMD** (large) — MPI parallel tempering; Δ = (β₁−β₂)(E₁−E₂), accept if rand < exp(−Δ); feature-gated MPI.
+  Ref: `algorithm/integration/replicaExchange/`
 
-#### TODO — COM rotation removal (medium)
-- [ ] Currently only translational COM removal is implemented
-- [ ] Need: angular momentum L = Σ mᵢ × rᵢ × (vᵢ - v_com), inertia tensor I (3×3), ω = I⁻¹·L
-- [ ] Remove rotation: vᵢ -= ω × rᵢ
-- [ ] gromosXX ref: `algorithm/constraints/remove_com_motion.cc`
+### Priority 2 — Analysis foundations (correlated with P1; the no-duplication layer)
+The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations before consumers.
 
-#### TODO — SETTLE constraints for rigid water (small)
-- [ ] Analytical solver for 3-site rigid water (SPC/TIP3P) — no iteration
-- [ ] Much faster than SHAKE for water: O(N_water) per step, single-pass
-- [ ] Code exists in gromos-rs but not wired
-- [ ] gromosXX ref: `algorithm/constraints/settle.cc` (Miyamoto & Kollman 1992)
+**2.1 — Atom selection (gromosXX primitives first, gromos++ facade on top)**
+- [ ] Solidify queryable per-atom metadata in `gromos-core` (`topology.rs`, `selection.rs`):
+  molecule-membership map, residue number/name **including solvent** (today solvent = residue_nr 0 /
+  name "SOLV", `topology.rs:570-571`), atom name/type/mass as flat queryable data.
+- [ ] Fix the known `AtomSelection` gaps: `parse_solvent` ignores its spec & grabs all solvent;
+  `parse_molecule` rejects non-first molecules; name/residue search only covers solute.
+- [ ] Build the gromos++ `AtomSpecifier` grammar as a facade over the primitives (molecule ranges,
+  residue by number+name, atom by name/type/number, wildcards). Ref:
+  `.local/gromosPlsPls/gromos++/src/utils/AtomSpecifier.{h,cc}`, `Neighbours.{h,cc}`.
+  (Grammar-depth for the first slice TBD — sequence with first real consumer.)
 
-#### TODO — LINCS constraints (medium)
-- [ ] Linear constraint solver using recursion order parameter
-- [ ] Alternative to SHAKE — better for long chains, parallelizable
-- [ ] Code exists in gromos-rs but not wired
-- [ ] gromosXX ref: `algorithm/constraints/lincs.cc`
+**2.2 — Extract shared analysis infra into the lower crates (kills duplication)**
+- [ ] Rotational fit (Kabsch/SVD) replacing `simple_rotation_fit` (rmsd.rs:161 only re-centers, no rotation).
+  Ref: `.local/gromosPlsPls/gromos++/src/fit/RotationalFit.cc`, `Reference.cc`.
+- [ ] Statistics + error-estimate (block averaging, `ee()`) per gromos++ `gmath/Stat`.
+- [ ] PBC gathering, shared across programs.
+- [ ] Single-point energy entry point so `ener.rs` calls `gromos-forces` instead of hardcoding LJ σ/ε
+  (requires `gromos-analysis` to depend on the engine crates — the no-duplication change).
 
-#### TODO — Nosé-Hoover thermostat (medium)
-- [ ] Single bath: ζ̇ = (1/τ²)(T/T₀ - 1), scale = 1 - ζ·dt
-- [ ] Chain variant: M coupled thermostats for ergodicity
-- [ ] Code exists in gromos-rs but not wired or tested
-- [ ] gromosXX ref: `algorithm/temperature/nosehoover_thermostat.cc`
+**2.3 — Make the blocked/real programs tractable & verifiable** (once 2.1/2.2 land)
+- [ ] `rmsd` — real rotational fit
+- [ ] `ext_ti_ana` — real dH/dλ parsing + reference comparison (today falls back to synthetic data)
+- [ ] `nhoparam` — **rewrite to the actual gromos++ algorithm** (NMR N-H order parameters S² with
+  rotational fit); current code computes Nosé-Hoover thermostat params — wrong algorithm entirely.
+  Ref: `.local/gromosPlsPls/gromos++/programs/nhoparam.cc`
 
-#### TODO — Triclinic box support (medium)
-- [ ] Code exists in `math.rs` (Triclinic periodicity) but md.rs never creates it
-- [ ] Wire GENBOX box_type into periodicity selection
-- [ ] Test with truncated octahedron or other non-rectangular boxes
+**2.4 — Clean up other discovered stubs**
+- [ ] `visco` (placeholder formula, not Green-Kubo), `frameout` (hardcoded CA/ALA), `amber2gromos`
+  (ignores input), `ener` (hardcoded LJ), `sasa_hasel`, `dssp` (no real H-bonding), `solute_entropy`.
 
-#### TODO — EDS — Enveloping Distribution Sampling (medium)
-- [ ] Multi-state Boltzmann averaging: V_mixed = -1/β · ln(Σ exp(-β(Eᵢ - eir_i)))
-- [ ] Per-state force evaluation + blending
-- [ ] Adaptive EDS (AEDS) with emax/emin boundaries
-- [ ] Code exists in gromos-rs, not tested against references
-- [ ] gromosXX ref: `algorithm/integration/eds.cc`
+### Priority 3 — py-gromos API & education
+Design reference: `.local/polars` (Python API surface, docstrings, method chaining, pyo3 wrapping).
+Focus: compositional API for **system/topology construction**.
 
-#### TODO — GaMD — Gaussian Accelerated MD (medium)
-- [ ] Boost potential: V_boost = k·(V - E_threshold)² when V > E_threshold
-- [ ] Welford algorithm for running statistics (mean, variance)
-- [ ] Three boost forms: dihedral-only, total-potential, dual
-- [ ] Code exists in gromos-rs, not tested against references
-- [ ] gromosXX ref: `algorithm/integration/gamd.cc`
+- Phase 1 — Rust bindings (pyo3-gromos). Done: compositional Simulation API, AlgorithmSequence API,
+  Python reference tests (62 passed), `.pyi` stubs.
+  - [ ] Expose ForceField evaluation (single-point energy/force)
+  - [ ] Expose SHAKE / constraint info
+  - [ ] Expose energy decomposition (bonded, LJ, CRF, kinetic, pressure)
+  - [ ] Study Polars pyo3 patterns (`PyDataFrame`/`PyExpr`/`PyLazyFrame`): `.local/polars/py-polars/src/`
+- Phase 2 — Python API (py-gromos). Done: Topology/Configuration/Simulation wrappers + numpy interop.
+  - [ ] Method chaining: `sim.run(steps=1000).energies().plot()`
+  - [ ] Energy timeseries as DataFrame (Polars/pandas interop)
+  - [ ] `md_runners.py` simplify; `analysis.py` expose gromos-analysis to Python
+  - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
+- Phase 3 — Notebooks & education
+  - [ ] Rewrite `py-gromos/notebooks/` (01 inspect+single-point energy; 02 short MD + energy conservation;
+    03 NVE/NVT/NPT comparison)
+  - [ ] Rewrite `py-gromos/examples/` (17 scripts) on the new API
+  - [ ] Fix `test_basic.py`, `test_advanced_features.py`; verify `maturin develop` builds + tests pass
 
-#### TODO — FEP / TI — Free Energy Perturbation (medium)
-- [ ] Lambda interpolation: K(λ) = (1-λ)K_A + λK_B for all interaction types
-- [ ] TI derivative: ∂V/∂λ for thermodynamic integration
-- [ ] Soft-core LJ to avoid singularities during atom appearance/disappearance
-- [ ] Code exists in gromos-rs (perturbed bond forces), needs testing
-- [ ] gromosXX ref: `interaction/bonded/perturbed_*.cc`
+### Priority 4 — Code quality & consistency (last)
+- [ ] Clippy (~390: gromos-forces 89, gromos-integrators 77, gromos-io 31, gromos-core 15).
+  `cargo clippy --fix --workspace` for auto-fixables, then review manually.
+- [ ] Replace bare `unwrap()` in non-test code with `.expect("msg")` or `?`
+- [ ] Add missing `#[test]`: constraints (SHAKE — currently 0), improper dihedral
+- [ ] Split large files: `nonbonded.rs` (~1500 LOC), `bonded.rs` (~1300 LOC), `gromos-io/topology.rs` (~1200 LOC)
+- [ ] Unify CLI error types (`Result<T,String>` → enum); audit `pub` visibility
+- [ ] **Benchmarking infra**: save baseline `cargo bench --workspace -- --save-baseline v0.1`; add
+  end-to-end MD step / pairlist / SHAKE / bonded benches; consider CI regression tracking; document in
+  CONTRIBUTING.md. Existing: `nonbonded_bench`, `math_bench`, `thermostat_bench`, `io_bench`, `scripts/benchmark.sh`.
 
-#### TODO — REMD — Replica Exchange MD (large)
-- [ ] MPI-based parallel tempering across temperature/lambda ladders
-- [ ] Exchange acceptance: Δ = (β₁ - β₂)(E₁ - E₂), accept if rand < exp(-Δ)
-- [ ] Requires MPI infrastructure (feature-gated)
-- [ ] gromosXX ref: `algorithm/integration/replicaExchange/`
+### Cross-cutting (do continuously) — minimal reference tests
+Full tutorial t_01–t_06 end-to-end runs are **deferred to last** (compute-limited). The always-available
+substitute: hand-craft **minimal** reference systems inspired by the tutorials and diff gromos-rs output
+against the C++ reference, mirroring `crates/gromos-md/tests/gromosXX_references/` (generated via
+`run_references.py` against the md++ binary). Stand up an analogous harness for analysis/tools (none exists
+today). Every P1 physics feature and every P2 program lands with a minimal reference test.
+
+### Parked / blocked
+- `ext_ti_ana`, `nhoparam` — blocked behind Priority 2 (selection + fit + stats + references).
+- Tutorials t_01–t_06 end-to-end — compute-limited; replaced near-term by minimal reference tests.
 
 ## Key Files
 
@@ -307,6 +271,7 @@ crates/gromos-md/src/bin/md.rs               — main MD driver, CLI, simulation
 crates/gromos-core/src/algorithm.rs          — Algorithm trait, AlgorithmSequence
 crates/gromos-core/src/math.rs               — Vec3, BoundaryCondition (Vacuum/Rectangular/Triclinic)
 crates/gromos-core/src/topology.rs           — Topology struct
+crates/gromos-core/src/selection.rs          — AtomSelection (P2: extend to AtomSpecifier facade)
 crates/gromos-forces/src/bonded.rs           — all bonded force calculations
 crates/gromos-forces/src/nonbonded.rs        — LJ+CRF, rf_excluded, pairlist loops
 crates/gromos-forces/src/electrostatics.rs   — CRF/PME parameters
@@ -319,6 +284,7 @@ crates/gromos-io/src/coordinate.rs           — coordinate/GENBOX parser
 crates/gromos-io/src/imd.rs                  — IMD parameter file parser
 crates/gromos-tools/src/bin/topology/        — make_top, com_top, check_top, etc.
 crates/gromos-tools/src/bin/box/             — sim_box, build_box, ion, etc.
+crates/gromos-analysis/src/bin/structural/rmsd.rs — simple_rotation_fit (P2: replace w/ Kabsch)
 crates/gromos-md/tests/test_gromosXX_references.rs — integration tests vs gromosXX
 crates/gromos-md/tests/run_references.py           — generate gromosXX reference data
 crates/gromos-md/tests/gromosXX_references/        — reference input + expected output
@@ -330,7 +296,7 @@ crates/gromos-md/tests/gromosXX_references/        — reference input + expecte
 # Build
 cargo build --release --bin md
 
-# Run integration tests against gromosXX references (14 active, 5 ignored)
+# Run integration tests against gromosXX references
 cargo test -p gromos-md --test test_gromosXX_references
 
 # Run including known-failing systems
@@ -347,4 +313,3 @@ python3 crates/gromos-md/tests/run_references.py --md-binary .local/gromosXX/md+
 # 2. Run run_references.py to generate expected/ data
 # 3. Add ref_test!(name, "dir") in crates/gromos-md/tests/test_gromosXX_references.rs
 ```
-
