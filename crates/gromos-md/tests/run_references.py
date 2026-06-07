@@ -67,6 +67,18 @@ SYSTEMS = [
         "isolates": "bond + angle + intramolecular Coulomb",
     },
     {
+        "name": "water_single_genvel",
+        "description": "Level 1: Single SPC water, NTIVEL=1 Maxwell-Boltzmann velocity generation",
+        "level": 1,
+        "dir": "water_single_genvel",
+        "topo": "water_single_genvel.topo",
+        "conf": "water_single_genvel.conf",
+        "input": "water_single_genvel.in",
+        "pttopo": None,
+        "natoms": 3,
+        "isolates": "NTIVEL=1 Maxwell-Boltzmann velocity generation (GSL mt19937 + gsl_ran_gaussian)",
+    },
+    {
         "name": "butane_vacuum",
         "description": "Level 1: United-atom butane in vacuum, dihedral + 1-4 LJ",
         "level": 1,

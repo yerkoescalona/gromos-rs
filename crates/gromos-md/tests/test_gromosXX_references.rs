@@ -366,6 +366,7 @@ ref_test!(nacl_pair,     "nacl_pair");
 
 // Level 1 — single molecule, bonded terms, PBC+RF
 ref_test!(water_single,   "water_single");
+ref_test!(water_single_genvel, "water_single_genvel");
 ref_test!(benzene_vacuum, "benzene_vacuum");
 ref_test!(nacl_pair_box,  "nacl_pair_box");
 

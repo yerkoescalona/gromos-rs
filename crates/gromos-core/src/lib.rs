@@ -30,6 +30,7 @@ pub mod float;
 pub mod vector;
 pub mod matrix;
 pub mod math;
+pub mod random;
 pub mod topology;
 pub mod configuration;
 pub mod pairlist;

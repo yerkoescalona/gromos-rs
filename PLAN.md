@@ -71,6 +71,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 0   | pair_lj_mixed    | 2     | LJ combination rules                 | **PASS** |
 | 0   | nacl_pair        | 2     | Coulomb + LJ ions                    | **PASS** |
 | 1   | water_single     | 3     | bond + angle + intramolecular CRF    | **PASS** |
+| 1   | water_single_genvel | 3  | NTIVEL=1 Maxwell-Boltzmann velocity generation | **PASS** |
 | 1   | benzene_vacuum   | 12    | aromatic ring + improper + torsion   | **PASS** |
 | 1   | nacl_pair_box    | 2     | Coulomb + LJ in PBC with RF (no solvent) | **PASS** |
 | 1   | butane_vacuum    | 4     | dihedral + 1-4 LJ interaction        | **PASS** |
@@ -95,7 +96,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | aladip_solvated_em_posres | 72 | SD EM + position restraints     | **PASS** |
 | 4   | aladip_solvated_em | 72  | SD EM + SHAKE + posres, solvated    | **PASS** |
 
-**27 of 27 tests pass.** All levels fully passing.
+**28 of 28 tests pass.** All levels fully passing.
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see Roadmap Priority 2 + the
 cross-cutting minimal-reference-test theme.)
@@ -150,12 +151,15 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 (reusable), never duplicated into binaries. Each item gets a minimal reference test.
 
 **1.1 — Reproducibility & correctness (small, do first)**
-- [ ] **NTIVEL=1 velocity generation** (Maxwell-Boltzmann)
-  - [ ] Read NTIVEL, IG (seed), TEMPI from INITIALISE block (already parsed in `imd.rs`)
-  - [ ] MT19937 RNG matching GSL's `gsl_rng_mt19937`; Gaussian matching `gsl_ran_gaussian` (polar Box-Muller)
-  - [ ] Per atom: σ = sqrt(k_B·T / m_i), v_i = gaussian(σ) for x,y,z; k_B = 0.00831441 kJ/(mol·K)
-  - [ ] Store in both current().vel and old().vel (gromosXX convention)
-  - [ ] Refs: `util/generate_velocities.cc`, `math/random.h`. Currently worked around with pre-gen velocities.
+- [x] **NTIVEL=1 velocity generation** (Maxwell-Boltzmann) — `gromos-core/src/random.rs`
+  (`GslMt19937` + `gsl_ran_gaussian` + `generate_velocities`), wired in `md.rs` velocity setup.
+  Bit-for-bit match verified via `water_single_genvel` reference test (kinetic energy at step 0
+  depends entirely on generated velocities and matches gromosXX to full precision).
+  - [x] Read NTIVEL, IG (seed), TEMPI from INITIALISE block (already parsed in `imd.rs`)
+  - [x] MT19937 RNG matching GSL's `gsl_rng_mt19937`; Gaussian matching `gsl_ran_gaussian` (polar Box-Muller)
+  - [x] Per atom: σ = sqrt(k_B·T / m_i), v_i = gaussian(σ) for x,y,z; k_B = 0.00831441 kJ/(mol·K)
+  - [x] Store in both current().vel and old().vel (gromosXX convention, via `copy_current_to_old`)
+  - Refs: `util/generate_velocities.cc`, `math/random.h`
 - [ ] **Unit-conversion audit (topology parsing)**
   - [ ] HARMBONDANGLETYPE: if/when parsed, also convert CHT — ×(180/π)²
   - Already converted: IMPDIHEDRALTYPE, BONDANGLEBENDTYPE. No conversion: CT, CP, bond K, LJ, charges.
