@@ -133,7 +133,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Publish gromos-rs
-        working-directory: gromos-rs
+        working-directory: crates/gromos
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

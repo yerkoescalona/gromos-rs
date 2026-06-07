@@ -129,7 +129,6 @@ jobs:
         run: pip install maturin
 
       - name: Run Rust tests
-        working-directory: gromos-rs
         run: cargo test --workspace --all-features
         continue-on-error: true
 
@@ -197,13 +196,11 @@ jobs:
 
       - name: Build Rust release (Unix with all features)
         if: matrix.os != 'windows-latest'
-        working-directory: gromos-rs
         run: cargo build --release --workspace --all-features
         continue-on-error: true
 
       - name: Build Rust release (Windows without MPI/FFTW)
         if: matrix.os == 'windows-latest'
-        working-directory: gromos-rs
         run: cargo build --release --workspace --features simd,mimalloc
         continue-on-error: true
 
@@ -299,8 +296,7 @@ jobs:
         run: cargo install cargo-llvm-cov
 
       - name: Generate Rust coverage
-        working-directory: gromos-rs
-        run: cargo llvm-cov --workspace --all-features --lcov --output-path ../lcov-rust.info
+        run: cargo llvm-cov --workspace --all-features --lcov --output-path ./lcov-rust.info
 
       - name: Install maturin and pytest
         run: pip install maturin pytest pytest-cov
