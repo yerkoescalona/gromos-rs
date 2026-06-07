@@ -160,10 +160,17 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
   - [x] Per atom: σ = sqrt(k_B·T / m_i), v_i = gaussian(σ) for x,y,z; k_B = 0.00831441 kJ/(mol·K)
   - [x] Store in both current().vel and old().vel (gromosXX convention, via `copy_current_to_old`)
   - Refs: `util/generate_velocities.cc`, `math/random.h`
-- [ ] **Unit-conversion audit (topology parsing)**
-  - [ ] HARMBONDANGLETYPE: if/when parsed, also convert CHT — ×(180/π)²
-  - Already converted: IMPDIHEDRALTYPE, BONDANGLEBENDTYPE. No conversion: CT, CP, bond K, LJ, charges.
-  - Ref: gromosXX `in_topology.cc` lines 854, 928, 1055
+- [x] **Unit-conversion audit (topology parsing)** — audited every conversion in
+  `gromos-io/src/topology.rs` line-by-line against `in_topology.cc` (lines 854, 928, 1055):
+  `BONDANGLEBENDTYPE` (CHT ×(180/π)², T0 deg→rad), `TORSDIHEDRALTYPE` (PD deg→rad + cos(PD)),
+  `IMPDIHEDRALTYPE` (CQ ×(180/π)², Q0 deg→rad), `BONDSTRETCHTYPE`/LJ/charges (no conversion) —
+  **all bit-correct, no bugs found**. Locked in via `test_parse_dihedral_and_improper_type_conversions`
+  and the extended `test_parse_cg16_topology` angle assertions.
+  **Decision: `BONDANGLETYPE`/`HARMBONDANGLETYPE`/`DIHEDRALTYPE` intentionally unsupported** —
+  these are GROMOS96-era split/legacy encodings of the exact same data `BONDANGLEBENDTYPE`/
+  `TORSDIHEDRALTYPE` already carry in unified form (kept in gromosXX only as a back-compat shim).
+  No `.top` in the repo's corpus uses them; gromos-rs treats them like `TITLE`/`TOPVERSION`/
+  `PHYSICALCONSTANTS` — silently ignored, by design, with no fallback dispatch to maintain.
 
 **1.2 — Constraints (code exists, wire + test)**
 - [ ] **SETTLE** for rigid water — analytical 3-site solver, O(N_water), single-pass; code exists, not wired.

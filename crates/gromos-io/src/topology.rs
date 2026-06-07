@@ -1359,6 +1359,64 @@ END
         assert!((parsed.bond_parameters[0].k_harmonic - 500.0).abs() < 1e-6);
         assert!((parsed.bond_parameters[0].r0 - 0.15).abs() < 1e-6);
 
+        // BONDANGLEBENDTYPE conversion (gromosXX in_topology.cc:854-855):
+        // CT untouched, CHT *= (180/pi)^2, T0 deg -> rad
+        let deg_to_rad_sq = 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI);
+        let angle = &parsed.angle_parameters[0];
+        assert!((angle.k_cosine - 50.0).abs() < 1e-6);
+        assert!((angle.k_harmonic - 100.0 * deg_to_rad_sq).abs() < 1e-6);
+        assert!((angle.theta0 - 109.5_f64.to_radians()).abs() < 1e-12);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    /// Minimal topology exercising TORSDIHEDRALTYPE and IMPDIHEDRALTYPE unit conversions.
+    const DIHEDRAL_TYPES_TOPO: &str = "\
+TITLE
+  dihedral/improper type conversion test
+END
+SOLUTEATOM
+# ATNM MRES PANM IAC   MASS      CG   CGC INE IEXCL
+2
+    1    1   C     6  12.000000  0.000000  0  1  2
+    2    1   H     1   1.000000  0.000000  0  0
+END
+TORSDIHEDRALTYPE
+# CP        PD        NP
+1
+    5.000   180.000    2
+END
+IMPDIHEDRALTYPE
+# CQ        Q0
+1
+    0.051     0.000
+END
+";
+
+    #[test]
+    fn test_parse_dihedral_and_improper_type_conversions() {
+        let path = write_tmp(DIHEDRAL_TYPES_TOPO, "dihedral_types_topo");
+        let parsed = read_topology_file(&path).expect("Failed to parse inline topology");
+
+        let deg_to_rad_sq = 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI);
+
+        // TORSDIHEDRALTYPE conversion (gromosXX read_block_TORSDIHEDRALTYPE):
+        // CP (k) untouched; PD deg -> rad, plus its cosine
+        assert_eq!(parsed.dihedral_parameters.len(), 1);
+        let dihedral = &parsed.dihedral_parameters[0];
+        assert!((dihedral.k - 5.0).abs() < 1e-6);
+        assert!((dihedral.pd - 180.0_f64.to_radians()).abs() < 1e-12);
+        assert!((dihedral.cospd - 180.0_f64.to_radians().cos()).abs() < 1e-12);
+        assert!((dihedral.cospd - (-1.0)).abs() < 1e-12);
+        assert_eq!(dihedral.m, 2);
+
+        // IMPDIHEDRALTYPE conversion (gromosXX in_topology.cc:1055-1056):
+        // CQ (k) *= (180/pi)^2, Q0 deg -> rad
+        assert_eq!(parsed.improper_dihedral_parameters.len(), 1);
+        let improper = &parsed.improper_dihedral_parameters[0];
+        assert!((improper.k - 0.051 * deg_to_rad_sq).abs() < 1e-6);
+        assert!((improper.q0 - 0.0_f64.to_radians()).abs() < 1e-12);
+
         std::fs::remove_file(path).ok();
     }
 
