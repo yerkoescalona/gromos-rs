@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.12] (2026-06-07)
+
+### Features
+
+- **gromos-core:** add `random` module — GSL-compatible `mt19937` RNG (`GslMt19937`) and
+  `gsl_ran_gaussian` (Marsaglia polar method), plus `generate_velocities` for NTIVEL=1
+  Maxwell-Boltzmann initial velocity generation, matching gromosXX `util::generate_velocities` /
+  `math::RandomGeneratorGSL` bit-for-bit
+- **gromos-md:** wire NTIVEL=1 into `md` binary's velocity setup (reads NTIVEL/IG/TEMPI from
+  INITIALISE block); add `water_single_genvel` reference test verifying generated velocities
+  reproduce gromosXX trajectories exactly
+
 ## [0.0.11] (2026-06-07)
 
 ### Features

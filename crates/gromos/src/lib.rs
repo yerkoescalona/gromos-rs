@@ -50,6 +50,10 @@ pub mod selection {
     pub use gromos_core::selection::*;
 }
 
+pub mod random {
+    pub use gromos_core::random::*;
+}
+
 pub mod pairlist {
     pub use gromos_core::pairlist::*;
 }

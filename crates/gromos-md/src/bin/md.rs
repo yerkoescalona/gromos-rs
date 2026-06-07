@@ -35,6 +35,7 @@ use gromos::{
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
     math::{Periodicity, Rectangular, Vacuum, Vec3},
+    random::generate_velocities,
     pairlist::{PairlistContainer, StandardPairlistAlgorithm},
     validation::{
         validate_configuration, validate_coordinates, validate_energy, validate_topology,
@@ -558,7 +559,14 @@ fn main() {
     log::debug!("Creating configuration");
     let mut conf = Configuration::new(topo.num_atoms(), 1, 1);
     conf.current_mut().pos = positions.clone();
-    conf.current_mut().vel = if velocities.len() == topo.num_atoms() {
+    conf.current_mut().vel = if imd.ntivel == 1 {
+        log::info!(
+            "Generating initial velocities (NTIVEL=1): T={:.2} K, seed={}",
+            imd.tempi,
+            imd.ig
+        );
+        generate_velocities(imd.tempi, imd.ig as u32, &topo.mass)
+    } else if velocities.len() == topo.num_atoms() {
         velocities.clone()
     } else {
         vec![Vec3::ZERO; topo.num_atoms()]
