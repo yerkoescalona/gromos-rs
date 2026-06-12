@@ -16,28 +16,30 @@
 //!   9. EnergyCalculation (total energy)
 //! ```
 
-mod leap_frog;
-mod temperature;
+mod berendsen_barostat;
+mod berendsen_thermostat;
 mod energy;
 mod forcefield;
-mod shake_algorithm;
-mod settle_algorithm;
+mod leap_frog;
 mod lincs_algorithm;
-mod remove_com_motion;
-mod berendsen_thermostat;
+mod nosehoover_thermostat;
 mod pressure_calculation;
-mod berendsen_barostat;
+mod remove_com_motion;
+mod settle_algorithm;
+mod shake_algorithm;
 mod steepest_descent;
+mod temperature;
 
-pub use leap_frog::{LeapFrogVelocity, LeapFrogPosition};
-pub use temperature::TemperatureCalculation;
+pub use berendsen_barostat::{BerendsenBarostat, BerendsenBarostatParams};
+pub use berendsen_thermostat::{BerendsenThermostat, BerendsenThermostatParams};
 pub use energy::EnergyCalculation;
 pub use forcefield::Forcefield;
-pub use shake_algorithm::ShakeAlgorithm;
-pub use settle_algorithm::SettleAlgorithm;
+pub use leap_frog::{LeapFrogPosition, LeapFrogVelocity};
 pub use lincs_algorithm::LincsAlgorithm;
-pub use remove_com_motion::RemoveCOMMotion;
-pub use berendsen_thermostat::{BerendsenThermostat, BerendsenThermostatParams};
+pub use nosehoover_thermostat::{NoseHooverThermostat, NoseHooverThermostatParams};
 pub use pressure_calculation::{PressureCalculation, VirialType};
-pub use berendsen_barostat::{BerendsenBarostat, BerendsenBarostatParams};
+pub use remove_com_motion::RemoveCOMMotion;
+pub use settle_algorithm::SettleAlgorithm;
+pub use shake_algorithm::ShakeAlgorithm;
 pub use steepest_descent::SteepestDescentAlgorithm;
+pub use temperature::TemperatureCalculation;

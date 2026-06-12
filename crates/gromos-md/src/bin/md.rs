@@ -10,33 +10,27 @@
 
 use gromos::{
     algorithm::{
-        BerendsenBarostatParameters,
-        ShakeParameters, NtcMode,
-        AlgorithmSequence, SimulationState,
-        Forcefield, LeapFrogVelocity, LeapFrogPosition,
-        TemperatureCalculation, EnergyCalculation, ShakeAlgorithm, SettleAlgorithm, LincsAlgorithm,
-        RemoveCOMMotion, BerendsenThermostat,
-        PressureCalculation, VirialType,
-        BerendsenBarostat, BerendsenBarostatParams,
-        SteepestDescentAlgorithm,
+        AlgorithmSequence, BerendsenBarostat, BerendsenBarostatParameters, BerendsenBarostatParams,
+        BerendsenThermostat, EnergyCalculation, Forcefield, LeapFrogPosition, LeapFrogVelocity,
+        LincsAlgorithm, NoseHooverThermostat, NtcMode, PressureCalculation, RemoveCOMMotion,
+        SettleAlgorithm, ShakeAlgorithm, ShakeParameters, SimulationState,
+        SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
     },
     configuration::{Box as SimBox, Configuration},
-    interaction::{
-        nonbonded::CRFParameters,
-    },
+    interaction::nonbonded::CRFParameters,
     io::{
         coordinate::read_coordinates,
         energy::{EnergyFrame, EnergyWriter},
+        force::ForceWriter,
         imd::read_imd_file,
-        posres::{read_posresspec, read_refpos, build_posres_entries},
+        posres::{build_posres_entries, read_posresspec, read_refpos},
         topology::{build_topology, read_topology_file},
         trajectory::TrajectoryWriter,
-        force::ForceWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
     math::{Periodicity, Rectangular, Vacuum, Vec3},
-    random::generate_velocities,
     pairlist::{PairlistContainer, StandardPairlistAlgorithm},
+    random::generate_velocities,
     validation::{
         validate_configuration, validate_coordinates, validate_energy, validate_topology,
     },
@@ -52,12 +46,19 @@ struct Timer {
 }
 impl Timer {
     fn new(name: &'static str) -> Self {
-        Self { name, start: Instant::now() }
+        Self {
+            name,
+            start: Instant::now(),
+        }
     }
 }
 impl Drop for Timer {
     fn drop(&mut self) {
-        log::debug!("{} took {:.3} ms", self.name, self.start.elapsed().as_secs_f64() * 1000.0);
+        log::debug!(
+            "{} took {:.3} ms",
+            self.name,
+            self.start.elapsed().as_secs_f64() * 1000.0
+        );
     }
 }
 
@@ -285,8 +286,7 @@ fn main() {
         0 => "info",
         _ => "debug",
     };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
-        .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter)).init();
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                   GROMOS-RS MD Engine                        ║");
@@ -307,7 +307,12 @@ fn main() {
             process::exit(1);
         },
     };
-    log::debug!("Input parameters: steps={}, dt={}, ntb={}", imd.nstlim, imd.dt, imd.ntb);
+    log::debug!(
+        "Input parameters: steps={}, dt={}, ntb={}",
+        imd.nstlim,
+        imd.dt,
+        imd.ntb
+    );
 
     // Extract simulation parameters from IMD file
     let n_steps = imd.nstlim;
@@ -352,10 +357,26 @@ fn main() {
         -1.0
     };
     let thermostat_on = thermostat_tau > 0.0;
+    let thermostat_algorithm = if !imd.temp_bath.is_empty() {
+        imd.temp_bath[0].algorithm
+    } else {
+        0
+    };
+    let thermostat_nhc_chain = if !imd.temp_bath.is_empty() {
+        imd.temp_bath[0].nhc_chain
+    } else {
+        1
+    };
 
     // Derive output file paths (from @args or defaults)
-    let trc_file = md_args.trc_file.clone().unwrap_or_else(|| "md.trc".to_string());
-    let tre_file = md_args.tre_file.clone().unwrap_or_else(|| "md.tre".to_string());
+    let trc_file = md_args
+        .trc_file
+        .clone()
+        .unwrap_or_else(|| "md.trc".to_string());
+    let tre_file = md_args
+        .tre_file
+        .clone()
+        .unwrap_or_else(|| "md.tre".to_string());
 
     // === gromosXX initialization order: parameters → topology → coordinates ===
 
@@ -401,13 +422,20 @@ fn main() {
         let n_solute = topo.solute.num_atoms();
         let remaining = positions.len().saturating_sub(n_solute);
         if remaining % atoms_per_solvent != 0 {
-            eprintln!("Error: ({} coords - {} solute) is not divisible by {} atoms/solvent",
-                positions.len(), n_solute, atoms_per_solvent);
+            eprintln!(
+                "Error: ({} coords - {} solute) is not divisible by {} atoms/solvent",
+                positions.len(),
+                n_solute,
+                atoms_per_solvent
+            );
             process::exit(1);
         }
         let nsm_from_coords = remaining / atoms_per_solvent;
         if nsm_from_coords != imd.nsm {
-            println!("  Adjusting NSM: {} (imd) -> {} (from coordinates)", imd.nsm, nsm_from_coords);
+            println!(
+                "  Adjusting NSM: {} (imd) -> {} (from coordinates)",
+                imd.nsm, nsm_from_coords
+            );
         }
         nsm_from_coords
     } else {
@@ -418,8 +446,12 @@ fn main() {
     println!("  Solute atoms: {}", topo.solute.num_atoms());
     if !topo.solvents.is_empty() {
         let sv = &topo.solvents[0];
-        println!("  Solvent: {} molecules × {} atoms = {} atoms",
-            sv.num_molecules, sv.atoms_per_molecule(), sv.total_atoms());
+        println!(
+            "  Solvent: {} molecules × {} atoms = {} atoms",
+            sv.num_molecules,
+            sv.atoms_per_molecule(),
+            sv.total_atoms()
+        );
     }
     println!("  Total atoms: {}", topo.num_atoms());
     println!("  Bonds: {}", topo.solute.bonds.len());
@@ -455,13 +487,16 @@ fn main() {
         "  Box: ({:.4}, {:.4}, {:.4}) nm",
         box_dims.x, box_dims.y, box_dims.z
     );
-    println!("  Box type: {}", match coord_data.box_type {
-        0 => "vacuum",
-        1 => "rectangular",
-        2 => "triclinic",
-        3 => "truncated octahedron",
-        _ => "unknown",
-    });
+    println!(
+        "  Box type: {}",
+        match coord_data.box_type {
+            0 => "vacuum",
+            1 => "rectangular",
+            2 => "triclinic",
+            3 => "truncated octahedron",
+            _ => "unknown",
+        }
+    );
     println!();
 
     // check_configuration: atom count must match
@@ -647,12 +682,7 @@ fn main() {
     println!();
 
     log::debug!("Calculating CRF parameters");
-    let crf_params = CRFParameters::new(
-        cutoff,
-        epsilon,
-        rf_epsilon,
-        rf_kappa,
-    );
+    let crf_params = CRFParameters::new(cutoff, epsilon, rf_epsilon, rf_kappa);
     log::debug!(
         "CRF parameters: crf_2cut3i={:.6}, crf_cut3i={:.6}",
         crf_params.crf_2cut3i,
@@ -737,8 +767,11 @@ fn main() {
                     imd.cpor,
                 ));
             }
-            println!("  Position restraints: {} atoms, CPOR={:.1} kJ/(mol·nm²)",
-                entries.len(), imd.cpor);
+            println!(
+                "  Position restraints: {} atoms, CPOR={:.1} kJ/(mol·nm²)",
+                entries.len(),
+                imd.cpor
+            );
             Some(pr)
         } else {
             eprintln!("NTPOR={} but no @posresspec file specified", imd.ntpor);
@@ -876,7 +909,12 @@ fn main() {
             forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
         }
         if imd.couple_pressure {
-            forcefield.virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
+            forcefield.virial_type = match imd
+                .pressure_parameters
+                .as_ref()
+                .map(|p| p.virial)
+                .unwrap_or(0)
+            {
                 2 => VirialType::Molecular,
                 1 => VirialType::Atomic,
                 _ => VirialType::None,
@@ -887,10 +925,11 @@ fn main() {
         }
         md_sequence.push(Box::new(forcefield));
 
-    // 3. Leap-Frog velocity step (exchange_state + v update)
+        // 3. Leap-Frog velocity step (exchange_state + v update)
         md_sequence.push(Box::new(LeapFrogVelocity::new()));
 
-        // 3b. Berendsen thermostat (between velocity and position update, gromosXX convention)
+        // 3b. Thermostat (between velocity and position update, gromosXX convention)
+        // algorithm 0 → Berendsen, 1 → NHC single, N≥2 → NHC chain length N
         if thermostat_on {
             // Compute degrees of freedom: 3N - N_constraints - NDFMIN
             let n_atoms = topo.num_atoms();
@@ -914,11 +953,39 @@ fn main() {
             let solute_constraint_dof = 0usize;
             let total_dof = (3 * n_atoms - solvent_constraint_dof - solute_constraint_dof) as f64
                 - imd.ndfmin as f64;
-            println!("  Thermostat DOF: {:.0} (3*{} - {} solvent_constr - {} NDFMIN)",
-                total_dof, n_atoms, solvent_constraint_dof, imd.ndfmin);
-            md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
-                temperature, thermostat_tau, total_dof, n_atoms,
-            )));
+            println!(
+                "  Thermostat DOF: {:.0} (3*{} - {} solvent_constr - {} NDFMIN)",
+                total_dof, n_atoms, solvent_constraint_dof, imd.ndfmin
+            );
+            match thermostat_algorithm {
+                0 => {
+                    md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
+                        temperature,
+                        thermostat_tau,
+                        total_dof,
+                        n_atoms,
+                    )));
+                },
+                1 => {
+                    md_sequence.push(Box::new(NoseHooverThermostat::new_single_bath(
+                        temperature,
+                        thermostat_tau,
+                        total_dof,
+                        n_atoms,
+                    )));
+                },
+                n => {
+                    // n >= 2: NHC chain of length n (or thermostat_nhc_chain)
+                    let chain = (n as usize).max(thermostat_nhc_chain).max(2);
+                    md_sequence.push(Box::new(NoseHooverThermostat::new_chain_bath(
+                        temperature,
+                        thermostat_tau,
+                        total_dof,
+                        n_atoms,
+                        chain,
+                    )));
+                },
+            }
         }
 
         // 4. Leap-Frog position step (r update)
@@ -978,7 +1045,12 @@ fn main() {
 
         // 7. Pressure calculation and barostat (if pressure coupling is on)
         if imd.couple_pressure {
-            let virial_type = match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0) {
+            let virial_type = match imd
+                .pressure_parameters
+                .as_ref()
+                .map(|p| p.virial)
+                .unwrap_or(0)
+            {
                 2 => VirialType::Molecular,
                 1 => VirialType::Atomic,
                 _ => VirialType::None,
@@ -1002,14 +1074,21 @@ fn main() {
 
     // Initialize the sequence
     let mut sim_state = SimulationState::new(dt, n_steps);
-    md_sequence.init(&topo, &mut conf, &sim_state).unwrap_or_else(|e| {
-        eprintln!("Error initializing algorithm sequence: {}", e);
-        process::exit(1);
-    });
+    md_sequence
+        .init(&topo, &mut conf, &sim_state)
+        .unwrap_or_else(|e| {
+            eprintln!("Error initializing algorithm sequence: {}", e);
+            process::exit(1);
+        });
 
     // Thermostat is now wired into the algorithm sequence (above)
     if thermostat_on {
-        println!("Setting up thermostat: Berendsen");
+        let thermostat_label = match thermostat_algorithm {
+            0 => "Berendsen".to_string(),
+            1 => "Nose-Hoover".to_string(),
+            n => format!("Nose-Hoover-Chain({})", n),
+        };
+        println!("Setting up thermostat: {}", thermostat_label);
         println!("  Target temp:   {:.1} K", temperature);
         println!("  Coupling time: {:.3} ps", thermostat_tau);
         println!();
@@ -1063,8 +1142,10 @@ fn main() {
         println!();
     }
     if lincs_enabled {
-        println!("Setting up constraints: LINCS (solute={}, solvent={}, order={}/{})",
-            solute_lincs, solvent_lincs, imd.lincs_order_solute, imd.lincs_order_solvent);
+        println!(
+            "Setting up constraints: LINCS (solute={}, solvent={}, order={}/{})",
+            solute_lincs, solvent_lincs, imd.lincs_order_solute, imd.lincs_order_solvent
+        );
         println!();
     }
 
@@ -1199,10 +1280,7 @@ fn main() {
         println!("MD Parameters:");
         println!("  Steps:         {}", n_steps);
         println!("  Time step:     {} ps", dt);
-        println!(
-            "  Total time:    {} ps",
-            n_steps as f64 * dt
-        );
+        println!("  Total time:    {} ps", n_steps as f64 * dt);
         println!("  Temperature:   {} K", temperature);
         println!("  Traj output:   {}", trc_file);
         println!("  Energy output: {}", tre_file);
@@ -1213,16 +1291,15 @@ fn main() {
         println!("╚══════════════════════════════════════════════════════════════╝");
         println!();
 
-        log::info!(
-            "Starting MD simulation: {} steps, dt={} ps",
-            n_steps,
-            dt
-        );
+        log::info!("Starting MD simulation: {} steps, dt={} ps", n_steps, dt);
     }
 
     let start_time = Instant::now();
     let init_elapsed = t_total.elapsed();
-    log::info!("Initialization wall time: {:.3} s", init_elapsed.as_secs_f64());
+    log::info!(
+        "Initialization wall time: {:.3} s",
+        init_elapsed.as_secs_f64()
+    );
     let mut energy_history: Vec<(f64, f64, f64)> = Vec::new();
     let mut minimization_converged = false;
     let mut prev_min_energy = f64::MAX;
@@ -1235,17 +1312,25 @@ fn main() {
         log::debug!("Step {}: time = {:.6} ps", step, time);
 
         // Run the algorithm sequence for this step
-        md_sequence.run_step(&topo, &mut conf, &sim_state).unwrap_or_else(|e| {
-            eprintln!("Error at step {}: {}", step, e);
-            process::exit(1);
-        });
+        md_sequence
+            .run_step(&topo, &mut conf, &sim_state)
+            .unwrap_or_else(|e| {
+                eprintln!("Error at step {}: {}", step, e);
+                process::exit(1);
+            });
 
         // Debug: dump forces at step 0
         if step == 0 && md_args.verbose >= 2 {
             log::debug!("=== Forces at step 0 (old state, after exchange) ===");
             for i in 0..topo.num_atoms() {
                 let f = conf.old().force[i];
-                log::debug!("  Atom {:2}: ({:18.9}, {:18.9}, {:18.9})", i+1, f.x, f.y, f.z);
+                log::debug!(
+                    "  Atom {:2}: ({:18.9}, {:18.9}, {:18.9})",
+                    i + 1,
+                    f.x,
+                    f.y,
+                    f.z
+                );
             }
         }
 
@@ -1413,7 +1498,11 @@ fn main() {
                 minimization_converged = true;
                 println!();
                 println!("*** Energy minimization CONVERGED at step {} ***", step);
-                println!("    dE = {:.6e} kJ/mol (tolerance: {:.6e})", min_de.abs(), imd.dele);
+                println!(
+                    "    dE = {:.6e} kJ/mol (tolerance: {:.6e})",
+                    min_de.abs(),
+                    imd.dele
+                );
                 println!("    E_pot = {:.10e} kJ/mol", state.energies.potential_total);
                 println!();
                 // Write final frame before breaking
@@ -1427,8 +1516,10 @@ fn main() {
         // Log progress
         if step % nstlog == 0 {
             if is_minimization {
-                println!("Step {:6}  E_pot: {:18.10e}  dE: {:12.4e}",
-                    step, state.energies.potential_total, min_de);
+                println!(
+                    "Step {:6}  E_pot: {:18.10e}  dE: {:12.4e}",
+                    step, state.energies.potential_total, min_de
+                );
             } else {
                 println!("Step {:6}  Time: {:8.3} ps  E_pot: {:18.10e}  E_kin: {:18.10e}  E_tot: {:18.10e}  T: {:6.1} K",
                     step, time, state.energies.potential_total, state.energies.kinetic_total,
@@ -1504,7 +1595,10 @@ fn main() {
         if minimization_converged {
             log::info!("Energy minimization converged at step {}", actual_steps);
         } else {
-            log::warn!("Energy minimization did NOT converge within {} steps", n_steps);
+            log::warn!(
+                "Energy minimization did NOT converge within {} steps",
+                n_steps
+            );
             println!();
             println!("*** WARNING: Energy minimization did NOT converge ***");
             println!("    Max steps reached: {}", n_steps);
@@ -1601,7 +1695,9 @@ fn main() {
         };
         let box_opt = if box_vec.x > 0.0 { Some(box_vec) } else { None };
         let title = format!("Final configuration after {} steps", actual_steps);
-        if let Err(e) = gromos::io::g96::write_g96(fin_path, &title, positions, vels, box_opt, Some(&topo)) {
+        if let Err(e) =
+            gromos::io::g96::write_g96(fin_path, &title, positions, vels, box_opt, Some(&topo))
+        {
             eprintln!("Error writing final configuration: {}", e);
         } else {
             log::info!("Final configuration written to: {}", fin_path);
@@ -1611,8 +1707,12 @@ fn main() {
     let elapsed = start_time.elapsed();
     let total_elapsed = t_total.elapsed();
     log::info!("Simulation wall time: {:.2} s", elapsed.as_secs_f64());
-    log::info!("Total wall time: {:.3} s (init: {:.3} s, sim: {:.3} s)",
-        total_elapsed.as_secs_f64(), init_elapsed.as_secs_f64(), elapsed.as_secs_f64());
+    log::info!(
+        "Total wall time: {:.3} s (init: {:.3} s, sim: {:.3} s)",
+        total_elapsed.as_secs_f64(),
+        init_elapsed.as_secs_f64(),
+        elapsed.as_secs_f64()
+    );
 
     println!();
     println!("╔══════════════════════════════════════════════════════════════╗");
@@ -1626,12 +1726,12 @@ fn main() {
     println!("Statistics:");
     println!("  Total steps:     {}", actual_steps);
     if is_minimization {
-        println!("  Converged:       {}", if minimization_converged { "YES" } else { "NO" });
-    } else {
         println!(
-            "  Simulation time: {:.3} ps",
-            n_steps as f64 * dt
+            "  Converged:       {}",
+            if minimization_converged { "YES" } else { "NO" }
         );
+    } else {
+        println!("  Simulation time: {:.3} ps", n_steps as f64 * dt);
     }
     println!("  Wall time:       {:.2} s", elapsed.as_secs_f64());
     println!(
