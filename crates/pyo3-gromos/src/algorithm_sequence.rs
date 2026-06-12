@@ -496,16 +496,17 @@ pub struct PyRemoveCOMMotion {
     /// Remove COM motion at step 0 (NTICOM≥1).
     #[pyo3(get, set)]
     pub initial: bool,
-    /// Periodic removal frequency (0 = off).
+    /// Signed periodic removal control: >0 translation every `nscm` steps,
+    /// <0 translation+rotation every `|nscm|` steps, 0 = off.
     #[pyo3(get, set)]
-    pub nscm: usize,
+    pub nscm: i32,
 }
 
 #[pymethods]
 impl PyRemoveCOMMotion {
     #[new]
     #[pyo3(signature = (initial=true, nscm=10))]
-    fn new(initial: bool, nscm: usize) -> Self {
+    fn new(initial: bool, nscm: i32) -> Self {
         Self { initial, nscm }
     }
 
@@ -767,7 +768,7 @@ impl PyAlgorithmSequence {
         let mut seq = Self::new();
 
         // COM removal
-        if imd.nticom >= 1 || imd.nscm > 0 {
+        if imd.nticom >= 1 || imd.nscm != 0 {
             seq.algorithms.push(AlgorithmDescriptor::RemoveCOMMotion(
                 PyRemoveCOMMotion {
                     initial: imd.nticom >= 1,
@@ -818,7 +819,7 @@ impl PyAlgorithmSequence {
         let mut seq = Self::new();
 
         // COM removal
-        if imd.nticom >= 1 || imd.nscm > 0 {
+        if imd.nticom >= 1 || imd.nscm != 0 {
             seq.algorithms.push(AlgorithmDescriptor::RemoveCOMMotion(
                 PyRemoveCOMMotion {
                     initial: imd.nticom >= 1,
@@ -891,7 +892,7 @@ impl PyAlgorithmSequence {
         let mut seq = Self::new();
 
         // COM removal
-        if imd.nticom >= 1 || imd.nscm > 0 {
+        if imd.nticom >= 1 || imd.nscm != 0 {
             seq.algorithms.push(AlgorithmDescriptor::RemoveCOMMotion(
                 PyRemoveCOMMotion {
                     initial: imd.nticom >= 1,

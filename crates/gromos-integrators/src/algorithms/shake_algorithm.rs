@@ -16,6 +16,9 @@ pub struct ShakeAlgorithm {
     pub shake_initial_positions: bool,
     /// Whether to shake initial velocities on init (gromosXX: sim.param().start.shake_vel)
     pub shake_initial_velocities: bool,
+    /// Whether SHAKE should also constrain the solvent (false when NTCS selects
+    /// a different solvent algorithm, e.g. SETTLE/LINCS)
+    pub include_solvent: bool,
     /// Precomputed constraint data and reusable buffers (initialized in init())
     buffers: Option<ShakeBuffers>,
 }
@@ -26,6 +29,7 @@ impl ShakeAlgorithm {
             params,
             shake_initial_positions: false,
             shake_initial_velocities: false,
+            include_solvent: true,
             buffers: None,
         }
     }
@@ -39,7 +43,7 @@ impl Algorithm for ShakeAlgorithm {
         sim: &SimulationState,
     ) -> Result<(), String> {
         // Precompute constraint lists and allocate reusable buffers
-        self.buffers = Some(ShakeBuffers::new(topo, self.params.ntc));
+        self.buffers = Some(ShakeBuffers::new(topo, self.params.ntc, self.include_solvent));
 
         if self.shake_initial_positions {
             log::info!("SHAKE: shaking initial positions");

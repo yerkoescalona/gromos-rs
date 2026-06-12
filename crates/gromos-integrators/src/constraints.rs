@@ -12,7 +12,7 @@
 //! - COM Motion Removal: Remove center-of-mass translation and rotation
 
 use gromos_core::configuration::Configuration;
-use gromos_core::math::{Mat3, Vec3};
+use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
 
 /// Precomputed constraint data and reusable buffers for SHAKE.
@@ -36,7 +36,11 @@ pub struct ShakeBuffers {
 impl ShakeBuffers {
     /// Precompute constraint lists from topology and NTC mode.
     /// Call once at initialization, reuse across all MD steps.
-    pub fn new(topo: &Topology, ntc: NtcMode) -> Self {
+    ///
+    /// `include_solvent` should be `false` when the solvent is constrained by
+    /// a different algorithm (e.g. SETTLE/LINCS selected via NTCS), so SHAKE
+    /// only handles the solute bonds.
+    pub fn new(topo: &Topology, ntc: NtcMode, include_solvent: bool) -> Self {
         let solute_constraints: Vec<(usize, usize, f64)> = match ntc {
             NtcMode::SolventOnly => Vec::new(),
             NtcMode::HydrogenBonds => {
@@ -65,7 +69,7 @@ impl ShakeBuffers {
         };
 
         let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
-        if !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
+        if include_solvent && !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
             let n_solute = topo.solute.num_atoms();
             let atoms_per_solvent = topo.solvent_atom_template.len();
             let num_molecules = topo.solvents[0].num_molecules;
@@ -757,170 +761,385 @@ pub fn perturbed_shake(
 /// designed for rigid water molecules with fixed bond lengths and angles.
 /// It's much faster than iterative SHAKE for water.
 ///
-/// Assumptions:
-/// - Water molecule with O-H1-H2 geometry
-/// - Fixed O-H bond lengths
-/// - Fixed H-O-H angle
+/// Faithful port of gromosXX `algorithm::Settle::solvent`
+/// (md++/src/algorithm/constraints/settle.cc:179-415): builds the canonical
+/// triangle geometry from the constraint lengths and masses, transforms into
+/// a centre-of-mass/orientation frame derived from the *old* positions, solves
+/// analytically for sin(φ), sin(ψ), sin(θ) (eqs. A3-A17 of the paper), and
+/// reconstructs the new O/H1/H2 positions — then derives velocities, the
+/// constraint force, and the virial contribution from the displacement.
+///
+/// Assumptions (checked by the caller / `SettleAlgorithm::init`):
+/// - Exactly one solvent, water-like with 3 atoms and equal H masses
+/// - 3 distance constraints with the two O-H lengths equal
 pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintResult {
-    // SETTLE parameters for common water models (SPC, TIP3P, etc.)
-    // O-H bond length: ~0.1 nm
-    // H-H distance: ~0.16333 nm (for 109.47° angle)
+    let n_solute = topo.solute.num_atoms();
+    let num_atoms = topo.num_atoms();
 
-    let mut num_processed = 0;
-
-    // Process each solvent molecule (assumed to be water)
-    for solvent in &topo.solvents {
-        if solvent.atoms.len() != 3 {
-            continue; // SETTLE only works for 3-site water
-        }
-
-        for molecule_idx in 0..solvent.num_molecules {
-            let base_idx = topo.solute.num_atoms() + molecule_idx * 3;
-            let o_idx = base_idx;
-            let h1_idx = base_idx + 1;
-            let h2_idx = base_idx + 2;
-
-            // Get masses
-            let m_o = topo.mass[o_idx];
-            let m_h = topo.mass[h1_idx];
-
-            // Target geometry (typical for SPC/TIP3P water)
-            let d_oh = 0.1; // O-H bond length in nm
-            let d_hh = 0.16333; // H-H distance in nm
-
-            // Get current and old positions
-            let r_o = conf.current().pos[o_idx];
-            let r_h1 = conf.current().pos[h1_idx];
-            let r_h2 = conf.current().pos[h2_idx];
-
-            let r_o_old = conf.old().pos[o_idx];
-            let r_h1_old = conf.old().pos[h1_idx];
-            let r_h2_old = conf.old().pos[h2_idx];
-
-            // Center of mass
-            let m_total = m_o + 2.0 * m_h;
-            let r_com = (r_o * m_o + r_h1 * m_h + r_h2 * m_h) / m_total;
-            let r_com_old = (r_o_old * m_o + r_h1_old * m_h + r_h2_old * m_h)
-                / m_total;
-
-            // Vectors from COM
-            let s_o = r_o - r_com;
-            let s_h1 = r_h1 - r_com;
-            let s_h2 = r_h2 - r_com;
-
-            let s_o_old = r_o_old - r_com_old;
-            let s_h1_old = r_h1_old - r_com_old;
-            let s_h2_old = r_h2_old - r_com_old;
-
-            // Analytical SETTLE solution (simplified version)
-            // Full SETTLE is complex; this is a simplified constraint satisfaction
-
-            // For now, use SHAKE-like correction for each bond
-            // A full SETTLE implementation would solve the analytical equations
-
-            // O-H1 constraint
-            let r_oh1 = r_h1 - r_o;
-            let d_current = r_oh1.length();
-            if (d_current - d_oh).abs() > 1e-6 {
-                let correction = (d_oh - d_current) / d_current;
-                let delta = r_oh1 * (correction * 0.5);
-                conf.current_mut().pos[h1_idx] += delta;
-                conf.current_mut().pos[o_idx] -= delta * (m_h / m_o);
-            }
-
-            // O-H2 constraint
-            let r_oh2 = r_h2 - r_o;
-            let d_current = r_oh2.length();
-            if (d_current - d_oh).abs() > 1e-6 {
-                let correction = (d_oh - d_current) / d_current;
-                let delta = r_oh2 * (correction * 0.5);
-                conf.current_mut().pos[h2_idx] += delta;
-                conf.current_mut().pos[o_idx] -= delta * (m_h / m_o);
-            }
-
-            // H1-H2 constraint
-            let r_h1h2 = r_h2 - r_h1;
-            let d_current = r_h1h2.length();
-            if (d_current - d_hh).abs() > 1e-6 {
-                let correction = (d_hh - d_current) / d_current;
-                let delta = r_h1h2 * (correction * 0.5);
-                conf.current_mut().pos[h2_idx] += delta;
-                conf.current_mut().pos[h1_idx] -= delta;
-            }
-
-            num_processed += 1;
-        }
+    if topo.solvents.is_empty() || topo.solvent_constraint_template.len() != 3 {
+        return ConstraintResult {
+            converged: true,
+            iterations: 0,
+            max_error: 0.0,
+        };
     }
 
+    let m_o = topo.mass[n_solute];
+    let m_h = topo.mass[n_solute + 1];
+
+    // Distance constraints: 0 = O-H1, 1 = O-H2, 2 = H1-H2 (gromosXX convention)
+    let dist_oh = topo.solvent_constraint_template[0].length;
+    let dist_hh = topo.solvent_constraint_template[2].length;
+
+    // canonical triangle geometry (settle.cc:203-206 / Figure 2a)
+    let half_mo_div_mh = 0.5 * m_o / m_h;
+    let rc = 0.5 * dist_hh;
+    let ra = (dist_oh * dist_oh - rc * rc).sqrt() / (1.0 + half_mo_div_mh);
+    let rb = half_mo_div_mh * ra;
+
+    let dt_i = 1.0 / dt;
+    let dt2_i = dt_i * dt_i;
+
+    let mut max_error: f64 = 0.0;
+    let mut error_count = 0usize;
+    let mut num_molecules = 0usize;
+
+    let mut i = n_solute;
+    while i + 3 <= num_atoms {
+        let pos_old = [conf.old().pos[i], conf.old().pos[i + 1], conf.old().pos[i + 2]];
+        let pos_new = [conf.current().pos[i], conf.current().pos[i + 1], conf.current().pos[i + 2]];
+
+        // vectors in the plane of the old positions
+        let mut b0 = pos_old[1] - pos_old[0];
+        let mut c0 = pos_old[2] - pos_old[0];
+
+        // centre of mass of the new positions
+        let d0 = (pos_new[0] * m_o + pos_new[1] * m_h + pos_new[2] * m_h) / (m_o + m_h + m_h);
+
+        // move the origin to the centre of mass
+        let mut a1 = pos_new[0] - d0;
+        let mut b1 = pos_new[1] - d0;
+        let mut c1 = pos_new[2] - d0;
+
+        // orthonormal basis transforming old-frame -> COM frame (settle.cc:252-265)
+        let mut n0 = b0.cross(c0);
+        let n1 = a1.cross(n0);
+        let n2 = n0.cross(n1);
+        n0 /= n0.length();
+        let n1 = n1 / n1.length();
+        let n2 = n2 / n2.length();
+
+        // transpose, to undo the transformation later
+        let m1 = Vec3::new(n1.x, n2.x, n0.x);
+        let m2 = Vec3::new(n1.y, n2.y, n0.y);
+        let m0 = Vec3::new(n1.z, n2.z, n0.z);
+
+        // rotate old positions into the COM/orientation frame
+        b0 = Vec3::new(n1.dot(b0), n2.dot(b0), n0.dot(b0));
+        c0 = Vec3::new(n1.dot(c0), n2.dot(c0), n0.dot(c0));
+
+        // and the new (COM-centred) positions
+        a1 = Vec3::new(n1.dot(a1), n2.dot(a1), n0.dot(a1));
+        b1 = Vec3::new(n1.dot(b1), n2.dot(b1), n0.dot(b1));
+        c1 = Vec3::new(n1.dot(c1), n2.dot(c1), n0.dot(c1));
+
+        // sin(phi)/cos(phi) — (A8)
+        let sinphi = a1.z / ra;
+        let one_minus_sinphi2 = 1.0 - sinphi * sinphi;
+        if one_minus_sinphi2 < 0.0 {
+            error_count += 1;
+            i += 3;
+            continue;
+        }
+        let cosphi = one_minus_sinphi2.sqrt();
+
+        // sin(psi)/cos(psi) — (A9)
+        let sinpsi = (b1.z - c1.z) / (2.0 * rc * cosphi);
+        let one_minus_sinpsi2 = 1.0 - sinpsi * sinpsi;
+        if one_minus_sinpsi2 < 0.0 {
+            error_count += 1;
+            i += 3;
+            continue;
+        }
+        let cospsi = one_minus_sinpsi2.sqrt();
+
+        let minus_rb_cosphi = -rb * cosphi;
+        let rc_cospsi = rc * cospsi;
+        let rc_sinpsi_sinphi = rc * sinpsi * sinphi;
+        let rc_sinpsi_cosphi = rc * sinpsi * cosphi;
+
+        // (A3)
+        let x_a2 = 0.0;
+        let x_b2 = -rc_cospsi;
+        let x_c2 = rc_cospsi;
+
+        let y_a2 = ra * cosphi;
+        let y_b2 = minus_rb_cosphi - rc_sinpsi_sinphi;
+        let y_c2 = minus_rb_cosphi + rc_sinpsi_sinphi;
+
+        // (A5)/(A6)/(A7)
+        let z_a2 = ra * sinphi;
+        let z_b2 = -rb * sinphi + rc_sinpsi_cosphi;
+        let z_c2 = -rb * sinphi - rc_sinpsi_cosphi;
+
+        let a2 = Vec3::new(x_a2, y_a2, z_a2);
+        let b2 = Vec3::new(x_b2, y_b2, z_b2);
+        let c2 = Vec3::new(x_c2, y_c2, z_c2);
+
+        // (A15)
+        let alpha = b2.x * (b0.x - c0.x) + b0.y * b2.y + c0.y * c2.y;
+        let beta = b2.x * (c0.y - b0.y) + b0.x * b2.y + c0.x * c2.y;
+        let gamma = b0.x * b1.y - b1.x * b0.y + c0.x * c1.y - c1.x * c0.y;
+
+        let alpha2_beta2 = alpha * alpha + beta * beta;
+        // (A17)
+        let sintheta = (alpha * gamma - beta * (alpha2_beta2 - gamma * gamma).sqrt()) / alpha2_beta2;
+        let one_minus_sintheta2 = 1.0 - sintheta * sintheta;
+        if one_minus_sintheta2 < 0.0 {
+            error_count += 1;
+            i += 3;
+            continue;
+        }
+        let costheta = one_minus_sintheta2.sqrt();
+
+        // (A4)
+        let a3 = Vec3::new(-a2.y * sintheta, a2.y * costheta, a1.z);
+        let b3 = Vec3::new(
+            b2.x * costheta - b2.y * sintheta,
+            b2.x * sintheta + b2.y * costheta,
+            b1.z,
+        );
+        let c3 = Vec3::new(
+            -b2.x * costheta - c2.y * sintheta,
+            -b2.x * sintheta + c2.y * costheta,
+            c1.z,
+        );
+
+        // rotate back to the lab frame and re-add the centre of mass
+        let pos_a = Vec3::new(a3.dot(m1), a3.dot(m2), a3.dot(m0)) + d0;
+        let pos_b = Vec3::new(b3.dot(m1), b3.dot(m2), b3.dot(m0)) + d0;
+        let pos_c = Vec3::new(c3.dot(m1), c3.dot(m2), c3.dot(m0)) + d0;
+
+        // displacement, used for velocity correction, constraint force and virial
+        let d_a = pos_a - pos_new[0];
+        let d_b = pos_b - pos_new[1];
+        let d_c = pos_c - pos_new[2];
+
+        conf.current_mut().pos[i] = pos_a;
+        conf.current_mut().pos[i + 1] = pos_b;
+        conf.current_mut().pos[i + 2] = pos_c;
+
+        // constraint force by finite difference (settle.cc:381-383)
+        let cons_force = [d_a * m_o * dt2_i, d_b * m_h * dt2_i, d_c * m_h * dt2_i];
+        conf.old_mut().constraint_force[i] = cons_force[0];
+        conf.old_mut().constraint_force[i + 1] = cons_force[1];
+        conf.old_mut().constraint_force[i + 2] = cons_force[2];
+
+        // velocity correction (settle.cc:387-395)
+        conf.current_mut().vel[i] += d_a * dt_i;
+        conf.current_mut().vel[i + 1] += d_b * dt_i;
+        conf.current_mut().vel[i + 2] += d_c * dt_i;
+
+        // atomic virial contribution (settle.cc:397-411)
+        // gromosXX: virial_tensor(row, col) += Σ_k pos_old[k](row) * cons_force[k](col);
+        // Mat3 is column-major (mat.col(col)[row]), see forcefield.rs virial transfer.
+        {
+            let p = [
+                [pos_old[0].x, pos_old[0].y, pos_old[0].z],
+                [pos_old[1].x, pos_old[1].y, pos_old[1].z],
+                [pos_old[2].x, pos_old[2].y, pos_old[2].z],
+            ];
+            let f = [
+                [cons_force[0].x, cons_force[0].y, cons_force[0].z],
+                [cons_force[1].x, cons_force[1].y, cons_force[1].z],
+                [cons_force[2].x, cons_force[2].y, cons_force[2].z],
+            ];
+            let mut dvir = [[0.0f64; 3]; 3]; // dvir[row][col]
+            for k in 0..3 {
+                for row in 0..3 {
+                    for col in 0..3 {
+                        dvir[row][col] += p[k][row] * f[k][col];
+                    }
+                }
+            }
+            let vt = &mut conf.old_mut().virial_tensor;
+            vt.x_axis += Vec3::new(dvir[0][0], dvir[1][0], dvir[2][0]);
+            vt.y_axis += Vec3::new(dvir[0][1], dvir[1][1], dvir[2][1]);
+            vt.z_axis += Vec3::new(dvir[0][2], dvir[1][2], dvir[2][2]);
+        }
+
+        let err = (d_a.length() + d_b.length() + d_c.length()) / 3.0;
+        if err > max_error {
+            max_error = err;
+        }
+
+        num_molecules += 1;
+        i += 3;
+    }
+
+    let _ = num_molecules;
+
     ConstraintResult {
-        converged: true,
+        converged: error_count == 0,
         iterations: 1,
-        max_error: 0.0,
+        max_error,
     }
 }
 
-/// Setup LINCS coupling matrix for a set of distance constraints
+/// Precomputed LINCS constraint data and reusable buffers, mirroring `ShakeBuffers`.
 ///
-/// This function analyzes the constraint topology to identify coupled constraints
-/// (constraints that share a common atom) and computes the coupling coefficients.
+/// Solute constraints use global atom indices directly (offset 0). Solvent
+/// constraints are stored once as a local (0-based, within-molecule) template
+/// — since every molecule of a given solvent type has identical connectivity
+/// and masses, the coupling matrix only needs to be computed once
+/// (cf. gromosXX `Lincs::init`, `lincs.cc:391-409`, which sets up
+/// `topo.solvent(i).lincs()` once and reuses it for every molecule via an
+/// `offset` in `_lincs<B>`, `lincs.cc:158-205`).
+#[derive(Debug, Clone)]
+pub struct LincsBuffers {
+    /// Solute constraints: (atom_i, atom_j, r0), global indices, offset 0
+    pub solute_constraints: Vec<(usize, usize, f64)>,
+    pub solute_data: LincsData,
+    pub solute_params: LincsParameters,
+
+    /// One solvent molecule's constraints: (local_i, local_j, r0)
+    pub solvent_constraints: Vec<(usize, usize, f64)>,
+    pub solvent_data: LincsData,
+    pub solvent_params: LincsParameters,
+    /// Atom index of the first solvent atom (= number of solute atoms)
+    pub solvent_offset0: usize,
+    /// Number of atoms per solvent molecule
+    pub atoms_per_solvent: usize,
+    /// Number of solvent molecules
+    pub num_solvent_molecules: usize,
+}
+
+impl LincsBuffers {
+    /// Precompute LINCS constraint lists and coupling matrices.
+    ///
+    /// `ntc` selects which solute bonds are constrained (mirrors `ShakeBuffers::new`);
+    /// LINCS for the solute additionally requires `ntc > 1` (gromosXX: `lincs.cc:248`).
+    /// `solute_order`/`solvent_order` are the LINCS expansion orders (NTCP0/NTCS0).
+    pub fn new(
+        topo: &Topology,
+        ntc: NtcMode,
+        solute_order: usize,
+        solvent_order: usize,
+        include_solute: bool,
+        include_solvent: bool,
+    ) -> Self {
+        let solute_constraints: Vec<(usize, usize, f64)> = if include_solute {
+            match ntc {
+                NtcMode::SolventOnly => Vec::new(),
+                NtcMode::HydrogenBonds => topo.solute.bonds.iter().filter_map(|bond| {
+                    let r0 = topo.bond_parameters[bond.bond_type].r0;
+                    if r0 < 1e-10 {
+                        return None;
+                    }
+                    if topo.mass[bond.i] > 2.0 && topo.mass[bond.j] > 2.0 {
+                        return None;
+                    }
+                    Some((bond.i, bond.j, r0))
+                }).collect(),
+                NtcMode::AllBonds => topo.solute.bonds.iter().filter_map(|bond| {
+                    let r0 = topo.bond_parameters[bond.bond_type].r0;
+                    if r0 < 1e-10 {
+                        return None;
+                    }
+                    Some((bond.i, bond.j, r0))
+                }).collect(),
+            }
+        } else {
+            Vec::new()
+        };
+
+        let n_solute = topo.solute.num_atoms();
+        let solute_params = LincsParameters { order: solute_order };
+        let solute_data = setup_lincs(topo, &solute_constraints, 0);
+
+        let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
+        let mut atoms_per_solvent = 0;
+        let mut num_solvent_molecules = 0;
+        if include_solvent && !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
+            atoms_per_solvent = topo.solvent_atom_template.len();
+            num_solvent_molecules = topo.solvents[0].num_molecules;
+            for constr in &topo.solvent_constraint_template {
+                solvent_constraints.push((constr.i, constr.j, constr.length));
+            }
+        }
+        let solvent_params = LincsParameters { order: solvent_order };
+        // Coupling matrix only depends on masses/connectivity, identical for every
+        // molecule of this solvent type — compute once using the first molecule's offset.
+        let solvent_data = setup_lincs(topo, &solvent_constraints, n_solute);
+
+        Self {
+            solute_constraints,
+            solute_data,
+            solute_params,
+            solvent_constraints,
+            solvent_data,
+            solvent_params,
+            solvent_offset0: n_solute,
+            atoms_per_solvent,
+            num_solvent_molecules,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.solute_constraints.is_empty() && self.solvent_constraints.is_empty()
+    }
+}
+
+/// Setup LINCS coupling matrix for a set of distance constraints.
 ///
-/// # Parameters
-/// - `topo`: Molecular topology
-/// - `constraint_indices`: Indices of bonds that are constrained
+/// Mirrors gromosXX `_setup_lincs` (`lincs.cc:288-345`): computes the diagonal
+/// matrix elements `sdiag[i] = 1/sqrt(1/m_i + 1/m_j)` and, for every pair of
+/// constraints sharing a common atom, the coupling coefficient
+/// `coef = ±(1/m_common) * sdiag[i] * sdiag[j]` (sign flips when the shared
+/// atom occupies the same slot — both `.i` or both `.j` — in each constraint).
 ///
-/// # Returns
-/// - `LincsData` containing diagonal elements, coupled constraint lists, and coefficients
-pub fn setup_lincs(topo: &Topology, constraint_indices: &[usize]) -> LincsData {
-    let num_constr = constraint_indices.len();
+/// `constraints` are `(atom_i, atom_j, r0)` triples using indices local to
+/// `offset` (pass `offset = 0` for already-global indices, e.g. solute bonds;
+/// pass the first-atom index of a solvent molecule for solvent templates).
+pub fn setup_lincs(topo: &Topology, constraints: &[(usize, usize, f64)], offset: usize) -> LincsData {
+    let num_constr = constraints.len();
     let mut lincs = LincsData::new();
 
     lincs.sdiag.reserve(num_constr);
     lincs.coupled_constr.resize(num_constr, Vec::new());
     lincs.coef.resize(num_constr, Vec::new());
 
-    // Compute diagonal matrix elements: sdiag[i] = 1 / sqrt(1/m_i + 1/m_j)
-    for &bond_idx in constraint_indices {
-        let bond = &topo.solute.bonds[bond_idx];
-        let inv_mass_i = topo.inverse_mass[bond.i];
-        let inv_mass_j = topo.inverse_mass[bond.j];
-        let inv_mass_sum = inv_mass_i + inv_mass_j;
-
-        let sdiag_val = 1.0 / inv_mass_sum.sqrt();
-        lincs.sdiag.push(sdiag_val);
+    for &(i, j, _) in constraints {
+        let inv_mass_sum = topo.inverse_mass[i + offset] + topo.inverse_mass[j + offset];
+        lincs.sdiag.push(1.0 / inv_mass_sum.sqrt());
     }
 
-    // Find coupled constraints (constraints that share a common atom)
     for i in 0..num_constr {
-        let bond_i = &topo.solute.bonds[constraint_indices[i]];
+        let (ci_i, ci_j, _) = constraints[i];
 
         for j in (i + 1)..num_constr {
-            let bond_j = &topo.solute.bonds[constraint_indices[j]];
+            let (cj_i, cj_j, _) = constraints[j];
 
-            // Check if constraints i and j share a common atom
-            let common_atom = if bond_i.i == bond_j.i {
-                Some(bond_i.i)
-            } else if bond_i.j == bond_j.i {
-                Some(bond_i.j)
-            } else if bond_i.i == bond_j.j {
-                Some(bond_i.i)
-            } else if bond_i.j == bond_j.j {
-                Some(bond_i.j)
+            let common_atom = if ci_i == cj_i {
+                Some(ci_i)
+            } else if ci_j == cj_i {
+                Some(ci_j)
+            } else if ci_i == cj_j {
+                Some(ci_i)
+            } else if ci_j == cj_j {
+                Some(ci_j)
             } else {
                 None
             };
 
             if let Some(con) = common_atom {
-                // Constraints are coupled
                 lincs.coupled_constr[i].push(j);
                 lincs.coupled_constr[j].push(i);
 
-                // Coupling coefficient: c = (1/m_common) * sdiag[i] * sdiag[j]
-                let inv_mass_common = topo.inverse_mass[con];
+                let inv_mass_common = topo.inverse_mass[con + offset];
                 let mut c = inv_mass_common * lincs.sdiag[i] * lincs.sdiag[j];
 
-                // Sign depends on the topology
-                // If both constraints have the common atom at the same position (both i or both j), negate
-                if (bond_i.i == bond_j.i) || (bond_i.j == bond_j.j) {
+                if (ci_i == cj_i) || (ci_j == cj_j) {
                     c *= -1.0;
                 }
 
@@ -933,36 +1152,34 @@ pub fn setup_lincs(topo: &Topology, constraint_indices: &[usize]) -> LincsData {
     lincs
 }
 
-/// Apply LINCS algorithm to satisfy distance constraints
+/// Apply LINCS algorithm to satisfy distance constraints.
 ///
-/// LINCS (Linear Constraint Solver) by Hess et al. (1997) uses a matrix
-/// formulation to solve constraints. It's typically faster than SHAKE and
-/// more suitable for parallel implementations.
+/// LINCS (Linear Constraint Solver, Hess et al. 1997) — analytical port of
+/// gromosXX `_lincs<B>` (`lincs.cc:118-205`): builds reference direction
+/// vectors `B` from old positions, solves the coupled linear system via a
+/// truncated matrix expansion (`_solve_lincs`, `lincs.cc:69-112`), corrects
+/// positions, then applies a second solve for the rotational-lengthening
+/// correction. Finishes with the gromosXX velocity recovery
+/// `v = (pos - old_pos) / dt` (`lincs.cc:273-281`, applied unconditionally
+/// here — mirrors how `shake`/`settle` handle `do_velocity` in this port,
+/// since `SimulationState` has no analyze/minimise/sd flags).
 ///
-/// Algorithm:
-/// 1. Compute constraint direction vectors B from old (reference) positions
-/// 2. Compute right-hand side: deviation from constraint
-/// 3. Solve linear system iteratively using coupling matrix
-/// 4. Apply position corrections
-/// 5. Apply rotational lengthening correction
+/// Note on sign convention: this port defines `B = (pos[j] - pos[old_i]) /
+/// |...|` (opposite of gromosXX's `B = (pos[i] - pos[j])/|...|`); the position
+/// correction signs below are flipped to match, so the net result is identical
+/// — `B` and the correction always appear together as `±B * sdiag/m * sol`.
 ///
-/// # Parameters
-/// - `topo`: Molecular topology
-/// - `conf`: Configuration with current and old positions
-/// - `constraint_indices`: Indices of bonds to constrain
-/// - `lincs_data`: Pre-computed LINCS coupling data
-/// - `params`: LINCS parameters (order of expansion)
-///
-/// # Returns
-/// - `ConstraintResult` with convergence status
+/// `constraints`/`offset` follow the same convention as [`setup_lincs`].
 pub fn lincs(
     topo: &Topology,
     conf: &mut Configuration,
-    constraint_indices: &[usize],
+    constraints: &[(usize, usize, f64)],
     lincs_data: &LincsData,
     params: &LincsParameters,
+    offset: usize,
+    dt: f64,
 ) -> ConstraintResult {
-    let num_constr = constraint_indices.len();
+    let num_constr = constraints.len();
 
     if num_constr == 0 {
         return ConstraintResult {
@@ -974,83 +1191,75 @@ pub fn lincs(
 
     // B vectors: constraint direction unit vectors from old positions
     let mut b_vectors: Vec<Vec3> = Vec::with_capacity(num_constr);
-
-    // Compute B vectors (reference constraint directions)
-    for &bond_idx in constraint_indices {
-        let bond = &topo.solute.bonds[bond_idx];
-        let r_ij = conf.old().pos[bond.j] - conf.old().pos[bond.i];
+    for &(i, j, _) in constraints {
+        let r_ij = conf.old().pos[j + offset] - conf.old().pos[i + offset];
         let r_length = r_ij.length();
 
         if r_length < 1e-10 {
             b_vectors.push(Vec3::new(0.0, 0.0, 0.0));
             continue;
         }
-
-        let b = r_ij / r_length;
-        b_vectors.push(b);
+        b_vectors.push(r_ij / r_length);
     }
+
+    // Solve-matrix coefficients: A[i][n] = coef[i][n] * dot(B[i], B[coupled[n]])
+    // (lincs.cc:188-189) — the static `coef` only carries the mass-weighted part;
+    // the geometry-dependent dot product between the (old-position) B vectors of
+    // coupled constraints must be folded in here, every step.
+    let a_coef: Vec<Vec<f64>> = (0..num_constr)
+        .map(|i| {
+            lincs_data.coupled_constr[i]
+                .iter()
+                .enumerate()
+                .map(|(n, &coupled_idx)| {
+                    lincs_data.coef[i][n] * b_vectors[i].dot(b_vectors[coupled_idx])
+                })
+                .collect()
+        })
+        .collect();
 
     // Right-hand side and solution vectors
     let mut rhs: Vec<Vec<f64>> = vec![vec![0.0; num_constr]; 2];
     let mut sol: Vec<f64> = vec![0.0; num_constr];
 
-    // Compute initial RHS: how much we deviate from constraint
-    for (idx, &bond_idx) in constraint_indices.iter().enumerate() {
-        let bond = &topo.solute.bonds[bond_idx];
-        let r_ij = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let constraint_length = topo.bond_parameters[bond.bond_type].r0;
-
-        // rhs = sdiag * (B · r - r0)
+    // Initial RHS: deviation of the current bond from the constraint length
+    for (idx, &(i, j, r0)) in constraints.iter().enumerate() {
+        let r_ij = conf.current().pos[j + offset] - conf.current().pos[i + offset];
         let projection = b_vectors[idx].dot(r_ij);
-        rhs[0][idx] = lincs_data.sdiag[idx] * (projection - constraint_length);
+        rhs[0][idx] = lincs_data.sdiag[idx] * (projection - r0);
         sol[idx] = rhs[0][idx];
     }
 
-    // Iterative solution of coupled constraints
-    let mut w = 1; // Ping-pong between rhs[0] and rhs[1]
-
+    // Iterative solution of coupled constraints (truncated matrix expansion)
+    let mut w = 1;
     for _rec in 0..params.order {
         for i in 0..num_constr {
             rhs[w][i] = 0.0;
-
-            // Add contributions from coupled constraints
             for (n, &coupled_idx) in lincs_data.coupled_constr[i].iter().enumerate() {
-                rhs[w][i] += lincs_data.coef[i][n] * rhs[1 - w][coupled_idx];
+                rhs[w][i] += a_coef[i][n] * rhs[1 - w][coupled_idx];
             }
-
             sol[i] += rhs[w][i];
         }
         w = 1 - w;
     }
 
     // Apply position corrections
-    for (idx, &bond_idx) in constraint_indices.iter().enumerate() {
-        let bond = &topo.solute.bonds[bond_idx];
-        let inv_mass_i = topo.inverse_mass[bond.i];
-        let inv_mass_j = topo.inverse_mass[bond.j];
-
-        // delta = B * sdiag * sol
+    for (idx, &(i, j, _)) in constraints.iter().enumerate() {
+        let inv_mass_i = topo.inverse_mass[i + offset];
+        let inv_mass_j = topo.inverse_mass[j + offset];
         let correction = lincs_data.sdiag[idx] * sol[idx];
 
-        // Update positions: move atoms to satisfy constraints
-        // When bond is too long (sol > 0), we need to bring atoms closer
-        conf.current_mut().pos[bond.i] += b_vectors[idx] * (correction * inv_mass_i);
-        conf.current_mut().pos[bond.j] -= b_vectors[idx] * (correction * inv_mass_j);
+        conf.current_mut().pos[i + offset] += b_vectors[idx] * (correction * inv_mass_i);
+        conf.current_mut().pos[j + offset] -= b_vectors[idx] * (correction * inv_mass_j);
     }
 
     // Rotational lengthening correction
-    // This accounts for the fact that rotation during the time step can cause lengthening
     let mut num_warnings = 0;
+    for (idx, &(i, j, r0)) in constraints.iter().enumerate() {
+        let r_ij = conf.current().pos[j + offset] - conf.current().pos[i + offset];
+        let r_sq = r_ij.dot(r_ij);
+        let target_sq = 2.0 * r0 * r0;
 
-    for (idx, &bond_idx) in constraint_indices.iter().enumerate() {
-        let bond = &topo.solute.bonds[bond_idx];
-        let r_ij = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let constraint_length = topo.bond_parameters[bond.bond_type].r0;
-
-        let r_sq = (r_ij.dot(r_ij));
-        let target_sq = 2.0 * constraint_length * constraint_length;
-
-        // Compute correction to bring |r|² back to r₀²
         let diff = target_sq - r_sq;
         let p = if diff > 0.0 {
             diff.sqrt()
@@ -1059,47 +1268,54 @@ pub fn lincs(
             0.0
         };
 
-        rhs[0][idx] = lincs_data.sdiag[idx] * (constraint_length - p);
+        rhs[0][idx] = lincs_data.sdiag[idx] * (r0 - p);
         sol[idx] = rhs[0][idx];
     }
+    let _ = num_warnings;
 
-    // Second iterative solve for rotational correction
+    // Second iterative solve for the rotational correction (reuses `a_coef` —
+    // the B vectors are still those from the old positions, lincs.cc:230)
     w = 1;
     for _rec in 0..params.order {
         for i in 0..num_constr {
             rhs[w][i] = 0.0;
-
             for (n, &coupled_idx) in lincs_data.coupled_constr[i].iter().enumerate() {
-                rhs[w][i] += lincs_data.coef[i][n] * rhs[1 - w][coupled_idx];
+                rhs[w][i] += a_coef[i][n] * rhs[1 - w][coupled_idx];
             }
-
             sol[i] += rhs[w][i];
         }
         w = 1 - w;
     }
 
     // Apply rotational corrections
-    for (idx, &bond_idx) in constraint_indices.iter().enumerate() {
-        let bond = &topo.solute.bonds[bond_idx];
-        let inv_mass_i = topo.inverse_mass[bond.i];
-        let inv_mass_j = topo.inverse_mass[bond.j];
-
+    for (idx, &(i, j, _)) in constraints.iter().enumerate() {
+        let inv_mass_i = topo.inverse_mass[i + offset];
+        let inv_mass_j = topo.inverse_mass[j + offset];
         let correction = lincs_data.sdiag[idx] * sol[idx];
 
-        conf.current_mut().pos[bond.i] += b_vectors[idx] * (correction * inv_mass_i);
-        conf.current_mut().pos[bond.j] -= b_vectors[idx] * (correction * inv_mass_j);
+        conf.current_mut().pos[i + offset] += b_vectors[idx] * (correction * inv_mass_i);
+        conf.current_mut().pos[j + offset] -= b_vectors[idx] * (correction * inv_mass_j);
     }
 
-    // Compute final error
+    // Velocity correction: v = (pos_new - pos_old) / dt (lincs.cc:273-281)
+    let mut constrained_atoms: Vec<usize> = Vec::with_capacity(num_constr * 2);
+    for &(i, j, _) in constraints {
+        constrained_atoms.push(i + offset);
+        constrained_atoms.push(j + offset);
+    }
+    constrained_atoms.sort_unstable();
+    constrained_atoms.dedup();
+    for &atom in &constrained_atoms {
+        conf.current_mut().vel[atom] =
+            (conf.current().pos[atom] - conf.old().pos[atom]) * (1.0 / dt);
+    }
+
+    // Final error
     let mut max_error = 0.0;
-    for (idx, &bond_idx) in constraint_indices.iter().enumerate() {
-        let bond = &topo.solute.bonds[bond_idx];
-        let r_ij = conf.current().pos[bond.j] - conf.current().pos[bond.i];
-        let constraint_length = topo.bond_parameters[bond.bond_type].r0;
-
+    for &(i, j, r0) in constraints {
+        let r_ij = conf.current().pos[j + offset] - conf.current().pos[i + offset];
         let r_current = r_ij.length();
-        let error = ((r_current - constraint_length) / constraint_length).abs();
-
+        let error = ((r_current - r0) / r0).abs();
         if error > max_error {
             max_error = error;
         }
@@ -1112,232 +1328,47 @@ pub fn lincs(
     }
 }
 
-// ============================================================================
-// COM Motion Removal
-// ============================================================================
-
-/// Center-of-mass motion data
-#[derive(Debug, Clone)]
-pub struct COMMotion {
-    // Translation
-    pub com_velocity: Vec3,
-    pub com_mass: f64,
-    pub ekin_trans: f64,
-
-    // Rotation
-    pub com_position: Vec3,
-    pub angular_momentum: Vec3,
-    pub inertia_tensor: Mat3,
-    pub inertia_inv: Mat3,
-    pub angular_velocity: Vec3,
-    pub ekin_rot: f64,
-}
-
-impl COMMotion {
-    pub fn new() -> Self {
-        Self {
-            com_velocity: Vec3::ZERO,
-            com_mass: 0.0,
-            ekin_trans: 0.0,
-            com_position: Vec3::ZERO,
-            angular_momentum: Vec3::ZERO,
-            inertia_tensor: Mat3::ZERO,
-            inertia_inv: Mat3::ZERO,
-            angular_velocity: Vec3::ZERO,
-            ekin_rot: 0.0,
-        }
-    }
-}
-
-/// COM motion removal configuration
-#[derive(Debug, Clone)]
-pub struct COMConfig {
-    pub skip_step: usize,      // Apply every N steps (0 = every step)
-    pub remove_trans: bool,    // Remove translational motion
-    pub remove_rot: bool,      // Remove rotational motion
-    pub print_interval: usize, // Print COM stats every N steps (0 = no printing)
-}
-
-impl Default for COMConfig {
-    fn default() -> Self {
-        Self {
-            skip_step: 0,
-            remove_trans: true,
-            remove_rot: true,
-            print_interval: 0,
-        }
-    }
-}
-
-/// Remove center-of-mass translation and rotation
-///
-/// This function removes spurious COM motion to prevent system drift
-/// and maintain proper statistical ensemble properties.
-///
-/// Algorithm:
-/// 1. Calculate COM velocity and position
-/// 2. Remove translational motion by subtracting COM velocity
-/// 3. Calculate angular momentum and inertia tensor
-/// 4. Remove rotational motion using ω = I⁻¹ · L
-///
-/// # Parameters
-/// - `topo`: Molecular topology with atom masses
-/// - `conf`: Configuration with current positions and velocities
-/// - `dt`: Time step size (for position interpolation)
-/// - `config`: COM removal configuration
-/// - `step`: Current simulation step (for skip logic)
-///
-/// # Returns
-/// - `COMMotion` containing COM motion statistics
-pub fn remove_com_motion(
+/// Apply LINCS using precomputed buffers — solute first, then every solvent
+/// molecule with its atom-index offset (mirrors gromosXX `Lincs::apply`,
+/// `lincs.cc:238-284`: `_lincs` for the solute, then `_solvent` looping over
+/// every molecule of every solvent type with a running `first` offset).
+pub fn lincs_buffered(
     topo: &Topology,
     conf: &mut Configuration,
     dt: f64,
-    config: &COMConfig,
-    step: usize,
-) -> COMMotion {
-    let mut com = COMMotion::new();
+    buffers: &LincsBuffers,
+) -> ConstraintResult {
+    let mut converged = true;
+    let mut max_error: f64 = 0.0;
 
-    // Check if we should skip this step
-    if config.skip_step > 0 && step % config.skip_step != 0 && step != 0 {
-        return com;
+    if !buffers.solute_constraints.is_empty() {
+        let result = lincs(
+            topo, conf,
+            &buffers.solute_constraints, &buffers.solute_data, &buffers.solute_params,
+            0, dt,
+        );
+        converged &= result.converged;
+        max_error = max_error.max(result.max_error);
     }
 
-    let num_atoms = topo.num_atoms();
-    if num_atoms == 0 {
-        return com;
-    }
-
-    // ========================================================================
-    // 1. COM Translation
-    // ========================================================================
-
-    if config.remove_trans {
-        // Calculate total mass
-        let mut total_mass = 0.0;
-        for i in 0..num_atoms {
-            total_mass += topo.mass[i];
-        }
-        com.com_mass = total_mass;
-
-        if total_mass < 1e-20 {
-            return com; // No mass, nothing to do
-        }
-
-        // Calculate COM velocity: v_com = Σ(m_i * v_i) / M_total
-        let mut com_vel = Vec3::ZERO;
-        for i in 0..num_atoms {
-            com_vel += conf.current().vel[i] * topo.mass[i];
-        }
-        com_vel /= total_mass;
-        com.com_velocity = com_vel;
-
-        // Translational kinetic energy: E_kin = 0.5 * M_total * |v_com|²
-        com.ekin_trans = 0.5 * total_mass * (com_vel.dot(com_vel));
-
-        // Remove translational motion: v_i -= v_com
-        for i in 0..num_atoms {
-            conf.current_mut().vel[i] -= com_vel;
+    if !buffers.solvent_constraints.is_empty() {
+        for mol in 0..buffers.num_solvent_molecules {
+            let offset = buffers.solvent_offset0 + mol * buffers.atoms_per_solvent;
+            let result = lincs(
+                topo, conf,
+                &buffers.solvent_constraints, &buffers.solvent_data, &buffers.solvent_params,
+                offset, dt,
+            );
+            converged &= result.converged;
+            max_error = max_error.max(result.max_error);
         }
     }
 
-    // ========================================================================
-    // 2. COM Rotation
-    // ========================================================================
-
-    if config.remove_rot {
-        let total_mass = if config.remove_trans {
-            com.com_mass
-        } else {
-            topo.mass.iter().sum()
-        };
-
-        if total_mass < 1e-20 {
-            return com;
-        }
-
-        // Calculate COM position at velocity time: r_com(t+0.5dt) = Σ(m_i * (r_i - 0.5*v_i*dt)) / M
-        // This ensures COM position and velocities are at the same time point
-        let mut com_pos = Vec3::ZERO;
-        for i in 0..num_atoms {
-            let pos_at_vel_time = conf.current().pos[i] - conf.current().vel[i] * (0.5 * dt);
-            com_pos += pos_at_vel_time * topo.mass[i];
-        }
-        com_pos /= total_mass;
-        com.com_position = com_pos;
-
-        // Calculate angular momentum: L = Σ m_i * (r_i - r_com) × (v_i - v_com)
-        let mut ang_mom = Vec3::ZERO;
-        let com_vel = if config.remove_trans {
-            Vec3::ZERO // Already removed translation
-        } else {
-            // Calculate COM velocity if not already done
-            let mut v = Vec3::ZERO;
-            for i in 0..num_atoms {
-                v += conf.current().vel[i] * topo.mass[i];
-            }
-            v / total_mass
-        };
-
-        for i in 0..num_atoms {
-            let r_rel = conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt);
-            let v_rel = conf.current().vel[i] - com_vel;
-            ang_mom += r_rel.cross(v_rel) * topo.mass[i];
-        }
-        com.angular_momentum = ang_mom;
-
-        // Calculate inertia tensor: I_αβ = Σ m_i * (δ_αβ * r² - r_α * r_β)
-        let mut inertia = Mat3::ZERO;
-
-        for i in 0..num_atoms {
-            let r = conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt);
-            let m = topo.mass[i];
-            let r_sq = r.dot(r);
-
-            // Diagonal elements: I[α,α] = m * (r² - r_α²)
-            inertia.x_axis.x += m * (r_sq - r.x * r.x);
-            inertia.y_axis.y += m * (r_sq - r.y * r.y);
-            inertia.z_axis.z += m * (r_sq - r.z * r.z);
-
-            // Off-diagonal elements: I[α,β] = -m * r_α * r_β
-            inertia.x_axis.y -= m * r.x * r.y;
-            inertia.x_axis.z -= m * r.x * r.z;
-            inertia.y_axis.x -= m * r.y * r.x;
-            inertia.y_axis.z -= m * r.y * r.z;
-            inertia.z_axis.x -= m * r.z * r.x;
-            inertia.z_axis.y -= m * r.z * r.y;
-        }
-        com.inertia_tensor = inertia;
-
-        // Invert inertia tensor: I⁻¹ using analytical 3x3 inversion
-        let det = inertia.determinant();
-
-        if det.abs() > 1e-20 {
-            // Tensor is invertible (non-singular)
-            com.inertia_inv = inertia.inverse();
-
-            // Angular velocity: ω = I⁻¹ · L
-            let ang_vel = com.inertia_inv * ang_mom;
-            com.angular_velocity = ang_vel;
-
-            // Rotational kinetic energy: E_rot = 0.5 * ω · L
-            com.ekin_rot = 0.5 * (ang_vel.dot(ang_mom));
-
-            // Remove rotational motion: v_i -= ω × (r_i - r_com)
-            for i in 0..num_atoms {
-                let r_rel =
-                    conf.current().pos[i] - com_pos - conf.current().vel[i] * (0.5 * dt);
-                let v_rot = ang_vel.cross(r_rel);
-                conf.current_mut().vel[i] -= v_rot;
-            }
-        } else {
-            // Inertia tensor is singular (e.g., linear molecule, planar system)
-            // Skip rotational removal to avoid numerical issues
-            com.ekin_rot = 0.0;
-        }
+    ConstraintResult {
+        converged,
+        iterations: buffers.solute_params.order.max(buffers.solvent_params.order),
+        max_error,
     }
-
-    com
 }
 
 // ============================================================================
@@ -1721,10 +1752,10 @@ mod tests {
             r0: 0.15, // 0.15 nm constraint length
         });
 
-        // All 3 bonds are constrained
-        let constraint_indices = vec![0, 1, 2];
+        // All 3 bonds are constrained: (atom_i, atom_j, r0) triples
+        let constraints = vec![(0usize, 1usize, 0.15), (0, 2, 0.15), (1, 2, 0.15)];
 
-        let lincs_data = setup_lincs(&topo, &constraint_indices);
+        let lincs_data = setup_lincs(&topo, &constraints, 0);
 
         // Check that we have 3 constraints
         assert_eq!(lincs_data.sdiag.len(), 3);
@@ -1771,8 +1802,8 @@ mod tests {
             r0: 0.15, // Constraint length 0.15 nm
         });
 
-        let constraint_indices = vec![0];
-        let lincs_data = setup_lincs(&topo, &constraint_indices);
+        let constraints = vec![(0usize, 1usize, 0.15)];
+        let lincs_data = setup_lincs(&topo, &constraints, 0);
         let params = LincsParameters { order: 4 };
 
         // Create configuration with atoms slightly too far apart
@@ -1784,7 +1815,7 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.16, 0.0, 0.0); // Slightly stretched
 
         // Apply LINCS
-        let result = lincs(&topo, &mut conf, &constraint_indices, &lincs_data, &params);
+        let result = lincs(&topo, &mut conf, &constraints, &lincs_data, &params, 0, 0.002);
 
         // Check that constraint is satisfied
         let r = conf.current().pos[1] - conf.current().pos[0];
@@ -1836,10 +1867,10 @@ mod tests {
             r0: 0.1, // O-H distance
         });
 
-        let constraint_indices = vec![0, 1];
+        let constraints = vec![(0usize, 1usize, 0.1), (0, 2, 0.1)];
 
         // Setup LINCS
-        let lincs_data = setup_lincs(&topo, &constraint_indices);
+        let lincs_data = setup_lincs(&topo, &constraints, 0);
 
         // Verify that constraints are coupled
         assert_eq!(
@@ -1880,9 +1911,11 @@ mod tests {
         let result = lincs(
             &topo,
             &mut conf,
-            &constraint_indices,
+            &constraints,
             &lincs_data,
             &lincs_params,
+            0,
+            0.002,
         );
 
         println!(
@@ -1914,5 +1947,85 @@ mod tests {
             "Bond 0-2 distance = {}, expected 0.1",
             dist02
         );
+    }
+
+    /// SETTLE analytical solver on a single SPC-like water molecule:
+    /// after constraining a slightly perturbed geometry, O-H/H-H distances
+    /// must match the constraint template lengths to high precision
+    /// (cf. `settle.cc::solvent`, Miyamoto & Kollman 1992).
+    #[test]
+    fn test_settle_water() {
+        use gromos_core::configuration::*;
+        use gromos_core::math::Vec3;
+        use gromos_core::topology::*;
+
+        let mut topo = Topology::new();
+
+        // Single SPC water: O, H, H (no solute)
+        topo.mass = vec![15.99940, 1.00800, 1.00800];
+        topo.inverse_mass = topo.mass.iter().map(|m| 1.0 / m).collect();
+
+        topo.solvent_atom_template = vec![
+            SolventAtomTemplate { iac: 0, name: "OW".into(), mass: 15.99940, charge: -0.82 },
+            SolventAtomTemplate { iac: 1, name: "HW1".into(), mass: 1.00800, charge: 0.41 },
+            SolventAtomTemplate { iac: 1, name: "HW2".into(), mass: 1.00800, charge: 0.41 },
+        ];
+
+        let dist_oh = 0.1;
+        let dist_hh = 0.1633;
+        topo.solvent_constraint_template = vec![
+            SolventConstraintTemplate { i: 0, j: 1, length: dist_oh },
+            SolventConstraintTemplate { i: 0, j: 2, length: dist_oh },
+            SolventConstraintTemplate { i: 1, j: 2, length: dist_hh },
+        ];
+
+        let make_atom = |name: &str, mass: f64, charge: f64| Atom {
+            name: name.to_string(),
+            residue_nr: 0,
+            residue_name: "SOL".to_string(),
+            iac: 0,
+            mass,
+            charge,
+            is_perturbed: false,
+            is_polarisable: false,
+            is_coarse_grained: false,
+        };
+        let mut solvent = Solvent::new("SOL".to_string());
+        solvent.atoms = vec![
+            make_atom("OW", 15.99940, -0.82),
+            make_atom("HW1", 1.00800, 0.41),
+            make_atom("HW2", 1.00800, 0.41),
+        ];
+        solvent.num_molecules = 1;
+        topo.solvents = vec![solvent];
+
+        // Old (reference) geometry: exact canonical SPC triangle, centered at origin
+        let half_hh = dist_hh / 2.0;
+        let h_height = (dist_oh * dist_oh - half_hh * half_hh).sqrt();
+        let mut conf = Configuration::new(3, 1, 1);
+        conf.old_mut().pos[0] = Vec3::new(0.0, h_height * (1.0 / 3.0) * 2.0, 0.0);
+        conf.old_mut().pos[1] = Vec3::new(-half_hh, -h_height * (1.0 / 3.0), 0.0);
+        conf.old_mut().pos[2] = Vec3::new(half_hh, -h_height * (1.0 / 3.0), 0.0);
+
+        // New (unconstrained) positions: old + small perturbation (as if integrated forward)
+        conf.current_mut().pos[0] = conf.old().pos[0] + Vec3::new(0.001, 0.0005, -0.0007);
+        conf.current_mut().pos[1] = conf.old().pos[1] + Vec3::new(-0.0012, 0.0009, 0.0006);
+        conf.current_mut().pos[2] = conf.old().pos[2] + Vec3::new(0.0008, -0.0011, 0.0003);
+
+        let dt = 0.002;
+        let result = settle(&topo, &mut conf, dt);
+        assert!(result.converged, "SETTLE failed to find a valid analytical solution");
+
+        let pos_o = conf.current().pos[0];
+        let pos_h1 = conf.current().pos[1];
+        let pos_h2 = conf.current().pos[2];
+
+        let d_oh1 = (pos_h1 - pos_o).length();
+        let d_oh2 = (pos_h2 - pos_o).length();
+        let d_hh = (pos_h2 - pos_h1).length();
+
+        assert!((d_oh1 - dist_oh).abs() < 1e-10, "O-H1 distance = {d_oh1}, expected {dist_oh}");
+        assert!((d_oh2 - dist_oh).abs() < 1e-10, "O-H2 distance = {d_oh2}, expected {dist_oh}");
+        assert!((d_hh - dist_hh).abs() < 1e-10, "H-H distance = {d_hh}, expected {dist_hh}");
     }
 }

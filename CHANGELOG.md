@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.13] (2026-06-12)
+
+### Features
+
+- **gromos-integrators:** wire SETTLE, LINCS, and COM rotation removal into the MD algorithm
+  sequence; all three are now reference-tested and passing
+  - `SettleAlgorithm` / `LincsAlgorithm` wired for solvent (NTCS=settle/lincs) and solute
+    (NTCP=lincs); reference tests: `nacl_1water_settle`, `nacl_1water_lincs`, `aladip_vacuum_lincs`
+  - COM rotation removal (`RemoveCOMMotion`) fully wired; reference test: `water_216_box_com_rot`
+
+### Bug fixes
+
+- **gromos-integrators:** fix COM rotation removal for PBC systems
+  - Use minimum-image (put_into_box) wrapped positions when computing angular momentum and
+    inertia tensor, mirroring gromosXX's `gather_chargegroups` init convention
+    (`periodicity.cc:175`); without this the position-COM and angular momentum diverged
+  - Suppress *periodic* COM rotation removal when the box is periodic, matching gromosXX
+    `configuration.cc:555-560` (`param.centreofmass.remove_rot = false` for non-vacuum PBC)
+  - Remove leftover debug `eprintln!` that printed all 648 atom positions at step 0
+- **gromos-io:** fix `imd.rs` parsing for NTCP/NTCS lincs/settle keywords and LINCS order params
+
+### Reference test matrix
+
+- 32 of 32 tests pass (up from 28); new: SETTLE, LINCS (solvent+solute), COM rotation removal
+
 ## [0.0.12] (2026-06-07)
 
 ### Features

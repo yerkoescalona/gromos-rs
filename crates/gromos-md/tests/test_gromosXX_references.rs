@@ -383,9 +383,15 @@ ref_test!(nacl_3water_cutoff,     "nacl_3water_cutoff");
 ref_test!(nacl_water_box,         "nacl_water_box");
 ref_test!(nacl_water_box_shifted, "nacl_water_box_shifted");
 
+// Constraint algorithm selection (NTCS = settle / lincs)
+ref_test!(nacl_1water_settle, "nacl_1water_settle");
+ref_test!(nacl_1water_lincs,  "nacl_1water_lincs");
+ref_test!(aladip_vacuum_lincs, "aladip_vacuum_lincs");
+
 // Level 3 — bulk water, pairlist scaling, long-range
 ref_test!(water_216_box,       "water_216_box");
 ref_test!(water_216_box_com,   "water_216_box_com");
+ref_test!(water_216_box_com_rot, "water_216_box_com_rot");
 
 // Level 3 — thermostats / barostats
 ref_test!(water_216_nvt,       "water_216_nvt");

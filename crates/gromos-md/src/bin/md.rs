@@ -14,7 +14,7 @@ use gromos::{
         ShakeParameters, NtcMode,
         AlgorithmSequence, SimulationState,
         Forcefield, LeapFrogVelocity, LeapFrogPosition,
-        TemperatureCalculation, EnergyCalculation, ShakeAlgorithm,
+        TemperatureCalculation, EnergyCalculation, ShakeAlgorithm, SettleAlgorithm, LincsAlgorithm,
         RemoveCOMMotion, BerendsenThermostat,
         PressureCalculation, VirialType,
         BerendsenBarostat, BerendsenBarostatParams,
@@ -322,7 +322,21 @@ fn main() {
     let ntf_angle = ntf[1] != 0;
     let ntf_improper = ntf[2] != 0;
     let ntf_dihedral = ntf[3] != 0;
-    let shake_enabled = imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0); // NTC>1=solute, NTCS>0=solvent (only if solvent exists)
+    // Constraint algorithm selection: gromosXX dispatches the solute algorithm
+    // on NTCP (only relevant when NTC>1) and the solvent algorithm on NTCS
+    // (only relevant when solvent molecules exist), independently.
+    let solute_constrained = imd.ntc > 1;
+    let solute_lincs = solute_constrained && imd.ntcp == 2;
+    let solute_shake = solute_constrained && !solute_lincs;
+
+    let solvent_constrained = imd.ntcs > 0 && imd.nsm > 0;
+    let solvent_settle = solvent_constrained && imd.ntcs == 3;
+    let solvent_lincs = solvent_constrained && imd.ntcs == 2;
+    let solvent_shake = solvent_constrained && !solvent_settle && !solvent_lincs;
+
+    let shake_enabled = solute_shake || solvent_shake;
+    let settle_enabled = solvent_settle;
+    let lincs_enabled = solute_lincs || solvent_lincs;
     let shake_tolerance = imd.shake_tol;
     let nstxout = imd.ntwx;
     let nstener = imd.ntwe;
@@ -788,16 +802,21 @@ fn main() {
 
         // SHAKE constraints (gromosXX applies constraints even during minimization)
         if shake_enabled {
-            let ntc_mode = match imd.ntc {
-                3 => NtcMode::AllBonds,
-                2 => NtcMode::HydrogenBonds,
-                _ => NtcMode::SolventOnly,
+            let ntc_mode = if solute_shake {
+                match imd.ntc {
+                    3 => NtcMode::AllBonds,
+                    2 => NtcMode::HydrogenBonds,
+                    _ => NtcMode::SolventOnly,
+                }
+            } else {
+                NtcMode::SolventOnly
             };
             let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
                 tolerance: shake_tolerance,
                 max_iterations: 1000,
                 ntc: ntc_mode,
             });
+            shake_alg.include_solvent = solvent_shake;
             if imd.ntishk >= 1 {
                 shake_alg.shake_initial_positions = true;
             }
@@ -805,6 +824,27 @@ fn main() {
                 shake_alg.shake_initial_velocities = true;
             }
             md_sequence.push(Box::new(shake_alg));
+        }
+
+        // SETTLE constraints (analytical rigid-water solver, NTCS=settle)
+        if settle_enabled {
+            md_sequence.push(Box::new(SettleAlgorithm::new()));
+        }
+
+        // LINCS constraints (linear constraint solver, NTCP/NTCS=lincs)
+        if lincs_enabled {
+            let ntc_mode = match imd.ntc {
+                3 => NtcMode::AllBonds,
+                2 => NtcMode::HydrogenBonds,
+                _ => NtcMode::SolventOnly,
+            };
+            md_sequence.push(Box::new(LincsAlgorithm::new(
+                ntc_mode,
+                imd.lincs_order_solute,
+                imd.lincs_order_solvent,
+                solute_lincs,
+                solvent_lincs,
+            )));
         }
 
         // Energy calculation (finalize totals)
@@ -815,7 +855,7 @@ fn main() {
         // Standard MD sequence
 
         // 1. COM motion removal (gromosXX: first in sequence, before forcefield)
-        if imd.nticom >= 1 || imd.nscm > 0 {
+        if imd.nticom >= 1 || imd.nscm != 0 {
             md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
         }
 
@@ -865,7 +905,7 @@ fn main() {
             } else {
                 0
             };
-            let solvent_constraint_dof = if shake_enabled {
+            let solvent_constraint_dof = if shake_enabled || settle_enabled || lincs_enabled {
                 n_solvent_molecules * topo.solvent_constraint_template.len()
             } else {
                 0
@@ -886,16 +926,21 @@ fn main() {
 
         // 5. SHAKE constraints (if enabled)
         if shake_enabled {
-            let ntc_mode = match imd.ntc {
-                3 => NtcMode::AllBonds,
-                2 => NtcMode::HydrogenBonds,
-                _ => NtcMode::SolventOnly,
+            let ntc_mode = if solute_shake {
+                match imd.ntc {
+                    3 => NtcMode::AllBonds,
+                    2 => NtcMode::HydrogenBonds,
+                    _ => NtcMode::SolventOnly,
+                }
+            } else {
+                NtcMode::SolventOnly
             };
             let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
                 tolerance: shake_tolerance,
                 max_iterations: 1000,
                 ntc: ntc_mode,
             });
+            shake_alg.include_solvent = solvent_shake;
             // gromosXX: NTISHK controls initial position/velocity shaking
             // NTISHK=1: shake positions, NTISHK=2: shake positions + velocities
             if imd.ntishk >= 1 {
@@ -905,6 +950,27 @@ fn main() {
                 shake_alg.shake_initial_velocities = true;
             }
             md_sequence.push(Box::new(shake_alg));
+        }
+
+        // 5b. SETTLE constraints (analytical rigid-water solver, NTCS=settle)
+        if settle_enabled {
+            md_sequence.push(Box::new(SettleAlgorithm::new()));
+        }
+
+        // 5c. LINCS constraints (linear constraint solver, NTCP/NTCS=lincs)
+        if lincs_enabled {
+            let ntc_mode = match imd.ntc {
+                3 => NtcMode::AllBonds,
+                2 => NtcMode::HydrogenBonds,
+                _ => NtcMode::SolventOnly,
+            };
+            md_sequence.push(Box::new(LincsAlgorithm::new(
+                ntc_mode,
+                imd.lincs_order_solute,
+                imd.lincs_order_solvent,
+                solute_lincs,
+                solvent_lincs,
+            )));
         }
 
         // 6. Temperature/kinetic energy calculation
@@ -990,6 +1056,15 @@ fn main() {
         println!("  NTC mode:      {:?}", params.ntc);
         println!("  Tolerance:     {:.6}", params.tolerance);
         println!("  Max iter:      {}", params.max_iterations);
+        println!();
+    }
+    if settle_enabled {
+        println!("Setting up constraints: SETTLE (analytical rigid water)");
+        println!();
+    }
+    if lincs_enabled {
+        println!("Setting up constraints: LINCS (solute={}, solvent={}, order={}/{})",
+            solute_lincs, solvent_lincs, imd.lincs_order_solute, imd.lincs_order_solvent);
         println!();
     }
 
@@ -1410,7 +1485,7 @@ fn main() {
         if let Some(ref mut fw) = force_writer {
             if step % nstxout == 0 {
                 let forces = &conf.old().force;
-                let constraint_forces = if shake_enabled {
+                let constraint_forces = if shake_enabled || settle_enabled || lincs_enabled {
                     Some(conf.old().constraint_force.as_slice())
                 } else {
                     None
