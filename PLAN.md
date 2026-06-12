@@ -131,6 +131,8 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
 | 3   | water_216_box_com_rot | 648 | COM translation+rotation removal (NTICOM=2, NSCM=-10) | **PASS** |
 | 3   | water_216_nvt    | 648   | Berendsen thermostat                 | **PASS** |
+| 3   | water_216_nvt_nosehoover | 648 | Nosé-Hoover thermostat (single NHC) | **PASS** |
+| 3   | water_216_nvt_nhc_chain | 648 | Nosé-Hoover-Chain (3 chains)        | **PASS** |
 | 3   | water_216_npt    | 648   | Berendsen barostat                   | **PASS** |
 | 4   | aladip_vacuum_lincs | 12 | LINCS (solute, NTC=2)               | **PASS** |
 | 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | **PASS** |
@@ -141,7 +143,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | aladip_solvated_em_posres | 72 | SD EM + position restraints     | **PASS** |
 | 4   | aladip_solvated_em | 72  | SD EM + SHAKE + posres, solvated    | **PASS** |
 
-**32 of 32 tests pass.** All levels fully passing.
+**34 of 34 tests pass.** All levels fully passing.
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see Roadmap Priority 2 + the
 cross-cutting minimal-reference-test theme.)
@@ -233,11 +235,14 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
   - Ref: `algorithm/constraints/remove_com_motion.cc`
 
 **1.3 — Thermostat**
-- [ ] **Nosé-Hoover** — single bath: ζ̇ = (1/τ²)(T/T₀−1), scale = 1−ζ·dt; chain variant: M coupled baths.
-  Code exists, not wired/tested. Ref: `algorithm/temperature/nosehoover_thermostat.cc`
-  - Note: gromosXX has a *"small flexible constraints hack!"* (`nosehoover_thermostat.cc:129,185`,
-    also `berendsen_thermostat.cc:105`) in the DOF/coupling path. Reproduce it only if/when we
-    support flexible constraints, and **document it as a deliberate GROMOS quirk** (not a port bug).
+- [x] **Nosé-Hoover** — single NHC (algorithm=1) and chain NHC (algorithm=N≥2); reference-tested
+  (`water_216_nvt_nosehoover`, `water_216_nvt_nhc_chain`). Both pass against gromosXX.
+  - Ref: `algorithm/temperature/nosehoover_thermostat.cc`
+  - Note: gromosXX has a *“small flexible constraints hack!”* (`nosehoover_thermostat.cc:129,185`,
+    also `berendsen_thermostat.cc:105`) in the DOF/coupling path. Not ported — only applies
+    with flex-shake, which we don’t support. **Documented as a deliberate GROMOS quirk.**
+  - NTINHT convention documented: 0=read from file, 1=generate from scratch (opposite of intuition).
+  - IMD parser bug fixed: algorithm codes now match gromosXX (0=Berendsen, 1=NHC, N=chain length).
 
 **1.4 — Boundary**
 - [ ] **Triclinic box** — code exists in `math.rs` but md.rs never creates Triclinic periodicity.

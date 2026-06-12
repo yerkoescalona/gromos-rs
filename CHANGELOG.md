@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.14] (2026-06-12)
+
+### Features
+
+- **gromos-integrators:** implement Nosé-Hoover thermostat — single NHC and NHC chain
+  - `NoseHooverThermostat` struct with `new_single_bath` (nhc=1) and `new_chain_bath` (nhc≥2)
+  - Single NHC: `ζ[0] += dt/τ² · (T_free/T₀ - 1)`, `scale = 1 - ζ[0]·dt`
+  - Chain NHC: sequential tail-to-head ζ update (gromosXX `calc_chain_scaling`)
+  - Wired in `md.rs` via `imd.temp_bath[0].algorithm` dispatch (0=Berendsen, 1=NHC, N=chain)
+- **gromos-io:** fix MULTIBATH algorithm code mapping to match gromosXX exactly
+  (0=weak-coupling, 1=nose-hoover, N≥2=nose-hoover-chains); add `nhc_chain` field
+- **gromos-md:** add `water_216_nvt_nosehoover` and `water_216_nvt_nhc_chain` reference tests
+
+### Reference test matrix
+
+- 34 of 34 tests pass (up from 32); new: NHC single, NHC chain
+
 ## [0.0.13] (2026-06-12)
 
 ### Features

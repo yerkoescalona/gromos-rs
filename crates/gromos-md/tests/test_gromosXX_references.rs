@@ -21,13 +21,12 @@ use std::process::Command;
 
 const ENERGY_REL_TOL: f64 = 1e-8;
 const ENERGY_ABS_TOL: f64 = 1e-10; // for near-zero energies
-const FORCE_ABS_TOL: f64 = 1e-6;   // kJ/(mol*nm)
+const FORCE_ABS_TOL: f64 = 1e-6; // kJ/(mol*nm)
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 fn ref_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/gromosXX_references")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/gromosXX_references")
 }
 
 fn md_bin() -> PathBuf {
@@ -82,8 +81,7 @@ struct EnergyFrame {
 //   [0]=e_total, [1]=e_kinetic, [2]=e_potential, ...
 
 fn parse_energy03(path: &Path) -> Vec<EnergyFrame> {
-    let content =
-        fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut frames = Vec::new();
     let mut in_ene = false;
     let mut vals: Vec<f64> = Vec::new();
@@ -94,7 +92,7 @@ fn parse_energy03(path: &Path) -> Vec<EnergyFrame> {
             "ENERGY03" => {
                 in_ene = true;
                 vals.clear();
-            }
+            },
             "END" => {
                 if in_ene {
                     if vals.len() >= 3 {
@@ -106,7 +104,7 @@ fn parse_energy03(path: &Path) -> Vec<EnergyFrame> {
                     }
                     in_ene = false;
                 }
-            }
+            },
             _ if in_ene => {
                 if !t.starts_with('#') && !t.is_empty() {
                     // Single-value lines only (totals); multi-value lines fail parse
@@ -114,8 +112,8 @@ fn parse_energy03(path: &Path) -> Vec<EnergyFrame> {
                         vals.push(v);
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     frames
@@ -127,8 +125,7 @@ fn parse_energy03(path: &Path) -> Vec<EnergyFrame> {
 //   [0]=time, [1]=E_kin, [2]=E_pot, [3]=E_tot, [4]=T, ...
 
 fn parse_enertrj(path: &Path) -> Vec<EnergyFrame> {
-    let content =
-        fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut frames = Vec::new();
     let mut in_block = false;
 
@@ -142,7 +139,10 @@ fn parse_enertrj(path: &Path) -> Vec<EnergyFrame> {
             break;
         }
         if in_block && !t.starts_with('#') && !t.is_empty() {
-            let vals: Vec<f64> = t.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            let vals: Vec<f64> = t
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
             // [0]=time [1]=Ekin [2]=Epot [3]=Etot [4]=T [5]=V [6]=P ...
             if vals.len() >= 4 {
                 frames.push(EnergyFrame {
@@ -167,8 +167,7 @@ type ForceFrame = Vec<[f64; 3]>;
 // Lines starting with '#' are comments (atom count markers).
 
 fn parse_trf(path: &Path) -> Vec<ForceFrame> {
-    let content =
-        fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut frames = Vec::new();
     let mut in_block = false;
     let mut current_frame: ForceFrame = Vec::new();
@@ -186,7 +185,10 @@ fn parse_trf(path: &Path) -> Vec<ForceFrame> {
             continue;
         }
         if in_block && !t.starts_with('#') && !t.is_empty() {
-            let vals: Vec<f64> = t.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            let vals: Vec<f64> = t
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
             if vals.len() == 3 {
                 current_frame.push([vals[0], vals[1], vals[2]]);
             }
@@ -233,11 +235,8 @@ fn run_reference(system: &str) {
     let params = sys_dir.join(toml_str(&toml, "parameters"));
 
     // Output directory
-    let out = std::env::temp_dir().join(format!(
-        "gromos_reftest_{}_{}",
-        system,
-        std::process::id()
-    ));
+    let out =
+        std::env::temp_dir().join(format!("gromos_reftest_{}_{}", system, std::process::id()));
     let _ = fs::remove_dir_all(&out);
     fs::create_dir_all(&out).unwrap();
 
@@ -246,13 +245,20 @@ fn run_reference(system: &str) {
 
     // Run md binary
     let mut cmd = Command::new(md_bin());
-    cmd.arg("@topo").arg(&topo)
-        .arg("@conf").arg(&conf)
-        .arg("@input").arg(&params)
-        .arg("@fin").arg(out.join("final.conf"))
-        .arg("@tre").arg(&tre)
-        .arg("@trf").arg(&trf)
-        .arg("@trc").arg(out.join("trajectory.trc"));
+    cmd.arg("@topo")
+        .arg(&topo)
+        .arg("@conf")
+        .arg(&conf)
+        .arg("@input")
+        .arg(&params)
+        .arg("@fin")
+        .arg(out.join("final.conf"))
+        .arg("@tre")
+        .arg(&tre)
+        .arg("@trf")
+        .arg(&trf)
+        .arg("@trc")
+        .arg(out.join("trajectory.trc"));
 
     // Optional position restraints
     if let Some(por) = toml_str_opt(&toml, "posresspec") {
@@ -320,21 +326,27 @@ fn run_reference(system: &str) {
             );
             for (atom_idx, (e, a)) in ef.iter().zip(af.iter()).enumerate() {
                 assert_force_close(
-                    a[0], e[0],
+                    a[0],
+                    e[0],
                     &format!("{system}[{frame_idx}] atom {atom_idx} fx"),
                 );
                 assert_force_close(
-                    a[1], e[1],
+                    a[1],
+                    e[1],
                     &format!("{system}[{frame_idx}] atom {atom_idx} fy"),
                 );
                 assert_force_close(
-                    a[2], e[2],
+                    a[2],
+                    e[2],
                     &format!("{system}[{frame_idx}] atom {atom_idx} fz"),
                 );
             }
         }
         if n_compare == 0 && !exp_forces.is_empty() {
-            panic!("{system}: expected {} force frames but got none", exp_forces.len());
+            panic!(
+                "{system}: expected {} force frames but got none",
+                exp_forces.len()
+            );
         }
     }
 
@@ -360,50 +372,52 @@ macro_rules! ref_test {
 }
 
 // Level 0 — pair interactions, vacuum
-ref_test!(pair_lj,       "pair_lj");
+ref_test!(pair_lj, "pair_lj");
 ref_test!(pair_lj_mixed, "pair_lj_mixed");
-ref_test!(nacl_pair,     "nacl_pair");
+ref_test!(nacl_pair, "nacl_pair");
 
 // Level 1 — single molecule, bonded terms, PBC+RF
-ref_test!(water_single,   "water_single");
+ref_test!(water_single, "water_single");
 ref_test!(water_single_genvel, "water_single_genvel");
 ref_test!(benzene_vacuum, "benzene_vacuum");
-ref_test!(nacl_pair_box,  "nacl_pair_box");
+ref_test!(nacl_pair_box, "nacl_pair_box");
 
 // Level 1 — dihedral + 1-4 LJ interaction
-ref_test!(butane_vacuum,  "butane_vacuum");
+ref_test!(butane_vacuum, "butane_vacuum");
 
 // Level 2 — PBC, pairlist, SHAKE, solvent, twin-range
-ref_test!(water_3_box,            "water_3_box");
-ref_test!(nacl_1water_box,        "nacl_1water_box");
-ref_test!(nacl_3water_box,        "nacl_3water_box");
-ref_test!(water_3_box_twinrange,  "water_3_box_twinrange");
-ref_test!(water_10_box,           "water_10_box");
-ref_test!(nacl_3water_cutoff,     "nacl_3water_cutoff");
-ref_test!(nacl_water_box,         "nacl_water_box");
+ref_test!(water_3_box, "water_3_box");
+ref_test!(nacl_1water_box, "nacl_1water_box");
+ref_test!(nacl_3water_box, "nacl_3water_box");
+ref_test!(water_3_box_twinrange, "water_3_box_twinrange");
+ref_test!(water_10_box, "water_10_box");
+ref_test!(nacl_3water_cutoff, "nacl_3water_cutoff");
+ref_test!(nacl_water_box, "nacl_water_box");
 ref_test!(nacl_water_box_shifted, "nacl_water_box_shifted");
 
 // Constraint algorithm selection (NTCS = settle / lincs)
 ref_test!(nacl_1water_settle, "nacl_1water_settle");
-ref_test!(nacl_1water_lincs,  "nacl_1water_lincs");
+ref_test!(nacl_1water_lincs, "nacl_1water_lincs");
 ref_test!(aladip_vacuum_lincs, "aladip_vacuum_lincs");
 
 // Level 3 — bulk water, pairlist scaling, long-range
-ref_test!(water_216_box,       "water_216_box");
-ref_test!(water_216_box_com,   "water_216_box_com");
+ref_test!(water_216_box, "water_216_box");
+ref_test!(water_216_box_com, "water_216_box_com");
 ref_test!(water_216_box_com_rot, "water_216_box_com_rot");
 
 // Level 3 — thermostats / barostats
-ref_test!(water_216_nvt,       "water_216_nvt");
-ref_test!(water_216_npt,       "water_216_npt");
+ref_test!(water_216_nvt, "water_216_nvt");
+ref_test!(water_216_nvt_nosehoover, "water_216_nvt_nosehoover");
+ref_test!(water_216_nvt_nhc_chain, "water_216_nvt_nhc_chain");
+ref_test!(water_216_npt, "water_216_npt");
 
-ref_test!(aladip_vacuum,       "aladip_vacuum");
-ref_test!(aladip_solvated,     "aladip_solvated");
+ref_test!(aladip_vacuum, "aladip_vacuum");
+ref_test!(aladip_solvated, "aladip_solvated");
 
 // Energy minimization
-ref_test!(aladip_vacuum_em,            "aladip_vacuum_em");
-ref_test!(aladip_vacuum_em_shake,      "aladip_vacuum_em_shake");
-ref_test!(aladip_solvated_em_noshake,  "aladip_solvated_em_noshake");
-ref_test!(aladip_solvated_em_shake,    "aladip_solvated_em_shake");
-ref_test!(aladip_solvated_em_posres,   "aladip_solvated_em_posres");
-ref_test!(aladip_solvated_em,          "aladip_solvated_em");
+ref_test!(aladip_vacuum_em, "aladip_vacuum_em");
+ref_test!(aladip_vacuum_em_shake, "aladip_vacuum_em_shake");
+ref_test!(aladip_solvated_em_noshake, "aladip_solvated_em_noshake");
+ref_test!(aladip_solvated_em_shake, "aladip_solvated_em_shake");
+ref_test!(aladip_solvated_em_posres, "aladip_solvated_em_posres");
+ref_test!(aladip_solvated_em, "aladip_solvated_em");
