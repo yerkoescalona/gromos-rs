@@ -10,6 +10,13 @@ References:
 - Tutorials: `.local/gromos_tutorial_livecoms/tutorial_files`
 - Theory: `.local/doc/gromos_book`
 - Force fields: `.local/gromosXX/forcefields`
+- **`FUTURE.md`** — architectural bets where Rust can *overtake* the C++ (SoA core, single
+  multi-backend kernel, O(N) cell-list pairlist, solute/solvent representation-vs-role refactor,
+  compositional py-gromos topology, GPU/SIMD/determinism, **QM/MM + in-process ML potentials (Dim
+  12)**, **Martini/CG ecosystem bridge (Dim 13)**, **the unifying layered architecture (Dim 14) —
+  one data+compute core shared by engine and analysis facade**), **plus the differential-audit
+  findings** (known gromosXX bugs *not* to port, and one live divergence already in our tree — P1.4).
+  PLAN.md = parity & near-term execution; FUTURE.md = where we diverge on purpose.
 
 Doc style: Rust → KaTeX + `[^label]` footnotes; Python → NumPy docstrings + `.. math::`
 
@@ -37,6 +44,40 @@ Doc style: Rust → KaTeX + `[^label]` footnotes; Python → NumPy docstrings + 
   over the gromosXX primitives: internally it uses the engine libraries; to the user it behaves like
   gromosPlsPls. In practice this means `gromos-analysis` should reuse engine code (energy eval,
   geometry, selection) rather than reimplement it — today it only depends on `gromos-core` + `gromos-io`.
+
+**The unifying architecture (FUTURE.md Dim 14 — the frame for everything below).** The two C++
+codebases are *two architectures that don't share a core* (gromosXX = pipeline of mutating algorithms
+over `(Topology, Configuration, Simulation)`; gromos++ = ~107 frame-loop `main()`s over a *separate*
+`gcore` that re-implements the physics — that re-implementation **is** the 79k LOC). gromos-rs must be
+**one machine**: a layered design where the data core (L0: SoA + instancing + roles + spatial-index)
+and the *pure compute layer* (L1: `PotentialProvider` for forces, `Observable` for analysis quantities)
+are **shared by both the MD engine and the analysis facade** — so an MD step (L0+L1+L2 steppers, loop
+over time) and an analysis (L0+L1 only, loop over frames) are the same machinery. **Lock now** (they
+shape every refactor): (a) **one owned `(Topology, State)` core, never a second `System`**; (b) **L1
+purity — every energy/force/observable is computed in one place, called by both engine and analysis**
+(the moment `ener.rs` re-implements LJ, you've recreated gromos++); (c) a **small stable trait
+taxonomy** (`PotentialProvider`, `Observable`, `Stepper`, `SpatialIndex`, `Reader`/`Writer`); (d) one
+**state-history model** (the `current()`/`old()` question). The QM/MM+ML prerequisites below are the
+Dim-12 specialization of this.
+
+**Architectural prerequisites for QM/MM + ML potentials (FUTURE.md Dim 12 — decide on the *next*
+force/pairlist refactor, not later).** Dim 12 is the flagship overtake (in-process ML potentials with
+no Python boundary; QM/MM as an additive force provider). It costs ~nothing to design for now and is
+very expensive to retrofit, so near-term refactors must honor these shapes even before any QM/ML code
+exists:
+1. **Force evaluation = additive `PotentialProvider`s** (data-in / scattered-forces-out, `&mut self`
+   for stateful workers, fallible, extensible return for uncertainty) — *classical* LJ+CRF/bonded
+   implement the same trait, so QM/ML is later just another provider, not a fork. (Reinforces the
+   single-kernel goal, FUTURE Dim 2.)
+2. **The pairlist/cell list (P1.6) is a query-based spatial-index *service*** that can emit the MD
+   pairlist, an ML radial graph, and the QM-zone gather from one structure — not a single-purpose
+   MD pairlist. (FUTURE Dim 9e.)
+3. **A typed units boundary** (kJ/mol·nm ↔ Hartree/Bohr ↔ eV/Å) introduced with the engine, so QM/ML
+   unit conversions are checked, not silent.
+4. **Region/role membership is a data-model attribute** and "promote a water into the QM zone" is the
+   Dim 10 de-instancing op — so the solute/solvent refactor (FUTURE Dim 10) is a Dim 12 prerequisite.
+5. **A second, tolerance-based test tier** (validated against reference energies/forces, not
+   bit-for-bit) for the non-deterministic QM/ML paths, alongside the classical bit-for-bit suite.
 
 ## Decisions Taken
 
@@ -78,6 +119,8 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 1   | aladip_vacuum    | 12    | all bonded + exclusions + 1-4        | **PASS** |
 | 2   | water_3_box      | 9     | PBC + min image + pairlist + CRF     | **PASS** |
 | 2   | nacl_1water_box  | 5     | minimal solute-solvent + SHAKE       | **PASS** |
+| 2   | nacl_1water_settle | 5   | SETTLE (analytical rigid water)      | **PASS** |
+| 2   | nacl_1water_lincs | 5    | LINCS (solvent)                      | **PASS** |
 | 2   | nacl_3water_box  | 11    | multiple solvent + solute-solvent pairlist | **PASS** |
 | 2   | water_3_box_twinrange | 9 | twin-range pairlist (RCUTP<RCUTL, NSNB=5) | **PASS** |
 | 2   | water_10_box     | 32    | 2 ions + 10 SPC, positions away from cutoff | **PASS** |
@@ -86,8 +129,10 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 2   | nacl_water_box_shifted | 62 | nacl_water_box with perturbed positions | **PASS** |
 | 3   | water_216_box    | 648   | bulk NVE, pairlist, virial           | **PASS** |
 | 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
+| 3   | water_216_box_com_rot | 648 | COM translation+rotation removal (NTICOM=2, NSCM=-10) | **PASS** |
 | 3   | water_216_nvt    | 648   | Berendsen thermostat                 | **PASS** |
 | 3   | water_216_npt    | 648   | Berendsen barostat                   | **PASS** |
+| 4   | aladip_vacuum_lincs | 12 | LINCS (solute, NTC=2)               | **PASS** |
 | 4   | aladip_solvated  | 72    | SHAKE + solute-solvent               | **PASS** |
 | 4   | aladip_vacuum_em | 12    | steepest descent EM, vacuum          | **PASS** |
 | 4   | aladip_vacuum_em_shake | 12 | SD EM + SHAKE, vacuum             | **PASS** |
@@ -96,7 +141,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | aladip_solvated_em_posres | 72 | SD EM + position restraints     | **PASS** |
 | 4   | aladip_solvated_em | 72  | SD EM + SHAKE + posres, solvated    | **PASS** |
 
-**28 of 28 tests pass.** All levels fully passing.
+**32 of 32 tests pass.** All levels fully passing.
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see Roadmap Priority 2 + the
 cross-cutting minimal-reference-test theme.)
@@ -113,6 +158,11 @@ cross-cutting minimal-reference-test theme.)
 - All bonded types: quartic/harmonic bonds, cos-harmonic/harmonic angles, dihedrals, impropers, cross-dihedrals
 - NTF flag control, RF excluded interactions (forces + energy + self-terms)
 - Pairlist: chargegroup-based, atom-based, twin-range (RCUTP/RCUTL with force caching)
+  - ⚠️ **O(N²) only** — `StandardPairlistAlgorithm` loops all chargegroup-COG pairs. Correct and
+    bit-for-bit, fine for reference-size systems, but no cell/grid list exists. gromosXX ships an
+    O(N) `grid_cell`/`extended_grid` pairlist; ours does not. This is the biggest scaling gap —
+    see new roadmap item **P1.6** and FUTURE.md Dim 9. (When porting the grid path, do **not** port
+    the Martina-flagged solute/solvent misclassification bug at `extended_grid_pairlist_algorithm.cc:1309`.)
 - Position restraints: harmonic F = -k·(r - r_ref), from .por + .rpr files
 
 ### gromos-integrators
@@ -173,19 +223,34 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
   `PHYSICALCONSTANTS` — silently ignored, by design, with no fallback dispatch to maintain.
 
 **1.2 — Constraints (code exists, wire + test)**
-- [ ] **SETTLE** for rigid water — analytical 3-site solver, O(N_water), single-pass; code exists, not wired.
+- [x] **SETTLE** for rigid water — analytical 3-site solver, O(N_water), single-pass; wired and reference-tested (`nacl_1water_settle`).
   - Ref: `algorithm/constraints/settle.cc` (Miyamoto & Kollman 1992)
-- [ ] **LINCS** — linear constraint solver (recursion order param); better for long chains; code exists, not wired.
+- [x] **LINCS** — linear constraint solver (recursion order param); better for long chains; wired and reference-tested (`nacl_1water_lincs`, `aladip_vacuum_lincs`).
   - Ref: `algorithm/constraints/lincs.cc`
-- [ ] **COM rotation removal** — currently only translational. Need L = Σ mᵢ·rᵢ×(vᵢ−v_com), inertia I (3×3),
-  ω = I⁻¹·L, then vᵢ −= ω×rᵢ. Ref: `algorithm/constraints/remove_com_motion.cc`
+- [x] **COM rotation removal** — wired and reference-tested (`water_216_box_com_rot`).
+  - Fix: use minimum-image (put_into_box) wrapped positions inside `remove_com_rotation`, mirroring gromosXX's `gather_chargegroups` init convention.
+  - Fix: suppress periodic COM rotation removal in PBC (gromosXX `configuration.cc:555-560`).
+  - Ref: `algorithm/constraints/remove_com_motion.cc`
 
 **1.3 — Thermostat**
 - [ ] **Nosé-Hoover** — single bath: ζ̇ = (1/τ²)(T/T₀−1), scale = 1−ζ·dt; chain variant: M coupled baths.
   Code exists, not wired/tested. Ref: `algorithm/temperature/nosehoover_thermostat.cc`
+  - Note: gromosXX has a *"small flexible constraints hack!"* (`nosehoover_thermostat.cc:129,185`,
+    also `berendsen_thermostat.cc:105`) in the DOF/coupling path. Reproduce it only if/when we
+    support flexible constraints, and **document it as a deliberate GROMOS quirk** (not a port bug).
 
 **1.4 — Boundary**
 - [ ] **Triclinic box** — code exists in `math.rs` but md.rs never creates Triclinic periodicity.
+  - ⚠️ **KNOWN LIVE DIVERGENCE (FUTURE.md Dim 11, finding #1).** Our `Triclinic::nearest_image`
+    (`gromos-core/src/math.rs:90`) uses the textbook fractional-coordinate `frac - frac.round()`.
+    gromosXX (`math/boundary_implementation.cc:285-318`) uses an **iterative `while`-loop reduction
+    in z→y→x order** over the lower-triangular box. These are **not equivalent for strongly
+    triclinic cells** — fractional `round()` is not always the Cartesian nearest image. Nothing
+    catches this today only because triclinic is unwired. **Write the triclinic reference test
+    FIRST; it will fail against the current code. Then port the `while`-loop z→y→x version** before
+    trusting any triclinic result. Do not assume the cleaner `round()` matches GROMOS.
+  - [ ] Add a triclinic gromosXX reference (truncated octahedron) — *before* wiring
+  - [ ] Replace `Triclinic::nearest_image` with the gromosXX while-loop z→y→x reduction
   - [ ] Wire GENBOX box_type into periodicity selection
   - [ ] Test with truncated octahedron / non-rectangular boxes
 
@@ -196,11 +261,63 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
   Ref: `algorithm/integration/gamd.cc`
 - [ ] **FEP / TI** — K(λ) = (1−λ)K_A + λK_B; ∂V/∂λ; soft-core LJ. Perturbed bond forces exist, need testing.
   Ref: `interaction/bonded/perturbed_*.cc`
+  - ⚠️ **Second-source the perturbed RF self-term — do NOT transcribe the C++.** The gromosXX authors
+    themselves flagged it as untrusted: `perturbed_nonbonded_term.cc:596,749` (*"Chris: CHECK! I'm
+    not sure if the self-term correction is not wrong…"*) and `:1444` (*"there is a bug here from the
+    previous version"*). Derive from the GROMOS book, implement to that, then diff against the C++;
+    where they disagree, investigate. (FUTURE.md Dim 11 findings #3/#4.)
 - [ ] **REMD** (large) — MPI parallel tempering; Δ = (β₁−β₂)(E₁−E₂), accept if rand < exp(−Δ); feature-gated MPI.
   Ref: `algorithm/integration/replicaExchange/`
 
+**1.6 — Scaling: O(N) cell-list pairlist (the biggest scaling gap)** — see FUTURE.md Dim 9 for the
+full design; the near-term, bit-for-bit-safe slice:
+- [ ] **Charge-group-aware cell (linked) list** as `CellListPairlistAlgorithm`, drop-in behind the
+  existing `update<BC>()` interface, selectable by system size. Bin **chargegroup COGs** (not atoms)
+  to preserve GROMOS's neutral-group cutoff + RF correctness.
+- [ ] **Validate by set-equality** against `StandardPairlistAlgorithm` (the O(N²) oracle) on every
+  reference system — identical pair set, not just identical energy — before trusting it.
+- [ ] Keep O(N²) as the always-correct reference path; cell list is an accelerator, not a replacement.
+- [ ] Do **not** reproduce the Martina solute/solvent misclassification bug
+  (`extended_grid_pairlist_algorithm.cc:1309`); classify pairs by **both** atoms' roles. (Dim 10
+  removes the root cause entirely.)
+- Deferred to FUTURE.md (post-parity): spatial reorder / Z-order of atom arrays (Dim 9b),
+  displacement-triggered rebuild (Dim 9c), charge groups as a first-class primitive (Dim 9d).
+
+**1.7 — Restraints & special interactions** — today **only position restraints** exist
+(`What Works`). gromosXX has ~24 special-interaction types in `interaction/special/`; the
+scientifically essential ones each need porting + a minimal reference test, and most have a
+*perturbed* variant (couples to FEP, P1.5). Per-term ground-truth available from gromosXX's own
+`check/aladip*.t.cc` (see cross-cutting test note). Priority within this group:
+- [ ] **Distance restraints** (`distance_restraint_interaction.cc`) — NMR NOE, the most common. +perturbed.
+- [ ] **Dihedral restraints** (`dihedral_restraint_interaction.cc`) — +perturbed. (Note gromosXX caveat:
+  `perturbed_dihedral_restraint_interaction.cc:152` — "may go wrong if phi0_A/phi0_B > 2π apart"; Dim 11 — second-source.)
+- [ ] **Angle restraints** (`angle_restraint_interaction.cc`) — +perturbed.
+- [ ] **J-value restraints** (`jvalue_restraint_interaction.cc`) — NMR ³J couplings.
+- [ ] **Order-parameter restraints** (`order_parameter_restraint_interaction.cc`) — NMR S². (Two
+  already-fixed bugs documented in-source at `:91,:213` — read them before porting; Dim 11.)
+- [ ] **Distance-field** (`distance_field_interaction.cc`) + **local elevation**
+  (`local_elevation_interaction.cc`) — enhanced sampling. +perturbed distance-field.
+- Lower priority within group: RDC, X-ray, symmetry, colvar, electric-field, NEMD, adde_reweighting.
+- Each lands with a minimal gromosXX reference test, mirroring the MD harness.
+
+**1.8 — Virtual atoms** (`algorithm/virtualatoms/`, tool `addvirt_top`) — massless interaction
+sites placed by geometry (e.g. aromatic centroids, lone pairs). **Primary motivation here: TI/free
+energy** (P1.5) and certain force fields. Touches the data model — coordinate with the Dim 10
+instancing refactor (FUTURE.md) so virtual sites aren't hard-coded around the old solute/solvent
+split. Reference: `algorithm/virtualatoms/prepare_virtualatoms.cc`, `create_virtualatoms.cc`.
+
 ### Priority 2 — Analysis foundations (correlated with P1; the no-duplication layer)
 The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations before consumers.
+
+> **Architectural note (FUTURE.md Dim 10): the solute/solvent split.** gromosXX uses a rigid index
+> threshold (`i >= num_solute_atoms()`); gromos++ is worse — *separate containers* (`mol()` vs
+> `sol()`) forcing dual code paths in every analysis program and an `m:`/`s:` namespace split. Our
+> `solvate()` is currently the worst hybrid (keeps a solvent template *but also* expands flat
+> `mass/charge/iac` arrays). The target model decouples **representation** (a `MoleculeType` registry
+> + instances — dedup any repeated molecule, not just water) from **role** (solvent-ness as a
+> queryable attribute, not a partition), enabling cheap `promote()` of one water to solute. **Do the
+> selection work below in a way that treats solvent-ness as an attribute, so it doesn't calcify
+> around the old split before the Dim 10 refactor lands.**
 
 **2.1 — Atom selection (gromosXX primitives first, gromos++ facade on top)**
 - [ ] Solidify queryable per-atom metadata in `gromos-core` (`topology.rs`, `selection.rs`):
@@ -217,7 +334,15 @@ The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations
 - [ ] Rotational fit (Kabsch/SVD) replacing `simple_rotation_fit` (rmsd.rs:161 only re-centers, no rotation).
   Ref: `.local/gromosPlsPls/gromos++/src/fit/RotationalFit.cc`, `Reference.cc`.
 - [ ] Statistics + error-estimate (block averaging, `ee()`) per gromos++ `gmath/Stat`.
-- [ ] PBC gathering, shared across programs.
+- [ ] **PBC gathering / molecule unwrapping — a unify-the-logics target, not a one-liner.** This is
+  the canonical place where gromosXX and gromos++ have *separate, divergent* implementations of the
+  same idea (the engine's `Periodicity`/min-image vs gromos++'s `bound/` gather methods: gbond, gref,
+  gcog, gltime, …). It's also notoriously bug-prone — a molecule broken across the box silently
+  corrupts every downstream analysis. **Build one gathering primitive in `gromos-core` (on the
+  engine's boundary code) and have both the engine and the gromos++-style tools (`gathtraj`, `inbox`,
+  `unify_box`, `frameout`) consume it** — the no-duplication principle applied to the single most
+  duplicated, most error-prone shared algorithm. Ref: `.local/gromosPlsPls/gromos++/src/bound/`,
+  `utils/Gather.cc`.
 - [ ] Single-point energy entry point so `ener.rs` calls `gromos-forces` instead of hardcoding LJ σ/ε
   (requires `gromos-analysis` to depend on the engine crates — the no-duplication change).
 
@@ -228,6 +353,15 @@ The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations
   rotational fit); current code computes Nosé-Hoover thermostat params — wrong algorithm entirely.
   Ref: `.local/gromosPlsPls/gromos++/programs/nhoparam.cc`
 
+**2.3b — Free-energy analysis estimators** (the *analysis* side of free energy; the *engine* side —
+FEP/TI, EDS, GaMD — is P1.5). A coherent family worth doing together once dH/dλ parsing (`ext_ti_ana`)
+and statistics/`ee()` land:
+- [ ] `bar` — Bennett Acceptance Ratio. Ref: `.local/gromosPlsPls/gromos++/programs/bar.cc`
+- [ ] `ext_ti_merge` — merge/extrapolate TI curves.
+- [ ] `reweight` — configurational reweighting.
+- [ ] `m_widom` — Widom test-particle insertion (excess chemical potential).
+- [ ] `dg_ener` — free-energy from energy differences.
+
 **2.4 — Clean up other discovered stubs**
 - [ ] `visco` (placeholder formula, not Green-Kubo), `frameout` (hardcoded CA/ALA), `amber2gromos`
   (ignores input), `ener` (hardcoded LJ), `sasa_hasel`, `dssp` (no real H-bonding), `solute_entropy`.
@@ -235,6 +369,17 @@ The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations
 ### Priority 3 — py-gromos API & education
 Design reference: `.local/polars` (Python API surface, docstrings, method chaining, pyo3 wrapping).
 Focus: compositional API for **system/topology construction**.
+
+> **Design target (FUTURE.md "Compositional topology"):** beat the gromos++ file-pipeline workflow
+> (make_top → com_top → check_top → sim_box → ion, stringly-typed, file round-trips, late stdout
+> errors). Model a topology as an **algebra**: `ForceField` (resolution context) → `BuildingBlock`
+> (MTB template) → `Topology` (composable value with `+`/`*`/`solvate()`/`check()`/`from_sequence`).
+> **Python expresses verbs; the Rust core owns every invariant** (exclusions, 1-4, LJ matrix, charge
+> groups — the *same* functions the engine uses, never a second copy). Payoff: build → minimize →
+> simulate in one address space, zero files; eager typed validation; reproducible recipes. The `*`
+> operator (`water * 216`, `na * 3`) rides on the Dim 10 instancing model. A `LazyTopology`
+> (Polars-style deferred build plan) is the second iteration. Refactor `gromos-tools` make_top/com_top
+> into reusable library functions (not binary-only `main`s) so pyo3 can call them.
 
 - Phase 1 — Rust bindings (pyo3-gromos). Done: compositional Simulation API, AlgorithmSequence API,
   Python reference tests (62 passed), `.pyi` stubs.
@@ -271,9 +416,53 @@ against the C++ reference, mirroring `crates/gromos-md/tests/gromosXX_references
 `run_references.py` against the md++ binary). Stand up an analogous harness for analysis/tools (none exists
 today). Every P1 physics feature and every P2 program lands with a minimal reference test.
 
+**Free win — mine gromosXX's own `check/*.t.cc` regression suite.** The gromosXX devs hard-code
+per-term reference energies in `md++/src/check/`: `aladip.t.cc` carries `QuarticBond=18.053811`,
+`NonBonded_newRF=-84.092443`, `DistanceRestraint=257.189539`, **and the perturbed/soft-core terms**
+(`PerturbedQuarticBond`, `PerturbedSoftBond`, `PerturbedDihedral`, …); also `c16_cg.t.cc`
+(coarse-grained), `lambdas.t.cc`, `scaling.t.cc`, `aladip_ls.t.cc` (lattice-sum). Porting these as
+unit tests gives **per-term validation independent of running the md binary** — and is a genuine
+*second source of truth* for exactly the perturbed terms Dim 11 says not to trust the C++ on (P1.5,
+P1.7). High value, low cost; do it alongside the FEP/restraints work.
+
+### Cross-cutting (do continuously) — differential audit (don't port the bugs) — FUTURE.md Dim 11
+The reference suite is a bug oracle **only for wired paths.** Every *unwired* path (triclinic, FEP,
+grid pairlist, Nosé-Hoover, EDS/GaMD, lattice-sum/PME) is un-audited surface where both inherited
+gromosXX bugs *and* silent gromos-rs divergences hide. Rules, applied to every port:
+1. **Reference test BEFORE wiring**, not after. (Would have caught the triclinic divergence, P1.4.)
+2. **Grep the C++ for self-flagged defects before porting a subsystem:**
+   `grep -rniE 'bug|fixme|wrong|hack' interaction/ algorithm/ math/` — the authors flag their own.
+3. **Second-source uncertain/subtle physics** (RF self-terms, virial, Ewald): derive from the GROMOS
+   book independently, implement to that, then diff against the C++; on disagreement, investigate —
+   don't assume the C++ is right.
+4. **Reproduce genuine GROMOS quirks as named, documented decisions** (like the "BONDANGLETYPE
+   intentionally unsupported" entries), so a deliberate GROMOS-ism is never mistaken for a port bug.
+5. Eventually a `--gromos-compat` vs `--corrected` split so "faithful" and "correct" can coexist.
+
+Known items already logged: triclinic nearest-image divergence (P1.4, **live in our tree**), Martina
+grid-pairlist bug (P1.6), perturbed RF self-term uncertainty (P1.5), thermostat flexible-constraints
+hack (P1.3). Full table in FUTURE.md Dim 11.
+
 ### Parked / blocked
 - `ext_ti_ana`, `nhoparam` — blocked behind Priority 2 (selection + fit + stats + references).
 - Tutorials t_01–t_06 end-to-end — compute-limited; replaced near-term by minimal reference tests.
+
+### Deferred breadth (tracked, not scheduled — low priority by design)
+Subsystems present in gromosXX/gromos++ but intentionally low on our list, recorded so they're not
+forgotten:
+- **PME / lattice-sum electrostatics** — **RF stays the focus by design** (it's why GROMOS chose RF;
+  PME was never well-optimized in gromosXX). NAMD/GROMACS optimize PME with *different logics*
+  (FFT-based mesh, decomposition) — **needs a focused investigation before committing** whether to
+  port gromosXX's lattice-sum or adopt a modern approach. Lower priority than RF-based physics.
+  Ref: `interaction/nonbonded/interaction/latticesum.{h,cc}` (note the `// wrong!!!` traps — Dim 11).
+- **Stochastic / Langevin dynamics (SD integrator)** — common but ~same priority tier as PME for our
+  goals. `random_force` scaffolding exists; the SD leap-frog + friction/stochastic terms are unported.
+  Ref: `algorithm/integration/` (stochastic), `math/random.*`.
+- **Coarse-grained → Martini bridge** — *wanted* (Martini interop = ecosystem reach), but it's a
+  research bet gated on a nonbonded-conventions investigation. Tracked as **FUTURE.md Dim 13**, not a
+  near-term PLAN item. CG data model should ride the Dim 10 instancing refactor (beads = heavy repeats).
+- **Polarisable / charge-on-spring force fields** — **explicitly out of scope** (low relevance for
+  target use cases). Listed only to mark the decision.
 
 ## Key Files
 

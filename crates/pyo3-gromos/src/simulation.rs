@@ -140,7 +140,7 @@ fn build_simulation(
     let mut md_sequence = AlgorithmSequence::new();
 
     // 1. COM motion removal
-    if imd.nticom >= 1 || imd.nscm > 0 {
+    if imd.nticom >= 1 || imd.nscm != 0 {
         md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
     }
 

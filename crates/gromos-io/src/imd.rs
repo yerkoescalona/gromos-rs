@@ -74,6 +74,8 @@ pub struct ImdParameters {
     pub ntcp: i32, // P-SHAKE (pressure-SHAKE)
     pub ntcs: i32, // Solvent SHAKE/SETTLE
     pub shake_tol: f64, // SHAKE tolerance
+    pub lincs_order_solute: usize,  // LINCS expansion order for solute (NTCP0 when NTCP=lincs)
+    pub lincs_order_solvent: usize, // LINCS expansion order for solvent (NTCS0 when NTCS=lincs)
 
     // PAIRLIST block
     pub algorithm: i32, // Pairlist algorithm
@@ -100,7 +102,7 @@ pub struct ImdParameters {
     pub nre: Vec<usize>,
 
     // COMTRANSROT
-    pub nscm: usize, // COM translation removal frequency
+    pub nscm: i32, // COM motion removal: >0 translation every NSCM steps, <0 translation+rotation every |NSCM| steps, 0=off
 
     // PME-specific parameters
     pub grid_x: usize,    // PME grid size X
@@ -197,6 +199,8 @@ impl Default for ImdParameters {
             ntcp: 0,
             ntcs: 1,
             shake_tol: 1e-4,
+            lincs_order_solute: 4,
+            lincs_order_solvent: 4,
             algorithm: 0,
             nsnb: 5,
             rcutp: 0.8,
@@ -515,7 +519,13 @@ fn parse_block(
                 idx += 1;
             }
             if idx < data_lines.len() {
-                params.shake_tol = parse_f64(&parse_values(&data_lines[idx])[0]);
+                let v = parse_values(&data_lines[idx]);
+                // NTCP0: SHAKE tolerance, or LINCS expansion order when NTCP=lincs
+                if params.ntcp == 2 {
+                    params.lincs_order_solute = parse_i32(&v[0]) as usize;
+                } else {
+                    params.shake_tol = parse_f64(&v[0]);
+                }
                 idx += 1;
             }
             if idx < data_lines.len() {
@@ -526,7 +536,15 @@ fn parse_block(
                     "settle" => 3,
                     _ => parse_i32(&v[0]),
                 };
-                // skip NTCS0 line
+                idx += 1;
+            }
+            if idx < data_lines.len() {
+                let v = parse_values(&data_lines[idx]);
+                // NTCS0: SHAKE tolerance, or LINCS expansion order when NTCS=lincs
+                // (settle reads no NTCS0 parameter — line absent from .in for NTCS=settle)
+                if params.ntcs == 2 {
+                    params.lincs_order_solvent = parse_i32(&v[0]) as usize;
+                }
             }
         },
         "FORCE" => {
@@ -656,7 +674,7 @@ fn parse_block(
             // Line 0: NSCM
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 { params.nscm = parse_usize(&v[0]); }
+                if v.len() >= 1 { params.nscm = parse_i32(&v[0]); }
             }
         },
         "POSITIONRES" => {
