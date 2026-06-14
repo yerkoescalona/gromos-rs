@@ -16,7 +16,7 @@ use gromos::{
         SettleAlgorithm, ShakeAlgorithm, ShakeParameters, SimulationState,
         SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
     },
-    configuration::{Box as SimBox, Configuration},
+    configuration::{Box as SimBox, BoxType, Configuration},
     interaction::nonbonded::CRFParameters,
     io::{
         coordinate::read_coordinates,
@@ -28,7 +28,10 @@ use gromos::{
         trajectory::TrajectoryWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
-    math::{Periodicity, Rectangular, Vacuum, Vec3},
+    math::{
+        truncoct_triclinic, truncoct_triclinic_box, truncoct_triclinic_rotmat, Mat3, Periodicity,
+        Rectangular, Triclinic, Vacuum, Vec3,
+    },
     pairlist::{PairlistContainer, StandardPairlistAlgorithm},
     random::generate_velocities,
     validation::{
@@ -412,9 +415,24 @@ fn main() {
         },
     };
 
-    let positions = coord_data.positions;
-    let velocities = coord_data.velocities;
+    let mut positions = coord_data.positions;
+    let mut velocities = coord_data.velocities;
     let box_dims = coord_data.box_dims;
+
+    // NTB=-1: truncated octahedron. gromosXX converts the legacy "cube edge
+    // length L" BOX block into the lower-triangular triclinic box vectors
+    // and rotates positions/velocities into that frame on read
+    // (io/configuration/in_configuration.cc, math::truncoct_triclinic_box /
+    // math::truncoct_triclinic). PLAN.md P1.4 / FUTURE.md Dim 11 #1.
+    let truncoct_box_matrix = if imd.ntb == -1 {
+        let cubic = Mat3::from_diagonal(box_dims);
+        let triclinic_box = truncoct_triclinic_box(cubic, true);
+        truncoct_triclinic(&mut positions, true);
+        truncoct_triclinic(&mut velocities, true);
+        Some(triclinic_box)
+    } else {
+        None
+    };
 
     // Determine actual NSM from coordinate file if solvent template exists
     let actual_nsm = if imd.nsm > 0 && !topo.solvent_atom_template.is_empty() {
@@ -620,7 +638,10 @@ fn main() {
     } else {
         vec![Vec3::ZERO; topo.num_atoms()]
     };
-    conf.current_mut().box_config = SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z);
+    conf.current_mut().box_config = match truncoct_box_matrix {
+        Some(triclinic_box) => SimBox::truncated_octahedral(triclinic_box),
+        None => SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z),
+    };
     conf.copy_current_to_old();
 
     // Create EDS parameters if enabled (now that we have num_atoms)
@@ -715,7 +736,9 @@ fn main() {
 
     let use_chargegroups = !topo.chargegroups.is_empty();
     let pairlist_algorithm = StandardPairlistAlgorithm::new(use_chargegroups);
-    let periodicity = if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
+    let periodicity = if let Some(triclinic_box) = truncoct_box_matrix {
+        Periodicity::Triclinic(Triclinic::new(triclinic_box))
+    } else if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
         Periodicity::Vacuum(Vacuum)
     } else {
         Periodicity::Rectangular(Rectangular::new(box_dims))
@@ -1581,7 +1604,26 @@ fn main() {
                 } else {
                     None
                 };
-                if let Err(e) = fw.write_frame(step, time, forces, constraint_forces) {
+
+                // gromosXX out_configuration.cc::_print_forcered rotates
+                // FREEFORCERED/CONSFORCERED back into the original (cube)
+                // frame via truncoct_triclinic_rotmat(false) when
+                // boundary_type==truncoct (no ROTTRANS block here, so
+                // rmat(phi,theta,psi)=identity). PLAN.md P1.4.
+                if conf.current().box_config.box_type == BoxType::TruncatedOctahedral {
+                    let rot = truncoct_triclinic_rotmat(false);
+                    let rotated_forces: Vec<Vec3> = forces.iter().map(|f| rot * *f).collect();
+                    let rotated_constraints: Option<Vec<Vec3>> =
+                        constraint_forces.map(|cf| cf.iter().map(|f| rot * *f).collect());
+                    if let Err(e) = fw.write_frame(
+                        step,
+                        time,
+                        &rotated_forces,
+                        rotated_constraints.as_deref(),
+                    ) {
+                        eprintln!("Error writing forces: {}", e);
+                    }
+                } else if let Err(e) = fw.write_frame(step, time, forces, constraint_forces) {
                     eprintln!("Error writing forces: {}", e);
                 }
             }

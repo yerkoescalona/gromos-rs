@@ -86,18 +86,50 @@ impl Triclinic {
 }
 
 impl BoundaryCondition for Triclinic {
+    /// Iterative z -> y -> x lattice reduction, ported from
+    /// `Boundary_Implementation<triclinic>::nearest_image`
+    /// (gromosXX `math/boundary_implementation.cc`). Requires the GROMOS
+    /// "lower triangular" box vector convention (a=(ax,0,0), b=(bx,by,0),
+    /// c=(cx,cy,cz)), as guaranteed by GENBOX / `truncoct_triclinic_box`.
+    ///
+    /// This is *not* equivalent to the textbook fractional-coordinate
+    /// `frac - frac.round()` reduction for strongly triclinic cells (e.g.
+    /// truncated octahedron) - see PLAN.md P1.4 / FUTURE.md Dim 11 #1.
     #[inline(always)]
     fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
-        let r = ri - rj;
+        let a = self.box_matrix.x_axis;
+        let b = self.box_matrix.y_axis;
+        let c = self.box_matrix.z_axis;
+        let mut nim = ri - rj;
 
-        // Transform to fractional coordinates
-        let frac = self.inv_box_matrix * r;
+        while nim.z >= 0.5 * c.z {
+            nim -= c;
+        }
+        while nim.z <= -0.5 * c.z {
+            nim += c;
+        }
 
-        // Apply minimum image
-        let frac_nearest = frac - frac.round();
+        let mut nim_y = nim.y - (c.y / c.z) * nim.z;
+        while nim_y >= 0.5 * b.y {
+            nim -= b;
+            nim_y = nim.y - (c.y / c.z) * nim.z;
+        }
+        while nim_y <= -0.5 * b.y {
+            nim += b;
+            nim_y = nim.y - (c.y / c.z) * nim.z;
+        }
 
-        // Transform back to Cartesian
-        self.box_matrix * frac_nearest
+        let mut nim_x = nim.x - b.x * (nim.y - c.y * nim.z / c.z) / b.y - c.x * nim.z / c.z;
+        while nim_x >= 0.5 * a.x {
+            nim -= a;
+            nim_x = nim.x - b.x * (nim.y - c.y * nim.z / c.z) / b.y - c.x * nim.z / c.z;
+        }
+        while nim_x <= -0.5 * a.x {
+            nim += a;
+            nim_x = nim.x - b.x * (nim.y - c.y * nim.z / c.z) / b.y - c.x * nim.z / c.z;
+        }
+
+        nim
     }
 
     #[inline(always)]
@@ -105,6 +137,70 @@ impl BoundaryCondition for Triclinic {
         let frac = self.inv_box_matrix * pos;
         let frac_wrapped = frac - frac.floor();
         self.box_matrix * frac_wrapped
+    }
+}
+
+/// Rotation matrix between the truncated-octahedron ("cubic") frame and the
+/// lower-triangular triclinic frame produced by `truncoct_triclinic_box`,
+/// ported from gromosXX `math::truncoct_triclinic_rotmat`
+/// (`math/transformation.cc`). `forward` rotates truncoct -> triclinic
+/// (applied to positions/velocities on read for NTB=-1); `!forward` is its
+/// transpose (triclinic -> truncoct, applied when writing forces back out).
+pub fn truncoct_triclinic_rotmat(forward: bool) -> Mat3 {
+    let sq3i = 1.0 / 3.0_f64.sqrt();
+    let sq2i = 1.0 / 2.0_f64.sqrt();
+
+    // gromosXX builds `rot` from rows (sq3i,-2*sq2i*sq3i,0), (sq3i,
+    // sq3i*sq2i,-sq2i), (sq3i,sq2i*sq3i,sq2i). `rot` below is that same
+    // matrix `M` (its columns are gromosXX's rows, per glam's column-major
+    // storage). gromosXX applies the rotation via `product(rot, v)`, which
+    // (per gmath.h's `product`) computes `rot^T * v`, not `rot * v`. So for
+    // `forward=true` (gromosXX's `rot` = `M`, untransposed) the applied
+    // rotation is `M^T`; for `forward=false` (gromosXX transposes `rot` to
+    // `M^T`, then `product` transposes again) the applied rotation is `M`.
+    // See PLAN.md P1.4 derivation.
+    let rot = Mat3::from_cols(
+        Vec3::new(sq3i, sq3i, sq3i),
+        Vec3::new(-2.0 * sq2i * sq3i, sq3i * sq2i, sq2i * sq3i),
+        Vec3::new(0.0, -sq2i, sq2i),
+    );
+
+    if forward {
+        rot.transpose()
+    } else {
+        rot
+    }
+}
+
+/// Converts a box matrix between the legacy "cube edge length L" convention
+/// (NTB=-1 BOX block, `forward=true`, where `box_matrix.x_axis.x = L`) and
+/// the lower-triangular truncated-octahedron triclinic box vectors
+/// (`forward=false` recovers the cubic box from the triclinic `a` vector),
+/// ported from gromosXX `math::truncoct_triclinic_box`
+/// (`math/transformation.cc`).
+pub fn truncoct_triclinic_box(box_matrix: Mat3, forward: bool) -> Mat3 {
+    if forward {
+        let l = box_matrix.x_axis.x;
+        let d = 0.5 * 3.0_f64.sqrt() * l;
+        let a = Vec3::new(d, 0.0, 0.0);
+        let b = Vec3::new(d / 3.0, 2.0 * 2.0_f64.sqrt() / 3.0 * d, 0.0);
+        let c = Vec3::new(-d / 3.0, 2.0_f64.sqrt() / 3.0 * d, 6.0_f64.sqrt() / 3.0 * d);
+        Mat3::from_cols(a, b, c)
+    } else {
+        let d = 2.0 * box_matrix.x_axis.x / 3.0_f64.sqrt();
+        Mat3::from_diagonal(Vec3::splat(d))
+    }
+}
+
+/// Rotates every position/velocity vector between the truncated-octahedron
+/// and triclinic frames in place, ported from gromosXX
+/// `math::truncoct_triclinic` (`math/transformation.cc`). `forward` rotates
+/// truncoct -> triclinic (applied on read for NTB=-1); `!forward` is the
+/// inverse (applied when writing forces back out).
+pub fn truncoct_triclinic(positions: &mut [Vec3], forward: bool) {
+    let rot = truncoct_triclinic_rotmat(forward);
+    for p in positions.iter_mut() {
+        *p = rot * *p;
     }
 }
 
@@ -183,5 +279,151 @@ mod tests {
         let r = bc.nearest_image(ri, rj);
         // ri - rj = 9.5 - 0.5 = 9.0, nearest image wraps to -1.0
         assert_relative_eq!(r.x, -1.0, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn test_triclinic_truncoct_tie_boundary_diverges_from_frac_round() {
+        // FUTURE.md Dim 11 finding #1 / PLAN.md P1.4: the textbook
+        // `frac - frac.round()` reduction and gromosXX's while-loop z->y->x
+        // reduction are NOT equivalent for strongly triclinic cells. At an
+        // exact half-lattice-vector displacement they land on opposite sides
+        // of the cell, a full lattice vector apart.
+        let cubic = Mat3::from_diagonal(Vec3::splat(3.767055681));
+        let box_matrix = truncoct_triclinic_box(cubic, true);
+        let bc = Triclinic::new(box_matrix);
+        let c = box_matrix.z_axis;
+
+        let ri = 0.5 * c;
+        let rj = Vec3::ZERO;
+
+        // Old textbook reduction: frac = (0, 0, 0.5) -> round() -> (0, 0, 1)
+        // -> result = -0.5 * c.
+        let frac = bc.inv_box_matrix * (ri - rj);
+        let old_result = box_matrix * (frac - frac.round());
+        assert_relative_eq!(old_result.x, -0.5 * c.x, epsilon = 1e-9);
+        assert_relative_eq!(old_result.y, -0.5 * c.y, epsilon = 1e-9);
+        assert_relative_eq!(old_result.z, -0.5 * c.z, epsilon = 1e-9);
+
+        // New while-loop reduction bounces back to +0.5 * c: z is "in range"
+        // on both the `>=` and `<=` sides of the boundary.
+        let new_result = bc.nearest_image(ri, rj);
+        assert_relative_eq!(new_result.x, 0.5 * c.x, epsilon = 1e-9);
+        assert_relative_eq!(new_result.y, 0.5 * c.y, epsilon = 1e-9);
+        assert_relative_eq!(new_result.z, 0.5 * c.z, epsilon = 1e-9);
+
+        // The two reductions differ by exactly one lattice vector c.
+        assert_relative_eq!((new_result - old_result).x, c.x, epsilon = 1e-9);
+        assert_relative_eq!((new_result - old_result).y, c.y, epsilon = 1e-9);
+        assert_relative_eq!((new_result - old_result).z, c.z, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn test_triclinic_truncoct_nearest_image_reduces_large_displacement() {
+        let cubic = Mat3::from_diagonal(Vec3::splat(3.767055681));
+        let box_matrix = truncoct_triclinic_box(cubic, true);
+        let bc = Triclinic::new(box_matrix);
+        let a = box_matrix.x_axis;
+        let b = box_matrix.y_axis;
+        let c = box_matrix.z_axis;
+
+        let ri = Vec3::new(10.0, 8.0, 7.0);
+        let rj = Vec3::ZERO;
+
+        let nim = bc.nearest_image(ri, rj);
+
+        // The result is `ri - rj` shifted by an integer combination of the
+        // box vectors (a valid periodic image).
+        let shift = (ri - rj) - nim;
+        let frac_shift = bc.inv_box_matrix * shift;
+        assert_relative_eq!(frac_shift.x, frac_shift.x.round(), epsilon = 1e-9);
+        assert_relative_eq!(frac_shift.y, frac_shift.y.round(), epsilon = 1e-9);
+        assert_relative_eq!(frac_shift.z, frac_shift.z.round(), epsilon = 1e-9);
+
+        // z is reduced into [-0.5*c.z, 0.5*c.z).
+        assert!(nim.z < 0.5 * c.z + 1e-9);
+        assert!(nim.z >= -0.5 * c.z - 1e-9);
+
+        // y is reduced into [-0.5*b.y, 0.5*b.y) after the c-correction.
+        let nim_y = nim.y - (c.y / c.z) * nim.z;
+        assert!(nim_y < 0.5 * b.y + 1e-9);
+        assert!(nim_y >= -0.5 * b.y - 1e-9);
+
+        // x is reduced into [-0.5*a.x, 0.5*a.x) after the b/c-correction.
+        let nim_x = nim.x - b.x * (nim.y - c.y * nim.z / c.z) / b.y - c.x * nim.z / c.z;
+        assert!(nim_x < 0.5 * a.x + 1e-9);
+        assert!(nim_x >= -0.5 * a.x - 1e-9);
+    }
+
+    #[test]
+    fn test_truncoct_triclinic_rotmat_forward_backward_are_transposes() {
+        // gromosXX: `truncoct_triclinic_rotmat(false) == transpose(truncoct_triclinic_rotmat(true))`,
+        // and the matrix is orthogonal, so backward is also the inverse.
+        let fwd = truncoct_triclinic_rotmat(true);
+        let bwd = truncoct_triclinic_rotmat(false);
+        let fwd_t = fwd.transpose();
+        for axis in [
+            (bwd.x_axis, fwd_t.x_axis),
+            (bwd.y_axis, fwd_t.y_axis),
+            (bwd.z_axis, fwd_t.z_axis),
+        ] {
+            assert_relative_eq!(axis.0.x, axis.1.x, epsilon = 1e-12);
+            assert_relative_eq!(axis.0.y, axis.1.y, epsilon = 1e-12);
+            assert_relative_eq!(axis.0.z, axis.1.z, epsilon = 1e-12);
+        }
+
+        let identity = fwd.transpose() * fwd;
+        assert_relative_eq!(identity.x_axis.x, 1.0, epsilon = 1e-12);
+        assert_relative_eq!(identity.y_axis.y, 1.0, epsilon = 1e-12);
+        assert_relative_eq!(identity.z_axis.z, 1.0, epsilon = 1e-12);
+        assert_relative_eq!(identity.x_axis.y, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(identity.x_axis.z, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(identity.y_axis.z, 0.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn test_truncoct_triclinic_box_round_trip() {
+        // forward (cubic -> triclinic) then backward (triclinic -> cubic)
+        // recovers the original cube edge length L, per gromosXX
+        // `math::truncoct_triclinic_box`.
+        let l = 3.767055681;
+        let cubic = Mat3::from_diagonal(Vec3::splat(l));
+        let triclinic = truncoct_triclinic_box(cubic, true);
+        let back = truncoct_triclinic_box(triclinic, false);
+        assert_relative_eq!(back.x_axis.x, l, epsilon = 1e-12);
+        assert_relative_eq!(back.y_axis.y, l, epsilon = 1e-12);
+        assert_relative_eq!(back.z_axis.z, l, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn test_truncoct_triclinic_rotates_positions() {
+        let mut positions = vec![Vec3::new(1.0, 2.0, 3.0)];
+        let original = positions[0];
+
+        truncoct_triclinic(&mut positions, true);
+        let rotated = positions[0];
+        assert!((rotated - original).length() > 1e-9);
+
+        truncoct_triclinic(&mut positions, false);
+        assert_relative_eq!(positions[0].x, original.x, epsilon = 1e-12);
+        assert_relative_eq!(positions[0].y, original.y, epsilon = 1e-12);
+        assert_relative_eq!(positions[0].z, original.z, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn test_truncoct_triclinic_forward_matches_gromosxx_reference() {
+        // gromosXX's `product(rot, v)` (gmath.h) computes `rot^T * v`, not
+        // `rot * v` - the forward/backward branches in
+        // `truncoct_triclinic_rotmat` must account for that transpose.
+        // Reference value from a gromosXX debug build: atom 21 of
+        // crates/gromos-md/tests/aladip.conf, rotated via
+        // `math::truncoct_triclinic(pos, true)` after
+        // `math::truncoct_triclinic_box(box, true)` (PLAN 1.4 / FUTURE Dim
+        // 11 #1), gives pos(21) = (1.88114910011, 0.267543648603,
+        // 0.423126867767).
+        let mut positions = vec![Vec3::new(0.867633465, 0.896110299, 1.494502054)];
+        truncoct_triclinic(&mut positions, true);
+        assert_relative_eq!(positions[0].x, 1.88114910011, epsilon = 1e-9);
+        assert_relative_eq!(positions[0].y, 0.267543648603, epsilon = 1e-9);
+        assert_relative_eq!(positions[0].z, 0.423126867767, epsilon = 1e-9);
     }
 }

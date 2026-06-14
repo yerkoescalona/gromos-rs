@@ -138,6 +138,18 @@ SYSTEMS = [
         "natoms": 72,
         "isolates": "SHAKE constraints + solute-solvent + full MD",
     },
+    {
+        "name": "aladip_trunc_oct",
+        "description": "Level 4: Aladip + 20 SPC, truncated octahedron box (NTB=-1)",
+        "level": 4,
+        "dir": "aladip_trunc_oct",
+        "topo": "../../aladip.topo",
+        "conf": "../../aladip.conf",
+        "input": "aladip_trunc_oct.in",
+        "pttopo": None,
+        "natoms": 72,
+        "isolates": "triclinic/truncoct nearest_image (PLAN 1.4, FUTURE Dim 11 #1)",
+    },
     # --- New systems: ions, unlike LJ, aromatics ---
     {
         "name": "nacl_pair",

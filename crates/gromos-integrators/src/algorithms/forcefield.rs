@@ -188,7 +188,7 @@ impl Algorithm for Forcefield {
                         self.periodicity = Periodicity::Rectangular(Rectangular::new(dims));
                     }
                 }
-                BoxType::Triclinic => {
+                BoxType::Triclinic | BoxType::TruncatedOctahedral => {
                     use gromos_core::math::Triclinic;
                     self.periodicity = Periodicity::Triclinic(Triclinic::new(box_cfg.vectors));
                 }

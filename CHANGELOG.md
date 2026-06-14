@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.15] (2026-06-14)
+
+### Features
+
+- **gromos-core:** port `truncoct_triclinic_rotmat` / `truncoct_triclinic_box` / `truncoct_triclinic`
+  (gromosXX `math/transformation.cc`) for NTB=-1 truncated-octahedron boxes
+  - `forward`/`!forward` APIs convert the legacy cube-edge BOX block to/from the lower-triangular
+    triclinic box vectors and rotate positions/velocities between the cube and triclinic frames
+  - Add `Box::truncated_octahedral()`
+- **gromos-core:** replace `Triclinic::nearest_image`'s textbook `frac - frac.round()` reduction
+  with gromosXX's iterative while-loop z→y→x reduction (`boundary_implementation.cc:285-318`) —
+  not equivalent for strongly triclinic cells (FUTURE.md Dim 11, finding #1)
+- **gromos-integrators:** `forcefield.rs` periodicity refresh now also matches
+  `BoxType::TruncatedOctahedral`
+- **gromos-md:** wire NTB=-1 in the `md` binary — convert the BOX block, rotate positions/velocities
+  on read, build `Periodicity::Triclinic` from the resulting box, and rotate
+  `FREEFORCERED`/`CONSFORCERED` back to the cube frame on output
+  (`out_configuration.cc::_print_forcered`)
+- **gromos-md:** add `aladip_trunc_oct` gromosXX reference test (truncated octahedron, NTB=-1)
+
+### Bug fixes
+
+- **gromos-core:** fix `truncoct_triclinic_rotmat`'s forward/backward rotation — gromosXX's
+  `product(rot, v)` (`gmath.h`) computes `rot^T * v`, not `rot * v`, because `GenericMatrix`'s
+  3-`Vec` constructor stores its arguments as rows while `product()` contracts over the matrix's
+  first index. The initial port had the two branches exactly swapped. Added a regression test
+  pinned to a gromosXX debug-build reference value for `aladip.conf` atom 21.
+
+### Reference test matrix
+
+- 35 of 35 tests pass (up from 34); new: `aladip_trunc_oct` (truncated octahedron / NTB=-1)
+
 ## [0.0.14] (2026-06-12)
 
 ### Features
