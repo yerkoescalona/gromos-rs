@@ -60,7 +60,7 @@ pub use configuration::{Box, BoxType, Configuration, Energy, State, StochasticVa
 pub use topology::{LJParameters, Topology};
 
 // Re-export pairlist types
-pub use pairlist::{Pairlist, PairlistContainer, StandardPairlistAlgorithm};
+pub use pairlist::{CellListPairlistAlgorithm, Pairlist, PairlistContainer, StandardPairlistAlgorithm};
 
 // Re-export selection
 pub use selection::AtomSelection;

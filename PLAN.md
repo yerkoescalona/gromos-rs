@@ -290,17 +290,40 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 
 **1.5 — Scaling: O(N) cell-list pairlist (the biggest scaling gap)** — see FUTURE.md Dim 9 for the
 full design; the near-term, bit-for-bit-safe slice:
-- [ ] **Charge-group-aware cell (linked) list** as `CellListPairlistAlgorithm`, drop-in behind the
+- [x] **Charge-group-aware cell (linked) list** as `CellListPairlistAlgorithm`, drop-in behind the
   existing `update<BC>()` interface, selectable by system size. Bin **chargegroup COGs** (not atoms)
   to preserve GROMOS's neutral-group cutoff + RF correctness.
-- [ ] **Validate by set-equality** against `StandardPairlistAlgorithm` (the O(N²) oracle) on every
+  - Implemented in `gromos-core/src/pairlist.rs`: bins each chargegroup's reference position
+    (solute CG → COG, solvent CG → first-atom position, matching `StandardPairlistAlgorithm`'s own
+    distance conventions) into a grid that exactly tiles the box, cells ≥ `long_range_cutoff +
+    skin`, with periodic-wrapped 27-cell neighbor search (deduplicated, so it stays correct even
+    when `grid_dim` is 1 or 2 along an axis). For `BoxType::Rectangular` this is the real O(N) path;
+    for vacuum/triclinic/truncated-octahedron boxes (where an axis-aligned grid can't be made
+    periodicity-safe without extra machinery) it transparently falls back to
+    `StandardPairlistAlgorithm`'s O(N²) path — still correct, just not yet accelerated. Exported
+    from `gromos-core` alongside `StandardPairlistAlgorithm`. Replaces the old, unexported,
+    non-chargegroup-aware `GridCellPairlistAlgorithm` stub. Not yet wired into the `md`/
+    `pyo3-gromos` binaries' algorithm selection — the system-size heuristic is the remaining piece.
+- [x] **Validate by set-equality** against `StandardPairlistAlgorithm` (the O(N²) oracle) on every
   reference system — identical pair set, not just identical energy — before trusting it.
-- [ ] Keep O(N²) as the always-correct reference path; cell list is an accelerator, not a replacement.
-- [ ] Do **not** reproduce the Martina solute/solvent misclassification bug
+  - Added `pairlist::tests::test_cell_list_matches_standard_{solvent_only,single_cell,with_solute}`:
+    sort+min/max-normalize all four pair lists (`solute_short/long`, `solvent_short/long`) from
+    both algorithms and assert equality. Covers pure-solvent with periodic wrap (grid_dim=4),
+    the single-cell fallback (grid_dim=1), and mixed solute+solvent with exclusions (grid_dim=2,
+    the trickiest neighbor-cell dedup case). Full `gromosXX_references` suite (35/35) still
+    passes unchanged (still runs on `StandardPairlistAlgorithm`).
+- [x] Keep O(N²) as the always-correct reference path; cell list is an accelerator, not a replacement.
+  - `StandardPairlistAlgorithm` remains the only algorithm wired into `md.rs` and `pyo3-gromos`;
+    `CellListPairlistAlgorithm` is an additional, independently-tested option.
+- [x] Do **not** reproduce the Martina solute/solvent misclassification bug
   (`extended_grid_pairlist_algorithm.cc:1309`); classify pairs by **both** atoms' roles. (Dim 10
   removes the root cause entirely.)
+  - `process_cg_pair` classifies each CG-CG pair by `cg1=min(cg_a,cg_b)` / `cg2=max(cg_a,cg_b)`
+    against `n_solute_cg` — i.e. by both chargegroups' roles, not just one.
 - Deferred to FUTURE.md (post-parity): spatial reorder / Z-order of atom arrays (Dim 9b),
-  displacement-triggered rebuild (Dim 9c), charge groups as a first-class primitive (Dim 9d).
+  displacement-triggered rebuild (Dim 9c), charge groups as a first-class primitive (Dim 9d),
+  triclinic/truncated-octahedron cell-list acceleration, and system-size-based algorithm
+  selection in the MD binaries.
 
 **1.6 — Restraints & special interactions** — today **only position restraints** exist
 (`What Works`). gromosXX has ~24 special-interaction types in `interaction/special/`; the
@@ -325,10 +348,7 @@ energy** (P1.5) and certain force fields. Touches the data model — coordinate 
 instancing refactor (FUTURE.md) so virtual sites aren't hard-coded around the old solute/solvent
 split. Reference: `algorithm/virtualatoms/prepare_virtualatoms.cc`, `create_virtualatoms.cc`.
 
-### Priority 2 — Analysis foundations (correlated with P1; the no-duplication layer)
-The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations before consumers.
-
-**1.8 — Advanced sampling (bigger; code exists, untested)**
+**1.8 — Advanced sampling (bigger; code exists, untested, OPTIONAL)**
 - [ ] **EDS** — V_mixed = −1/β·ln(Σ exp(−β(Eᵢ−eir_i))); per-state force eval + blending; AEDS emax/emin.
   Ref: `algorithm/integration/eds.cc`
 - [ ] **GaMD** — V_boost = k·(V−E_threshold)² when V>E_threshold; Welford running stats; dihedral/total/dual.
@@ -342,6 +362,9 @@ The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations
     where they disagree, investigate. (FUTURE.md Dim 11 findings #3/#4.)
 - [ ] **REMD** (large) — MPI parallel tempering; Δ = (β₁−β₂)(E₁−E₂), accept if rand < exp(−Δ); feature-gated MPI.
   Ref: `algorithm/integration/replicaExchange/`
+
+### Priority 2 — Analysis foundations (correlated with P1; the no-duplication layer)
+The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations before consumers.
 
 > **Architectural note (FUTURE.md Dim 10): the solute/solvent split.** gromosXX uses a rigid index
 > threshold (`i >= num_solute_atoms()`); gromos++ is worse — *separate containers* (`mol()` vs

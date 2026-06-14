@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.16] (2026-06-14)
+
+### Features
+
+- **gromos-core:** add `CellListPairlistAlgorithm` (FUTURE.md Dim 9a) — a charge-group-aware
+  linked-cell pairlist, drop-in via the existing `update<BC>()` interface
+  - Bins each chargegroup's reference position (solute CG → COG, solvent CG → first-atom
+    position, matching `StandardPairlistAlgorithm`'s own distance conventions) into a grid that
+    exactly tiles the box, with cells ≥ `long_range_cutoff + skin` and a periodic-wrapped,
+    deduplicated 27-cell neighbor search (correct even when `grid_dim` is 1 or 2 along an axis)
+  - O(N) for `BoxType::Rectangular`; vacuum/triclinic/truncated-octahedron boxes fall back to
+    `StandardPairlistAlgorithm`'s O(N²) path (correct, not yet accelerated)
+  - Pairs are classified by `min/max(cg_a, cg_b)` against `num_solute_chargegroups` — both
+    chargegroups' roles — avoiding the Martina solute/solvent misclassification bug
+    (`extended_grid_pairlist_algorithm.cc:1309`)
+  - Replaces the old, unexported, non-chargegroup-aware `GridCellPairlistAlgorithm` stub
+- **gromos-core:** add set-equality tests (`test_cell_list_matches_standard_*`) validating that
+  `CellListPairlistAlgorithm` produces identical `solute_short/long`/`solvent_short/long` pair
+  sets to `StandardPairlistAlgorithm`, covering periodic wrap, the single-cell fallback, and
+  mixed solute+solvent with exclusions
+
+### Reference test matrix
+
+- 35 of 35 tests pass (unchanged — `StandardPairlistAlgorithm` remains the only algorithm wired
+  into the `md`/`pyo3-gromos` binaries)
+
 ## [0.0.15] (2026-06-14)
 
 ### Features
