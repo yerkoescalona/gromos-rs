@@ -245,36 +245,50 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
   - IMD parser bug fixed: algorithm codes now match gromosXX (0=Berendsen, 1=NHC, N=chain length).
 
 **1.4 — Boundary**
-- [ ] **Triclinic box** — code exists in `math.rs` but md.rs never creates Triclinic periodicity.
-  - ⚠️ **KNOWN LIVE DIVERGENCE (FUTURE.md Dim 11, finding #1).** Our `Triclinic::nearest_image`
-    (`gromos-core/src/math.rs:90`) uses the textbook fractional-coordinate `frac - frac.round()`.
+- [x] **Triclinic box** — code exists in `math.rs` but md.rs never creates Triclinic periodicity.
+  - ⚠️ **KNOWN LIVE DIVERGENCE (FUTURE.md Dim 11, finding #1) — RESOLVED.** Our `Triclinic::nearest_image`
+    (`gromos-core/src/math.rs:90`) used the textbook fractional-coordinate `frac - frac.round()`.
     gromosXX (`math/boundary_implementation.cc:285-318`) uses an **iterative `while`-loop reduction
     in z→y→x order** over the lower-triangular box. These are **not equivalent for strongly
-    triclinic cells** — fractional `round()` is not always the Cartesian nearest image. Nothing
-    catches this today only because triclinic is unwired. **Write the triclinic reference test
-    FIRST; it will fail against the current code. Then port the `while`-loop z→y→x version** before
-    trusting any triclinic result. Do not assume the cleaner `round()` matches GROMOS.
-  - [ ] Add a triclinic gromosXX reference (truncated octahedron) — *before* wiring
-  - [ ] Replace `Triclinic::nearest_image` with the gromosXX while-loop z→y→x reduction
-  - [ ] Wire GENBOX box_type into periodicity selection
-  - [ ] Test with truncated octahedron / non-rectangular boxes
+    triclinic cells** — fractional `round()` is not always the Cartesian nearest image. Ported the
+    `while`-loop z→y→x version (see below); `aladip_trunc_oct` now passes.
+  - [x] Add a triclinic gromosXX reference (truncated octahedron) — *before* wiring
+    - `aladip_trunc_oct` (aladip.topo/aladip.conf, NTB=-1, RCUTP/RCUTL=0.8/0.9 — the
+      box's inscribed-sphere check caps RCUTL around ~1.33 nm for this 3.767 nm cell).
+      Reference data generated; Rust test added as `ignore: aladip_trunc_oct` —
+      confirmed failing (E_total 133.62 vs gromosXX 132.07), as predicted: md.rs
+      ignores NTB and treats the box as Rectangular without the truncoct_triclinic
+      rotation gromosXX applies on read.
+  - [x] Replace `Triclinic::nearest_image` with the gromosXX while-loop z→y→x reduction
+    - Ported `boundary_implementation.cc:285-318` verbatim into `math.rs` (assumes the
+      GROMOS lower-triangular box convention). Added unit tests demonstrating that the
+      while-loop and the old `frac.round()` reduction diverge by a full lattice vector at
+      an exact half-box tie (FUTURE.md Dim 11 #1), and that large displacements still
+      reduce correctly. `aladip_trunc_oct` still fails identically (133.62 vs 132.07) —
+      expected, since md.rs doesn't construct a triclinic box yet (item below).
+  - [x] Wire GENBOX box_type into periodicity selection (incl. truncoct_triclinic_box
+    conversion + truncoct_triclinic rotation of positions/velocities on read for NTB=-1)
+    - Ported `math::truncoct_triclinic_rotmat`/`truncoct_triclinic_box`/`truncoct_triclinic`
+      (`math/transformation.cc`) into `math.rs` as faithful 3-function APIs taking a
+      `forward: bool`. Added `Box::truncated_octahedral()`. md.rs now: for NTB=-1, converts
+      the cubic BOX block via `truncoct_triclinic_box(.., true)`, rotates positions/velocities
+      via `truncoct_triclinic(.., true)`, builds `Periodicity::Triclinic` from the resulting
+      lower-triangular box (forcefield.rs's periodicity refresh now matches
+      `TruncatedOctahedral` too), and rotates `FREEFORCERED`/`CONSFORCERED` back to the cube
+      frame via `truncoct_triclinic_rotmat(false)` on output (matches
+      `out_configuration.cc::_print_forcered`).
+  - [x] Test with truncated octahedron / non-rectangular boxes — un-ignore `aladip_trunc_oct`
+    - **Found and fixed a rotation-matrix bug** while debugging: gromosXX's `product(rot, v)`
+      (`gmath.h`) computes `rot^T * v`, not `rot * v` (its `GenericMatrix` constructor stores
+      the 3 ctor-arg `Vec`s as *rows*, but `product` contracts over the *first* matrix index).
+      Our initial port applied `rot * v` for `forward` and `rot^T * v` for `!forward` —
+      exactly backwards. Fixed by swapping the two branches; added a regression test pinned
+      to a gromosXX debug-build reference value for `aladip.conf` atom 21
+      (`test_truncoct_triclinic_forward_matches_gromosxx_reference`). `aladip_trunc_oct` now
+      passes (energies + forces match gromosXX to tolerance); full reference suite
+      (35/35) still green.
 
-**1.5 — Advanced sampling (bigger; code exists, untested)**
-- [ ] **EDS** — V_mixed = −1/β·ln(Σ exp(−β(Eᵢ−eir_i))); per-state force eval + blending; AEDS emax/emin.
-  Ref: `algorithm/integration/eds.cc`
-- [ ] **GaMD** — V_boost = k·(V−E_threshold)² when V>E_threshold; Welford running stats; dihedral/total/dual.
-  Ref: `algorithm/integration/gamd.cc`
-- [ ] **FEP / TI** — K(λ) = (1−λ)K_A + λK_B; ∂V/∂λ; soft-core LJ. Perturbed bond forces exist, need testing.
-  Ref: `interaction/bonded/perturbed_*.cc`
-  - ⚠️ **Second-source the perturbed RF self-term — do NOT transcribe the C++.** The gromosXX authors
-    themselves flagged it as untrusted: `perturbed_nonbonded_term.cc:596,749` (*"Chris: CHECK! I'm
-    not sure if the self-term correction is not wrong…"*) and `:1444` (*"there is a bug here from the
-    previous version"*). Derive from the GROMOS book, implement to that, then diff against the C++;
-    where they disagree, investigate. (FUTURE.md Dim 11 findings #3/#4.)
-- [ ] **REMD** (large) — MPI parallel tempering; Δ = (β₁−β₂)(E₁−E₂), accept if rand < exp(−Δ); feature-gated MPI.
-  Ref: `algorithm/integration/replicaExchange/`
-
-**1.6 — Scaling: O(N) cell-list pairlist (the biggest scaling gap)** — see FUTURE.md Dim 9 for the
+**1.5 — Scaling: O(N) cell-list pairlist (the biggest scaling gap)** — see FUTURE.md Dim 9 for the
 full design; the near-term, bit-for-bit-safe slice:
 - [ ] **Charge-group-aware cell (linked) list** as `CellListPairlistAlgorithm`, drop-in behind the
   existing `update<BC>()` interface, selectable by system size. Bin **chargegroup COGs** (not atoms)
@@ -288,7 +302,7 @@ full design; the near-term, bit-for-bit-safe slice:
 - Deferred to FUTURE.md (post-parity): spatial reorder / Z-order of atom arrays (Dim 9b),
   displacement-triggered rebuild (Dim 9c), charge groups as a first-class primitive (Dim 9d).
 
-**1.7 — Restraints & special interactions** — today **only position restraints** exist
+**1.6 — Restraints & special interactions** — today **only position restraints** exist
 (`What Works`). gromosXX has ~24 special-interaction types in `interaction/special/`; the
 scientifically essential ones each need porting + a minimal reference test, and most have a
 *perturbed* variant (couples to FEP, P1.5). Per-term ground-truth available from gromosXX's own
@@ -305,7 +319,7 @@ scientifically essential ones each need porting + a minimal reference test, and 
 - Lower priority within group: RDC, X-ray, symmetry, colvar, electric-field, NEMD, adde_reweighting.
 - Each lands with a minimal gromosXX reference test, mirroring the MD harness.
 
-**1.8 — Virtual atoms** (`algorithm/virtualatoms/`, tool `addvirt_top`) — massless interaction
+**1.7 — Virtual atoms** (`algorithm/virtualatoms/`, tool `addvirt_top`) — massless interaction
 sites placed by geometry (e.g. aromatic centroids, lone pairs). **Primary motivation here: TI/free
 energy** (P1.5) and certain force fields. Touches the data model — coordinate with the Dim 10
 instancing refactor (FUTURE.md) so virtual sites aren't hard-coded around the old solute/solvent
@@ -313,6 +327,21 @@ split. Reference: `algorithm/virtualatoms/prepare_virtualatoms.cc`, `create_virt
 
 ### Priority 2 — Analysis foundations (correlated with P1; the no-duplication layer)
 The gromosPlsPls facade built on gromosXX primitives. Order matters: foundations before consumers.
+
+**1.8 — Advanced sampling (bigger; code exists, untested)**
+- [ ] **EDS** — V_mixed = −1/β·ln(Σ exp(−β(Eᵢ−eir_i))); per-state force eval + blending; AEDS emax/emin.
+  Ref: `algorithm/integration/eds.cc`
+- [ ] **GaMD** — V_boost = k·(V−E_threshold)² when V>E_threshold; Welford running stats; dihedral/total/dual.
+  Ref: `algorithm/integration/gamd.cc`
+- [ ] **FEP / TI** — K(λ) = (1−λ)K_A + λK_B; ∂V/∂λ; soft-core LJ. Perturbed bond forces exist, need testing.
+  Ref: `interaction/bonded/perturbed_*.cc`
+  - ⚠️ **Second-source the perturbed RF self-term — do NOT transcribe the C++.** The gromosXX authors
+    themselves flagged it as untrusted: `perturbed_nonbonded_term.cc:596,749` (*"Chris: CHECK! I'm
+    not sure if the self-term correction is not wrong…"*) and `:1444` (*"there is a bug here from the
+    previous version"*). Derive from the GROMOS book, implement to that, then diff against the C++;
+    where they disagree, investigate. (FUTURE.md Dim 11 findings #3/#4.)
+- [ ] **REMD** (large) — MPI parallel tempering; Δ = (β₁−β₂)(E₁−E₂), accept if rand < exp(−Δ); feature-gated MPI.
+  Ref: `algorithm/integration/replicaExchange/`
 
 > **Architectural note (FUTURE.md Dim 10): the solute/solvent split.** gromosXX uses a rigid index
 > threshold (`i >= num_solute_atoms()`); gromos++ is worse — *separate containers* (`mol()` vs

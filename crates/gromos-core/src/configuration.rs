@@ -63,6 +63,18 @@ impl Box {
         }
     }
 
+    /// Create a truncated-octahedron box from its (lower-triangular)
+    /// triclinic box vectors, as produced by
+    /// `math::truncoct_triclinic_box(cubic, true)` from the legacy NTB=-1
+    /// "cube edge length" BOX block (PLAN.md P1.4).
+    pub fn truncated_octahedral(vectors: Mat3) -> Self {
+        Self {
+            box_type: BoxType::TruncatedOctahedral,
+            vectors,
+            inv_vectors: vectors.inverse(),
+        }
+    }
+
     /// Get box volume
     pub fn volume(&self) -> f64 {
         // Volume = determinant of box matrix

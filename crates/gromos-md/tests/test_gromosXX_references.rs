@@ -414,6 +414,15 @@ ref_test!(water_216_npt, "water_216_npt");
 ref_test!(aladip_vacuum, "aladip_vacuum");
 ref_test!(aladip_solvated, "aladip_solvated");
 
+// Triclinic / truncated octahedron (PLAN 1.4 / FUTURE.md Dim 11 finding #1):
+// NTB=-1 converts the legacy "cube edge L" BOX block via
+// truncoct_triclinic_box, rotates positions/velocities into the
+// lower-triangular triclinic frame via truncoct_triclinic, and uses the
+// while-loop z->y->x Triclinic::nearest_image. Forces are rotated back to the
+// cube frame on FREEFORCERED/CONSFORCERED output via
+// truncoct_triclinic_rotmat(false).
+ref_test!(aladip_trunc_oct, "aladip_trunc_oct");
+
 // Energy minimization
 ref_test!(aladip_vacuum_em, "aladip_vacuum_em");
 ref_test!(aladip_vacuum_em_shake, "aladip_vacuum_em_shake");
