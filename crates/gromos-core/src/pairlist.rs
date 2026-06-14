@@ -5,10 +5,11 @@
 //! - md++/src/interaction/nonbonded/pairlist/standard_pairlist_algorithm.cc
 //! - md++/src/interaction/nonbonded/pairlist/grid_cell_pairlist.cc
 
-use crate::configuration::Configuration;
+use crate::configuration::{BoxType, Configuration};
 use crate::math::{BoundaryCondition, Vec3};
 use crate::topology::Topology;
 use rayon::prelude::*;
+use std::collections::HashSet;
 
 /// Pairlist for nonbonded interactions
 ///
@@ -331,32 +332,38 @@ impl StandardPairlistAlgorithm {
     }
 }
 
-/// Grid-based pairlist algorithm for large systems
+/// Charge-group-aware linked-cell pairlist algorithm — an O(N) alternative
+/// to [`StandardPairlistAlgorithm`] for rectangular boxes (FUTURE.md Dim 9a).
 ///
-/// Translation of md++/src/interaction/nonbonded/pairlist/grid_cell_pairlist.cc
+/// Bins chargegroup reference positions into a grid that exactly tiles the
+/// box, with each cell at least `long_range_cutoff + skin` wide along every
+/// axis, then only tests CG pairs that share a cell or occupy a
+/// periodic-wrapped neighboring cell. The reference position and the
+/// pairwise distance/exclusion logic for each of the three cases
+/// (solute-solute, solute-solvent, solvent-solvent) mirror
+/// [`StandardPairlistAlgorithm`]'s chargegroup-based algorithm exactly, so
+/// the resulting pair *set* is identical (see
+/// `tests::test_cell_list_matches_standard_*`), just in a different
+/// (cell-traversal) order.
 ///
-/// Uses spatial decomposition into grid cells for O(N) scaling instead of O(N²).
-pub struct GridCellPairlistAlgorithm {
-    pub cell_size: f64,
-    cells: Vec<Vec<usize>>, // cells[cell_idx] = list of atoms
-    grid_dim: [usize; 3],
-}
+/// For non-rectangular boxes (vacuum, triclinic, truncated octahedron) an
+/// axis-aligned grid can't be made periodicity-safe without extra
+/// machinery, so this falls back to `StandardPairlistAlgorithm`'s O(N²)
+/// path — still correct, just not accelerated.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CellListPairlistAlgorithm;
 
-impl GridCellPairlistAlgorithm {
-    /// Create grid-based pairlist algorithm
-    ///
-    /// `cell_size` should be at least cutoff + skin
-    pub fn new(cell_size: f64) -> Self {
-        Self {
-            cell_size,
-            cells: Vec::new(),
-            grid_dim: [0, 0, 0],
-        }
+impl CellListPairlistAlgorithm {
+    pub fn new() -> Self {
+        Self
     }
 
-    /// Update pairlist using grid-based algorithm
+    /// Update pairlist based on current configuration.
+    ///
+    /// Produces the same `solute_short`/`solute_long`/`solvent_short`/
+    /// `solvent_long` pair sets as `StandardPairlistAlgorithm::new(true)`.
     pub fn update<BC: BoundaryCondition>(
-        &mut self,
+        &self,
         topo: &Topology,
         conf: &Configuration,
         pairlist: &mut PairlistContainer,
@@ -364,145 +371,243 @@ impl GridCellPairlistAlgorithm {
     ) {
         pairlist.solute_short.clear();
         pairlist.solute_long.clear();
+        pairlist.solvent_short.clear();
+        pairlist.solvent_long.clear();
 
-        // Initialize grid
-        self.initialize_grid(conf);
-
-        // Assign atoms to cells
-        self.assign_atoms_to_cells(topo, conf);
-
-        // Generate pairs from grid
-        self.generate_pairs_from_grid(topo, conf, pairlist, periodicity);
+        if conf.current().box_config.box_type == BoxType::Rectangular {
+            self.update_cell_list(topo, conf, pairlist, periodicity);
+        } else {
+            // Axis-aligned cells aren't periodicity-safe for vacuum/triclinic
+            // boxes; fall back to the always-correct O(N^2) path.
+            StandardPairlistAlgorithm::new(true)
+                .update_chargegroup_based(topo, conf, pairlist, periodicity);
+        }
 
         pairlist.reset_counter();
     }
 
-    /// Initialize grid based on box dimensions
-    fn initialize_grid(&mut self, conf: &Configuration) {
-        let box_dims = conf.current().box_config.dimensions();
-
-        self.grid_dim = [
-            ((box_dims.x / self.cell_size).ceil() as usize).max(1),
-            ((box_dims.y / self.cell_size).ceil() as usize).max(1),
-            ((box_dims.z / self.cell_size).ceil() as usize).max(1),
-        ];
-
-        let total_cells = self.grid_dim[0] * self.grid_dim[1] * self.grid_dim[2];
-        self.cells = vec![Vec::new(); total_cells];
-
-        // Clear existing cells
-        for cell in &mut self.cells {
-            cell.clear();
-        }
-    }
-
-    /// Assign atoms to grid cells
-    fn assign_atoms_to_cells(&mut self, topo: &Topology, conf: &Configuration) {
-        let n_atoms = topo.num_atoms();
-
-        for i in 0..n_atoms {
-            let pos = conf.current().pos[i];
-            let cell_idx = self.position_to_cell(pos);
-            self.cells[cell_idx].push(i);
-        }
-    }
-
-    /// Convert position to cell index
-    fn position_to_cell(&self, pos: Vec3) -> usize {
-        let ix = ((pos.x / self.cell_size).floor() as usize).min(self.grid_dim[0] - 1);
-        let iy = ((pos.y / self.cell_size).floor() as usize).min(self.grid_dim[1] - 1);
-        let iz = ((pos.z / self.cell_size).floor() as usize).min(self.grid_dim[2] - 1);
-
-        ix + iy * self.grid_dim[0] + iz * self.grid_dim[0] * self.grid_dim[1]
-    }
-
-    /// Generate pairs from grid cells
-    fn generate_pairs_from_grid<BC: BoundaryCondition>(
+    fn update_cell_list<BC: BoundaryCondition>(
         &self,
         topo: &Topology,
         conf: &Configuration,
         pairlist: &mut PairlistContainer,
         periodicity: &BC,
     ) {
+        let n_chargegroups = topo.chargegroups.len();
+        if n_chargegroups == 0 {
+            return;
+        }
+        let n_solute_cg = topo.num_solute_chargegroups;
         let cutoff2_short = (pairlist.short_range_cutoff + pairlist.skin).powi(2);
         let cutoff2_long = (pairlist.long_range_cutoff + pairlist.skin).powi(2);
+        let min_cell_size = pairlist.long_range_cutoff + pairlist.skin;
 
-        // Loop over all cells
-        for cell_idx in 0..self.cells.len() {
-            let (cx, cy, cz) = self.cell_index_to_coords(cell_idx);
+        let positions = &conf.current().pos;
 
-            // Check neighboring cells (including self)
-            for dx in -1..=1 {
-                for dy in -1..=1 {
-                    for dz in -1..=1 {
-                        let nx = (cx as isize + dx).rem_euclid(self.grid_dim[0] as isize) as usize;
-                        let ny = (cy as isize + dy).rem_euclid(self.grid_dim[1] as isize) as usize;
-                        let nz = (cz as isize + dz).rem_euclid(self.grid_dim[2] as isize) as usize;
+        // Solute CG centers-of-geometry (StandardPairlistAlgorithm convention:
+        // only solute CGs get a COG).
+        let cg_cog: Vec<Vec3> = (0..n_solute_cg)
+            .map(|i| topo.chargegroups[i].center_of_geometry(positions))
+            .collect();
 
-                        let neighbor_idx =
-                            nx + ny * self.grid_dim[0] + nz * self.grid_dim[0] * self.grid_dim[1];
+        // Intra-CG non-excluded pairs don't depend on the spatial grid.
+        for cg in 0..n_solute_cg {
+            let atoms = &topo.chargegroups[cg].atoms;
+            for ai in 0..atoms.len() {
+                let a1 = atoms[ai];
+                for &a2 in &atoms[ai + 1..] {
+                    if !topo.is_excluded_or_14(a1, a2) {
+                        pairlist.solute_short.push((a1, a2));
+                    }
+                }
+            }
+        }
 
-                        // Add pairs between current cell and neighbor
-                        self.add_cell_pairs(
-                            cell_idx,
-                            neighbor_idx,
-                            topo,
-                            conf,
-                            pairlist,
-                            periodicity,
-                            cutoff2_short,
-                            cutoff2_long,
-                        );
+        // Reference position for binning AND for the CG-CG distance test:
+        // solute CGs use their COG, solvent CGs use their first atom
+        // (matches StandardPairlistAlgorithm).
+        let ref_pos: Vec<Vec3> = (0..n_chargegroups)
+            .map(|cg| {
+                if cg < n_solute_cg {
+                    cg_cog[cg]
+                } else {
+                    positions[topo.chargegroups[cg].atoms[0]]
+                }
+            })
+            .collect();
+
+        // A grid that exactly tiles the box, with cells >= min_cell_size
+        // along each axis: any pair within cutoff is in the same or an
+        // adjacent cell, modulo periodic wrap of cell indices.
+        let box_dims = conf.current().box_config.dimensions();
+        let grid_dim = [
+            grid_dim_for_axis(box_dims.x, min_cell_size),
+            grid_dim_for_axis(box_dims.y, min_cell_size),
+            grid_dim_for_axis(box_dims.z, min_cell_size),
+        ];
+        let cell_size = [
+            box_dims.x / grid_dim[0] as f64,
+            box_dims.y / grid_dim[1] as f64,
+            box_dims.z / grid_dim[2] as f64,
+        ];
+
+        let total_cells = grid_dim[0] * grid_dim[1] * grid_dim[2];
+        let mut cells: Vec<Vec<usize>> = vec![Vec::new(); total_cells];
+        for (cg, &pos) in ref_pos.iter().enumerate() {
+            cells[cell_index(pos, &cell_size, &grid_dim)].push(cg);
+        }
+
+        for cell_a in 0..total_cells {
+            if cells[cell_a].is_empty() {
+                continue;
+            }
+            for cell_b in neighbor_cells(cell_a, &grid_dim) {
+                if cell_b < cell_a || cells[cell_b].is_empty() {
+                    continue;
+                }
+                if cell_a == cell_b {
+                    let members = &cells[cell_a];
+                    for i in 0..members.len() {
+                        for &cg2 in &members[i + 1..] {
+                            process_cg_pair(
+                                members[i], cg2, topo, positions, periodicity, pairlist,
+                                n_solute_cg, &cg_cog, cutoff2_short, cutoff2_long,
+                            );
+                        }
+                    }
+                } else {
+                    for &cg1 in &cells[cell_a] {
+                        for &cg2 in &cells[cell_b] {
+                            process_cg_pair(
+                                cg1, cg2, topo, positions, periodicity, pairlist,
+                                n_solute_cg, &cg_cog, cutoff2_short, cutoff2_long,
+                            );
+                        }
                     }
                 }
             }
         }
     }
+}
 
-    /// Convert 1D cell index to 3D coordinates
-    fn cell_index_to_coords(&self, idx: usize) -> (usize, usize, usize) {
-        let z = idx / (self.grid_dim[0] * self.grid_dim[1]);
-        let remainder = idx % (self.grid_dim[0] * self.grid_dim[1]);
-        let y = remainder / self.grid_dim[0];
-        let x = remainder % self.grid_dim[0];
-        (x, y, z)
+/// Number of cells along one axis: at least 1, each cell at least `min_cell_size`.
+fn grid_dim_for_axis(box_len: f64, min_cell_size: f64) -> usize {
+    if min_cell_size <= 0.0 || box_len <= 0.0 {
+        return 1;
     }
+    ((box_len / min_cell_size).floor() as usize).max(1)
+}
 
-    /// Add pairs between two cells
-    fn add_cell_pairs<BC: BoundaryCondition>(
-        &self,
-        cell1: usize,
-        cell2: usize,
-        topo: &Topology,
-        conf: &Configuration,
-        pairlist: &mut PairlistContainer,
-        periodicity: &BC,
-        cutoff2_short: f64,
-        cutoff2_long: f64,
-    ) {
-        for &i in &self.cells[cell1] {
-            for &j in &self.cells[cell2] {
-                // Skip if same cell and j <= i (avoid double counting)
-                if cell1 == cell2 && j <= i {
-                    continue;
-                }
+/// Cell index of a position, wrapping into `[0, grid_dim)` per axis.
+fn cell_index(pos: Vec3, cell_size: &[f64; 3], grid_dim: &[usize; 3]) -> usize {
+    let cx = ((pos.x / cell_size[0]).floor() as i64).rem_euclid(grid_dim[0] as i64) as usize;
+    let cy = ((pos.y / cell_size[1]).floor() as i64).rem_euclid(grid_dim[1] as i64) as usize;
+    let cz = ((pos.z / cell_size[2]).floor() as i64).rem_euclid(grid_dim[2] as i64) as usize;
+    cx + cy * grid_dim[0] + cz * grid_dim[0] * grid_dim[1]
+}
 
-                // Check exclusions
-                if topo.is_excluded_or_14(i, j) {
-                    continue;
-                }
+/// All cells (including `cell` itself) within one periodic-wrapped step of
+/// `cell`, de-duplicated (matters when `grid_dim` is 1 or 2 along some axis).
+fn neighbor_cells(cell: usize, grid_dim: &[usize; 3]) -> Vec<usize> {
+    let cx = (cell % grid_dim[0]) as i64;
+    let cy = ((cell / grid_dim[0]) % grid_dim[1]) as i64;
+    let cz = (cell / (grid_dim[0] * grid_dim[1])) as i64;
 
-                // Calculate distance
-                let r = periodicity.nearest_image(conf.current().pos[i], conf.current().pos[j]);
-                let dist2 = r.length_squared();
+    let mut neighbors = HashSet::with_capacity(27);
+    for dx in -1..=1i64 {
+        for dy in -1..=1i64 {
+            for dz in -1..=1i64 {
+                let nx = (cx + dx).rem_euclid(grid_dim[0] as i64) as usize;
+                let ny = (cy + dy).rem_euclid(grid_dim[1] as i64) as usize;
+                let nz = (cz + dz).rem_euclid(grid_dim[2] as i64) as usize;
+                neighbors.insert(nx + ny * grid_dim[0] + nz * grid_dim[0] * grid_dim[1]);
+            }
+        }
+    }
+    neighbors.into_iter().collect()
+}
 
-                // Add to appropriate pairlist
-                if dist2 < cutoff2_short {
-                    pairlist.solute_short.push((i, j));
-                } else if dist2 < cutoff2_long {
-                    pairlist.solute_long.push((i, j));
+/// Classify and test a single chargegroup pair, pushing atom pairs into
+/// `pairlist` exactly as `StandardPairlistAlgorithm`'s chargegroup-based
+/// algorithm would for the same pair.
+#[allow(clippy::too_many_arguments)]
+fn process_cg_pair<BC: BoundaryCondition>(
+    cg_a: usize,
+    cg_b: usize,
+    topo: &Topology,
+    positions: &[Vec3],
+    periodicity: &BC,
+    pairlist: &mut PairlistContainer,
+    n_solute_cg: usize,
+    cg_cog: &[Vec3],
+    cutoff2_short: f64,
+    cutoff2_long: f64,
+) {
+    // StandardPairlistAlgorithm's loops always visit CG pairs with cg1 < cg2.
+    let cg1 = cg_a.min(cg_b);
+    let cg2 = cg_a.max(cg_b);
+
+    if cg2 < n_solute_cg {
+        // Solute-solute: CG centers-of-geometry, exclusion check for short-range.
+        let r = periodicity.nearest_image(cg_cog[cg1], cg_cog[cg2]);
+        let dist2 = r.length_squared();
+        if dist2 > cutoff2_long {
+            return;
+        }
+        if dist2 > cutoff2_short {
+            for &a1 in &topo.chargegroups[cg1].atoms {
+                for &a2 in &topo.chargegroups[cg2].atoms {
+                    pairlist.solute_long.push((a1, a2));
                 }
             }
+        } else {
+            for &a1 in &topo.chargegroups[cg1].atoms {
+                for &a2 in &topo.chargegroups[cg2].atoms {
+                    if !topo.is_excluded_or_14(a1, a2) {
+                        pairlist.solute_short.push((a1, a2));
+                    }
+                }
+            }
+        }
+    } else if cg1 < n_solute_cg {
+        // Solute-solvent: solute CG COG vs solvent CG first atom, no exclusion check.
+        let solvent_first_atom = topo.chargegroups[cg2].atoms[0];
+        let r = periodicity.nearest_image(cg_cog[cg1], positions[solvent_first_atom]);
+        let dist2 = r.length_squared();
+        if dist2 > cutoff2_long {
+            return;
+        }
+        if dist2 > cutoff2_short {
+            for &a1 in &topo.chargegroups[cg1].atoms {
+                for &a2 in &topo.chargegroups[cg2].atoms {
+                    pairlist.solute_long.push((a1, a2));
+                }
+            }
+        } else {
+            for &a1 in &topo.chargegroups[cg1].atoms {
+                for &a2 in &topo.chargegroups[cg2].atoms {
+                    pairlist.solute_short.push((a1, a2));
+                }
+            }
+        }
+    } else {
+        // Solvent-solvent: first-atom positions; short-range stores the
+        // first-atom pair only (solvent_innerloop expands all atom pairs).
+        let first_atom_1 = topo.chargegroups[cg1].atoms[0];
+        let first_atom_2 = topo.chargegroups[cg2].atoms[0];
+        let r = periodicity.nearest_image(positions[first_atom_1], positions[first_atom_2]);
+        let dist2 = r.length_squared();
+        if dist2 > cutoff2_long {
+            return;
+        }
+        if dist2 > cutoff2_short {
+            for &a1 in &topo.chargegroups[cg1].atoms {
+                for &a2 in &topo.chargegroups[cg2].atoms {
+                    pairlist.solvent_long.push((a1, a2));
+                }
+            }
+        } else {
+            pairlist.solvent_short.push((first_atom_1, first_atom_2));
         }
     }
 }
@@ -656,18 +761,110 @@ mod tests {
         assert!(pairlist.solute_long.len() >= 1);
     }
 
-    #[test]
-    fn test_grid_cell_algorithm() {
-        use crate::topology::Atom;
+    /// Sort + min/max-normalize a pair list so two pairlists can be compared
+    /// for set-equality regardless of traversal order.
+    fn normalize_pairs(pairs: &Pairlist) -> Vec<(usize, usize)> {
+        let mut v: Vec<(usize, usize)> = pairs.iter().map(|&(a, b)| (a.min(b), a.max(b))).collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// Assert that two pairlist containers contain the same pair *sets* in
+    /// all four categories (FUTURE.md Dim 9a validation requirement).
+    fn assert_pairlists_match(standard: &PairlistContainer, cell: &PairlistContainer) {
+        assert_eq!(
+            normalize_pairs(&standard.solute_short),
+            normalize_pairs(&cell.solute_short),
+            "solute_short mismatch"
+        );
+        assert_eq!(
+            normalize_pairs(&standard.solute_long),
+            normalize_pairs(&cell.solute_long),
+            "solute_long mismatch"
+        );
+        assert_eq!(
+            normalize_pairs(&standard.solvent_short),
+            normalize_pairs(&cell.solvent_short),
+            "solvent_short mismatch"
+        );
+        assert_eq!(
+            normalize_pairs(&standard.solvent_long),
+            normalize_pairs(&cell.solvent_long),
+            "solvent_long mismatch"
+        );
+    }
+
+    /// Build a pure-solvent topology of `n_molecules` single-atom "molecules"
+    /// (each its own chargegroup), scattered across a cubic box of side
+    /// `box_len` (including near the box edges, to exercise periodic wrap).
+    fn build_solvent_topology(n_molecules: usize, box_len: f64) -> (Topology, Configuration) {
+        use crate::topology::SolventAtomTemplate;
 
         let mut topo = Topology::new();
+        topo.solvent_atom_template.push(SolventAtomTemplate {
+            iac: 0,
+            name: "OW".to_string(),
+            mass: 16.0,
+            charge: 0.0,
+        });
+        topo.solvate(n_molecules);
 
-        // Add 10 solute atoms
-        for i in 0..10 {
+        let mut conf = Configuration::new(n_molecules, 1, 1);
+        conf.current_mut().box_config = crate::configuration::Box::rectangular(box_len, box_len, box_len);
+        for (i, pos) in conf.current_mut().pos.iter_mut().enumerate() {
+            let f = i as f64;
+            *pos = Vec3::new(
+                (f * 1.37).rem_euclid(box_len),
+                (f * 0.91 + 0.3).rem_euclid(box_len),
+                (f * 2.03 + 0.6).rem_euclid(box_len),
+            );
+        }
+
+        (topo, conf)
+    }
+
+    #[test]
+    fn test_cell_list_matches_standard_solvent_only() {
+        let (topo, conf) = build_solvent_topology(40, 6.0);
+        let periodicity = Rectangular::new(Vec3::new(6.0, 6.0, 6.0));
+
+        let mut standard_pl = PairlistContainer::new(1.0, 1.4, 0.0);
+        StandardPairlistAlgorithm::new(true).update(&topo, &conf, &mut standard_pl, &periodicity);
+
+        let mut cell_pl = PairlistContainer::new(1.0, 1.4, 0.0);
+        CellListPairlistAlgorithm::new().update(&topo, &conf, &mut cell_pl, &periodicity);
+
+        assert!(standard_pl.total_pairs() > 0);
+        assert_pairlists_match(&standard_pl, &cell_pl);
+    }
+
+    #[test]
+    fn test_cell_list_matches_standard_single_cell() {
+        // box_len < long_range_cutoff + skin -> grid_dim == [1,1,1]: exercises
+        // the single-cell / 27-offset-deduplication fallback path.
+        let (topo, conf) = build_solvent_topology(15, 1.0);
+        let periodicity = Rectangular::new(Vec3::new(1.0, 1.0, 1.0));
+
+        let mut standard_pl = PairlistContainer::new(1.0, 1.4, 0.0);
+        StandardPairlistAlgorithm::new(true).update(&topo, &conf, &mut standard_pl, &periodicity);
+
+        let mut cell_pl = PairlistContainer::new(1.0, 1.4, 0.0);
+        CellListPairlistAlgorithm::new().update(&topo, &conf, &mut cell_pl, &periodicity);
+
+        assert!(standard_pl.total_pairs() > 0);
+        assert_pairlists_match(&standard_pl, &cell_pl);
+    }
+
+    #[test]
+    fn test_cell_list_matches_standard_with_solute() {
+        use crate::topology::{Atom, Bond, SolventAtomTemplate};
+
+        let mut topo = Topology::new();
+        for i in 0..4 {
             topo.solute.atoms.push(Atom {
-                name: format!("C{}", i),
+                name: format!("A{}", i + 1),
                 residue_nr: 1,
-                residue_name: "MOL".to_string(),
+                residue_name: "TEST".to_string(),
                 iac: 0,
                 mass: 1.0,
                 charge: 0.0,
@@ -676,27 +873,61 @@ mod tests {
                 is_coarse_grained: false,
             });
         }
-
-        topo.iac = vec![0; 10];
-        topo.mass = vec![1.0; 10];
-        topo.charge = vec![0.0; 10];
+        // Bonds: (0,1) and (2,3) within chargegroups, (1,2) across them
+        // (an excluded cross-CG pair, to exercise the exclusion check).
+        topo.solute.bonds.push(Bond { i: 0, j: 1, bond_type: 0 });
+        topo.solute.bonds.push(Bond { i: 2, j: 3, bond_type: 0 });
+        topo.solute.bonds.push(Bond { i: 1, j: 2, bond_type: 0 });
+        topo.iac = vec![0; 4];
+        topo.mass = vec![1.0; 4];
+        topo.charge = vec![0.0; 4];
         topo.resize_atom_arrays();
+        topo.build_exclusions(false);
 
-        let mut conf = Configuration::new(10, 1, 1);
-        conf.current_mut().box_config = crate::configuration::Box::rectangular(5.0, 5.0, 5.0);
+        topo.chargegroups.push(ChargeGroup { atoms: vec![0, 1] });
+        topo.chargegroups.push(ChargeGroup { atoms: vec![2, 3] });
+        topo.num_solute_chargegroups = 2;
 
-        // Place atoms randomly in box
-        for (i, pos) in conf.current_mut().pos.iter_mut().enumerate() {
-            *pos = Vec3::new((i % 5) as f64, ((i / 5) % 5) as f64, 0.0);
+        topo.solvent_atom_template.push(SolventAtomTemplate {
+            iac: 0,
+            name: "OW".to_string(),
+            mass: 16.0,
+            charge: 0.0,
+        });
+        topo.solvate(20);
+        topo.compute_inverse_masses();
+
+        let n_total = topo.num_atoms();
+        let mut conf = Configuration::new(n_total, 1, 1);
+        conf.current_mut().box_config = crate::configuration::Box::rectangular(3.0, 3.0, 3.0);
+
+        // CG0 = {0,1} and CG1 = {2,3} are close enough for a solute-solute pair.
+        conf.current_mut().pos[0] = Vec3::new(0.1, 0.1, 0.1);
+        conf.current_mut().pos[1] = Vec3::new(0.3, 0.1, 0.1);
+        conf.current_mut().pos[2] = Vec3::new(0.5, 0.5, 0.5);
+        conf.current_mut().pos[3] = Vec3::new(0.7, 0.5, 0.5);
+
+        for i in 4..n_total {
+            let f = i as f64;
+            conf.current_mut().pos[i] = Vec3::new(
+                (f * 1.13).rem_euclid(3.0),
+                (f * 0.77 + 0.2).rem_euclid(3.0),
+                (f * 1.91 + 0.5).rem_euclid(3.0),
+            );
         }
 
-        let mut pairlist = PairlistContainer::new(1.5, 2.5, 0.2);
-        let mut algorithm = GridCellPairlistAlgorithm::new(2.0);
-        let periodicity = Rectangular::new(Vec3::new(5.0, 5.0, 5.0));
+        // box_len / (long_range_cutoff + skin) = 3.0 / 1.4 -> grid_dim == 2,
+        // the trickiest case for the neighbor-cell deduplication.
+        let periodicity = Rectangular::new(Vec3::new(3.0, 3.0, 3.0));
 
-        algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
+        let mut standard_pl = PairlistContainer::new(1.0, 1.4, 0.0);
+        StandardPairlistAlgorithm::new(true).update(&topo, &conf, &mut standard_pl, &periodicity);
 
-        // Should find some pairs
-        assert!(pairlist.total_pairs() > 0);
+        let mut cell_pl = PairlistContainer::new(1.0, 1.4, 0.0);
+        CellListPairlistAlgorithm::new().update(&topo, &conf, &mut cell_pl, &periodicity);
+
+        assert!(!standard_pl.solute_short.is_empty());
+        assert!(standard_pl.total_pairs() > 0);
+        assert_pairlists_match(&standard_pl, &cell_pl);
     }
 }
