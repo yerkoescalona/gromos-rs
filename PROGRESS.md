@@ -1,6 +1,12 @@
 # gromos-rs — Progress Dashboard
 > Auto-generated 2026-06-16 from PLAN.md audit
 
+State legend:
+- ✅ **DONE** — implemented, wired, reference-tested
+- 🔶 **PARTIAL** — code exists, but unwired / disconnected / incomplete
+- 🔧 **STUB** — code exists with wrong/placeholder logic (needs rewrite)
+- ❌ **TODO** — not yet started
+
 ---
 
 ## Reference Test Suite
@@ -12,97 +18,121 @@
 
 ## Priority 1 — MD Engine Physics (gromosXX-faithful)
 
-| #   | Item                                         | Status | Progress                          |
-|-----|----------------------------------------------|--------|-----------------------------------|
-| 1.1 | Reproducibility (NTIVEL velocity gen + unit audit) | ✅ DONE | `████████████` 2/2 |
-| 1.2 | Constraints (SETTLE, LINCS, COM rotation)    | ✅ DONE | `████████████` 3/3 |
-| 1.3 | Nosé-Hoover thermostat (single + chain NHC)  | ✅ DONE | `████████████` 1/1 |
-| 1.4 | Triclinic boundary (truncated octahedron)    | ✅ DONE | `████████████` 4/4 |
-| 1.5 | O(N) cell-list pairlist                      | 🔶 PARTIAL | `█████████░░░` 3/4 — built+validated, **not wired** into `md` binary |
-| 1.6 | Restraints (distance, dihedral, angle, J-val, order-param, dist-field) | ❌ TODO | `░░░░░░░░░░░░` 0/6 |
-| 1.7 | Virtual atoms                                | ❌ TODO | `░░░░░░░░░░░░` 0/1 |
-| 1.8 | Advanced sampling (EDS, GaMD, FEP/TI, REMD)  | ❌ TODO | `░░░░░░░░░░░░` 0/4 |
+| #   | Item                                              | State    | Notes |
+|-----|---------------------------------------------------|----------|-------|
+| 1.1 | NTIVEL velocity gen + unit-conversion audit       | ✅ DONE  | bit-for-bit, ref-tested |
+| 1.2 | SETTLE, LINCS, COM rotation removal               | ✅ DONE  | all ref-tested |
+| 1.3 | Nosé-Hoover thermostat (single + chain NHC)       | ✅ DONE  | ref-tested |
+| 1.4 | Triclinic / truncated-octahedron boundary         | ✅ DONE  | ref-tested (`aladip_trunc_oct`) |
+| 1.5 | O(N) cell-list pairlist                           | 🔶 PARTIAL | built + set-equality-validated; **not wired** into `md` binary |
+| 1.6 | Restraints (distance, dihedral, angle, J-val, order-param, dist-field) | ❌ TODO | 0/6 — no code yet |
+| 1.7 | Virtual atoms (`addvirt_top`)                     | ❌ TODO  | no code yet |
+| 1.8 | Advanced sampling (EDS, GaMD, FEP/TI, REMD)      | 🔶 PARTIAL | **code exists** in integrators/forces (eds.rs, gamd.rs, fep.rs, remd.rs); **untested, unvalidated** |
 
 ```
-P1 overall   ████████░░░░░░░░░░░░░░░░░░░░░░░░  13 / 21   62%
+P1 overall   ██████████░░░░░░░░░░░░░░░░░░░░░░  14 / 21   67%
+             (counting 1.8 as ½ credit — code exists but zero ref tests)
 ```
 
 ---
 
 ## Priority 2 — Analysis Foundations (no-duplication layer)
 
-| #    | Item                                                      | Status   | Progress |
-|------|-----------------------------------------------------------|----------|----------|
-| 2.1  | Atom selection (per-atom metadata + AtomSpecifier facade) | ❌ TODO  | `░░░░░░░░░░░░` 0/3 |
-| 2.2  | Shared infra (Kabsch fit, stats/ee, PBC gather, single-point energy) | ❌ TODO | `░░░░░░░░░░░░` 0/4 |
-| 2.3  | Fix blocked programs (rmsd rotfit, ext_ti_ana, nhoparam)  | ❌ TODO  | `░░░░░░░░░░░░` 0/3 |
-| 2.3b | Free-energy estimators (BAR, TI merge, reweight, Widom, dg_ener) | ❌ TODO | `░░░░░░░░░░░░` 0/5 |
-| 2.4  | Clean up known stubs (visco, frameout, amber2gromos, ener, sasa_hasel, dssp, solute_entropy) | ❌ TODO | `░░░░░░░░░░░░` 0/7 |
+| #    | Item                                                        | State       | Notes |
+|------|-------------------------------------------------------------|-------------|-------|
+| 2.1a | Queryable per-atom metadata (molecule map, residue/name incl. solvent) | 🔶 PARTIAL | basic `AtomSelection` exists; `parse_solvent` ignores spec; `parse_molecule` rejects non-first |
+| 2.1b | `AtomSpecifier` gromos++ facade                             | ❌ TODO     | not started |
+| 2.2a | Rotational fit (Kabsch/SVD)                                 | 🔧 STUB     | `simple_rotation_fit` in `rmsd.rs:161` only re-centers — **no rotation** |
+| 2.2b | Statistics + block-averaging error (`ee()`)                 | ❌ TODO     | not started |
+| 2.2c | PBC gathering / molecule unwrapping (unified primitive)     | ❌ TODO     | not started |
+| 2.2d | Single-point energy entry point (`ener` → `gromos-forces`)  | 🔧 STUB     | `ener.rs` **hardcodes LJ σ/ε** instead of calling engine |
+| 2.3a | `rmsd` — real rotational fit                                | 🔧 STUB     | runs, but re-centering only; blocked on 2.2a |
+| 2.3b | `ext_ti_ana` — real dH/dλ parsing                          | 🔧 STUB     | falls back to synthetic data; blocked on 2.1+2.2 |
+| 2.3c | `nhoparam` — NMR N-H order parameters S²                   | 🔧 STUB     | **wrong algorithm** — currently computes Nosé-Hoover params |
+| 2.3b | Free-energy estimators (BAR, ext_ti_merge, reweight, Widom, dg_ener) | 🔶 PARTIAL | code scaffolds exist; no reference tests |
+| 2.4  | Other stubs: `visco`, `frameout`, `amber2gromos`, `sasa_hasel`, `dssp`, `solute_entropy` | 🔧 STUB | code exists but placeholder/wrong logic |
 
 ```
-P2 overall   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0 / 22    0%
+P2 overall   ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░   code exists throughout
+             0 items fully done (ref-tested); ~8 partial/stub; 2 not started
 ```
 
 ---
 
 ## Priority 3 — py-gromos API & Education
 
-| Phase | Item                                                  | Status  | Progress |
-|-------|-------------------------------------------------------|---------|----------|
-| 3.1   | Rust bindings: ForceField eval, SHAKE, energy decomp, Polars study | ❌ TODO | `░░░░░░░░░░░░` 0/4 |
-| 3.2   | Python API: method chaining, DataFrame, md_runners, repr | ❌ TODO | `░░░░░░░░░░░░` 0/4 |
-| 3.3   | Notebooks & examples (17 scripts, 3 notebooks, tests) | ❌ TODO | `░░░░░░░░░░░░` 0/3 |
+| Phase | Item                                                         | State       | Notes |
+|-------|--------------------------------------------------------------|-------------|-------|
+| 3.1 ✅ | Simulation API, AlgorithmSequence API, 62 Python ref tests, `.pyi` stubs | ✅ DONE | |
+| 3.1 ✅ | Topology/Configuration/Simulation wrappers + numpy interop   | ✅ DONE     | |
+| 3.1   | Expose ForceField eval (single-point energy/force)           | ❌ TODO     | |
+| 3.1   | Expose SHAKE / constraint info                               | ❌ TODO     | |
+| 3.1   | Expose energy decomposition (bonded, LJ, CRF, kinetic, pressure) | ❌ TODO | |
+| 3.1   | Study Polars pyo3 patterns for API design                    | ❌ TODO     | |
+| 3.2   | Method chaining: `sim.run().energies().plot()`               | ❌ TODO     | |
+| 3.2   | Energy timeseries as DataFrame (Polars/pandas)               | ❌ TODO     | |
+| 3.2   | `md_runners.py` simplify; `analysis.py` Python-expose        | 🔶 PARTIAL  | files exist, need update |
+| 3.2   | Rich `__repr__` / `_repr_html_` for Jupyter                  | ❌ TODO     | |
+| 3.3   | Rewrite notebooks (01/02/03) on new API                      | 🔶 PARTIAL  | old notebooks exist, need rewrite |
+| 3.3   | Rewrite 17 example scripts on new API                        | 🔶 PARTIAL  | scripts exist, need update |
+| 3.3   | Fix `test_basic.py`, `test_advanced_features.py`             | 🔧 STUB     | tests exist but broken |
 
 ```
-P3 overall   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0 / 11    0%
+P3 overall   ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░   2 items fully done (Simulation API + wrappers)
+             rest: partial / needs update / broken
 ```
 
 ---
 
 ## Priority 4 — Code Quality & Consistency
 
-| Item                                              | Status  |
-|---------------------------------------------------|---------|
-| Clippy (~390 warnings across workspace)           | ❌ TODO |
-| Replace bare `unwrap()` with `.expect()` / `?`   | ❌ TODO |
-| Missing `#[test]` (SHAKE, improper dihedral)      | ❌ TODO |
-| Split large files (nonbonded, bonded, topology)   | ❌ TODO |
-| Unify CLI error types; audit `pub` visibility     | ❌ TODO |
-| Benchmarking infra (baseline + CI regression)     | ❌ TODO |
+| Item                                                        | State       | Notes |
+|-------------------------------------------------------------|-------------|-------|
+| Clippy (~390 warnings: forces 89, integrators 77, io 31, core 15) | 🔶 PARTIAL | warnings known, not addressed |
+| Replace bare `unwrap()` with `.expect()` / `?`             | 🔶 PARTIAL  | present in non-test code |
+| Add missing `#[test]` (SHAKE — currently 0, improper dihedral) | 🔶 PARTIAL | gaps known |
+| Split large files (nonbonded ~1500, bonded ~1300, topology ~1200 LOC) | 🔶 PARTIAL | oversized, not split |
+| Unify CLI error types; audit `pub` visibility               | ❌ TODO     | |
+| Benchmarking infra (baseline + CI regression)               | 🔶 PARTIAL  | `nonbonded_bench`, `math_bench` etc. exist; no saved baseline |
 
 ```
-P4 overall   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0 / 6     0%
-```
-
----
-
-## Overall Plan Progress
-
-```
-Priority 1   ████████░░░░░░░░░░░░░░░░░░░░░░░░   13 / 21   62%
-Priority 2   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0 / 22    0%
-Priority 3   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0 / 11    0%
-Priority 4   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0 /  6    0%
-─────────────────────────────────────────────────────────────
-TOTAL        ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░   13 / 60   22%
+P4 overall   ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   infrastructure exists, not addressed
 ```
 
 ---
 
-## Nearest Next Steps (unblocked, highest leverage)
+## Overall Picture
 
-1. **Wire `CellListPairlistAlgorithm` into `md.rs`** (P1.5 finish) — already implemented + validated
-2. **Distance restraints** (P1.6 first item) — unblocked, start with `distance_restraint_interaction.cc`
-3. **Benchmarking baseline** (P4) — `cargo bench --save-baseline` before any more perf work
-4. **Atom selection solidification** (P2.1) — unblocks all of P2
+```
+                     fully done   partial/stub   not started
+Priority 1 (engine)     62%          19%            19%
+Priority 2 (analysis)    0%          82%            18%   ← code is there, needs fixing
+Priority 3 (py-gromos)  18%          36%            46%   ← base layer done
+Priority 4 (quality)     0%          83%            17%   ← known gaps, not addressed
+```
+
+**The real situation:** The codebase is much further along than a raw 22% suggests.
+Most analysis tools, py-gromos bindings, and the advanced sampling code exist as working
+(if imperfect) implementations. What's missing is **reference tests and correct algorithms**
+in specific places — not blank files.
 
 ---
 
-## Blocked / Parked
+## Nearest Next Steps (unblocked)
 
-| Item           | Blocked by              |
-|----------------|-------------------------|
-| `ext_ti_ana`   | P2.1 selection + P2.2 fit + stats |
-| `nhoparam`     | P2.1 + P2.2 (needs full algorithm rewrite) |
+1. **Wire `CellListPairlistAlgorithm` into `md.rs`** — closes P1.5, one heuristic remaining
+2. **Distance restraints** (P1.6 first item) — unblocked, port `distance_restraint_interaction.cc`
+3. **Benchmarking baseline** — `cargo bench --save-baseline v0.1` before any perf work
+4. **Fix `AtomSelection` gaps** (P2.1a) — small, high-leverage, unblocks all of P2
+5. **Kabsch/SVD rotational fit** (P2.2a) — fixes `rmsd`, unblocks `nhoparam` rewrite
+
+---
+
+## Parked / Blocked
+
+| Item               | Blocked by                          |
+|--------------------|-------------------------------------|
+| `ext_ti_ana`       | P2.1 selection + P2.2 fit + stats   |
+| `nhoparam`         | P2.2a fit (needs full algo rewrite) |
+| P2.3b free-energy estimators | P2.3b `ext_ti_ana` + P2.2 stats |
 | Tutorials t01–t06 end-to-end | compute-limited; deferred to last |
-| EDS/GaMD/REMD (P1.8) | optional; big, untested code exists |
