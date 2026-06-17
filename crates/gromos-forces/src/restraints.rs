@@ -78,164 +78,238 @@ impl PositionRestraints {
     }
 }
 
-/// Distance restraint - restrains distance between two atoms
+// ─── Distance restraints (gromosXX distance_restraint_interaction.cc) ────────
+
+/// Decode the RAH field into (form, dimension_mask).
 ///
-/// Direct translation from distance_restraint_interaction.cc
+/// RAH encodes both the half-harmonic type and the spatial dimension:
+///   dim_base ∈ {0,10,20,30,40,50,60}  →  mask: XYZ, XY, XZ, YZ, X, Y, Z
+///   form     ∈ {-1, 0, 1}             →  repulsive, full-harmonic, attractive
+///   rah = dim_base + form  (but shifted so -1 works: dim_base = ((rah+1)/10)*10)
+fn decode_rah(rah: i32) -> (i32, Vec3) {
+    let dim_base = (rah + 1).div_euclid(10) * 10;
+    let form = rah - dim_base;
+    let mask = match dim_base {
+        10 => Vec3::new(1.0, 1.0, 0.0),
+        20 => Vec3::new(1.0, 0.0, 1.0),
+        30 => Vec3::new(0.0, 1.0, 1.0),
+        40 => Vec3::new(1.0, 0.0, 0.0),
+        50 => Vec3::new(0.0, 1.0, 0.0),
+        60 => Vec3::new(0.0, 0.0, 1.0),
+        _  => Vec3::new(1.0, 1.0, 1.0), // dim_base=0 (XYZ)
+    };
+    (form, mask)
+}
+
+/// Core energy+force calculation for a single distance restraint.
 ///
-/// Supports:
-/// - Harmonic/linear force function
-/// - Time-averaging for NOE restraints
-/// - Repulsive/attractive/harmonic modes
+/// Returns `(energy, force_on_atom1)`.  Caller adds force to atom1 and
+/// subtracts it from atom2 (Newton's 3rd law).
+///
+/// `v = nearest_image(pos_j, pos_i)` — the vector from atom1 to atom2.
+/// `mode`: 1 = no w0 scaling, 2 = multiply energy & force by w0.
+fn distres_en_force(
+    v: Vec3,
+    r0: f64,
+    w0: f64,
+    rah: i32,
+    k: f64,
+    r_linear: f64,
+    mode: i32,
+) -> (f64, Vec3) {
+    let (form, mask) = decode_rah(rah);
+    let vm = Vec3::new(v.x * mask.x, v.y * mask.y, v.z * mask.z);
+    let dist = vm.length();
+
+    if dist < 1e-10 {
+        return (0.0, Vec3::ZERO);
+    }
+
+    // Half-harmonic: skip if restraint is satisfied
+    if form != 0 && (form as f64) * dist < (form as f64) * r0 {
+        return (0.0, Vec3::ZERO);
+    }
+
+    let delta = dist - r0;
+    let (energy, f_on_1) = if delta.abs() <= r_linear {
+        // Harmonic zone: E = 0.5 K (dist-r0)², F_1 = K*(dist-r0)*vm/dist
+        let e = 0.5 * k * delta * delta;
+        let f = vm * (k * delta / dist);
+        (e, f)
+    } else if dist < r0 {
+        // Linear zone below r0 (dist < r0 - r_linear)
+        let e = -k * r_linear * (dist + 0.5 * r_linear - r0);
+        let f = vm * (-k * r_linear / dist);
+        (e, f)
+    } else {
+        // Linear zone above r0 (dist > r0 + r_linear)
+        let e = k * r_linear * (dist - 0.5 * r_linear - r0);
+        let f = vm * (k * r_linear / dist);
+        (e, f)
+    };
+
+    let w = if mode == 2 { w0 } else { 1.0 };
+    (energy * w, f_on_1 * w)
+}
+
+/// Single distance restraint (gromosXX-faithful, virtual atom type 0 only).
+///
+/// RAH encodes both the half-harmonic form and the spatial dimension;
+/// see `decode_rah` for details.  Mode 2 scales by w0 (NTDIR=2).
 #[derive(Debug, Clone)]
 pub struct DistanceRestraint {
-    /// First atom index
-    pub atom_i: usize,
-    /// Second atom index
-    pub atom_j: usize,
-    /// Target distance (nm)
+    pub atom1: usize,
+    pub atom2: usize,
     pub r0: f64,
-    /// Force constant (kJ mol⁻¹ nm⁻²)
-    pub force_constant: f64,
-    /// Linear region width (nm)
+    pub w0: f64,
+    pub rah: i32,
+    /// Force constant K (kJ mol⁻¹ nm⁻²)
+    pub k: f64,
+    /// Linear-region threshold r_linear = DIR0 (nm)
     pub r_linear: f64,
-    /// Restraint type: -1 (repulsive), 0 (harmonic), +1 (attractive)
-    pub restraint_type: i32,
-    /// Time-averaged distance (for NOE restraints, r⁻³ averaging)
-    pub time_averaged_distance: Option<f64>,
-    /// Time constant for averaging (ps)
-    pub tau: Option<f64>,
+    /// 1 = no w0 scaling, 2 = multiply by w0
+    pub mode: i32,
+    /// r⁻³ time average for NOE (None = instantaneous)
+    pub avg_r_inv3: Option<f64>,
+    /// Exponential memory parameter exp(-dt/tau); None = instantaneous
+    pub exp_mem: Option<f64>,
 }
 
 impl DistanceRestraint {
-    pub fn new(atom_i: usize, atom_j: usize, r0: f64, force_constant: f64) -> Self {
-        Self {
-            atom_i,
-            atom_j,
-            r0,
-            force_constant,
-            r_linear: 0.0,     // Default: pure harmonic
-            restraint_type: 0, // Harmonic by default
-            time_averaged_distance: None,
-            tau: None,
-        }
+    pub fn new(atom1: usize, atom2: usize, r0: f64, w0: f64, rah: i32, k: f64, r_linear: f64, mode: i32) -> Self {
+        Self { atom1, atom2, r0, w0, rah, k, r_linear, mode, avg_r_inv3: None, exp_mem: None }
     }
 
-    /// Set linear region width
-    pub fn with_linear_region(mut self, r_linear: f64) -> Self {
-        self.r_linear = r_linear;
+    pub fn with_time_averaging(mut self, tau: f64, dt: f64) -> Self {
+        self.exp_mem = Some((-dt / tau).exp());
         self
     }
 
-    /// Set restraint type: -1 (repulsive), 0 (harmonic), +1 (attractive)
-    pub fn with_type(mut self, restraint_type: i32) -> Self {
-        self.restraint_type = restraint_type;
-        self
-    }
-
-    /// Enable time averaging with exponential decay
-    pub fn with_time_averaging(mut self, tau: f64) -> Self {
-        self.tau = Some(tau);
-        self.time_averaged_distance = Some(self.r0);
-        self
-    }
-
-    /// Calculate restraint energy and forces
-    ///
-    /// Direct translation from distance_restraint_interaction.cc
-    pub fn calculate(
-        &mut self,
-        conf: &mut Configuration,
-        periodicity: &Periodicity,
-        dt: f64,
-    ) -> f64 {
-        // Get distance vector using periodic boundary conditions
-        let r_vec = periodicity.nearest_image(
-            conf.current().pos[self.atom_j],
-            conf.current().pos[self.atom_i],
+    pub fn calculate(&mut self, conf: &mut Configuration, periodicity: &Periodicity) -> f64 {
+        let v = periodicity.nearest_image(
+            conf.current().pos[self.atom2],
+            conf.current().pos[self.atom1],
         );
 
-        let mut distance = r_vec.length();
-
-        // Time averaging (NOE r⁻³ averaging)
-        if let (Some(tau), Some(avg_dist)) = (self.tau, self.time_averaged_distance) {
-            let exp_term = (-dt / tau).exp();
-            let r_inv_3 = 1.0 / (distance * distance * distance);
-            let avg_r_inv_3 = 1.0 / (avg_dist * avg_dist * avg_dist);
-
-            // Update average: <r⁻³> = (1-e^(-dt/τ)) * r⁻³ + e^(-dt/τ) * <r⁻³>_old
-            let new_avg_r_inv_3 = (1.0 - exp_term) * r_inv_3 + exp_term * avg_r_inv_3;
-            let new_avg_dist = new_avg_r_inv_3.powf(-1.0 / 3.0);
-
-            self.time_averaged_distance = Some(new_avg_dist);
-            distance = new_avg_dist;
-        }
-
-        let delta = distance - self.r0;
-
-        // Check if restraint is violated based on type
-        let violated = match self.restraint_type {
-            -1 => distance < self.r0, // Repulsive: violated if too close
-            0 => true,                // Harmonic: always active
-            1 => distance > self.r0,  // Attractive: violated if too far
-            _ => true,
-        };
-
-        if !violated {
-            return 0.0; // No restraint force
-        }
-
-        // Calculate energy and force
-        let (energy, force_magnitude) = if delta.abs() < self.r_linear || self.r_linear == 0.0 {
-            // Harmonic region: E = 0.5 * k * (r - r0)²
-            let energy = 0.5 * self.force_constant * delta * delta;
-            let force_mag = -self.force_constant * delta;
-            (energy, force_mag)
+        let dist = v.length();
+        let effective_dist = if let (Some(exp_t), Some(avg)) = (self.exp_mem, self.avg_r_inv3) {
+            let r3 = dist * dist * dist;
+            let new_avg = (1.0 - exp_t) / r3 + exp_t * avg;
+            self.avg_r_inv3 = Some(new_avg);
+            new_avg.powf(-1.0 / 3.0)
         } else {
-            // Linear region (prevents unrealistic forces at large distances)
-            let sign = if delta > 0.0 { 1.0 } else { -1.0 };
-            let energy = self.force_constant * self.r_linear * (delta.abs() - 0.5 * self.r_linear);
-            let force_mag = -sign * self.force_constant * self.r_linear;
-            (energy, force_mag)
+            dist
         };
 
-        // Apply force along bond direction
-        if distance > 1e-10 {
-            let force = r_vec * ((force_magnitude / distance));
-            conf.current_mut().force[self.atom_i] -= force;
-            conf.current_mut().force[self.atom_j] += force;
-        }
+        // Recompute v scaled to effective_dist when time-averaging is active
+        let v_eff = if self.avg_r_inv3.is_some() && dist > 1e-10 {
+            v * (effective_dist / dist)
+        } else {
+            v
+        };
 
+        let (energy, f1) = distres_en_force(v_eff, self.r0, self.w0, self.rah, self.k, self.r_linear, self.mode);
+        conf.current_mut().force[self.atom1] += f1;
+        conf.current_mut().force[self.atom2] -= f1;
         energy
     }
 }
 
-/// Collection of distance restraints
+/// Collection of distance restraints with shared parameters.
 #[derive(Debug, Clone, Default)]
 pub struct DistanceRestraints {
     pub restraints: Vec<DistanceRestraint>,
 }
 
 impl DistanceRestraints {
-    pub fn new() -> Self {
-        Self {
-            restraints: Vec::new(),
-        }
+    pub fn new() -> Self { Self { restraints: Vec::new() } }
+
+    pub fn add(&mut self, r: DistanceRestraint) { self.restraints.push(r); }
+
+    pub fn calculate_all(&mut self, conf: &mut Configuration, periodicity: &Periodicity) -> f64 {
+        self.restraints.iter_mut().map(|r| r.calculate(conf, periodicity)).sum()
+    }
+}
+
+// ─── Perturbed distance restraints (perturbed_distance_restraint_interaction.cc) ──
+
+/// Single perturbed distance restraint.
+///
+/// r0(λ) = (1-λ)·A_r0 + λ·B_r0, w0(λ) = (1-λ)·A_w0 + λ·B_w0
+/// prefactor = 2^(n+m) · λ^n · (1-λ)^m
+/// Energy = prefactor · en_term (· w0 for mode 2)
+#[derive(Debug, Clone)]
+pub struct PerturbedDistanceRestraint {
+    pub atom1: usize,
+    pub atom2: usize,
+    pub n: i32,
+    pub m: i32,
+    pub a_r0: f64,
+    pub b_r0: f64,
+    pub a_w0: f64,
+    pub b_w0: f64,
+    pub rah: i32,
+    pub k: f64,
+    pub r_linear: f64,
+    pub mode: i32,
+}
+
+impl PerturbedDistanceRestraint {
+    pub fn new(
+        atom1: usize, atom2: usize, n: i32, m: i32,
+        a_r0: f64, b_r0: f64, a_w0: f64, b_w0: f64,
+        rah: i32, k: f64, r_linear: f64, mode: i32,
+    ) -> Self {
+        Self { atom1, atom2, n, m, a_r0, b_r0, a_w0, b_w0, rah, k, r_linear, mode }
     }
 
-    pub fn add_restraint(&mut self, restraint: DistanceRestraint) {
-        self.restraints.push(restraint);
-    }
-
-    pub fn calculate_all(
-        &mut self,
+    pub fn calculate(
+        &self,
         conf: &mut Configuration,
         periodicity: &Periodicity,
-        dt: f64,
+        lambda: f64,
     ) -> f64 {
-        self.restraints
-            .iter_mut()
-            .map(|r| r.calculate(conf, periodicity, dt))
-            .sum()
+        let r0 = (1.0 - lambda) * self.a_r0 + lambda * self.b_r0;
+        let w0 = (1.0 - lambda) * self.a_w0 + lambda * self.b_w0;
+        let prefactor = 2_f64.powi(self.n + self.m)
+            * lambda.powi(self.n)
+            * (1.0 - lambda).powi(self.m);
+
+        let v = periodicity.nearest_image(
+            conf.current().pos[self.atom2],
+            conf.current().pos[self.atom1],
+        );
+
+        // en_term without w0 (mode=1), then apply w0 via prefactor logic
+        let (en_no_w0, f1_no_w0) = distres_en_force(v, r0, w0, self.rah, self.k, self.r_linear, 1);
+        let w = if self.mode == 2 { w0 } else { 1.0 };
+        let energy = prefactor * en_no_w0 * w;
+        let f1 = f1_no_w0 * (prefactor * w);
+
+        conf.current_mut().force[self.atom1] += f1;
+        conf.current_mut().force[self.atom2] -= f1;
+        energy
+    }
+}
+
+/// Collection of perturbed distance restraints.
+#[derive(Debug, Clone, Default)]
+pub struct PerturbedDistanceRestraints {
+    pub restraints: Vec<PerturbedDistanceRestraint>,
+}
+
+impl PerturbedDistanceRestraints {
+    pub fn new() -> Self { Self { restraints: Vec::new() } }
+
+    pub fn add(&mut self, r: PerturbedDistanceRestraint) { self.restraints.push(r); }
+
+    pub fn calculate_all(
+        &self,
+        conf: &mut Configuration,
+        periodicity: &Periodicity,
+        lambda: f64,
+    ) -> f64 {
+        self.restraints.iter().map(|r| r.calculate(conf, periodicity, lambda)).sum()
     }
 }
 
@@ -588,16 +662,17 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(2.0, 0.0, 0.0);
 
-        let mut restraint = DistanceRestraint::new(0, 1, 1.0, 100.0);
+        // rah=0 → full harmonic XYZ, mode=1 (no w0), r_linear > delta so stays harmonic
+        let mut restraint = DistanceRestraint::new(0, 1, 1.0, 1.0, 0, 100.0, 10.0, 1);
 
         let periodicity =
             Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
 
-        let energy = restraint.calculate(&mut conf, &periodicity, 0.001);
+        let energy = restraint.calculate(&mut conf, &periodicity);
 
         // Distance = 2.0, r0 = 1.0, delta = 1.0
         // E = 0.5 * 100 * 1² = 50 kJ/mol
-        assert!((energy - 50.0).abs() < 1e-6);
+        assert!((energy - 50.0).abs() < 1e-6, "Expected 50, got {energy}");
 
         // Forces should be equal and opposite
         let force_i = conf.current().force[0];
@@ -611,18 +686,17 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(5.0, 0.0, 0.0);
 
-        let mut restraint = DistanceRestraint::new(0, 1, 1.0, 100.0).with_linear_region(0.1);
+        // rah=0 → full harmonic XYZ, r_linear=0.1
+        let mut restraint = DistanceRestraint::new(0, 1, 1.0, 1.0, 0, 100.0, 0.1, 1);
 
         let periodicity =
             Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
 
-        let energy = restraint.calculate(&mut conf, &periodicity, 0.001);
+        let energy = restraint.calculate(&mut conf, &periodicity);
 
-        // Distance = 5.0, r0 = 1.0, delta = 4.0
-        // Linear region since |delta| > 0.1
-        // E = k * r_linear * (|delta| - 0.5*r_linear)
-        // E = 100 * 0.1 * (4.0 - 0.05) = 10 * 3.95 = 39.5
-        assert!((energy - 39.5).abs() < 1e-6);
+        // Distance = 5.0, r0 = 1.0, delta = 4.0 > r_linear=0.1 → linear zone above r0
+        // E = k * r_linear * (dist - 0.5*r_linear - r0) = 100 * 0.1 * (5.0 - 0.05 - 1.0) = 39.5
+        assert!((energy - 39.5).abs() < 1e-6, "Expected 39.5, got {energy}");
     }
 
     #[test]
@@ -631,18 +705,90 @@ mod tests {
         let periodicity =
             Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
 
-        // Repulsive restraint: only active when distance < r0
+        // Repulsive restraint (rah=-1): only active when distance < r0
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(0.5, 0.0, 0.0);
-        let mut restraint = DistanceRestraint::new(0, 1, 1.0, 100.0).with_type(-1); // Repulsive
-        let energy = restraint.calculate(&mut conf, &periodicity, 0.001);
-        assert!(energy > 0.0); // Should have energy
+        let mut restraint = DistanceRestraint::new(0, 1, 1.0, 1.0, -1, 100.0, 10.0, 1);
+        let energy = restraint.calculate(&mut conf, &periodicity);
+        assert!(energy > 0.0, "Repulsive restraint should have energy when dist < r0");
 
         // Same restraint but distance > r0 - no energy
         conf.current_mut().pos[1] = Vec3::new(2.0, 0.0, 0.0);
         conf.current_mut().clear_forces();
-        let energy = restraint.calculate(&mut conf, &periodicity, 0.001);
-        assert_eq!(energy, 0.0); // Should have no energy
+        let mut restraint2 = DistanceRestraint::new(0, 1, 1.0, 1.0, -1, 100.0, 10.0, 1);
+        let energy = restraint2.calculate(&mut conf, &periodicity);
+        assert_eq!(energy, 0.0, "Repulsive restraint should have no energy when dist > r0");
+    }
+
+    #[test]
+    fn test_distance_restraint_gromosxx_reference() {
+        // Reference values from gromosXX aladip_special.t.cc:
+        //   DistanceRestraint = 257.189539
+        //   PerturbedDistanceRestraint = 195.899012
+        //
+        // Parameters: K=1000.0, r_linear=0.3, mode=2 (NTDIR=2), lambda=0.125
+        // Atom positions from aladip.conf:
+        //   atom 5 → 0-indexed 4: (2.506319188, 0.858753474, 1.635829769)
+        //   atom 9 → 0-indexed 8: (2.722961726, 1.075330732, 1.724773551)
+        //   atom12 → 0-indexed11: (3.001529656, 0.996657605, 1.693520228)
+        let n_atoms = 12;
+        let mut conf = Configuration::new(n_atoms, 1, 1);
+        conf.current_mut().pos[4]  = Vec3::new(2.506319188, 0.858753474, 1.635829769);
+        conf.current_mut().pos[8]  = Vec3::new(2.722961726, 1.075330732, 1.724773551);
+        conf.current_mut().pos[11] = Vec3::new(3.001529656, 0.996657605, 1.693520228);
+
+        let box_l = 3.767055681_f64;
+        let periodicity = Periodicity::Rectangular(
+            gromos_core::math::Rectangular::new(Vec3::new(box_l, box_l, box_l)),
+        );
+
+        let k = 1000.0_f64;
+        let r_linear = 0.3_f64;
+        let mode = 2;
+
+        // Unperturbed restraints from aladip.distrest (all type-0 virtual atoms):
+        // pairs: (4,8) and (8,11), rah={1,1,0,0,-1,-1}, r0 and w0 vary per entry
+        let specs: &[(usize, usize, f64, f64, i32)] = &[
+            (4,  8, 0.21, 1.0,  1),
+            (8, 11, 0.80, 1.0,  1),
+            (4,  8, 0.21, 1.0,  0),
+            (8, 11, 0.90, 1.0,  0),
+            (4,  8, 0.21, 1.0, -1),
+            (8, 11, 0.80, 1.0, -1),
+        ];
+
+        let mut total = 0.0_f64;
+        for &(a1, a2, r0, w0, rah) in specs {
+            let mut r = DistanceRestraint::new(a1, a2, r0, w0, rah, k, r_linear, mode);
+            total += r.calculate(&mut conf, &periodicity);
+        }
+        assert!(
+            (total - 257.189539).abs() < 1e-3,
+            "DistanceRestraint total: expected 257.189539, got {total:.6}"
+        );
+
+        // Perturbed restraints (lambda=0.125, NLAM=1, RLAM=0.125)
+        let lambda = 0.125_f64;
+        let pspecs: &[(usize, usize, i32, i32, f64, f64, f64, f64, i32)] = &[
+            (4,  8, 1, 1, 0.19, 2.0, 0.21, 1.0,  1),
+            (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0,  1),
+            (4,  8, 1, 1, 0.19, 2.0, 0.21, 1.0,  0),
+            (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0,  0),
+            (4,  8, 1, 1, 0.19, 2.0, 0.21, 1.0, -1),
+            (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0, -1),
+        ];
+
+        // Clear forces from previous run
+        conf.current_mut().clear_forces();
+        let mut ptotal = 0.0_f64;
+        for &(a1, a2, n, m, a_r0, a_w0, b_r0, b_w0, rah) in pspecs {
+            let r = PerturbedDistanceRestraint::new(a1, a2, n, m, a_r0, b_r0, a_w0, b_w0, rah, k, r_linear, mode);
+            ptotal += r.calculate(&mut conf, &periodicity, lambda);
+        }
+        assert!(
+            (ptotal - 195.899012).abs() < 1e-3,
+            "PerturbedDistanceRestraint total: expected 195.899012, got {ptotal:.6}"
+        );
     }
 
     #[test]

@@ -330,7 +330,7 @@ full design; the near-term, bit-for-bit-safe slice:
 scientifically essential ones each need porting + a minimal reference test, and most have a
 *perturbed* variant (couples to FEP, P1.5). Per-term ground-truth available from gromosXX's own
 `check/aladip*.t.cc` (see cross-cutting test note). Priority within this group:
-- [ ] **Distance restraints** (`distance_restraint_interaction.cc`) — NMR NOE, the most common. +perturbed.
+- [x] **Distance restraints** (`distance_restraint_interaction.cc`) — NMR NOE, the most common. +perturbed. (v0.0.17)
 - [ ] **Dihedral restraints** (`dihedral_restraint_interaction.cc`) — +perturbed. (Note gromosXX caveat:
   `perturbed_dihedral_restraint_interaction.cc:152` — "may go wrong if phi0_A/phi0_B > 2π apart"; Dim 11 — second-source.)
 - [ ] **Angle restraints** (`angle_restraint_interaction.cc`) — +perturbed.

@@ -10,6 +10,7 @@
 //! - .ptp - Perturbation topology files (FEP)
 
 pub mod coordinate;
+pub mod distanceres;
 pub mod dlg;
 pub mod energy;
 pub mod ifp;

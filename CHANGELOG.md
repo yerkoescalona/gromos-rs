@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.17] (2026-06-17)
+
+### Features
+
+- **gromos-forces:** port gromosXX distance restraints (PLAN.md §1.6, first priority)
+  - `DistanceRestraint` / `DistanceRestraints` — faithful translation of
+    `distance_restraint_interaction.cc`: RAH dimensionality encoding
+    (`dim_base ∈ {0,10,20,30,40,50,60}` × form `∈ {-1,0,+1}`), harmonic/linear
+    switching (gromosXX `r_linear = DIR0 = 0.3 nm`), mode 1 / mode 2 (NTDIR=2 ×w0)
+  - `PerturbedDistanceRestraint` / `PerturbedDistanceRestraints` — translation of
+    `perturbed_distance_restraint_interaction.cc`: λ-interpolated r0/w0,
+    hidden-restraint prefactor `2^(n+m)·λⁿ·(1-λ)ᵐ`
+  - Reference test `test_distance_restraint_gromosxx_reference` validates both at
+    gromosXX's own hard-coded values: DistanceRestraint = 257.189539 kJ/mol,
+    PerturbedDistanceRestraint = 195.899012 kJ/mol (aladip.distrest, tol 1e-3)
+- **gromos-core:** add `DistanceRestraintSpec` / `PerturbedDistanceRestraintSpec` to
+  `topology.rs`; extend `Topology` with `distance_restraints` /
+  `perturbed_distance_restraints` Vec fields
+- **gromos-core:** add `distanceres_total: f64` to `Energy` struct
+- **gromos-io:** new `distanceres.rs` parser for DISTANCERESSPEC / PERTDISRESSPEC
+  blocks (virtual atom type 0 only; unsupported types logged + skipped)
+- **gromos-io:** parse DISTANCERES block (`NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE
+  VDIR NTWDIR`) and PERTURBATION block (`NTG NRDGL RLAM DLAMT ALPHLJ ALPHC NLAM
+  NSCALE`) in `imd.rs`; add `ImdParameters::lambda_and_derivative()` helper
+- **gromos-integrators:** wire `DistanceRestraints` / `PerturbedDistanceRestraints`
+  into `Forcefield` (step 4c after position restraints); result accumulated into
+  `conf.current_mut().energies.distanceres_total`
+
+### Reference test matrix
+
+- 13 restraint tests pass (13 restraint-specific, up from 0 gromosXX-faithful)
+- All other workspace tests unchanged
+
 ## [0.0.16] (2026-06-14)
 
 ### Features

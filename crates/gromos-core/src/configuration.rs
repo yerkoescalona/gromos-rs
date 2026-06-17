@@ -116,6 +116,7 @@ pub struct Energy {
 
     // Special interactions
     pub special_total: f64,
+    pub distanceres_total: f64,
     pub sasa_total: f64, // Solvent accessible surface area
     pub constraint_total: f64,
 
@@ -150,6 +151,7 @@ impl Energy {
             ls_realspace_total: 0.0,
             ls_kspace_total: 0.0,
             special_total: 0.0,
+            distanceres_total: 0.0,
             sasa_total: 0.0,
             constraint_total: 0.0,
             kinetic_energy_new: 0.0,
@@ -193,6 +195,7 @@ impl Energy {
         self.ls_realspace_total = 0.0;
         self.ls_kspace_total = 0.0;
         self.special_total = 0.0;
+        self.distanceres_total = 0.0;
         self.sasa_total = 0.0;
         self.constraint_total = 0.0;
         self.kinetic_energy_new = 0.0;

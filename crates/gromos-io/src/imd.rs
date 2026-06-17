@@ -141,6 +141,42 @@ pub struct ImdParameters {
     /// Position restraint force constant (kJ mol⁻¹ nm⁻²)
     pub cpor: f64,
 
+    // DISTANCERES block
+    /// NTDIR: -2=time-avg+force, -1=time-avg, 0=off, 1=instantaneous, 2=instantaneous+w0
+    pub ntdir: i32,
+    /// NTDIRA: time-averaging flag
+    pub ntdira: i32,
+    /// CDIR: force constant for distance restraints (kJ mol⁻¹ nm⁻²)
+    pub cdir: f64,
+    /// DIR0: linear region threshold (nm)
+    pub dir0: f64,
+    /// TAUDIR: time constant for time averaging (ps)
+    pub taudir: f64,
+    /// FORCESCALE: force scaling mode for time-averaged restraints (0,1,2)
+    pub forcescale: i32,
+    /// VDIR: averaging exponent (unused in plain instantaneous mode)
+    pub vdir: i32,
+    /// NTWDIR: trajectory write frequency for restraints (0=off)
+    pub ntwdir: i32,
+
+    // PERTURBATION block (for FEP/lambda calculations)
+    /// NTG: perturbation flag (0=off, 1=on)
+    pub ntg: i32,
+    /// NRDGL: read lambda from startup (0=no)
+    pub nrdgl: i32,
+    /// RLAM: starting lambda value
+    pub rlam: f64,
+    /// DLAMT: lambda change per step
+    pub dlamt: f64,
+    /// ALPHLJ: LJ soft-core alpha
+    pub alphlj: f64,
+    /// ALPHC: Coulomb soft-core alpha
+    pub alphc: f64,
+    /// NLAM: lambda exponent
+    pub nlam: i32,
+    /// NSCALE: energy group scaling (0=off)
+    pub nscale: i32,
+
     // ENERGYMIN block
     /// Energy minimization method (0=off, 1=steepest descent, 2=Fletcher-Reeves CG)
     pub ntem: i32,
@@ -240,6 +276,22 @@ impl Default for ImdParameters {
             ntporb: 0,
             ntpors: 0,
             cpor: 0.0,
+            ntdir: 0,
+            ntdira: 0,
+            cdir: 0.0,
+            dir0: 0.0,
+            taudir: 0.0,
+            forcescale: 0,
+            vdir: 0,
+            ntwdir: 0,
+            ntg: 0,
+            nrdgl: 0,
+            rlam: 0.0,
+            dlamt: 0.0,
+            alphlj: 0.0,
+            alphc: 0.0,
+            nlam: 1,
+            nscale: 0,
             ntem: 0,
             nmin: 1,
             dele: 0.1,
@@ -777,6 +829,36 @@ fn parse_block(
                 }
             }
         },
+        "DISTANCERES" => {
+            // gromosXX format (one data line):
+            //   NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE VDIR NTWDIR
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntdir      = parse_i32(&v[0]); }
+                if v.len() >= 2 { params.ntdira     = parse_i32(&v[1]); }
+                if v.len() >= 3 { params.cdir       = parse_f64(&v[2]); }
+                if v.len() >= 4 { params.dir0       = parse_f64(&v[3]); }
+                if v.len() >= 5 { params.taudir     = parse_f64(&v[4]); }
+                if v.len() >= 6 { params.forcescale = parse_i32(&v[5]); }
+                if v.len() >= 7 { params.vdir       = parse_i32(&v[6]); }
+                if v.len() >= 8 { params.ntwdir     = parse_i32(&v[7]); }
+            }
+        },
+        "PERTURBATION" => {
+            // gromosXX format (one data line):
+            //   NTG NRDGL RLAM DLAMT ALPHLJ ALPHC NLAM NSCALE
+            if let Some(line) = data_lines.first() {
+                let v = parse_values(line);
+                if v.len() >= 1 { params.ntg    = parse_i32(&v[0]); }
+                if v.len() >= 2 { params.nrdgl  = parse_i32(&v[1]); }
+                if v.len() >= 3 { params.rlam   = parse_f64(&v[2]); }
+                if v.len() >= 4 { params.dlamt  = parse_f64(&v[3]); }
+                if v.len() >= 5 { params.alphlj = parse_f64(&v[4]); }
+                if v.len() >= 6 { params.alphc  = parse_f64(&v[5]); }
+                if v.len() >= 7 { params.nlam   = parse_i32(&v[6]); }
+                if v.len() >= 8 { params.nscale = parse_i32(&v[7]); }
+            }
+        },
         "ENERGYMIN" => {
             // gromosXX format:
             //   Line 0: NTEM NCYC DELE DX0 DXM NMIN FLIM
@@ -809,6 +891,23 @@ fn parse_block(
     }
 
     Ok(())
+}
+
+impl ImdParameters {
+    /// Compute the individual lambda and its derivative with respect to RLAM.
+    ///
+    /// Following gromosXX: individual_lambda = RLAM^NLAM,
+    /// d(individual_lambda)/d(RLAM) = NLAM * RLAM^(NLAM-1).
+    pub fn lambda_and_derivative(&self) -> (f64, f64) {
+        let nlam = self.nlam as f64;
+        let l = self.rlam.powf(nlam);
+        let dl = if self.nlam <= 0 {
+            0.0
+        } else {
+            nlam * self.rlam.powf(nlam - 1.0)
+        };
+        (l, dl)
+    }
 }
 
 /// Split a line into whitespace-separated tokens
