@@ -23,7 +23,9 @@ use gromos_forces::nonbonded::{
     solvent_innerloop_parallel, solvent_innerloop_parallel_novirial,
     CGPairGroup, CRFParameters, ForceStorage, LJParamMatrix, LJParameters,
 };
-use gromos_forces::restraints::PositionRestraints;
+use gromos_forces::restraints::{
+    DistanceRestraints, PerturbedDistanceRestraints, PositionRestraints,
+};
 
 use crate::algorithms::pressure_calculation::VirialType;
 
@@ -88,6 +90,12 @@ pub struct Forcefield {
     use_cg_grouped_solute: bool,
     /// Position restraints (empty = none)
     pub position_restraints: PositionRestraints,
+    /// Distance restraints (empty = none)
+    pub distance_restraints: DistanceRestraints,
+    /// Perturbed distance restraints (empty = none)
+    pub perturbed_distance_restraints: PerturbedDistanceRestraints,
+    /// Current lambda value (for perturbed restraints)
+    pub lambda: f64,
 }
 
 impl Forcefield {
@@ -129,6 +137,9 @@ impl Forcefield {
             longrange_computed: false,
             use_cg_grouped_solute: false, // computed at init when box size is known
             position_restraints: PositionRestraints::new(),
+            distance_restraints: DistanceRestraints::new(),
+            perturbed_distance_restraints: PerturbedDistanceRestraints::new(),
+            lambda: 0.0,
         }
     }
 
@@ -661,6 +672,18 @@ impl Algorithm for Forcefield {
             conf.current_mut().energies.special_total = e_posres;
             log::debug!("  Position restraints: {:.10e} kJ/mol ({} atoms)",
                 e_posres, self.position_restraints.restraints.len());
+        }
+
+        // --- 4c. Distance restraints ---
+        if !self.distance_restraints.restraints.is_empty() {
+            let e_dr = self.distance_restraints.calculate_all(conf, &self.periodicity);
+            conf.current_mut().energies.distanceres_total = e_dr;
+            log::debug!("  Distance restraints: {:.10e} kJ/mol", e_dr);
+        }
+        if !self.perturbed_distance_restraints.restraints.is_empty() {
+            let e_pdr = self.perturbed_distance_restraints.calculate_all(conf, &self.periodicity, self.lambda);
+            conf.current_mut().energies.distanceres_total += e_pdr;
+            log::debug!("  Perturbed distance restraints: {:.10e} kJ/mol", e_pdr);
         }
 
         // --- 5. atomic_to_molecular_virial: correct virial from atomic to molecular ---

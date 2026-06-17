@@ -310,6 +310,30 @@ pub struct SolventConstraintTemplate {
     pub length: f64,
 }
 
+/// Distance restraint specification (virtual atom type 0 only)
+#[derive(Debug, Clone)]
+pub struct DistanceRestraintSpec {
+    pub atom1: usize,
+    pub atom2: usize,
+    pub r0: f64,
+    pub w0: f64,
+    pub rah: i32,
+}
+
+/// Perturbed distance restraint specification (virtual atom type 0 only)
+#[derive(Debug, Clone)]
+pub struct PerturbedDistanceRestraintSpec {
+    pub atom1: usize,
+    pub atom2: usize,
+    pub n: i32,
+    pub m: i32,
+    pub a_r0: f64,
+    pub b_r0: f64,
+    pub a_w0: f64,
+    pub b_w0: f64,
+    pub rah: i32,
+}
+
 /// Main topology structure containing all molecular information
 #[derive(Debug, Clone)]
 pub struct Topology {
@@ -359,6 +383,10 @@ pub struct Topology {
 
     // Chargegroup codes (CGC) from topology for solute atoms
     pub chargegroup_codes: Vec<usize>,
+
+    // Distance restraints (loaded from .distres file)
+    pub distance_restraints: Vec<DistanceRestraintSpec>,
+    pub perturbed_distance_restraints: Vec<PerturbedDistanceRestraintSpec>,
 }
 
 impl Topology {
@@ -391,6 +419,8 @@ impl Topology {
             solvent_atom_template: Vec::new(),
             solvent_constraint_template: Vec::new(),
             chargegroup_codes: Vec::new(),
+            distance_restraints: Vec::new(),
+            perturbed_distance_restraints: Vec::new(),
         }
     }
 
