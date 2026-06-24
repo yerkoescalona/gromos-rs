@@ -13,6 +13,7 @@ pub mod coordinate;
 pub mod distanceres;
 pub mod dlg;
 pub mod energy;
+pub mod free_energy;
 pub mod ifp;
 pub mod jobs;
 pub mod mk_script;
@@ -34,6 +35,7 @@ pub mod trajectory_binary;
 // Re-export commonly used types
 pub use coordinate::{CoordinateData, G96Atom, LabeledCoordinateData, read_coordinates, read_g96_labeled};
 pub use dlg::{DlgWriter, LambdaDerivativeFrame};
+pub use free_energy::{FreeEnergyWriter, FreeEnergyFrame, read_free_energy_trajectory};
 pub use energy::{EnergyBlock, EnergyFrame, EnergyReader, EnergyWriter};
 pub use energy_binary::{BinaryEnergyReader, BinaryEnergyWriter};
 pub use force::ForceWriter;
@@ -41,7 +43,7 @@ pub use g96::{write_por, write_rpr};
 pub use imd::{ImdParameters, PressureParameters, TempBathParameters};
 pub use input::{EdsBlock, GamdBlock, ReplicaBlock};
 pub use output::{EdsStatsWriter, EdsVrWriter, GamdBoostWriter, GamdStatsWriter};
-pub use ptp::PtpWriter;
+pub use ptp::{PtpWriter, PerturbedTopology, read_pttopo};
 pub use trajectory::TrajectoryWriter;
 pub use trajectory_binary::{
     BinaryFrame, BinaryTrajectoryReader, BinaryTrajectoryWriter, DcdReader, DcdWriter,

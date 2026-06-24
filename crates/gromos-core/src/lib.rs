@@ -35,6 +35,7 @@ pub mod topology;
 pub mod configuration;
 pub mod pairlist;
 pub mod selection;
+pub mod stat;
 pub mod validation;
 pub mod algorithm;
 
@@ -57,7 +58,12 @@ pub use math::{BoundaryCondition, Mat3, Periodicity, Rectangular, Triclinic, Vac
 pub use configuration::{Box, BoxType, Configuration, Energy, State, StochasticVariables};
 
 // Re-export topology types
-pub use topology::{LJParameters, Topology};
+pub use topology::{
+    LJParameters, Topology,
+    PerturbedAtom, PerturbedAtomPair,
+    PerturbedBond, PerturbedAngle, PerturbedDihedral, PerturbedSolute,
+    SoftBond, SoftAngle, SoftImproper,
+};
 
 // Re-export pairlist types
 pub use pairlist::{CellListPairlistAlgorithm, Pairlist, PairlistContainer, StandardPairlistAlgorithm};

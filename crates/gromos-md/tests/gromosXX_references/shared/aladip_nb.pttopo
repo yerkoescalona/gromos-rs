@@ -1,0 +1,49 @@
+TITLE
+Perturbation of aladipeptide — nonbonded ONLY (no bonded perturbations)
+Tests pure nonbonded FEP: perturbed pairlist correction, RF self-energy,
+excluded-pair CRF, 1-4 correction.  No soft bonded, no bond breaking.
+END
+PERTATOMPARAM
+3
+# JLA RESNR ATNAM IACA      WMA      CGA IACB      WMB      CGB ALPHAJ  ALPHACRF
+    1     1 CB      14  15.0350    0.000   11  12.0350    1.000    0.3       0.6
+    4     1 N        5  14.0067   -0.280   19  14.0067    0.200    0.3       0.6
+   11     1 H       18   1.0080    0.280   14   2.0080    0.000    0.3       0.6
+END
+PERTATOMPAIR
+   1
+	7	10	2	0
+END
+PERTBONDSTRETCH
+   0
+END
+PERTBONDSTRETCHH
+   0
+END
+PERTBONDSOFT
+   0
+END
+PERTBONDANGLE
+   0
+END
+PERTBONDANGLEH
+   0
+END
+PERTANGLESOFT
+   0
+END
+PERTIMPROPERDIH
+   0
+END
+PERTIMPROPERDIHH
+   0
+END
+PERTIMPROPERDIHSOFT
+   0
+END
+PERTPROPERDIH
+   0
+END
+PERTPROPERDIHH
+   0
+END

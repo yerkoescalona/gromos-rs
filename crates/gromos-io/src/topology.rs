@@ -1,5 +1,22 @@
 //! Parser for GROMOS topology files (.topo/.top)
 //!
+//! # IAC (Integer Atom Code) indexing convention
+//!
+//! **All IAC values stored in memory are 0-indexed** (0..N_types-1).
+//! GROMOS file formats (SOLUTEATOM, CGPARAMETERS/LJPARAMETERS, SOLVENTATOM)
+//! write IAC as 1-indexed.  The subtraction happens exactly once, at each
+//! file-read site, so callers never need to worry about it:
+//!
+//! ```text
+//!  file value → subtract 1 → topo.iac[i]  (0-indexed, matches LJ matrix rows/cols)
+//!                          → PerturbedAtom.a_iac  (ptp.rs also subtracts 1)
+//!                          → lj.get(iac_i, iac_j)
+//! ```
+//!
+//! This matches gromosXX, which also stores IAC 0-indexed internally
+//! (`in_topology.cc` line 1695: `topo.add_solute_atom(…, t-1, …)` and
+//! lines 1147-1148: `--i; --j;` before indexing the LJ matrix).
+//!
 //! Format blocks:
 //! - SOLUTEATOM: atom definitions (mass, charge, IAC)
 //! - BOND/BONDSTRETCHTYPE: covalent bonds
@@ -266,9 +283,14 @@ fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
             let mres: usize = parts[1]
                 .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid MRES: {}", parts[1])))?;
+            // IAC in GROMOS .topo is 1-indexed (1..=N_types).
+            // Subtract 1 here so topo.iac is always 0-indexed (0..N_types) throughout the
+            // codebase — matching array offsets, the LJ matrix rows/cols, and pttopo
+            // PerturbedAtom.a_iac / b_iac (which the pttopo reader also converts to 0-indexed).
             let atom_iac: usize = parts[3]
-                .parse()
-                .map_err(|_| IoError::ParseError(format!("Invalid IAC: {}", parts[3])))?;
+                .parse::<usize>()
+                .map_err(|_| IoError::ParseError(format!("Invalid IAC: {}", parts[3])))?
+                .saturating_sub(1);
             let mass: f64 = parts[4]
                 .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid mass: {}", parts[4])))?;
@@ -657,15 +679,19 @@ fn parse_lj_parameters<I: Iterator<Item = Result<String, std::io::Error>>>(
         }
 
         // Parse LJ parameters (format: IAC JAC C12 C6 [CS12 CS6])
+        // IAC/JAC are 1-indexed in the file; subtract 1 so the LJ matrix is 0-indexed,
+        // consistent with topo.iac and pttopo PerturbedAtom.a_iac / b_iac.
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
         if parts.len() >= 4 {
             let iac: usize = parts[0]
-                .parse()
-                .map_err(|_| IoError::ParseError(format!("Invalid IAC: {}", parts[0])))?;
+                .parse::<usize>()
+                .map_err(|_| IoError::ParseError(format!("Invalid IAC: {}", parts[0])))?
+                .saturating_sub(1);
             let jac: usize = parts[1]
-                .parse()
-                .map_err(|_| IoError::ParseError(format!("Invalid JAC: {}", parts[1])))?;
+                .parse::<usize>()
+                .map_err(|_| IoError::ParseError(format!("Invalid JAC: {}", parts[1])))?
+                .saturating_sub(1);
             let c12: f64 = parts[2]
                 .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid C12: {}", parts[2])))?;
@@ -794,10 +820,12 @@ fn parse_solventatom<I: Iterator<Item = Result<String, std::io::Error>>>(
         }
 
         // Format: I ANMS IACS MASS CGS
+        // IAC is 1-indexed in file; subtract 1 for 0-indexed convention.
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if parts.len() >= 5 {
-            let atom_iac: usize = parts[2].parse()
-                .map_err(|_| IoError::ParseError(format!("Invalid solvent IAC: {}", parts[2])))?;
+            let atom_iac: usize = parts[2].parse::<usize>()
+                .map_err(|_| IoError::ParseError(format!("Invalid solvent IAC: {}", parts[2])))?
+                .saturating_sub(1);
             let mass: f64 = parts[3].parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid solvent mass: {}", parts[3])))?;
             let charge: f64 = parts[4].parse()
@@ -970,7 +998,9 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     if !parsed.solute_molecules.is_empty() {
         let mut start = 0usize;
         for &last_atom in &parsed.solute_molecules {
-            // last_atom is 1-based; convert to 0-based exclusive range
+            // last_atom is 1-indexed from the file, but no subtraction is needed:
+            // a 1-indexed last atom N is the correct *exclusive* upper bound for a
+            // 0-indexed Rust range (the -1 for 0-indexing and the +1 for exclusivity cancel).
             topo.molecules.push(start..last_atom);
             start = last_atom;
         }
@@ -1035,10 +1065,25 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     }
     topo.improper_dihedral_parameters = parsed.improper_dihedral_parameters;
 
-    // Build LJ parameter matrix
-    let max_iac = topo.iac.iter()
-        .chain(topo.solvent_atom_template.iter().map(|sa| &sa.iac))
-        .max().copied().unwrap_or(0);
+    // Build LJ parameter matrix.
+    //
+    // IMPORTANT: size the matrix from the LJ parameter *table* (which covers all
+    // force-field atom types, e.g. 45 types in GROMOS 54A7), NOT from the atom
+    // types actually present in this topology (which may be a small subset).
+    //
+    // Rationale: perturbed B-state IAC values (from pttopo) may refer to atom types
+    // that don't appear in the regular topology but ARE listed in the LJ table.
+    // Using topo.iac.max() would give a matrix too small to index those types,
+    // causing out-of-bounds memory access via the unsafe get_unchecked path.
+    let max_iac_table = parsed.lj_parameters.keys()
+        .flat_map(|&(i, j)| [i, j])
+        .max()
+        .unwrap_or(0);
+    // Also include atom IAC values (solute + solvent) to handle topologies without
+    // a full LJPARAMETERS block.
+    let max_iac = max_iac_table
+        .max(topo.iac.iter().copied().max().unwrap_or(0))
+        .max(topo.solvent_atom_template.iter().map(|sa| sa.iac).max().unwrap_or(0));
     let n_types = max_iac + 1;
     topo.lj_parameters = vec![vec![LJParameters::default(); n_types]; n_types];
 
@@ -1054,9 +1099,15 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         n_solute, topo.chargegroups.len(), n_types, n_types,
         topo.solvent_atom_template.len());
 
+    // Dim 10: populate solute MoleculeType + MoleculeInstance now that solute.atoms
+    // and the flat arrays are both fully built.
+    topo.init_solute_moltype();
+
     // --- Populate solute pressure groups from PRESSUREGROUPS block ---
     // gromosXX: pressure_groups is a boundary vector [last_atom_1, last_atom_2, ...]
-    // Convert to Vec<Range<usize>>
+    // Each value is 1-indexed in the file, but no subtraction is needed: a 1-indexed
+    // last atom N is the correct *exclusive* upper bound for a 0-indexed Rust range
+    // (the -1 for 0-indexing and the +1 for exclusivity cancel).
     if !parsed.pressure_groups.is_empty() {
         let mut start = 0usize;
         for &last_atom in &parsed.pressure_groups {

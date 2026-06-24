@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.19] (2026-06-24)
+
+### Features
+
+- **gromos-forces:** perturbed bonded forces (P1.7 Step 2) — quartic bond, cos-harmonic
+  angle, improper dihedral, proper dihedral; gromosXX-faithful λ-interpolation + dE/dλ;
+  `calculate_perturbed_bonded_forces` wired into `Forcefield::apply` step 2b
+- **gromos-forces:** perturbed nonbonded corrections (P1.7 Step 3) — soft-core LJ+CRF
+  dual-topology via `perturbed_pairlist_correction`; RF self-energy, excluded-pair, 1-4,
+  and PERTATOMPAIR corrections; `ch4_water_fep` (CH4→dummy in 999 SPC water, λ=0.5)
+  passes to <1e-6 kJ/mol vs gromosXX
+- **gromos-io:** fix PERTURBATION block multi-line parser (ALPHLJ/ALPHC silently dropped);
+  fix effective alpha = per-atom × global (matches `in_perturbation.cc:1308`)
+- **gromos-io:** `FreeEnergyWriter` + `read_free_energy_trajectory` (FREEENERGY03 blocks);
+  md binary writes `@trg` when NTG≠0 at NTWE frequency (P1.7 Step 4)
+- **gromos-core:** `Stat` — `ave()`, `rmsd()`, `ee()` block averaging, port of gromos++
+  `gmath/Stat` (Allen–Tildesley); 4 unit tests
+- **gromos-analysis:** `ext_ti_ana` — real TI analysis; reads N `.trg` files, ⟨dH/dλ⟩ ±
+  ee() per window, trapezoidal ΔG integration (P1.7 Step 5 + P2.2 stat + P2.3 program)
+- **gromos-core:** full gromos++ AtomSpecifier grammar — `a:NAME`, `1:name,name`,
+  `1:res(nr:atom)`, `1:res(name:atom)`, `not(spec)`, `minus(spec)`, `;`-union, `all`/`no`;
+  routes via `topology.molecules` (no `num_solute_atoms()` threshold, Dim 10 ready);
+  30 tests, every index confirmed against gromos++ `atominfo` on aladip topology
+- **gromos-core:** per-atom metadata accessors — `atom_name(i)`, `residue_nr(i)`,
+  `residue_name(i)`, `molecule_nr(i)` covering solute + solvent uniformly
+- **gromos-analysis:** `atominfo` binary — gromos++-compatible TITLE+ATOMS output
+- **gromos-core:** Dimension 10 Phase 1 — instancing model alongside legacy structs;
+  `Role`, `MolTypeAtom`, `MoleculeType`, `MoleculeInstance`; `Topology::moltypes` +
+  `instances` populated by `init_solute_moltype()` and `solvate()`; per-atom accessors
+  prefer moltype path; `s:` in AtomSelection uses `role == Role::Solvent`; `promote()`;
+  37/37 reference tests byte-identical
+
+### Test infrastructure
+
+- Shared topology/coord/ptp files moved to `tests/gromosXX_references/shared/`;
+  all `input.toml` paths updated from `../../` to `../shared/`
+- `.trg` free-energy trajectory tracked in `ch4_water_fep` (dH/dλ at 1e-6 rel tol)
+- `run_references.py` removed (both copies); Rust runner is the only harness
+- 37 tests pass (up from 36); 1 ignored
+
+## [0.0.18] (2026-06-19)
+
+### Features
+
+- **gromos-core:** add `PerturbedAtom` and `PerturbedAtomPair` structs; extend
+  `PerturbedSolute` with `atoms` + `atom_pairs` fields; add `is_perturbed: Vec<bool>`
+  to `Topology` (P1.7 Step 1 scaffolding)
+- **gromos-io:** replace ptp.rs stub with a full gromosXX-faithful `.pttopo` reader
+  (`read_pttopo`); parses PERTATOMPARAM, PERTATOMPAIR, PERTBONDSTRETCH(H),
+  PERTBONDANGLE(H), PERTIMPROPERDIH(H), PERTPROPERDIH(H); validated against
+  `aladip.pttopo` (3 atoms, 1 pair, 2 bonds, 2 angles, 2 impropers, 2 dihedrals)
+- **gromos-md:** wire `@pttopo` into md binary — when NTG≠0, read perturbation topology
+  and populate `topo.perturbed_solute` + `topo.is_perturbed`
+- **gromos-core:** fix `Energies::total()` to include `distanceres_total` (matches
+  gromosXX: `total = potential_total + kinetic_total + special_total` where
+  `special_total` includes distance restraints)
+- **gromos-md:** add `nacl_1water_distres` reference test — instantaneous distance
+  restraint (NTDIR=2) on Na-Cl pair; validates total energy accounting and step-0
+  forces; 36 of 36 tests pass
+
+### Reference test matrix
+
+- 36 tests pass (up from 34); new: `nacl_1water_distres` (distance restraint)
+
 ## [0.0.17] (2026-06-17)
 
 ### Features

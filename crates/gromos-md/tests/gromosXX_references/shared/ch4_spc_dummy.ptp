@@ -1,0 +1,38 @@
+TITLE
+CH4 → dummy perturbation topology (vol7 TI tutorial, 54a7 force field)
+State A: CH4 united atom (CM, IAC=17, charge=0)
+State B: dummy atom (IAC=22, charge=0, C6=C12=0)
+END
+PERTATOMPARAM
+# number of perturbed atoms
+   1
+#  NR  RES  NAME IAC(A) MASS(A) CHARGE(A) IAC(B)  MASS(B) CHARGE(B)  ALJ  ACRF
+    1    1     CM  17    16.04300  0.00000   22   16.04300  0.00000   0.5   0.5
+END
+PERTATOMPAIR
+   0
+END
+PERTBONDSTRETCH
+   0
+END
+PERTBONDSTRETCHH
+   0
+END
+PERTBONDANGLE
+   0
+END
+PERTBONDANGLEH
+   0
+END
+PERTIMPROPERDIH
+   0
+END
+PERTIMPROPERDIHH
+   0
+END
+PERTPROPERDIH
+   0
+END
+PERTPROPERDIHH
+   0
+END

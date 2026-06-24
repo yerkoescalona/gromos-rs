@@ -1,0 +1,45 @@
+# gromosXX v1.6.0, double precision, 5 atoms
+
+[system]
+name = "nacl_1water_distres"
+description = "Level 2: Na+ Cl- + 1 SPC water, unperturbed distance restraint Na-Cl"
+level = 2
+natoms = 5
+isolates = "instantaneous distance restraint (NTDIR=2, CDIR*w0) on ion pair"
+
+[input]
+topology = "../nacl_1water_box/nacl_1water_box.topo"
+configuration = "../nacl_1water_box/nacl_1water_box.conf"
+parameters = "nacl_1water_distres.in"
+distrest = "nacl_1water_distres.distrest"
+
+[expected]
+forces = "expected/forces.trf"
+energies = "expected/energies.tre"
+trajectory = "expected/trajectory.trc"
+final_conf = "expected/final.conf"
+
+[precision]
+internal = "f64"
+position_digits = 9
+force_digits = 9
+energy_sigfigs = 10
+
+[tolerances]
+force_abs = 1e-6
+energy_rel = 1e-8
+position_abs = 1e-9
+
+[reference_values]
+# Step 0: total = kinetic + potential + distanceres_special
+# gromosXX ENERGY03[0]=total, [1]=kinetic, [2]=potential (bonded+nonbonded)
+E_Total = -3.4444e+00
+E_Kinetic = 5.8842e-03
+E_Potential = -2.3450e+01
+E_Distanceres = 2.0000e+01
+
+[reference_values.forces_step0]
+# Force on atom 0 (Na+) at step 0: Coulomb(-92.97) + distanceres(+200.0) = +107.03
+atom_0 = [107.032419954, 0.000000000, 0.000000000]
+atom_1 = [-107.032419954, 0.000000000, 0.000000000]
+atom_2 = [0.000000000, 0.000000000, 0.000000000]

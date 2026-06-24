@@ -117,8 +117,11 @@ pub struct Energy {
     // Special interactions
     pub special_total: f64,
     pub distanceres_total: f64,
-    pub sasa_total: f64, // Solvent accessible surface area
+    pub sasa_total: f64,
     pub constraint_total: f64,
+
+    // Free-energy / TI: accumulated dH/dλ across all perturbed terms this step
+    pub dhdl_total: f64,
 
     // "New" kinetic energy from current velocities only (for thermostat scaling)
     // gromosXX stores this in multibath.bath.ekin; we store it here
@@ -154,6 +157,7 @@ impl Energy {
             distanceres_total: 0.0,
             sasa_total: 0.0,
             constraint_total: 0.0,
+            dhdl_total: 0.0,
             kinetic_energy_new: 0.0,
             kinetic_energy: vec![0.0; num_temperature_groups],
             lj_energy: vec![vec![0.0; num_energy_groups]; num_energy_groups],
@@ -162,9 +166,11 @@ impl Energy {
         }
     }
 
-    /// Total energy (kinetic + potential + special)
+    /// Total energy (kinetic + potential + special), mirroring gromosXX:
+    /// total = potential_total + kinetic_total + special_total
+    /// where special_total includes distanceres_total, posrest, angrest, etc.
     pub fn total(&self) -> f64 {
-        self.kinetic_total + self.potential_total + self.special_total
+        self.kinetic_total + self.potential_total + self.special_total + self.distanceres_total
     }
 
     /// Update potential total from components (bonded + nonbonded, without special)
@@ -198,6 +204,7 @@ impl Energy {
         self.distanceres_total = 0.0;
         self.sasa_total = 0.0;
         self.constraint_total = 0.0;
+        self.dhdl_total = 0.0;
         self.kinetic_energy_new = 0.0;
         self.virial_total = 0.0;
 

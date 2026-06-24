@@ -1,0 +1,42 @@
+# gromosXX v1.6.0, double precision, 12 atoms
+
+[system]
+name = "aladip_vacuum_fep"
+description = "Level 4: Aladip vacuum FEP/TI — perturbed bonded terms at lambda=0.125"
+level = 4
+natoms = 12
+isolates = "perturbed quartic bond + cos-harmonic angle + improper + proper dihedral (NTG=1, RLAM=0.125, NLAM=1)"
+
+[input]
+topology = "../shared/aladip.topo"
+configuration = "../aladip_vacuum/aladip_vacuum.conf"
+parameters = "aladip_vacuum_fep.in"
+pttopo = "../shared/aladip.pttopo"
+
+[expected]
+forces = "expected/forces.trf"
+energies = "expected/energies.tre"
+trajectory = "expected/trajectory.trc"
+final_conf = "expected/final.conf"
+
+[precision]
+internal = "f64"
+position_digits = 9
+force_digits = 9
+energy_sigfigs = 10
+
+[tolerances]
+force_abs = 1e-6
+energy_rel = 1e-8
+position_abs = 1e-9
+
+[reference_values]
+# gromosXX ENERGY03 step 0: total/kinetic/potential (bonded@λ + nonbonded)
+E_Total = -1.082709107e+01
+E_Kinetic = 4.516683872e+00
+E_Potential = -1.534377495e+01
+
+[reference_values.forces_step0]
+atom_0 = [259.589914725, -292.877485232, -23.711680762]
+atom_1 = [-791.052689923, 415.561598955, 513.415850657]
+atom_2 = [26.793555113, -507.605718109, -122.336099386]

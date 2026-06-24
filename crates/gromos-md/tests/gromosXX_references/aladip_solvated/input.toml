@@ -9,8 +9,8 @@ natoms = 72
 isolates = "SHAKE constraints + solute-solvent + full MD"
 
 [input]
-topology = "../../aladip.topo"
-configuration = "../../aladip.conf"
+topology = "../shared/aladip.topo"
+configuration = "../shared/aladip.conf"
 parameters = "aladip_solvated.in"
 
 [expected]

@@ -1,0 +1,9 @@
+TITLE
+Distance restraint: Na+(1) to Cl-(2), r0=0.3nm, full harmonic
+END
+DISTANCERESSPEC
+# DISH  DISC  (C-H and C-C distances for virtual atoms, unused for type 0)
+  0.1   0.153
+# i  j  k  l  type    i  j  k  l  type    r0    w0    rah
+  1  0  0  0  0       2  0  0  0  0       0.3   1.0   0
+END

@@ -22,6 +22,7 @@ use std::process::Command;
 const ENERGY_REL_TOL: f64 = 1e-8;
 const ENERGY_ABS_TOL: f64 = 1e-10; // for near-zero energies
 const FORCE_ABS_TOL: f64 = 1e-6; // kJ/(mol*nm)
+const DHDL_REL_TOL: f64 = 1e-6; // dH/dλ relative tolerance
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -156,6 +157,60 @@ fn parse_enertrj(path: &Path) -> Vec<EnergyFrame> {
     frames
 }
 
+// ─── Parser: FREEENERGY03 blocks from .trg files ────────────────────────────
+//
+// Each block has one data line:
+//   time  lambda  dhdl_bond  dhdl_angle  dhdl_improper  dhdl_dihedral  dhdl_lj  dhdl_crf  dhdl_total
+
+#[derive(Debug, Clone)]
+struct FreeEnergyFrame {
+    time: f64,
+    lambda: f64,
+    dhdl_total: f64,
+}
+
+fn parse_freeenergy03(path: &Path) -> Vec<FreeEnergyFrame> {
+    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut frames = Vec::new();
+    let mut in_block = false;
+
+    for line in content.lines() {
+        let t = line.trim();
+        if t == "FREEENERGY03" {
+            in_block = true;
+            continue;
+        }
+        if t == "END" && in_block {
+            in_block = false;
+            continue;
+        }
+        if in_block && !t.starts_with('#') && !t.is_empty() {
+            let vals: Vec<f64> = t
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            // columns: time lambda dhdl_bond dhdl_angle dhdl_improper dhdl_dihedral dhdl_lj dhdl_crf dhdl_total
+            if vals.len() >= 9 {
+                frames.push(FreeEnergyFrame {
+                    time: vals[0],
+                    lambda: vals[1],
+                    dhdl_total: vals[8],
+                });
+            }
+        }
+    }
+    frames
+}
+
+fn assert_dhdl_close(actual: f64, expected: f64, label: &str) {
+    let diff = (actual - expected).abs();
+    let tol = (expected.abs() * DHDL_REL_TOL).max(ENERGY_ABS_TOL);
+    assert!(
+        diff <= tol,
+        "{label}: expected {expected:.10e}, got {actual:.10e}, diff={diff:.2e}, tol={tol:.2e}"
+    );
+}
+
 // ─── Force frame ────────────────────────────────────────────────────────────
 
 /// One frame of per-atom forces: Vec of (fx, fy, fz) for each atom.
@@ -242,6 +297,7 @@ fn run_reference(system: &str) {
 
     let tre = out.join("energies.tre");
     let trf = out.join("forces.trf");
+    let trg = out.join("free_energy.trg");
 
     // Run md binary
     let mut cmd = Command::new(md_bin());
@@ -258,7 +314,9 @@ fn run_reference(system: &str) {
         .arg("@trf")
         .arg(&trf)
         .arg("@trc")
-        .arg(out.join("trajectory.trc"));
+        .arg(out.join("trajectory.trc"))
+        .arg("@trg")
+        .arg(&trg);
 
     // Optional position restraints
     if let Some(por) = toml_str_opt(&toml, "posresspec") {
@@ -266,6 +324,16 @@ fn run_reference(system: &str) {
     }
     if let Some(rpr) = toml_str_opt(&toml, "refpos") {
         cmd.arg("@refpos").arg(sys_dir.join(rpr));
+    }
+
+    // Optional distance restraints
+    if let Some(dr) = toml_str_opt(&toml, "distrest") {
+        cmd.arg("@distrest").arg(sys_dir.join(dr));
+    }
+
+    // Optional perturbation topology
+    if let Some(pt) = toml_str_opt(&toml, "pttopo") {
+        cmd.arg("@pttopo").arg(sys_dir.join(pt));
     }
 
     let t0 = std::time::Instant::now();
@@ -350,6 +418,28 @@ fn run_reference(system: &str) {
         }
     }
 
+    // Compare free-energy trajectory if reference .trg exists
+    if let Some(fe_path) = toml_str_opt(&toml, "free_energy") {
+        let expected_trg = sys_dir.join(fe_path);
+        if expected_trg.exists() && trg.exists() {
+            let exp_fe = parse_freeenergy03(&expected_trg);
+            let act_fe = parse_freeenergy03(&trg);
+            assert!(
+                act_fe.len() >= exp_fe.len(),
+                "{system}: too few free-energy frames (expected {}, got {})",
+                exp_fe.len(),
+                act_fe.len()
+            );
+            for (i, (ef, af)) in exp_fe.iter().zip(&act_fe).enumerate() {
+                assert_dhdl_close(
+                    af.dhdl_total,
+                    ef.dhdl_total,
+                    &format!("{system}[{i}] dH/dλ (t={:.3}ps λ={:.3})", ef.time, ef.lambda),
+                );
+            }
+        }
+    }
+
     let _ = fs::remove_dir_all(&out);
 }
 
@@ -422,6 +512,14 @@ ref_test!(aladip_solvated, "aladip_solvated");
 // cube frame on FREEFORCERED/CONSFORCERED output via
 // truncoct_triclinic_rotmat(false).
 ref_test!(aladip_trunc_oct, "aladip_trunc_oct");
+
+// Distance restraints (P1.6)
+ref_test!(nacl_1water_distres, "nacl_1water_distres");
+
+// FEP/TI — perturbed nonbonded (P1.7 Step 3)
+ref_test!(ch4_water_fep, "ch4_water_fep");
+// FEP/TI — aladip vacuum FEP at λ=0.125 (P1.7 Step 3 in progress)
+ref_test!(ignore: aladip_vacuum_fep, "aladip_vacuum_fep");
 
 // Energy minimization
 ref_test!(aladip_vacuum_em, "aladip_vacuum_em");

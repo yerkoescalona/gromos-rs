@@ -12,7 +12,7 @@ use gromos_core::math::{Mat3, Periodicity, Vec3};
 use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
 
-use gromos_forces::bonded::calculate_bonded_forces_ntf;
+use gromos_forces::bonded::{calculate_bonded_forces_ntf, calculate_perturbed_bonded_forces};
 use gromos_forces::nonbonded::{
     lj_crf_innerloop, lj_crf_innerloop_novirial,
     lj_crf_innerloop_parallel, lj_crf_innerloop_parallel_novirial,
@@ -22,6 +22,10 @@ use gromos_forces::nonbonded::{
     solvent_innerloop, solvent_innerloop_novirial,
     solvent_innerloop_parallel, solvent_innerloop_parallel_novirial,
     CGPairGroup, CRFParameters, ForceStorage, LJParamMatrix, LJParameters,
+    PertAtomInfo, PertNBCorrection, PerturbedLambdaParams,
+    perturbed_pairlist_correction, perturbed_self_energy_correction,
+    perturbed_excluded_correction, perturbed_one_four_correction,
+    perturbed_atom_pair_correction,
 };
 use gromos_forces::restraints::{
     DistanceRestraints, PerturbedDistanceRestraints, PositionRestraints,
@@ -96,6 +100,20 @@ pub struct Forcefield {
     pub perturbed_distance_restraints: PerturbedDistanceRestraints,
     /// Current lambda value (for perturbed restraints)
     pub lambda: f64,
+    /// (lambda, lambda_derivative) for FEP/TI perturbed bonded terms.
+    /// lambda_derivative = NLAM * RLAM^(NLAM-1); set from ImdParameters::lambda_and_derivative().
+    pub lambda_and_derivative: (f64, f64),
+    /// NLAM exponent (1 = linear, 2 = quadratic, etc.)
+    pub lambda_exp: i32,
+    /// Global soft-core alpha for LJ (ALPHLJ from imd PERTURBATION block).
+    /// Per-atom lj_soft from .ptp is multiplied by this to get effective alpha_lj,
+    /// matching gromosXX in_perturbation.cc:1308 `lj_soft *= param.perturbation.soft_vdw`.
+    pub global_alphlj: f64,
+    /// Global soft-core alpha for CRF (ALPHC from imd PERTURBATION block).
+    pub global_alphc: f64,
+    /// Per-atom perturbation data; None for non-perturbed atoms.
+    /// Populated when a pttopo is loaded (topo.perturbed_solute.atoms is non-empty).
+    pert_info: Vec<Option<PertAtomInfo>>,
 }
 
 impl Forcefield {
@@ -140,7 +158,40 @@ impl Forcefield {
             distance_restraints: DistanceRestraints::new(),
             perturbed_distance_restraints: PerturbedDistanceRestraints::new(),
             lambda: 0.0,
+            lambda_and_derivative: (0.0, 1.0),
+            lambda_exp: 1,
+            global_alphlj: 1.0,
+            global_alphc: 1.0,
+            pert_info: Vec::new(),
         }
+    }
+
+    /// Build per-atom perturbation info from the topology's perturbed_solute.
+    ///
+    /// gromosXX multiplies the per-atom lj_soft/crf_soft from the .ptp file by the
+    /// global ALPHLJ/ALPHC from the .imd PERTURBATION block before storing them
+    /// (in_perturbation.cc:1308: `lj_soft *= param.perturbation.soft_vdw`).
+    /// We replicate that here: effective alpha_lj = pa.lj_soft * global_alphlj.
+    fn build_pert_info(topo: &Topology, global_alphlj: f64, global_alphc: f64) -> Vec<Option<PertAtomInfo>> {
+        let n = topo.inverse_mass.len();
+        let mut info: Vec<Option<PertAtomInfo>> = vec![None; n];
+        for pa in &topo.perturbed_solute.atoms {
+            if pa.seq < n {
+                // topo.iac and PerturbedAtom.a_iac / b_iac are both 0-indexed:
+                //   topo.iac   → topology.rs reader subtracts 1 from file's 1-indexed value
+                //   pa.a_iac   → ptp.rs reader subtracts 1 from pttopo's 1-indexed value
+                // No conversion needed here.
+                info[pa.seq] = Some(PertAtomInfo {
+                    a_iac:    pa.a_iac,
+                    b_iac:    pa.b_iac,
+                    a_charge: pa.a_charge,
+                    b_charge: pa.b_charge,
+                    alpha_lj:  pa.lj_soft  * global_alphlj,
+                    alpha_crf: pa.crf_soft * global_alphc,
+                });
+            }
+        }
+        info
     }
 
     /// Convert topology LJ parameters to the nonbonded-crate format.
@@ -164,6 +215,7 @@ impl Algorithm for Forcefield {
         self.charges = topo.charge.clone();
         self.iac_u32 = topo.iac.iter().map(|&i| i as u32).collect();
         self.longrange_forces = vec![Vec3::ZERO; n];
+        self.pert_info = Self::build_pert_info(topo, self.global_alphlj, self.global_alphc);
         Ok(())
     }
 
@@ -181,6 +233,7 @@ impl Algorithm for Forcefield {
             self.charges = topo.charge.clone();
             self.iac_u32 = topo.iac.iter().map(|&i| i as u32).collect();
             self.longrange_forces = vec![Vec3::ZERO; n_atoms];
+            self.pert_info = Self::build_pert_info(topo, self.global_alphlj, self.global_alphc);
         }
 
         // IMPORTANT: Update periodicity from current box each step.
@@ -330,6 +383,17 @@ impl Algorithm for Forcefield {
             )
         } else {
             gromos_forces::bonded::ForceEnergy::new(n_atoms)
+        };
+
+        // --- 2b. Perturbed bonded forces (FEP/TI, NTG != 0) ---
+        // Forces are accumulated in the returned ForceEnergyLambda and applied in step 4.
+        let (lambda, lambda_deriv) = self.lambda_and_derivative;
+        let perturbed_bonded = if !topo.perturbed_solute.is_empty() {
+            let pr = calculate_perturbed_bonded_forces(topo, conf, lambda, lambda_deriv);
+            log::debug!("  Perturbed bonded: E={:.10e} dH/dλ={:.10e}", pr.energy, pr.lambda_derivative);
+            Some(pr)
+        } else {
+            None
         };
 
         // --- 3. Calculate nonbonded forces ---
@@ -636,16 +700,176 @@ impl Algorithm for Forcefield {
             );
         }
 
+        // --- 3b. Perturbed nonbonded corrections (FEP/TI) ---
+        // The four steps below mirror gromosXX's perturbed_nonbonded_outerloop:
+        //   perturbed_pairlist_correction   → replaces state-A contribution for perturbed pairs
+        //   perturbed_self_energy_correction → corrects RF self for perturbed atoms
+        //   perturbed_excluded_correction    → corrects RF excluded pairs for perturbed atoms
+        //   perturbed_one_four_correction    → corrects 1-4 for perturbed atoms
+        let pert_nb_dhdl = if !self.pert_info.is_empty()
+            && self.pert_info.iter().any(|x| x.is_some())
+        {
+            let (lam, _) = self.lambda_and_derivative;
+            let lp = PerturbedLambdaParams::from_lambda(
+                lam, lam, lam, lam, 1.0, 1.0, 1.0, 1.0,
+                self.lambda_exp,
+            );
+            // 3b-1: pairlist correction (delta over what state-A innerloop already computed)
+            // Applied to BOTH short-range and long-range pairlists:
+            // the regular innerloops computed state-A for all pairs; here we replace the
+            // contribution for perturbed pairs with the full soft-core dual-topology result.
+            let corr_pl = perturbed_pairlist_correction(
+                &conf.current().pos,
+                &self.pairlist_solute_u32,
+                &self.pert_info,
+                &self.charges,
+                &self.iac_u32,
+                &self.lj_params,
+                &self.crf_params,
+                &lp,
+                &self.periodicity,
+            );
+            self.nonbonded_storage.e_lj  += corr_pl.delta_e_lj;
+            self.nonbonded_storage.e_crf += corr_pl.delta_e_crf;
+            let mut dhdl_nb = corr_pl.dhdl;
+            for i in 0..n_atoms {
+                self.nonbonded_storage.forces[i] += corr_pl.forces[i];
+            }
+
+            // 3b-1b: same correction for ALL remaining pairlists that may contain
+            // perturbed pairs. Solute-solvent long-range pairs are in solute_long.
+            let pls: &[(&str, &[(u32,u32)])] = &[
+                ("solute_long",   &self.pairlist_solute_long_u32),
+                ("solvent_short", &self.pairlist_solvent_u32),
+                ("solvent_long",  &self.pairlist_solvent_long_u32),
+            ];
+            for (_name, pl) in pls {
+                if pl.is_empty() { continue; }
+                let corr = perturbed_pairlist_correction(
+                    &conf.current().pos,
+                    pl,
+                    &self.pert_info,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &lp,
+                    &self.periodicity,
+                );
+                self.nonbonded_storage.e_lj  += corr.delta_e_lj;
+                self.nonbonded_storage.e_crf += corr.delta_e_crf;
+                dhdl_nb += corr.dhdl;
+                for i in 0..n_atoms {
+                    self.nonbonded_storage.forces[i] += corr.forces[i];
+                }
+            }
+            log::debug!("  Pert corr solute_short: ({} pairs, Δe_lj={:.6e}, Δe_crf={:.6e})",
+                self.pairlist_solute_u32.len(), corr_pl.delta_e_lj, corr_pl.delta_e_crf);
+            log::debug!("  Perturbed NB: Δe_lj_pl={:.6e} Δe_crf_pl={:.6e} Δe_self=TBD dH/dλ_nb={:.6e}",
+                corr_pl.delta_e_lj, corr_pl.delta_e_crf, dhdl_nb);
+
+            // 3b-2: RF self-energy correction for perturbed atoms
+            let (de_self, dhdl_self) = perturbed_self_energy_correction(
+                &self.pert_info, &self.crf_params, &lp,
+            );
+            self.nonbonded_storage.e_crf += de_self;
+            dhdl_nb += dhdl_self;
+
+            // 3b-3: excluded-pair CRF correction (separate accumulator to avoid double-add)
+            {
+                use gromos_forces::nonbonded::PertNBCorrection;
+                let mut corr_ex = PertNBCorrection::new(n_atoms);
+                perturbed_excluded_correction(
+                    &topo.exclusions,
+                    &conf.current().pos,
+                    &self.pert_info,
+                    &self.charges,
+                    &self.crf_params,
+                    &lp,
+                    &self.periodicity,
+                    topo.num_solute_atoms(),
+                    &mut corr_ex,
+                );
+                self.nonbonded_storage.e_crf += corr_ex.delta_e_crf;
+                dhdl_nb += corr_ex.dhdl;
+                for i in 0..n_atoms {
+                    self.nonbonded_storage.forces[i] += corr_ex.forces[i];
+                }
+            }
+
+            // 3b-4: 1-4 correction (separate accumulator)
+            if !topo.one_four_pairs.is_empty() {
+                use gromos_forces::nonbonded::PertNBCorrection;
+                let mut corr14 = PertNBCorrection::new(n_atoms);
+                perturbed_one_four_correction(
+                    &topo.one_four_pairs,
+                    &conf.current().pos,
+                    &self.pert_info,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &lp,
+                    &self.periodicity,
+                    &mut corr14,
+                );
+                log::debug!("  1-4 corr: Δe_lj={:.6e} Δe_crf={:.6e}", corr14.delta_e_lj, corr14.delta_e_crf);
+                self.nonbonded_storage.e_lj  += corr14.delta_e_lj;
+                self.nonbonded_storage.e_crf += corr14.delta_e_crf;
+                dhdl_nb += corr14.dhdl;
+                for i in 0..n_atoms {
+                    self.nonbonded_storage.forces[i] += corr14.forces[i];
+                }
+            }
+
+            // 3b-5: PERTATOMPAIR correction (special pair types replacing 1-4 LJ)
+            if !topo.perturbed_solute.atom_pairs.is_empty() {
+                let mut corr_ap = PertNBCorrection::new(n_atoms);
+                perturbed_atom_pair_correction(
+                    &topo.perturbed_solute.atom_pairs,
+                    &topo.one_four_pairs,
+                    &conf.current().pos,
+                    &self.charges,
+                    &self.iac_u32,
+                    &self.lj_params,
+                    &self.crf_params,
+                    &lp,
+                    &self.periodicity,
+                    &mut corr_ap,
+                );
+                self.nonbonded_storage.e_lj += corr_ap.delta_e_lj;
+                dhdl_nb += corr_ap.dhdl;
+                for i in 0..n_atoms {
+                    self.nonbonded_storage.forces[i] += corr_ap.forces[i];
+                }
+                log::debug!("  AtomPair corr: Δe_lj={:.6e} Δe_crf={:.6e}", corr_ap.delta_e_lj, corr_ap.delta_e_crf);
+            }
+
+            log::debug!("  Perturbed NB: Δe_lj_pl={:.6e} Δe_crf_pl={:.6e} Δe_self={:.6e} dH/dλ_nb={:.6e}",
+                corr_pl.delta_e_lj, corr_pl.delta_e_crf, de_self, dhdl_nb);
+            log::debug!("  nb_storage after all: e_lj={:.6e} e_crf={:.6e}", self.nonbonded_storage.e_lj, self.nonbonded_storage.e_crf);
+
+            dhdl_nb
+        } else {
+            0.0
+        };
+
         // --- 4. Assemble forces and energies ---
         {
             let state = conf.current_mut();
             let has_bonded = !bonded_result.forces.is_empty();
             for i in 0..n_atoms {
                 let bonded_f = if has_bonded { bonded_result.forces[i] } else { gromos_core::math::Vec3::ZERO };
-                state.force[i] = bonded_f + self.nonbonded_storage.forces[i];
+                let pert_f = perturbed_bonded.as_ref()
+                    .and_then(|p| p.forces.get(i).copied())
+                    .unwrap_or(gromos_core::math::Vec3::ZERO);
+                state.force[i] = bonded_f + pert_f + self.nonbonded_storage.forces[i];
             }
 
-            state.energies.bond_total = bonded_result.energy;
+            state.energies.bond_total = bonded_result.energy
+                + perturbed_bonded.as_ref().map_or(0.0, |p| p.energy);
+            state.energies.dhdl_total = perturbed_bonded.as_ref().map_or(0.0, |p| p.lambda_derivative)
+                + pert_nb_dhdl;
             state.energies.lj_total = self.nonbonded_storage.e_lj;
             state.energies.crf_total = self.nonbonded_storage.e_crf;
             state.energies.update_potential_total();
