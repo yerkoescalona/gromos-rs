@@ -9,8 +9,8 @@ natoms = 72
 isolates = "steepest descent + SHAKE + solvent (no posres)"
 
 [input]
-topology = "../../aladip.topo"
-configuration = "../../aladip.conf"
+topology = "../shared/aladip.topo"
+configuration = "../shared/aladip.conf"
 parameters = "aladip_solvated_em_shake.in"
 
 [expected]

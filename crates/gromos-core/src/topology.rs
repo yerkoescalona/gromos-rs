@@ -4,8 +4,85 @@
 //! - md++/src/topology/topology.h
 //! - md++/src/topology/solute.h
 //! - md++/src/topology/solvent.h
+//!
+//! # Dimension 10 — instancing model (Phase 1)
+//!
+//! The legacy `Solute` / `Vec<Solvent>` fields remain the authoritative source
+//! for bonded interactions during the transition.  The new fields alongside them
+//! implement the *representation* half of Dim 10:
+//!
+//! - `MoleculeType` stores per-atom parameters **once** per unique molecule type.
+//! - `MoleculeInstance` places one copy at an `atom_offset` in the flat arrays
+//!   and carries a `Role` attribute (Solute / Solvent).
+//! - `Topology::moltypes` + `Topology::instances` are populated by
+//!   `init_solute_moltype()` and `solvate()`.
+//!
+//! **Phase 1 invariants:**
+//! - `instances[k]` corresponds 1-to-1 with `molecules[k]`.
+//! - `role_of_atom(i)` → `Some(Role::Solvent)` iff atom `i` belongs to a
+//!   solvent instance.  Returns `None` when the instance model is not yet
+//!   initialised (pre-`solvate()` test topologies).
+//! - `s:` in `AtomSelection` routes through `role_of_atom` when instances are
+//!   available; falls back to `molecules[1..]` otherwise.
+//!
+//! Phase 2 (future): move bonds/angles/dihedrals into `MoleculeType`; make the
+//! flat `iac`/`mass`/`charge` arrays into rebuildable caches; remove `Solute`
+//! and `Vec<Solvent>`; add `promote(instance)` with CG/exclusion renumbering.
 
 use crate::math::Vec3;
+
+// ─── Dim 10: instancing model ────────────────────────────────────────────────
+
+/// Semantic role of a molecule instance in the simulation.
+///
+/// Routes SHAKE/SETTLE dispatch, the solvent fast-path in the nonbonded
+/// innerloop, and the `s:`/`m:` AtomSpecifier grammar.
+/// In Phase 1 this is set at `solvate()` time; Phase 2 adds `promote()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Role {
+    Solute,
+    Solvent,
+}
+
+/// Per-atom parameters stored *once* inside a `MoleculeType`.
+///
+/// Equivalent to `Atom` but without the boolean flags (those belong to the
+/// instance or to future attribute layers).
+#[derive(Debug, Clone)]
+pub struct MolTypeAtom {
+    pub name: String,
+    pub residue_nr: usize,
+    pub residue_name: String,
+    pub iac: usize,
+    pub mass: f64,
+    pub charge: f64,
+}
+
+/// Topology stored once for a unique molecule type.
+///
+/// Phase 1: only atom parameters.  Phase 2: bonds/angles/dihedrals move here.
+#[derive(Debug, Clone)]
+pub struct MoleculeType {
+    /// Human-readable name ("SOLUTE", "SPC", …).
+    pub name: String,
+    /// One entry per atom in the template, in order.
+    pub atoms: Vec<MolTypeAtom>,
+}
+
+impl MoleculeType {
+    pub fn num_atoms(&self) -> usize { self.atoms.len() }
+}
+
+/// One copy of a `MoleculeType` placed in the system.
+#[derive(Debug, Clone)]
+pub struct MoleculeInstance {
+    /// Index into `Topology::moltypes`.
+    pub moltype_id: usize,
+    /// First atom's 0-based global index in the flat position/force arrays.
+    pub atom_offset: usize,
+    /// Semantic role — drives dispatch and selection grammar.
+    pub role: Role,
+}
 
 /// Atom properties
 #[derive(Debug, Clone)]
@@ -60,6 +137,45 @@ pub struct CrossDihedral {
     pub g: usize,
     pub h: usize,
     pub cross_dihedral_type: usize,
+}
+
+/// Perturbed atom — state A and B LJ+charge parameters (PERTATOMPARAM block).
+/// `lj_soft` and `crf_soft` are the per-atom soft-core alphas from the file;
+/// they are scaled by ALPHLJ/ALPHC from the imd PERTURBATION block at run time.
+#[derive(Debug, Clone)]
+pub struct PerturbedAtom {
+    pub seq: usize,      // 0-indexed atom number in topology
+    pub a_iac: usize,    // State A IAC (0-indexed)
+    pub a_mass: f64,
+    pub a_charge: f64,
+    pub b_iac: usize,    // State B IAC (0-indexed)
+    pub b_mass: f64,
+    pub b_charge: f64,
+    pub lj_soft: f64,    // per-atom alpha_LJ soft-core
+    pub crf_soft: f64,   // per-atom alpha_CRF soft-core
+}
+
+/// Perturbed atom pair — special LJ interaction between two perturbed atoms
+/// (PERTATOMPAIR block). These pairs are excluded from the regular pairlist
+/// and handled with their own A/B LJ types.
+///
+/// **INVARIANT: all index fields are 0-indexed.** GROMOS files store `A_type`
+/// and `B_type` as 1-indexed integers; `gromos-io/ptp.rs` subtracts 1 at the
+/// parse boundary.  Never store a raw file value here.
+///
+/// `B_type` is `Option` because the file value `0` is a sentinel meaning "the
+/// atom pair disappears in state B" (no interaction).  The parse boundary maps
+/// file 0 → `None` and file N → `Some(N-1)`.
+///
+/// Interaction type encoding (same for A and B):
+///   `0` (file 1) → normal full LJ (c6/c12)
+///   `1` (file 2) → 1-4 LJ (cs6/cs12)
+#[derive(Debug, Clone, Copy)]
+pub struct PerturbedAtomPair {
+    pub i: usize,               // 0-indexed, i < j
+    pub j: usize,
+    pub a_type: usize,          // State A interaction type (0-indexed)
+    pub b_type: Option<usize>,  // State B interaction type (0-indexed); None = absent in state B
 }
 
 /// Perturbed bond (for FEP calculations)
@@ -239,25 +355,84 @@ impl Solute {
     }
 }
 
+/// Soft-core perturbed harmonic bond (PERTBONDSOFT).
+/// Used when a bond is absent in one state (K=0), requiring soft-core treatment.
+/// `b_type = None` means the bond is absent in state B (K_B = 0, r0_B = r0_A).
+#[derive(Debug, Clone)]
+pub struct SoftBond {
+    pub i: usize,
+    pub j: usize,
+    pub a_type: usize,          // index into bond_parameters (uses k_harmonic)
+    pub b_type: Option<usize>,  // None → K_B=0, r0_B=r0_A
+    pub alpha: f64,
+}
+
+/// Soft-core perturbed cos-harmonic angle (PERTANGLESOFT).
+/// `b_type = None` means the angle is absent in state B (K_B = 0, cos0_B = cos0_A).
+#[derive(Debug, Clone)]
+pub struct SoftAngle {
+    pub i: usize,
+    pub j: usize,
+    pub k: usize,
+    pub a_type: usize,
+    pub b_type: Option<usize>,
+    pub alpha: f64,
+}
+
+/// Soft-core perturbed improper dihedral (PERTIMPROPERDIHSOFT).
+/// `b_type = None` means the improper is absent in state B (K_B = 0, q0_B = q0_A).
+#[derive(Debug, Clone)]
+pub struct SoftImproper {
+    pub i: usize,
+    pub j: usize,
+    pub k: usize,
+    pub l: usize,
+    pub a_type: usize,
+    pub b_type: Option<usize>,
+    pub alpha: f64,
+}
+
 /// Perturbed solute for FEP calculations
 ///
 /// Contains dual-topology (A/B state) bonded terms for free energy perturbation
 #[derive(Debug, Clone)]
 pub struct PerturbedSolute {
+    /// Perturbed atoms: state A/B IAC, mass, charge, soft-core alphas.
+    /// Indexed sparsely — only atoms listed in PERTATOMPARAM.
+    pub atoms: Vec<PerturbedAtom>,
+    /// Perturbed atom pairs (PERTATOMPAIR): special LJ between two perturbed atoms.
+    pub atom_pairs: Vec<PerturbedAtomPair>,
     pub bonds: Vec<PerturbedBond>,
     pub angles: Vec<PerturbedAngle>,
     pub proper_dihedrals: Vec<PerturbedDihedral>,
     pub improper_dihedrals: Vec<PerturbedDihedral>,
+    /// Soft-core perturbed bonds (PERTBONDSOFT): bond absent in one state.
+    pub soft_bonds: Vec<SoftBond>,
+    /// Soft-core perturbed angles (PERTANGLESOFT): angle absent in one state.
+    pub soft_angles: Vec<SoftAngle>,
+    /// Soft-core perturbed impropers (PERTIMPROPERDIHSOFT): improper absent in one state.
+    pub soft_impropers: Vec<SoftImproper>,
 }
 
 impl PerturbedSolute {
     pub fn new() -> Self {
         Self {
+            atoms: Vec::new(),
+            atom_pairs: Vec::new(),
             bonds: Vec::new(),
             angles: Vec::new(),
             proper_dihedrals: Vec::new(),
             improper_dihedrals: Vec::new(),
+            soft_bonds: Vec::new(),
+            soft_angles: Vec::new(),
+            soft_impropers: Vec::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.atoms.is_empty() && self.bonds.is_empty()
+            && self.angles.is_empty() && self.proper_dihedrals.is_empty()
+            && self.improper_dihedrals.is_empty()
     }
 }
 
@@ -343,7 +518,14 @@ pub struct Topology {
     pub solvents: Vec<Solvent>,
 
     // Per-atom properties (flat arrays for all atoms)
-    pub iac: Vec<usize>,        // Integer atom codes (atom types)
+
+    /// Integer atom codes (atom types).
+    ///
+    /// **INVARIANT: 0-indexed** (0..N\_types-1), matching LJ matrix rows/cols.
+    /// GROMOS files store IAC as 1-indexed; `gromos-io/topology.rs` subtracts 1
+    /// at the parse boundary.  `ptp.rs` does the same for `PerturbedAtom.a_iac`
+    /// and `b_iac`.  Never store a raw 1-indexed file value here.
+    pub iac: Vec<usize>,
     pub mass: Vec<f64>,         // Atomic masses
     pub inverse_mass: Vec<f64>, // Precomputed 1/mass for efficiency
     pub charge: Vec<f64>,       // Atomic charges
@@ -370,6 +552,15 @@ pub struct Topology {
     // Molecule boundaries (for molecule-based operations)
     pub molecules: Vec<std::ops::Range<usize>>, // molecule_start..molecule_end
 
+    // ── Dim 10 instancing model ──────────────────────────────────────────────
+    // Populated by init_solute_moltype() + solvate().
+    // instances[k] corresponds 1-to-1 with molecules[k].
+    // Empty until those methods are called (e.g. in raw test topologies).
+    /// Registry: one entry per unique molecule type (parameters stored once).
+    pub moltypes: Vec<MoleculeType>,
+    /// All instances in system order; instances[k].atom_offset == molecules[k].start.
+    pub instances: Vec<MoleculeInstance>,
+
     // Force field parameters
     pub bond_parameters: Vec<BondParameters>,
     pub angle_parameters: Vec<AngleParameters>,
@@ -387,6 +578,9 @@ pub struct Topology {
     // Distance restraints (loaded from .distres file)
     pub distance_restraints: Vec<DistanceRestraintSpec>,
     pub perturbed_distance_restraints: Vec<PerturbedDistanceRestraintSpec>,
+
+    // FEP/TI: per-solute-atom flag, true if listed in PERTATOMPARAM
+    pub is_perturbed: Vec<bool>,
 }
 
 impl Topology {
@@ -411,6 +605,8 @@ impl Topology {
             energy_groups: Vec::new(),
             atom_to_energy_group: Vec::new(),
             molecules: Vec::new(),
+            moltypes: Vec::new(),
+            instances: Vec::new(),
             bond_parameters: Vec::new(),
             angle_parameters: Vec::new(),
             dihedral_parameters: Vec::new(),
@@ -421,6 +617,7 @@ impl Topology {
             chargegroup_codes: Vec::new(),
             distance_restraints: Vec::new(),
             perturbed_distance_restraints: Vec::new(),
+            is_perturbed: Vec::new(),
         }
     }
 
@@ -483,6 +680,131 @@ impl Topology {
     #[inline]
     pub fn energy_group(&self, i: usize) -> usize {
         self.atom_to_energy_group[i]
+    }
+
+    // ── Dim 10 accessors ─────────────────────────────────────────────────────
+
+    /// Internal: look up the MolTypeAtom for global atom index `i` via instances.
+    fn moltype_atom(&self, i: usize) -> Option<&MolTypeAtom> {
+        let mol = self.molecule_nr(i)?;
+        let inst = self.instances.get(mol)?;
+        let mt = self.moltypes.get(inst.moltype_id)?;
+        mt.atoms.get(i - inst.atom_offset)
+    }
+
+    /// Role of the molecule instance that owns atom `i`.
+    /// Returns `None` when the instance model hasn't been initialised yet.
+    pub fn role_of_atom(&self, i: usize) -> Option<Role> {
+        self.molecule_nr(i)
+            .and_then(|m| self.instances.get(m))
+            .map(|inst| inst.role)
+    }
+
+    /// `true` iff atom `i` belongs to a `Role::Solvent` instance.
+    pub fn is_solvent_atom(&self, i: usize) -> bool {
+        self.role_of_atom(i) == Some(Role::Solvent)
+    }
+
+    /// Change the role of molecule instance `mol_idx` to `Role::Solute`.
+    ///
+    /// This is the "promote one solvent molecule to solute" operation from Dim 10.
+    /// Phase 2 will add CG/exclusion renumbering; for now it's a label flip.
+    pub fn promote(&mut self, mol_idx: usize) -> Result<(), String> {
+        match self.instances.get_mut(mol_idx) {
+            Some(inst) => { inst.role = Role::Solute; Ok(()) }
+            None => Err(format!("molecule index {mol_idx} out of range (have {})", self.instances.len())),
+        }
+    }
+
+    /// Build the solute `MoleculeType` + `MoleculeInstance` from the existing
+    /// `solute.atoms` and flat parameter arrays.
+    ///
+    /// Safe to call repeatedly (no-op if already initialised).
+    /// Called by `solvate()` and by `gromos-io::build_topology()`.
+    pub fn init_solute_moltype(&mut self) {
+        if !self.instances.is_empty() { return; }
+        let n_sol = self.solute.num_atoms();
+        if n_sol == 0 { return; }
+
+        let mt_atoms: Vec<MolTypeAtom> = self.solute.atoms.iter().enumerate()
+            .map(|(i, a)| MolTypeAtom {
+                name:         a.name.clone(),
+                residue_nr:   a.residue_nr,
+                residue_name: a.residue_name.clone(),
+                iac:   self.iac.get(i).copied().unwrap_or(a.iac),
+                mass:  self.mass.get(i).copied().unwrap_or(a.mass),
+                charge: self.charge.get(i).copied().unwrap_or(a.charge),
+            })
+            .collect();
+
+        self.moltypes.push(MoleculeType { name: "SOLUTE".to_string(), atoms: mt_atoms });
+        self.instances.push(MoleculeInstance { moltype_id: 0, atom_offset: 0, role: Role::Solute });
+
+        // Ensure molecules[0] is set (solvate() may not have been called yet)
+        if self.molecules.is_empty() && n_sol > 0 {
+            self.molecules.push(0..n_sol);
+        }
+    }
+
+    /// Atom name for atom `i` (covers solute + all expanded solvent). Returns `None` if out of range.
+    ///
+    /// Prefers the Dim 10 moltype path when instances are populated; falls back to
+    /// the legacy `solute.atoms` + `solvent_atom_template` approach.
+    pub fn atom_name(&self, i: usize) -> Option<&str> {
+        if !self.instances.is_empty() {
+            return self.moltype_atom(i).map(|a| a.name.as_str());
+        }
+        // Legacy fallback (pre-init_solute_moltype)
+        let n_sol = self.solute.num_atoms();
+        if i < n_sol {
+            return self.solute.atoms.get(i).map(|a| a.name.as_str());
+        }
+        let aps = self.solvent_atom_template.len();
+        if aps > 0 {
+            return self.solvent_atom_template.get((i - n_sol) % aps).map(|a| a.name.as_str());
+        }
+        None
+    }
+
+    /// Residue number (1-based) for atom `i`.
+    pub fn residue_nr(&self, i: usize) -> Option<usize> {
+        if !self.instances.is_empty() {
+            return self.moltype_atom(i).map(|a| a.residue_nr);
+        }
+        let n_sol = self.solute.num_atoms();
+        if i < n_sol {
+            return self.solute.atoms.get(i).map(|a| a.residue_nr);
+        }
+        let aps = self.solvent_atom_template.len();
+        if aps > 0 { return Some((i - n_sol) / aps + 1); }
+        None
+    }
+
+    /// Residue name for atom `i` (covers solute + solvent).
+    pub fn residue_name(&self, i: usize) -> Option<&str> {
+        if !self.instances.is_empty() {
+            return self.moltype_atom(i).map(|a| a.residue_name.as_str());
+        }
+        let n_sol = self.solute.num_atoms();
+        if i < n_sol {
+            return self.solute.atoms.get(i).map(|a| a.residue_name.as_str());
+        }
+        if !self.solvents.is_empty() { return Some(self.solvents[0].name.as_str()); }
+        None
+    }
+
+    /// 0-based molecule index for atom `i` (uses the `molecules` ranges populated by `solvate()`).
+    /// Returns `None` if `molecules` is empty or atom is out of all molecule ranges.
+    pub fn molecule_nr(&self, i: usize) -> Option<usize> {
+        // molecules is sorted by start; binary-search on start to find candidate
+        let idx = self.molecules.partition_point(|r| r.start <= i);
+        if idx > 0 {
+            let mol = idx - 1;
+            if self.molecules[mol].contains(&i) {
+                return Some(mol);
+            }
+        }
+        None
     }
 
     /// Build exclusions from bonded topology
@@ -584,6 +906,9 @@ impl Topology {
         let atoms_per_solvent = self.solvent_atom_template.len();
         let n_solute = self.solute.num_atoms();
 
+        // Dim 10: ensure solute moltype + instance are initialised before we add solvent.
+        self.init_solute_moltype();
+
         // Add solute as one molecule (if it has atoms)
         if n_solute > 0 && self.molecules.is_empty() {
             self.molecules.push(0..n_solute);
@@ -672,6 +997,38 @@ impl Topology {
             }
             log::debug!("LJ matrix expanded from {}x{} to {}x{} for solvent types",
                 old_len, old_len, n_types, n_types);
+        }
+
+        // Dim 10: add solvent MoleculeType (stored once) + one Instance per molecule.
+        {
+            let sv_name = self.solvents.last()
+                .map(|sv| sv.name.clone())
+                .unwrap_or_else(|| "SOLV".to_string());
+
+            let sv_moltype = MoleculeType {
+                name: sv_name,
+                atoms: self.solvent_atom_template.iter().enumerate().map(|(idx, sa)| {
+                    MolTypeAtom {
+                        name:         sa.name.clone(),
+                        residue_nr:   idx + 1,
+                        residue_name: "SOLV".to_string(),
+                        iac:   sa.iac,
+                        mass:  sa.mass,
+                        charge: sa.charge,
+                    }
+                }).collect(),
+            };
+            let solvent_moltype_id = self.moltypes.len();
+            self.moltypes.push(sv_moltype);
+
+            for mol in 0..nsm {
+                let atom_offset = n_solute + mol * atoms_per_solvent;
+                self.instances.push(MoleculeInstance {
+                    moltype_id: solvent_moltype_id,
+                    atom_offset,
+                    role: Role::Solvent,
+                });
+            }
         }
 
         log::debug!("Solvated: {} solute + {} solvent ({} molecules × {} atoms) = {} total, {} chargegroups",

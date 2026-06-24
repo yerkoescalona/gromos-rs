@@ -9,7 +9,7 @@ natoms = 12
 isolates = "LINCS constraint solver applied to solute bonds (NTC=3, NTCP=lincs)"
 
 [input]
-topology = "../../aladip.topo"
+topology = "../shared/aladip.topo"
 configuration = "aladip_vacuum_lincs.conf"
 parameters = "aladip_vacuum_lincs.in"
 

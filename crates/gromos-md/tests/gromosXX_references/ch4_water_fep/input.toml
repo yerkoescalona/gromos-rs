@@ -1,0 +1,40 @@
+# gromosXX v1.6.0, double precision, CH4 in 999 SPC water
+# CH4 → dummy decoupling (vol7 TI tutorial, 54a7 force field)
+# RLAM=0.5, NLAM=1, ALPHLJ=0.5, ALPHC=0.5, NTB=1, EPSRF=78.5
+
+[system]
+name = "ch4_water_fep"
+description = "Level 4: CH4 in water FEP — CH4→dummy decoupling at lambda=0.5"
+level = 4
+natoms = 2998
+isolates = "pure nonbonded FEP: 1 perturbed solute atom (CH4→DUM), no bonded perturbations"
+
+[input]
+topology = "../shared/ch4_spc.top"
+configuration = "../shared/ch4_spc.cnf"
+parameters = "ch4_water_fep.in"
+pttopo = "../shared/ch4_spc_dummy.ptp"
+
+[expected]
+forces = "expected/forces.trf"
+energies = "expected/energies.tre"
+trajectory = "expected/trajectory.trc"
+final_conf = "expected/final.conf"
+free_energy = "expected/free_energy.trg"
+
+[precision]
+internal = "f64"
+position_digits = 9
+force_digits = 9
+energy_sigfigs = 10
+
+[tolerances]
+force_abs = 1e-4
+energy_rel = 1e-6
+position_abs = 1e-6
+
+[reference_values]
+# gromosXX ENERGY03 step 0: total/kinetic/potential
+E_Total = -4.133666697e+04
+E_Kinetic = 9.082293961e+01
+E_Potential = -4.142748991e+04

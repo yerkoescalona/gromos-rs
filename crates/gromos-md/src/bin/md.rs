@@ -22,8 +22,11 @@ use gromos::{
         coordinate::read_coordinates,
         energy::{EnergyFrame, EnergyWriter},
         force::ForceWriter,
+        free_energy::{FreeEnergyFrame, FreeEnergyWriter},
         imd::read_imd_file,
+        distanceres::read_distanceres,
         posres::{build_posres_entries, read_posresspec, read_refpos},
+        ptp::read_pttopo,
         topology::{build_topology, read_topology_file},
         trajectory::TrajectoryWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
@@ -399,6 +402,69 @@ fn main() {
 
     // gromosXX convention: read_topology() then topo.solvate(0, nsm)
     let mut topo = build_topology(topo_data);
+
+    // Load perturbation topology if provided and FEP is on (NTG != 0)
+    if let Some(ref pt_file) = md_args.pttopo_file {
+        if imd.ntg != 0 {
+            match read_pttopo(pt_file) {
+                Ok(pt) => {
+                    topo.perturbed_solute = pt.perturbed_solute;
+                    let n = topo.num_solute_atoms();
+                    topo.is_perturbed = pt.is_perturbed;
+                    topo.is_perturbed.resize(n, false);
+
+                    // Remove from solute the bonds/angles/impropers/dihedrals that
+                    // are perturbed — gromosXX keeps them in disjoint sets.
+                    {
+                        use std::collections::HashSet;
+                        let pb: HashSet<(usize,usize)> = topo.perturbed_solute.bonds
+                            .iter().map(|b| (b.i.min(b.j), b.i.max(b.j)))
+                            .chain(topo.perturbed_solute.soft_bonds
+                                .iter().map(|b| (b.i.min(b.j), b.i.max(b.j))))
+                            .collect();
+                        topo.solute.bonds.retain(|b| !pb.contains(&(b.i.min(b.j), b.i.max(b.j))));
+
+                        let pa: HashSet<(usize,usize,usize)> = topo.perturbed_solute.angles
+                            .iter().map(|a| (a.i, a.j, a.k))
+                            .chain(topo.perturbed_solute.soft_angles
+                                .iter().map(|a| (a.i, a.j, a.k)))
+                            .collect();
+                        topo.solute.angles.retain(|a| !pa.contains(&(a.i, a.j, a.k)));
+
+                        let pi: HashSet<(usize,usize,usize,usize)> = topo.perturbed_solute.improper_dihedrals
+                            .iter().map(|d| (d.i, d.j, d.k, d.l))
+                            .chain(topo.perturbed_solute.soft_impropers
+                                .iter().map(|d| (d.i, d.j, d.k, d.l)))
+                            .collect();
+                        topo.solute.improper_dihedrals.retain(|d| !pi.contains(&(d.i, d.j, d.k, d.l)));
+
+                        let pd: HashSet<(usize,usize,usize,usize)> = topo.perturbed_solute.proper_dihedrals
+                            .iter().map(|d| (d.i, d.j, d.k, d.l)).collect();
+                        topo.solute.proper_dihedrals.retain(|d| !pd.contains(&(d.i, d.j, d.k, d.l)));
+                    }
+
+                    println!(
+                        "  Perturbation topology: {} perturbed atoms, {} bonds, {} angles, \
+                         {} impropers, {} dihedrals, {} soft bonds, {} soft angles, {} soft impropers",
+                        topo.perturbed_solute.atoms.len(),
+                        topo.perturbed_solute.bonds.len(),
+                        topo.perturbed_solute.angles.len(),
+                        topo.perturbed_solute.improper_dihedrals.len(),
+                        topo.perturbed_solute.proper_dihedrals.len(),
+                        topo.perturbed_solute.soft_bonds.len(),
+                        topo.perturbed_solute.soft_angles.len(),
+                        topo.perturbed_solute.soft_impropers.len(),
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Error reading perturbation topology: {}", e);
+                    process::exit(1);
+                }
+            }
+        } else {
+            log::warn!("@pttopo provided but NTG=0 — perturbation topology ignored");
+        }
+    }
 
     // === 2. Load coordinates (read_configuration) ===
     // Load coordinates BEFORE solvation so we can determine actual NSM
@@ -804,6 +870,57 @@ fn main() {
         None
     };
 
+    // Load distance restraints if requested (NTDIR != 0)
+    let distanceres_data = if imd.ntdir != 0 {
+        if let Some(ref dr_file) = md_args.distrest_file {
+            use gromos::interaction::restraints::{
+                DistanceRestraint, DistanceRestraints,
+                PerturbedDistanceRestraint, PerturbedDistanceRestraints,
+            };
+
+            let (unperturbed, perturbed) = read_distanceres(dr_file).unwrap_or_else(|e| {
+                eprintln!("Error reading distance restraint file: {}", e);
+                process::exit(1);
+            });
+
+            let mode = imd.ntdir.abs();
+            let k = imd.cdir;
+            let r_linear = imd.dir0;
+
+            let mut dr = DistanceRestraints::new();
+            for spec in &unperturbed {
+                let mut r = DistanceRestraint::new(
+                    spec.atom1, spec.atom2, spec.r0, spec.w0, spec.rah, k, r_linear, mode,
+                );
+                if imd.ntdir < 0 {
+                    r = r.with_time_averaging(imd.taudir, imd.dt);
+                }
+                dr.add(r);
+            }
+
+            let mut pdr = PerturbedDistanceRestraints::new();
+            for spec in &perturbed {
+                let r = PerturbedDistanceRestraint::new(
+                    spec.atom1, spec.atom2, spec.n, spec.m,
+                    spec.a_r0, spec.b_r0, spec.a_w0, spec.b_w0,
+                    spec.rah, k, r_linear, mode,
+                );
+                pdr.add(r);
+            }
+
+            println!(
+                "  Distance restraints: {} unperturbed, {} perturbed, NTDIR={}, CDIR={:.1}, DIR0={:.3}",
+                dr.restraints.len(), pdr.restraints.len(), imd.ntdir, k, r_linear
+            );
+            Some((dr, pdr))
+        } else {
+            eprintln!("NTDIR={} but no @distrest file specified", imd.ntdir);
+            process::exit(1);
+        }
+    } else {
+        None
+    };
+
     // === Build Algorithm Sequence (gromosXX pattern) ===
     let is_minimization = imd.ntem > 0;
 
@@ -845,6 +962,17 @@ fn main() {
         }
         if let Some(pr) = posres.clone() {
             forcefield.position_restraints = pr;
+        }
+        if let Some((ref dr, ref pdr)) = distanceres_data {
+            forcefield.distance_restraints = dr.clone();
+            forcefield.perturbed_distance_restraints = pdr.clone();
+            forcefield.lambda = imd.rlam;
+        }
+        if imd.ntg != 0 {
+            forcefield.lambda_and_derivative = imd.lambda_and_derivative();
+            forcefield.lambda_exp = imd.nlam;
+            forcefield.global_alphlj = imd.alphlj;
+            forcefield.global_alphc  = imd.alphc;
         }
         md_sequence.push(Box::new(forcefield));
 
@@ -945,6 +1073,17 @@ fn main() {
         }
         if let Some(pr) = posres {
             forcefield.position_restraints = pr;
+        }
+        if let Some((dr, pdr)) = distanceres_data {
+            forcefield.distance_restraints = dr;
+            forcefield.perturbed_distance_restraints = pdr;
+            forcefield.lambda = imd.rlam;
+        }
+        if imd.ntg != 0 {
+            forcefield.lambda_and_derivative = imd.lambda_and_derivative();
+            forcefield.lambda_exp = imd.nlam;
+            forcefield.global_alphlj = imd.alphlj;
+            forcefield.global_alphc  = imd.alphc;
         }
         md_sequence.push(Box::new(forcefield));
 
@@ -1279,6 +1418,23 @@ fn main() {
         None
     };
 
+    // Setup free-energy trajectory writer (@trg) — only when FEP is active (NTG != 0)
+    let mut free_energy_writer: Option<FreeEnergyWriter> = if imd.ntg != 0 {
+        let trg_path = md_args.trg_file.clone().unwrap_or_else(|| "md.trg".to_string());
+        match FreeEnergyWriter::new(&trg_path, "GROMOS-RS free energy trajectory") {
+            Ok(w) => {
+                println!("  Free-energy output: {}", trg_path);
+                Some(w)
+            },
+            Err(e) => {
+                eprintln!("Error creating free-energy trajectory file: {}", e);
+                process::exit(1);
+            },
+        }
+    } else {
+        None
+    };
+
     // Parameters summary
     if is_minimization {
         println!("Energy Minimization Parameters:");
@@ -1595,6 +1751,17 @@ fn main() {
             }
         }
 
+        // Write free-energy trajectory (dH/dλ) at energy output frequency
+        if let Some(ref mut fw) = free_energy_writer {
+            if step % nstener == 0 {
+                let dhdl = conf.old().energies.dhdl_total;
+                let fe_frame = FreeEnergyFrame::new(time, imd.rlam, dhdl);
+                if let Err(e) = fw.write_frame(&fe_frame) {
+                    eprintln!("Error writing free-energy trajectory: {}", e);
+                }
+            }
+        }
+
         // Write forces (same frequency as trajectory)
         if let Some(ref mut fw) = force_writer {
             if step % nstxout == 0 {
@@ -1722,6 +1889,14 @@ fn main() {
             eprintln!("Error finalizing EDS V_R file: {}", e);
         } else {
             log::debug!("EDS V_R file finalized");
+        }
+    }
+
+    // Finalize free-energy trajectory if enabled
+    if let Some(ref mut fw) = free_energy_writer {
+        if let Err(e) = fw.flush() {
+            log::error!("Failed to flush free-energy trajectory: {}", e);
+            eprintln!("Error flushing free-energy trajectory: {}", e);
         }
     }
 

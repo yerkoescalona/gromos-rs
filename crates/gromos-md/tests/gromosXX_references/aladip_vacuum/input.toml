@@ -9,7 +9,7 @@ natoms = 12
 isolates = "all bonded terms + exclusions + 1-4 interactions"
 
 [input]
-topology = "../../aladip.topo"
+topology = "../shared/aladip.topo"
 configuration = "aladip_vacuum.conf"
 parameters = "aladip_vacuum.in"
 

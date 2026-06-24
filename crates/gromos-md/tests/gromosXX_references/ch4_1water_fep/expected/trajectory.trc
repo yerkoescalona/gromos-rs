@@ -1,0 +1,24 @@
+TITLE
+	MD++
+CH4+1water FEP: minimal perturbed nonbonded test
+CM(CH4)->dummy at RLAM=0.5, vacuum, 4 atoms, no twin-range.
+Pure nonbonded FEP: only CM-OW LJ matters (CM charge=0, HW LJ=0).
+
+	position trajectory
+END
+TIMESTEP
+              0    0.000000000
+END
+POSITIONRED
+    0.000000000    0.000000000    0.000000000
+    0.400000000    0.000000000    0.000000000
+    0.463700000    0.163700000    0.000000000
+    0.463700000   -0.163700000    0.000000000
+END
+GENBOX
+    1
+    5.000000000    5.000000000    5.000000000
+   90.000000000   90.000000000   90.000000000
+    0.000000000    0.000000000    0.000000000
+    0.000000000    0.000000000    0.000000000
+END

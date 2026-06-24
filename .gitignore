@@ -68,7 +68,7 @@ coverage.xml
 test-results/
 
 # claude
-.claude
+.claude/settings.local.json
 
 # GROMOS
 gromosXX

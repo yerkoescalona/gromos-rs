@@ -9,8 +9,8 @@ natoms = 72
 isolates = "Position restraints + SHAKE + EM + solvated system"
 
 [input]
-topology = "../../aladip.topo"
-configuration = "../../aladip.conf"
+topology = "../shared/aladip.topo"
+configuration = "../shared/aladip.conf"
 parameters = "aladip_solvated_em.in"
 posresspec = "aladip_solvated_em.por"
 refpos = "aladip_solvated_em.rpr"

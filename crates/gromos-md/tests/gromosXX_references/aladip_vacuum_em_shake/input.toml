@@ -9,7 +9,7 @@ natoms = 12
 isolates = "steepest descent + SHAKE interaction (no solvent, no posres)"
 
 [input]
-topology = "../../aladip.topo"
+topology = "../shared/aladip.topo"
 configuration = "../aladip_vacuum_em/aladip_vacuum_em.conf"
 parameters = "aladip_vacuum_em_shake.in"
 
