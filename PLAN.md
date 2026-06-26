@@ -187,30 +187,77 @@ Steps (each with a reference test before wiring):
 > Dissolve the solute/solvent split: separate *representation* (store once, instance N times)
 > from *role* (per-instance attribute). See FUTURE.md §Dim10 for full design rationale.
 
+### Why `MoleculeType.bonds` is correct (not scope creep)
+
+`role` and `MoleculeType.bonds` are **independent knobs** — this is what makes the design
+powerful:
+
+- **`role`** controls: thermostat/pressure group, `s:`/`m:` selection, analysis membership,
+  fast-path dispatch (e.g. SETTLE for rigid water vs SHAKE for flexible)
+- **`MoleculeType.bonds`** controls: whether bonded *forces* are computed for a molecule type
+  (`empty` = geometry kept by constraints only; `non-empty` = explicit bond/angle forces)
+
+This handles every combination without special-casing:
+
+| Simulation | `mt.bonds` | `role` |
+|------------|-----------|--------|
+| Standard GROMOS: flexible solute + rigid SPC | solute: full / water: empty | Solute / Solvent |
+| Flexible water (SPC/Fw): both have bond forces | both: full | Solute / Solvent |
+| DMSO solvent: full bonding, grouped as solvent | full | Solvent |
+| Promoted catalytic water: solute for restraints, rigid geometry | empty | **Solute** after `promote()` |
+| Mixed: some waters flexible, most rigid | two water MoleculeTypes | Solvent |
+
+**The current gromosXX limitation** (DMSO must be faked as "solute atoms") disappears: any
+molecule can have full bonded forces regardless of its role.
+
+**The final bonded force loop (Phase 3 target):**
+```rust
+for inst in &topo.instances {
+    let mt = &topo.moltypes[inst.moltype_id];
+    for bond in &mt.bonds {
+        let i = inst.atom_offset + bond.i;  // local → global
+        let j = inst.atom_offset + bond.j;
+        // compute bond force — one loop, no solute/solvent special-casing
+    }
+}
+```
+
+### Phase status
+
 **Phase 1 — COMPLETE ✓ (37/37 reference tests pass, byte-identical output):**
-- [x] Added `Role`, `MolTypeAtom`, `MoleculeType`, `MoleculeInstance` types to `gromos-core/src/topology.rs`
-- [x] Added `moltypes: Vec<MoleculeType>` and `instances: Vec<MoleculeInstance>` fields to `Topology`
-- [x] `init_solute_moltype()` — builds solute MoleculeType + MoleculeInstance from existing `solute.atoms`; safe to call repeatedly (no-op if already done)
-- [x] `solvate()` calls `init_solute_moltype()` first, then appends one solvent MoleculeType + N solvent instances
-- [x] `gromos-io::build_topology()` calls `topo.init_solute_moltype()` before returning
-- [x] Per-atom accessors (`atom_name`, `residue_nr`, `residue_name`) prefer moltype path when instances are populated; legacy fallback otherwise
-- [x] `role_of_atom(i)`, `is_solvent_atom(i)`, `promote(mol_idx)` added to Topology API
-- [x] `s:` in `AtomSelection` uses `role == Role::Solvent` filter when instances are available
-- [x] 37/37 reference tests pass — byte-identical output confirmed ✓
+- [x] `Role`, `MolTypeAtom`, `MoleculeType`, `MoleculeInstance` types
+- [x] `moltypes` + `instances` fields on `Topology`
+- [x] `init_solute_moltype()`, `solvate()` populates instances
+- [x] Per-atom accessors (`atom_name`, `residue_nr`, `residue_name`) prefer moltype path
+- [x] `role_of_atom(i)`, `is_solvent_atom(i)`, `promote(mol_idx)` API
+- [x] `s:` in `AtomSelection` uses `role == Role::Solvent`
 
-**Phase 1 invariants (must hold after tests pass):**
-- `instances[k]` ↔ `molecules[k]` 1-to-1
-- `role_of_atom(i)` returns `None` for pre-`solvate()` test topologies (legacy graceful)
-- `solute.bonds`, `solute.angles`, etc. — UNCHANGED; all physics code reads them as before
+**Phase 2a ✓** — `rebuild_flat_arrays()`: flat `iac`/`mass`/`charge` derived from instances.
 
-**Phase 2 — NOT STARTED (future work):**
-- [ ] Move bonds/angles/dihedrals into `MoleculeType` (needs careful migration of bonded force code)
-- [ ] Make flat `iac`/`mass`/`charge` arrays into rebuildable caches (source of truth = moltypes)
-- [ ] Remove `Solute` struct and `Vec<Solvent>` once all callers migrated
-- [ ] `promote(mol_idx)` with CG/exclusion renumbering (needs Dim 9d charge-group primitives)
-- [ ] `s:`/`m:` grammar unification — collapse into single attribute-based namespace
+**Phase 2b ✓** — `MoleculeType` carries all bonded terms. Read accessors `solute_bonds()` etc.
+route through `moltypes[0]`. ~100 read-access call sites migrated. (Uncommitted diff — pending review.)
 
-**Resuming:** run `cargo test -p gromos-core -p gromos-md --test test_gromosXX_references` first to verify Phase 1 doesn't break anything, then continue with Phase 2 or move to P2.2.
+**Phase 2c ✓** — `Solute` now contains only `atoms: Vec<Atom>`. All bonded write sites use
+`mut_solute_bonds()` / `mut_solute_angles()` / etc. (Uncommitted diff — pending review.)
+
+**Phase 2d — DEFERRED:** Remove `solute.atoms: Vec<Atom>`.
+  - `Atom` has boolean flags (`is_perturbed`, `is_coarse_grained`, `is_polarisable`) absent from
+    `MolTypeAtom` — merge the two types first
+  - ~36 read + ~15 write call sites; topology writer iterates with full `Atom` struct
+  - Unblock by: add flags to `MolTypeAtom`, add `mut_solute_atoms()`, migrate iteratively
+
+**Phase 2e — DEFERRED:** Remove `Vec<Solvent>` (12 accesses in constraints/settle/md.rs);
+replace with moltype lookup via instances + constraint template.
+
+**Phase 2f — DEFERRED:** `promote(mol_idx)` with CG/exclusion renumbering (needs Dim 9d).
+
+**Phase 3 — THE GOAL:** Replace per-term bonded force loops in `bonds.rs`, `angles.rs`,
+`dihedrals.rs` with the instance-iterating loop above. This is when the DMSO/flexible-solvent
+use case becomes live and the `solute_bonds()` bridge accessors can be removed entirely.
+
+**Current state:** `Solute` has only `atoms`; all bonded topology is in `MoleculeType`; flat
+arrays are derived caches; `s:` uses role. Remaining duality: `solute.atoms` + `Vec<Solvent>`.
+Phase 2d+2e remove those; Phase 3 wires the instance loop into the force calculations.
 
 ---
 

@@ -37,13 +37,13 @@ impl Algorithm for SettleAlgorithm {
         _sim: &SimulationState,
     ) -> Result<(), String> {
         // gromosXX Settle::init validation (settle.cc:53-118)
-        if topo.solvents.len() != 1 {
+        if topo.num_solvent_molecules() == 0 {
             return Err("SETTLE does only work if 1 solvent.".to_string());
         }
-        if topo.solvents[0].atoms.len() != 3 {
+        if topo.atoms_per_solvent() != 3 {
             return Err("SETTLE does only work with water like molecules (3 atoms).".to_string());
         }
-        let n_solute = topo.solute.num_atoms();
+        let n_solute = topo.num_solute_atoms();
         if topo.mass[n_solute + 1] != topo.mass[n_solute + 2] {
             return Err(
                 "SETTLE does only work with water like molecules (wrong masses).".to_string(),

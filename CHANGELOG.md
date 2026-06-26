@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.20] (2026-06-26)
+
+### Refactor
+
+- **gromos-core (Dim 10 Phase 2a–3):** Dissolve the solute/solvent split — full instancing model.
+  Direct field access everywhere: `topo.moltypes[0].bonds`, no wrapper methods.
+  `MoleculeType` carries atoms + all bonded terms; `Atom = MolTypeAtom` (type alias);
+  `Solute` reduced to ZST shell; `Solvent` struct and `Vec<Solvent>` field removed.
+  `rebuild_flat_arrays()`: iac/mass/charge derived from instance registry (Phase 2a).
+  `all_bonds_global()` / `all_angles_global()` / etc.: instance-iterating force-loop
+  iterators with local→global index translation — one loop handles flexible solute,
+  flexible solvent (future), and any repeated molecule type (Phase 3).
+  `Topology::new()` pre-initializes `moltypes[0]` (SOLUTE) + `instances[0]` so no
+  guard methods are needed at write sites.
+  Follows GROMACS `gmx_moltype_t` / `gmx_molblock_t` convention exactly.
+  37/37 reference tests pass byte-identical.
+
 ## [0.0.19] (2026-06-24)
 
 ### Features

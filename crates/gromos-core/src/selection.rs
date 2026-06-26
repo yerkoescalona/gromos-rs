@@ -464,7 +464,7 @@ mod tests {
         ];
         let mut topo = Topology::new();
         for &(name, res_nr, res_name) in atoms {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: name.into(), residue_nr: res_nr, residue_name: res_name.into(),
                 iac: 0, mass: 12.0, charge: 0.0,
                 is_perturbed: false, is_polarisable: false, is_coarse_grained: false,

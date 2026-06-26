@@ -720,7 +720,7 @@ mod tests {
         // Set solute atoms FIRST - populate the atoms vector
         use crate::topology::Atom;
         for i in 0..4 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("A{}", i + 1),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -861,7 +861,7 @@ mod tests {
 
         let mut topo = Topology::new();
         for i in 0..4 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("A{}", i + 1),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -875,9 +875,9 @@ mod tests {
         }
         // Bonds: (0,1) and (2,3) within chargegroups, (1,2) across them
         // (an excluded cross-CG pair, to exercise the exclusion check).
-        topo.solute.bonds.push(Bond { i: 0, j: 1, bond_type: 0 });
-        topo.solute.bonds.push(Bond { i: 2, j: 3, bond_type: 0 });
-        topo.solute.bonds.push(Bond { i: 1, j: 2, bond_type: 0 });
+        topo.moltypes[0].bonds.push(Bond { i: 0, j: 1, bond_type: 0 });
+        topo.moltypes[0].bonds.push(Bond { i: 2, j: 3, bond_type: 0 });
+        topo.moltypes[0].bonds.push(Bond { i: 1, j: 2, bond_type: 0 });
         topo.iac = vec![0; 4];
         topo.mass = vec![1.0; 4];
         topo.charge = vec![0.0; 4];

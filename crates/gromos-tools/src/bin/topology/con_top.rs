@@ -48,7 +48,7 @@ fn main() {
     }
 
     let total_atoms: usize = all_topos.iter().map(|t| t.mass.len()).sum();
-    let total_bonds: usize = all_topos.iter().map(|t| t.solute.bonds.len()).sum();
+    let total_bonds: usize = all_topos.iter().map(|t| t.moltypes[0].bonds.len()).sum();
 
     println!("TITLE");
     println!("Combined topology from {} files", topo_files.len());

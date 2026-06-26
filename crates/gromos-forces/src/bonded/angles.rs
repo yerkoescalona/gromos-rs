@@ -13,7 +13,7 @@ use super::ForceEnergy;
 pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
-    for angle in &topo.solute.angles {
+    for angle in topo.all_angles_global() {
         if angle.angle_type >= topo.angle_parameters.len() {
             continue;
         }
@@ -84,7 +84,7 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
     const EPSILON: f64 = 1e-10; // Small value for numerical stability
     const PI: f64 = std::f64::consts::PI;
 
-    for angle in &topo.solute.angles {
+    for angle in topo.all_angles_global() {
         if angle.angle_type >= topo.angle_parameters.len() {
             continue;
         }
@@ -231,7 +231,7 @@ mod tests {
 
         // Add 3 atoms with equal masses
         for i in 0..3 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -247,7 +247,7 @@ mod tests {
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0, 1.0 / 12.0];
 
         // Add one angle: 0-1-2
-        topo.solute.angles.push(Angle {
+        topo.moltypes[0].angles.push(Angle {
             i: 0,
             j: 1,
             k: 2,
@@ -331,7 +331,7 @@ mod tests {
 
         // Add 3 atoms
         for i in 0..3 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -346,7 +346,7 @@ mod tests {
         topo.mass = vec![12.0, 12.0, 12.0];
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0, 1.0 / 12.0];
 
-        topo.solute.angles.push(Angle {
+        topo.moltypes[0].angles.push(Angle {
             i: 0,
             j: 1,
             k: 2,
@@ -416,7 +416,7 @@ mod tests {
         let mut topo = Topology::new();
 
         // Add 3 atoms (water-like masses)
-        topo.solute.atoms.push(Atom {
+        topo.moltypes[0].atoms.push(Atom {
             name: "O".to_string(),
             residue_nr: 1,
             residue_name: "WAT".to_string(),
@@ -428,7 +428,7 @@ mod tests {
             is_coarse_grained: false,
         });
         for i in 0..2 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("H{}", i + 1),
                 residue_nr: 1,
                 residue_name: "WAT".to_string(),
@@ -443,7 +443,7 @@ mod tests {
         topo.mass = vec![16.0, 1.0, 1.0]; // Water-like: O-H-H
         topo.inverse_mass = vec![1.0 / 16.0, 1.0, 1.0];
 
-        topo.solute.angles.push(Angle {
+        topo.moltypes[0].angles.push(Angle {
             i: 0,
             j: 1,
             k: 2,
@@ -515,7 +515,7 @@ mod tests {
 
         // Add 3 atoms
         for i in 0..3 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -530,7 +530,7 @@ mod tests {
         topo.mass = vec![12.0, 12.0, 12.0];
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0, 1.0 / 12.0];
 
-        topo.solute.angles.push(Angle {
+        topo.moltypes[0].angles.push(Angle {
             i: 0,
             j: 1,
             k: 2,

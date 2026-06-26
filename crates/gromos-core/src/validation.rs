@@ -142,7 +142,7 @@ pub fn validate_topology(topo: &Topology) -> ValidationReport {
     }
 
     // Check bonds
-    for (i, bond) in topo.solute.bonds.iter().enumerate() {
+    for (i, bond) in topo.moltypes[0].bonds.iter().enumerate() {
         if bond.i >= n_atoms || bond.j >= n_atoms {
             report.add(ValidationError::error(
                 "topology",
@@ -163,7 +163,7 @@ pub fn validate_topology(topo: &Topology) -> ValidationReport {
     }
 
     // Check angles
-    for (i, angle) in topo.solute.angles.iter().enumerate() {
+    for (i, angle) in topo.moltypes[0].angles.iter().enumerate() {
         if angle.i >= n_atoms || angle.j >= n_atoms || angle.k >= n_atoms {
             report.add(ValidationError::error(
                 "topology",
@@ -191,7 +191,7 @@ pub fn validate_topology(topo: &Topology) -> ValidationReport {
     }
 
     // Check proper dihedrals
-    for (i, dih) in topo.solute.proper_dihedrals.iter().enumerate() {
+    for (i, dih) in topo.moltypes[0].proper_dihedrals.iter().enumerate() {
         if dih.i >= n_atoms || dih.j >= n_atoms || dih.k >= n_atoms || dih.l >= n_atoms {
             report.add(ValidationError::error(
                 "topology",
@@ -306,7 +306,7 @@ pub fn validate_configuration(topo: &Topology, conf: &Configuration) -> Validati
     }
 
     // Check for reasonable bond lengths
-    for bond in &topo.solute.bonds {
+    for bond in topo.all_bonds_global() {
         let pos_i = conf.current().pos[bond.i];
         let pos_j = conf.current().pos[bond.j];
         let r = (pos_j - pos_i).length();
@@ -326,7 +326,7 @@ pub fn validate_configuration(topo: &Topology, conf: &Configuration) -> Validati
     }
 
     // Check for reasonable angles
-    for angle in &topo.solute.angles {
+    for angle in topo.all_angles_global() {
         let pos_i = conf.current().pos[angle.i];
         let pos_j = conf.current().pos[angle.j];
         let pos_k = conf.current().pos[angle.k];

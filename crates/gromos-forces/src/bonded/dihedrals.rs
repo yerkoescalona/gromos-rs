@@ -19,7 +19,7 @@ use super::ForceEnergy;
 pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
-    for dihedral in &topo.solute.proper_dihedrals {
+    for dihedral in topo.all_proper_dihedrals_global() {
         if dihedral.dihedral_type >= topo.dihedral_parameters.len() {
             continue;
         }
@@ -135,7 +135,7 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
 pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
-    for dihedral in &topo.solute.proper_dihedrals {
+    for dihedral in topo.all_proper_dihedrals_global() {
         if dihedral.dihedral_type >= topo.dihedral_parameters.len() {
             continue;
         }
@@ -254,7 +254,7 @@ mod tests {
 
         // Add 4 atoms in a dihedral
         for i in 0..4 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -271,7 +271,7 @@ mod tests {
 
         // Dihedral parameters: K=10, m=1, δ=180° (π radians)
         // Energy minimum at φ = π
-        topo.solute.proper_dihedrals.push(Dihedral {
+        topo.moltypes[0].proper_dihedrals.push(Dihedral {
             i: 0,
             j: 1,
             k: 2,
@@ -337,7 +337,7 @@ mod tests {
 
         // Add 4 atoms
         for i in 0..4 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -353,7 +353,7 @@ mod tests {
         topo.inverse_mass = vec![1.0 / 12.0; 4];
 
         // Parameters: K=10, m=1, δ=0°
-        topo.solute.proper_dihedrals.push(Dihedral {
+        topo.moltypes[0].proper_dihedrals.push(Dihedral {
             i: 0,
             j: 1,
             k: 2,
@@ -403,7 +403,7 @@ mod tests {
 
         // Add 4 atoms
         for i in 0..4 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -420,7 +420,7 @@ mod tests {
 
         // Parameters: K=15, m=3, δ=60° = π/3 rad
         let delta = PI / 3.0; // 60°
-        topo.solute.proper_dihedrals.push(Dihedral {
+        topo.moltypes[0].proper_dihedrals.push(Dihedral {
             i: 0,
             j: 1,
             k: 2,
@@ -480,7 +480,7 @@ mod tests {
 
         // Add 4 atoms
         for i in 0..4 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -495,7 +495,7 @@ mod tests {
         topo.mass = vec![12.0; 4];
         topo.inverse_mass = vec![1.0 / 12.0; 4];
 
-        topo.solute.proper_dihedrals.push(Dihedral {
+        topo.moltypes[0].proper_dihedrals.push(Dihedral {
             i: 0,
             j: 1,
             k: 2,

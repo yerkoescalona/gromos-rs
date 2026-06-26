@@ -12,7 +12,7 @@ use super::ForceEnergy;
 pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
-    for improper in &topo.solute.improper_dihedrals {
+    for improper in topo.all_improper_dihedrals_global() {
         if improper.dihedral_type >= topo.improper_dihedral_parameters.len() {
             continue;
         }
@@ -111,7 +111,7 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
 pub fn calculate_crossdihedral_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
-    for crossdih in &topo.solute.cross_dihedrals {
+    for crossdih in topo.all_cross_dihedrals_global() {
         if crossdih.cross_dihedral_type >= topo.dihedral_parameters.len() {
             continue;
         }
@@ -216,10 +216,10 @@ mod tests {
     #[test]
     fn test_crossdihedral_simple() {
         let mut topo = Topology::new();
-        for _ in 0..8 { topo.solute.atoms.push(make_atom()); }
+        for _ in 0..8 { topo.moltypes[0].atoms.push(make_atom()); }
         topo.mass = vec![12.0; 8];
         topo.inverse_mass = vec![1.0 / 12.0; 8];
-        topo.solute.cross_dihedrals.push(CrossDihedral {
+        topo.solute_cross_dihedrals().push(CrossDihedral {
             a: 0, b: 1, c: 2, d: 3, e: 4, f: 5, g: 6, h: 7,
             cross_dihedral_type: 0,
         });
@@ -243,10 +243,10 @@ mod tests {
     #[test]
     fn test_crossdihedral_force_conservation() {
         let mut topo = Topology::new();
-        for _ in 0..8 { topo.solute.atoms.push(make_atom()); }
+        for _ in 0..8 { topo.moltypes[0].atoms.push(make_atom()); }
         topo.mass = vec![12.0; 8];
         topo.inverse_mass = vec![1.0 / 12.0; 8];
-        topo.solute.cross_dihedrals.push(CrossDihedral {
+        topo.solute_cross_dihedrals().push(CrossDihedral {
             a: 0, b: 1, c: 2, d: 3, e: 4, f: 5, g: 6, h: 7,
             cross_dihedral_type: 0,
         });
@@ -272,10 +272,10 @@ mod tests {
     #[test]
     fn test_crossdihedral_coupling() {
         let mut topo = Topology::new();
-        for _ in 0..8 { topo.solute.atoms.push(make_atom()); }
+        for _ in 0..8 { topo.moltypes[0].atoms.push(make_atom()); }
         topo.mass = vec![12.0; 8];
         topo.inverse_mass = vec![1.0 / 12.0; 8];
-        topo.solute.cross_dihedrals.push(CrossDihedral {
+        topo.solute_cross_dihedrals().push(CrossDihedral {
             a: 0, b: 1, c: 2, d: 3, e: 4, f: 5, g: 6, h: 7,
             cross_dihedral_type: 0,
         });

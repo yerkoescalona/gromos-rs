@@ -50,18 +50,9 @@ impl G96Writer {
 
         for (i, pos) in positions.iter().enumerate() {
             let (resnum, resname, atomname) = if let Some(topo) = topology {
-                let n_solute = topo.solute.num_atoms();
-                if i < n_solute {
-                    let atom = &topo.solute.atoms[i];
-                    (atom.residue_nr + 1, atom.residue_name.as_str(), atom.name.as_str())
-                } else if !topo.solvents.is_empty() {
-                    let sv = &topo.solvents[0];
-                    let atoms_per_mol = sv.atoms_per_molecule();
-                    let sv_idx = i - n_solute;
-                    let mol_nr = sv_idx / atoms_per_mol;
-                    let atom_in_mol = sv_idx % atoms_per_mol;
-                    let sv_atom = &sv.atoms[atom_in_mol];
-                    (n_solute / atoms_per_mol + mol_nr + 1, sv_atom.residue_name.as_str(), sv_atom.name.as_str())
+                let n_solute = topo.num_solute_atoms();
+                if let Some(a) = topo.moltype_atom(i) {
+                    (a.residue_nr + 1, a.residue_name.as_str(), a.name.as_str())
                 } else {
                     (1, "UNK", "AT")
                 }
