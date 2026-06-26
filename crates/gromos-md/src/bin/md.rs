@@ -422,25 +422,25 @@ fn main() {
                             .chain(topo.perturbed_solute.soft_bonds
                                 .iter().map(|b| (b.i.min(b.j), b.i.max(b.j))))
                             .collect();
-                        topo.solute.bonds.retain(|b| !pb.contains(&(b.i.min(b.j), b.i.max(b.j))));
+                        topo.moltypes[0].bonds.retain(|b| !pb.contains(&(b.i.min(b.j), b.i.max(b.j))));
 
                         let pa: HashSet<(usize,usize,usize)> = topo.perturbed_solute.angles
                             .iter().map(|a| (a.i, a.j, a.k))
                             .chain(topo.perturbed_solute.soft_angles
                                 .iter().map(|a| (a.i, a.j, a.k)))
                             .collect();
-                        topo.solute.angles.retain(|a| !pa.contains(&(a.i, a.j, a.k)));
+                        topo.moltypes[0].angles.retain(|a| !pa.contains(&(a.i, a.j, a.k)));
 
                         let pi: HashSet<(usize,usize,usize,usize)> = topo.perturbed_solute.improper_dihedrals
                             .iter().map(|d| (d.i, d.j, d.k, d.l))
                             .chain(topo.perturbed_solute.soft_impropers
                                 .iter().map(|d| (d.i, d.j, d.k, d.l)))
                             .collect();
-                        topo.solute.improper_dihedrals.retain(|d| !pi.contains(&(d.i, d.j, d.k, d.l)));
+                        topo.moltypes[0].improper_dihedrals.retain(|d| !pi.contains(&(d.i, d.j, d.k, d.l)));
 
                         let pd: HashSet<(usize,usize,usize,usize)> = topo.perturbed_solute.proper_dihedrals
                             .iter().map(|d| (d.i, d.j, d.k, d.l)).collect();
-                        topo.solute.proper_dihedrals.retain(|d| !pd.contains(&(d.i, d.j, d.k, d.l)));
+                        topo.moltypes[0].proper_dihedrals.retain(|d| !pd.contains(&(d.i, d.j, d.k, d.l)));
                     }
 
                     println!(
@@ -503,7 +503,7 @@ fn main() {
     // Determine actual NSM from coordinate file if solvent template exists
     let actual_nsm = if imd.nsm > 0 && !topo.solvent_atom_template.is_empty() {
         let atoms_per_solvent = topo.solvent_atom_template.len();
-        let n_solute = topo.solute.num_atoms();
+        let n_solute = topo.num_solute_atoms();
         let remaining = positions.len().saturating_sub(n_solute);
         if remaining % atoms_per_solvent != 0 {
             eprintln!(
@@ -527,21 +527,20 @@ fn main() {
     };
     topo.solvate(actual_nsm);
 
-    println!("  Solute atoms: {}", topo.solute.num_atoms());
-    if !topo.solvents.is_empty() {
-        let sv = &topo.solvents[0];
+    println!("  Solute atoms: {}", topo.num_solute_atoms());
+    if topo.num_solvent_molecules() > 0 {
+        let nsm = topo.num_solvent_molecules();
+        let aps = topo.atoms_per_solvent();
         println!(
             "  Solvent: {} molecules × {} atoms = {} atoms",
-            sv.num_molecules,
-            sv.atoms_per_molecule(),
-            sv.total_atoms()
+            nsm, aps, nsm * aps
         );
     }
     println!("  Total atoms: {}", topo.num_atoms());
-    println!("  Bonds: {}", topo.solute.bonds.len());
-    println!("  Angles: {}", topo.solute.angles.len());
-    println!("  Dihedrals: {}", topo.solute.proper_dihedrals.len());
-    println!("  Impropers: {}", topo.solute.improper_dihedrals.len());
+    println!("  Bonds: {}", topo.moltypes[0].bonds.len());
+    println!("  Angles: {}", topo.moltypes[0].angles.len());
+    println!("  Dihedrals: {}", topo.moltypes[0].proper_dihedrals.len());
+    println!("  Impropers: {}", topo.moltypes[0].improper_dihedrals.len());
     println!("  Chargegroups: {}", topo.chargegroups.len());
     println!();
 

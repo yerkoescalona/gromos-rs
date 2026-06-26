@@ -65,7 +65,7 @@ impl TopologyChecker {
     }
 
     fn check_atom_count(&mut self, topo: &Topology) {
-        let n_atoms = topo.solute.num_atoms();
+        let n_atoms = topo.num_solute_atoms();
         println!("CHECK: Atom count");
         println!("  Solute atoms: {}", n_atoms);
 
@@ -147,12 +147,12 @@ impl TopologyChecker {
 
     fn check_bonds(&mut self, topo: &Topology) {
         println!("CHECK: Bonds");
-        let n_atoms = topo.solute.num_atoms();
-        let n_bonds = topo.solute.bonds.len();
+        let n_atoms = topo.num_solute_atoms();
+        let n_bonds = topo.moltypes[0].bonds.len();
 
         println!("  Number of bonds: {}", n_bonds);
 
-        for (idx, bond) in topo.solute.bonds.iter().enumerate() {
+        for (idx, bond) in topo.moltypes[0].bonds.iter().enumerate() {
             // Check atom indices are in range
             if bond.i >= n_atoms {
                 self.errors.push(format!(
@@ -200,12 +200,12 @@ impl TopologyChecker {
 
     fn check_angles(&mut self, topo: &Topology) {
         println!("CHECK: Bond angles");
-        let n_atoms = topo.solute.num_atoms();
-        let n_angles = topo.solute.angles.len();
+        let n_atoms = topo.num_solute_atoms();
+        let n_angles = topo.moltypes[0].angles.len();
 
         println!("  Number of angles: {}", n_angles);
 
-        for (idx, angle) in topo.solute.angles.iter().enumerate() {
+        for (idx, angle) in topo.moltypes[0].angles.iter().enumerate() {
             // Check atom indices
             if angle.i >= n_atoms {
                 self.errors.push(format!(
@@ -260,12 +260,12 @@ impl TopologyChecker {
 
     fn check_proper_dihedrals(&mut self, topo: &Topology) {
         println!("CHECK: Proper dihedrals");
-        let n_atoms = topo.solute.num_atoms();
-        let n_dihedrals = topo.solute.proper_dihedrals.len();
+        let n_atoms = topo.num_solute_atoms();
+        let n_dihedrals = topo.moltypes[0].proper_dihedrals.len();
 
         println!("  Number of proper dihedrals: {}", n_dihedrals);
 
-        for (idx, dihedral) in topo.solute.proper_dihedrals.iter().enumerate() {
+        for (idx, dihedral) in topo.moltypes[0].proper_dihedrals.iter().enumerate() {
             if dihedral.i >= n_atoms
                 || dihedral.j >= n_atoms
                 || dihedral.k >= n_atoms
@@ -301,12 +301,12 @@ impl TopologyChecker {
 
     fn check_improper_dihedrals(&mut self, topo: &Topology) {
         println!("CHECK: Improper dihedrals");
-        let n_atoms = topo.solute.num_atoms();
-        let n_impropers = topo.solute.improper_dihedrals.len();
+        let n_atoms = topo.num_solute_atoms();
+        let n_impropers = topo.moltypes[0].improper_dihedrals.len();
 
         println!("  Number of improper dihedrals: {}", n_impropers);
 
-        for (idx, dihedral) in topo.solute.improper_dihedrals.iter().enumerate() {
+        for (idx, dihedral) in topo.moltypes[0].improper_dihedrals.iter().enumerate() {
             if dihedral.i >= n_atoms
                 || dihedral.j >= n_atoms
                 || dihedral.k >= n_atoms
@@ -330,7 +330,7 @@ impl TopologyChecker {
 
     fn check_exclusions(&mut self, topo: &Topology) {
         println!("CHECK: Exclusion lists");
-        let n_atoms = topo.solute.num_atoms();
+        let n_atoms = topo.num_solute_atoms();
 
         if topo.exclusions.len() != n_atoms {
             self.errors.push(format!(

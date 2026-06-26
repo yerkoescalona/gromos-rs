@@ -12,7 +12,7 @@ use gromos_integrators::thermostats::{
 fn make_system(n_atoms: usize) -> (Topology, Configuration) {
     let mut topo = Topology::new();
     for i in 0..n_atoms {
-        topo.solute.atoms.push(Atom {
+        topo.moltypes[0].atoms.push(Atom {
             name: format!("C{i}"),
             residue_nr: 1,
             residue_name: "BNZ".to_string(),

@@ -929,7 +929,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         } else {
             "UNK".to_string()
         };
-        topo.solute.atoms.push(Atom {
+        topo.moltypes[0].atoms.push(Atom {
             name: atom_name,
             residue_nr: res_nr,
             residue_name: res_name,
@@ -1031,7 +1031,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
 
     // Build bonds
     for (i, j, bond_type) in parsed.bonds {
-        topo.solute.bonds.push(Bond { i, j, bond_type });
+        topo.moltypes[0].bonds.push(Bond { i, j, bond_type });
         topo.exclusions[i].push(j);
         topo.exclusions[j].push(i);
     }
@@ -1040,7 +1040,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
 
     // Build angles
     for (i, j, k, angle_type) in parsed.angles {
-        topo.solute.angles.push(Angle {
+        topo.moltypes[0].angles.push(Angle {
             i, j, k, angle_type,
         });
         topo.exclusions[i].push(k);
@@ -1051,7 +1051,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
 
     // Build proper dihedrals
     for (i, j, k, l, dihedral_type) in parsed.proper_dihedrals {
-        topo.solute.proper_dihedrals.push(Dihedral {
+        topo.moltypes[0].proper_dihedrals.push(Dihedral {
             i, j, k, l, dihedral_type,
         });
     }
@@ -1059,7 +1059,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
 
     // Build improper dihedrals
     for (i, j, k, l, dihedral_type) in parsed.improper_dihedrals {
-        topo.solute.improper_dihedrals.push(Dihedral {
+        topo.moltypes[0].improper_dihedrals.push(Dihedral {
             i, j, k, l, dihedral_type,
         });
     }
@@ -1195,7 +1195,7 @@ pub fn write_topology_file<P: AsRef<Path>>(
     writeln!(writer, "END").map_err(|e| IoError::WriteError(e.to_string()))?;
 
     // SOLUTEATOM block
-    let n_atoms = topo.solute.num_atoms();
+    let n_atoms = topo.num_solute_atoms();
     writeln!(writer, "SOLUTEATOM").map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "#   NRP: number of solute atoms")
         .map_err(|e| IoError::WriteError(e.to_string()))?;
@@ -1211,7 +1211,7 @@ pub fn write_topology_file<P: AsRef<Path>>(
         .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "#ATNM MRES PANM IAC  MASS      CG     CGC INE")
         .map_err(|e| IoError::WriteError(e.to_string()))?;
-    for (i, atom) in topo.solute.atoms.iter().enumerate() {
+    for (i, atom) in topo.moltypes[0].atoms.iter().enumerate() {
         let n_exclusions = topo.exclusions.get(i).map_or(0, |e| e.len());
         let cg_code = topo.atom_to_chargegroup.get(i).map_or(1, |&c| c + 1);
 
@@ -1268,14 +1268,14 @@ pub fn write_topology_file<P: AsRef<Path>>(
     }
 
     // BOND block
-    if !topo.solute.bonds.is_empty() {
+    if !&topo.moltypes[0].bonds.is_empty() {
         writeln!(writer, "BOND").map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "# NBH: number of bonds")
             .map_err(|e| IoError::WriteError(e.to_string()))?;
-        writeln!(writer, "{}", topo.solute.bonds.len())
+        writeln!(writer, "{}", &topo.moltypes[0].bonds.len())
             .map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "#  IB   JB  ICB").map_err(|e| IoError::WriteError(e.to_string()))?;
-        for bond in &topo.solute.bonds {
+        for bond in &topo.moltypes[0].bonds {
             writeln!(
                 writer,
                 "{:5}{:5}{:5}",
@@ -1311,14 +1311,14 @@ pub fn write_topology_file<P: AsRef<Path>>(
     }
 
     // BONDANGLE block
-    if !topo.solute.angles.is_empty() {
+    if !&topo.moltypes[0].angles.is_empty() {
         writeln!(writer, "BONDANGLE").map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "# NTHEH: number of angles")
             .map_err(|e| IoError::WriteError(e.to_string()))?;
-        writeln!(writer, "{}", topo.solute.angles.len())
+        writeln!(writer, "{}", &topo.moltypes[0].angles.len())
             .map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "#  IT   JT   KT  ICT").map_err(|e| IoError::WriteError(e.to_string()))?;
-        for angle in &topo.solute.angles {
+        for angle in &topo.moltypes[0].angles {
             writeln!(
                 writer,
                 "{:5}{:5}{:5}{:5}",

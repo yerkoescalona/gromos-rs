@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn test_perturbed_bond_lambda_0_equals_state_a() {
         let mut topo = Topology::new();
-        topo.solute.atoms.extend([atom(), atom()]);
+        topo.moltypes[0].atoms.extend([atom(), atom()]);
         topo.mass = vec![12.0; 2];
         topo.inverse_mass = vec![1.0 / 12.0; 2];
         // State A: K=1000, r0=0.15; State B: K=2000, r0=0.20
@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn test_perturbed_bond_lambda_1_equals_state_b() {
         let mut topo = Topology::new();
-        topo.solute.atoms.extend([atom(), atom()]);
+        topo.moltypes[0].atoms.extend([atom(), atom()]);
         topo.mass = vec![12.0; 2];
         topo.inverse_mass = vec![1.0 / 12.0; 2];
         topo.bond_parameters.push(BondParameters { k_quartic: 1000.0, k_harmonic: 0.0, r0: 0.15 });
@@ -633,7 +633,7 @@ mod tests {
     fn test_perturbed_bond_force_direction() {
         // At equilibrium (r = r0(λ)), energy and force should be zero
         let mut topo = Topology::new();
-        topo.solute.atoms.extend([atom(), atom()]);
+        topo.moltypes[0].atoms.extend([atom(), atom()]);
         topo.mass = vec![12.0; 2];
         topo.inverse_mass = vec![1.0 / 12.0; 2];
         topo.bond_parameters.push(BondParameters { k_quartic: 1000.0, k_harmonic: 0.0, r0: 0.15 });
@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn test_perturbed_angle_lambda_0() {
         let mut topo = Topology::new();
-        topo.solute.atoms.extend([atom(), atom(), atom()]);
+        topo.moltypes[0].atoms.extend([atom(), atom(), atom()]);
         topo.mass = vec![12.0; 3];
         topo.inverse_mass = vec![1.0 / 12.0; 3];
         // State A: θ0=120°, K=500; State B: θ0=180°, K=1000
@@ -684,7 +684,7 @@ mod tests {
     #[test]
     fn test_perturbed_angle_force_conservation() {
         let mut topo = Topology::new();
-        topo.solute.atoms.extend([atom(), atom(), atom()]);
+        topo.moltypes[0].atoms.extend([atom(), atom(), atom()]);
         topo.mass = vec![12.0; 3];
         topo.inverse_mass = vec![1.0 / 12.0; 3];
         topo.angle_parameters.push(AngleParameters { k_cosine: 500.0, k_harmonic: 0.0,
@@ -708,7 +708,7 @@ mod tests {
     #[test]
     fn test_perturbed_improper_at_equilibrium() {
         let mut topo = Topology::new();
-        for _ in 0..4 { topo.solute.atoms.push(atom()); }
+        for _ in 0..4 { topo.moltypes[0].atoms.push(atom()); }
         topo.mass = vec![12.0; 4];
         topo.inverse_mass = vec![1.0 / 12.0; 4];
         topo.improper_dihedral_parameters.push(
@@ -736,7 +736,7 @@ mod tests {
     #[test]
     fn test_perturbed_dihedral_lambda_0_equals_state_a() {
         let mut topo = Topology::new();
-        for _ in 0..4 { topo.solute.atoms.push(atom()); }
+        for _ in 0..4 { topo.moltypes[0].atoms.push(atom()); }
         topo.mass = vec![12.0; 4];
         topo.inverse_mass = vec![1.0 / 12.0; 4];
         // State A: K=5, m=3, δ=0; State B: K=8, m=3, δ=π (different K/δ)

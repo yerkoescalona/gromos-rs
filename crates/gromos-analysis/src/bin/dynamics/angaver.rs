@@ -61,7 +61,7 @@ fn main() {
     let topo = build_topology(topo_data);
     let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
 
-    let n_angles = topo.solute.angles.len();
+    let n_angles = topo.solute_angles().len();
 
     eprintln!("# Bond angle averaging");
     eprintln!("# Angles: {}", n_angles);
@@ -72,7 +72,7 @@ fn main() {
     loop {
         match traj.read_frame() {
             Ok(Some(frame)) => {
-                for (idx, angle) in topo.solute.angles.iter().enumerate() {
+                for (idx, angle) in topo.solute_angles().iter().enumerate() {
                     if angle.i < frame.positions.len()
                         && angle.j < frame.positions.len()
                         && angle.k < frame.positions.len()
@@ -114,7 +114,7 @@ fn main() {
 
     println!("# Angle    Atom_i    Atom_j    Atom_k    Avg_Angle (deg)");
 
-    for (idx, angle) in topo.solute.angles.iter().enumerate() {
+    for (idx, angle) in topo.solute_angles().iter().enumerate() {
         let avg = angle_sums[idx] / n_frames as f64;
         println!(
             "{:8} {:8} {:8} {:8} {:17.4}",

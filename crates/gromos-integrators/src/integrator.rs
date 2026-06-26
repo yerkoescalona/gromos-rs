@@ -1460,7 +1460,7 @@ mod tests {
         
         // Add atoms to solute so num_atoms() returns the correct count
         for i in 0..10 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("A{}", i),
                 residue_nr: 1,
                 residue_name: "RES".to_string(),

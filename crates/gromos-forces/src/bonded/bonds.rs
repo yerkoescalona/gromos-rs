@@ -13,7 +13,7 @@ use super::ForceEnergy;
 pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
-    for bond in &topo.solute.bonds {
+    for bond in topo.all_bonds_global() {
         if bond.bond_type >= topo.bond_parameters.len() {
             continue;
         }
@@ -55,7 +55,7 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
 pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
-    for bond in &topo.solute.bonds {
+    for bond in topo.all_bonds_global() {
         if bond.bond_type >= topo.bond_parameters.len() {
             continue;
         }
@@ -105,7 +105,7 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
 
     // CG bonds are stored separately in topology (if available)
     // For now, we'll use a marker in bond parameters to identify CG bonds
-    for bond in &topo.solute.bonds {
+    for bond in topo.all_bonds_global() {
         if bond.bond_type >= topo.bond_parameters.len() {
             continue;
         }

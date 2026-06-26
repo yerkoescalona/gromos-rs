@@ -46,9 +46,10 @@ pub enum Role {
 
 /// Per-atom parameters stored *once* inside a `MoleculeType`.
 ///
-/// Equivalent to `Atom` but without the boolean flags (those belong to the
-/// instance or to future attribute layers).
-#[derive(Debug, Clone)]
+/// Phase 2d: merged with `Atom` — carries the same fields including the
+/// boolean attribute flags.  `Atom` is now an alias kept for backwards compat
+/// during the remaining migration.
+#[derive(Debug, Clone, Default)]
 pub struct MolTypeAtom {
     pub name: String,
     pub residue_nr: usize,
@@ -56,17 +57,35 @@ pub struct MolTypeAtom {
     pub iac: usize,
     pub mass: f64,
     pub charge: f64,
+    pub is_perturbed: bool,
+    pub is_polarisable: bool,
+    pub is_coarse_grained: bool,
 }
+
+/// Legacy alias — `Atom` is now the same type as `MolTypeAtom`.
+/// Kept so existing code compiles unchanged during Phase 2d migration;
+/// will be removed once all sites use `MolTypeAtom` directly.
+pub type Atom = MolTypeAtom;
 
 /// Topology stored once for a unique molecule type.
 ///
-/// Phase 1: only atom parameters.  Phase 2: bonds/angles/dihedrals move here.
+/// Phase 1: atom parameters.
+/// Phase 2: bonds, angles, dihedrals — migrated here from `Solute`.
+/// Indices within bonded terms are *local* (0-based within this moltype).
+/// For the solute at atom_offset=0, local == global, so no conversion needed
+/// during the migration.
 #[derive(Debug, Clone)]
 pub struct MoleculeType {
     /// Human-readable name ("SOLUTE", "SPC", …).
     pub name: String,
     /// One entry per atom in the template, in order.
     pub atoms: Vec<MolTypeAtom>,
+    // Phase 2: bonded terms (local indices).
+    pub bonds: Vec<Bond>,
+    pub angles: Vec<Angle>,
+    pub proper_dihedrals: Vec<Dihedral>,
+    pub improper_dihedrals: Vec<Dihedral>,
+    pub cross_dihedrals: Vec<CrossDihedral>,
 }
 
 impl MoleculeType {
@@ -82,20 +101,6 @@ pub struct MoleculeInstance {
     pub atom_offset: usize,
     /// Semantic role — drives dispatch and selection grammar.
     pub role: Role,
-}
-
-/// Atom properties
-#[derive(Debug, Clone)]
-pub struct Atom {
-    pub name: String,
-    pub residue_nr: usize,
-    pub residue_name: String,
-    pub iac: usize, // Integer atom code (atom type)
-    pub mass: f64,
-    pub charge: f64,
-    pub is_perturbed: bool,
-    pub is_polarisable: bool,
-    pub is_coarse_grained: bool,
 }
 
 /// Two-body bonded term (bonds, harmonic constraints)
@@ -327,32 +332,21 @@ impl ChargeGroup {
     }
 }
 
-/// Solute molecule structure
-#[derive(Debug, Clone)]
-pub struct Solute {
-    pub atoms: Vec<Atom>,
-    pub bonds: Vec<Bond>,
-    pub angles: Vec<Angle>,
-    pub proper_dihedrals: Vec<Dihedral>,
-    pub improper_dihedrals: Vec<Dihedral>,
-    pub cross_dihedrals: Vec<CrossDihedral>,
-}
+/// Solute atom data.
+///
+/// Phase 2c: bonded terms (bonds/angles/dihedrals) have been moved to
+/// Solute — Phase 2d: atoms moved to MoleculeType. This struct is now empty
+/// and kept only as a named placeholder until the `topo.solute` field
+/// is removed in Phase 2e (when `Vec<Solvent>` is also removed).
+/// All data is now in `topo.moltypes[0]`.
+#[derive(Debug, Clone, Default)]
+pub struct Solute;
 
 impl Solute {
-    pub fn new() -> Self {
-        Self {
-            atoms: Vec::new(),
-            bonds: Vec::new(),
-            angles: Vec::new(),
-            proper_dihedrals: Vec::new(),
-            improper_dihedrals: Vec::new(),
-            cross_dihedrals: Vec::new(),
-        }
-    }
-
-    pub fn num_atoms(&self) -> usize {
-        self.atoms.len()
-    }
+    pub fn new() -> Self { Self }
+    /// Number of solute atoms — delegates to Topology::num_solute_atoms().
+    /// Call `topo.num_solute_atoms()` directly instead.
+    pub fn num_atoms(&self) -> usize { 0 }
 }
 
 /// Soft-core perturbed harmonic bond (PERTBONDSOFT).
@@ -443,31 +437,6 @@ impl Default for PerturbedSolute {
 }
 
 /// Solvent molecule structure (typically water)
-#[derive(Debug, Clone)]
-pub struct Solvent {
-    pub name: String,
-    pub atoms: Vec<Atom>,
-    pub num_molecules: usize,
-}
-
-impl Solvent {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            atoms: Vec::new(),
-            num_molecules: 0,
-        }
-    }
-
-    pub fn atoms_per_molecule(&self) -> usize {
-        self.atoms.len()
-    }
-
-    pub fn total_atoms(&self) -> usize {
-        self.atoms.len() * self.num_molecules
-    }
-}
-
 /// Solvent atom template (one molecule's worth of atom properties)
 #[derive(Debug, Clone)]
 pub struct SolventAtomTemplate {
@@ -512,10 +481,10 @@ pub struct PerturbedDistanceRestraintSpec {
 /// Main topology structure containing all molecular information
 #[derive(Debug, Clone)]
 pub struct Topology {
-    // Solute and solvent
+    // Dim 10: Solute is now a shell (atoms in moltypes[0]).
+    // Phase 2e: Vec<Solvent> removed — solvent info lives in moltypes + instances.
     pub solute: Solute,
     pub perturbed_solute: PerturbedSolute, // FEP dual-topology terms
-    pub solvents: Vec<Solvent>,
 
     // Per-atom properties (flat arrays for all atoms)
 
@@ -588,7 +557,6 @@ impl Topology {
         Self {
             solute: Solute::new(),
             perturbed_solute: PerturbedSolute::new(),
-            solvents: Vec::new(),
             iac: Vec::new(),
             mass: Vec::new(),
             inverse_mass: Vec::new(),
@@ -605,8 +573,23 @@ impl Topology {
             energy_groups: Vec::new(),
             atom_to_energy_group: Vec::new(),
             molecules: Vec::new(),
-            moltypes: Vec::new(),
-            instances: Vec::new(),
+            // moltypes[0] is always the solute MoleculeType (GROMACS moltype[0] convention).
+            // Initialised empty here so callers can write `topo.moltypes[0].bonds.push(..)`
+            // without any guard or ensure_* call.
+            moltypes: vec![MoleculeType {
+                name: "SOLUTE".to_string(),
+                atoms: Vec::new(),
+                bonds: Vec::new(),
+                angles: Vec::new(),
+                proper_dihedrals: Vec::new(),
+                improper_dihedrals: Vec::new(),
+                cross_dihedrals: Vec::new(),
+            }],
+            instances: vec![MoleculeInstance {
+                moltype_id: 0,
+                atom_offset: 0,
+                role: Role::Solute,
+            }],
             bond_parameters: Vec::new(),
             angle_parameters: Vec::new(),
             dihedral_parameters: Vec::new(),
@@ -621,14 +604,54 @@ impl Topology {
         }
     }
 
-    /// Total number of atoms in the system
+    /// Total number of atoms in the system — derived from instances.
     pub fn num_atoms(&self) -> usize {
-        self.solute.num_atoms() + self.solvents.iter().map(|s| s.total_atoms()).sum::<usize>()
+        if !self.instances.is_empty() {
+            self.instances.iter()
+                .map(|inst| self.moltypes.get(inst.moltype_id)
+                    .map(|mt| mt.num_atoms()).unwrap_or(0))
+                .sum()
+        } else {
+            self.num_solute_atoms()
+        }
     }
 
-    /// Number of solute atoms
+    // ── Phase 2e helpers — replace .solvents[0].X accesses ──────────────────
+
+    /// Number of solvent molecule instances.
+    pub fn num_solvent_molecules(&self) -> usize {
+        self.instances.iter().filter(|i| i.role == Role::Solvent).count()
+    }
+
+    /// Number of atoms per solvent molecule (from the solvent MoleculeType).
+    /// Falls back to `solvent_atom_template.len()` for pre-solvate topologies.
+    pub fn atoms_per_solvent(&self) -> usize {
+        self.instances.iter()
+            .find(|i| i.role == Role::Solvent)
+            .and_then(|i| self.moltypes.get(i.moltype_id))
+            .map(|mt| mt.num_atoms())
+            .unwrap_or(self.solvent_atom_template.len())
+    }
+
+    /// Name of the solvent molecule type.
+    pub fn solvent_name(&self) -> Option<&str> {
+        self.instances.iter()
+            .find(|i| i.role == Role::Solvent)
+            .and_then(|i| self.moltypes.get(i.moltype_id))
+            .map(|mt| mt.name.as_str())
+    }
+
+    /// Number of solute atoms — derived from instances when available.
     pub fn num_solute_atoms(&self) -> usize {
-        self.solute.num_atoms()
+        if !self.instances.is_empty() {
+            self.instances.iter()
+                .filter(|inst| inst.role == Role::Solute)
+                .map(|inst| self.moltypes.get(inst.moltype_id)
+                    .map(|mt| mt.num_atoms()).unwrap_or(0))
+                .sum()
+        } else {
+            self.num_solute_atoms()
+        }
     }
 
     /// Number of atom types
@@ -684,12 +707,17 @@ impl Topology {
 
     // ── Dim 10 accessors ─────────────────────────────────────────────────────
 
-    /// Internal: look up the MolTypeAtom for global atom index `i` via instances.
-    fn moltype_atom(&self, i: usize) -> Option<&MolTypeAtom> {
+    /// Look up the MolTypeAtom for global atom index `i` via instances.
+    pub fn moltype_atom(&self, i: usize) -> Option<&MolTypeAtom> {
         let mol = self.molecule_nr(i)?;
         let inst = self.instances.get(mol)?;
         let mt = self.moltypes.get(inst.moltype_id)?;
-        mt.atoms.get(i - inst.atom_offset)
+        // Guard: instances[mol].atom_offset must be ≤ i.
+        // Can mismatch when molecule_nr returns the pre-initialized empty Solute instance
+        // (instances[0], offset=0) for a pure-solvent system where molecules[0] is a
+        // solvent range but instances[0] still points to the empty solute moltype.
+        let local = i.checked_sub(inst.atom_offset)?;
+        mt.atoms.get(local)
     }
 
     /// Role of the molecule instance that owns atom `i`.
@@ -721,26 +749,33 @@ impl Topology {
     ///
     /// Safe to call repeatedly (no-op if already initialised).
     /// Called by `solvate()` and by `gromos-io::build_topology()`.
+    /// Ensure a solute MoleculeType + instance exist at index 0.
+    ///
+    /// Creates an EMPTY moltype (no atoms, no bonds) if none exists yet.
+    /// Sync flat iac/mass/charge into `moltypes[0].atoms` after the flat arrays
+    /// are populated by `build_topology()`.  `moltypes[0]` always exists (created
+    /// in `Topology::new()`) so no guard is needed.
     pub fn init_solute_moltype(&mut self) {
-        if !self.instances.is_empty() { return; }
-        let n_sol = self.solute.num_atoms();
+        let n_sol = self.moltypes[0].atoms.len();
         if n_sol == 0 { return; }
 
-        let mt_atoms: Vec<MolTypeAtom> = self.solute.atoms.iter().enumerate()
+        // Overwrite iac/mass/charge from the flat arrays (source of truth at load time).
+        let mt_atoms: Vec<MolTypeAtom> = self.moltypes[0].atoms.iter().enumerate()
             .map(|(i, a)| MolTypeAtom {
-                name:         a.name.clone(),
-                residue_nr:   a.residue_nr,
-                residue_name: a.residue_name.clone(),
-                iac:   self.iac.get(i).copied().unwrap_or(a.iac),
-                mass:  self.mass.get(i).copied().unwrap_or(a.mass),
-                charge: self.charge.get(i).copied().unwrap_or(a.charge),
+                name:             a.name.clone(),
+                residue_nr:       a.residue_nr,
+                residue_name:     a.residue_name.clone(),
+                iac:              self.iac.get(i).copied().unwrap_or(a.iac),
+                mass:             self.mass.get(i).copied().unwrap_or(a.mass),
+                charge:           self.charge.get(i).copied().unwrap_or(a.charge),
+                is_perturbed:     a.is_perturbed,
+                is_polarisable:   a.is_polarisable,
+                is_coarse_grained: a.is_coarse_grained,
             })
             .collect();
+        self.moltypes[0].atoms = mt_atoms;
 
-        self.moltypes.push(MoleculeType { name: "SOLUTE".to_string(), atoms: mt_atoms });
-        self.instances.push(MoleculeInstance { moltype_id: 0, atom_offset: 0, role: Role::Solute });
-
-        // Ensure molecules[0] is set (solvate() may not have been called yet)
+        // Ensure molecules[0] is set
         if self.molecules.is_empty() && n_sol > 0 {
             self.molecules.push(0..n_sol);
         }
@@ -751,46 +786,15 @@ impl Topology {
     /// Prefers the Dim 10 moltype path when instances are populated; falls back to
     /// the legacy `solute.atoms` + `solvent_atom_template` approach.
     pub fn atom_name(&self, i: usize) -> Option<&str> {
-        if !self.instances.is_empty() {
-            return self.moltype_atom(i).map(|a| a.name.as_str());
-        }
-        // Legacy fallback (pre-init_solute_moltype)
-        let n_sol = self.solute.num_atoms();
-        if i < n_sol {
-            return self.solute.atoms.get(i).map(|a| a.name.as_str());
-        }
-        let aps = self.solvent_atom_template.len();
-        if aps > 0 {
-            return self.solvent_atom_template.get((i - n_sol) % aps).map(|a| a.name.as_str());
-        }
-        None
+        self.moltype_atom(i).map(|a| a.name.as_str())
     }
 
-    /// Residue number (1-based) for atom `i`.
     pub fn residue_nr(&self, i: usize) -> Option<usize> {
-        if !self.instances.is_empty() {
-            return self.moltype_atom(i).map(|a| a.residue_nr);
-        }
-        let n_sol = self.solute.num_atoms();
-        if i < n_sol {
-            return self.solute.atoms.get(i).map(|a| a.residue_nr);
-        }
-        let aps = self.solvent_atom_template.len();
-        if aps > 0 { return Some((i - n_sol) / aps + 1); }
-        None
+        self.moltype_atom(i).map(|a| a.residue_nr)
     }
 
-    /// Residue name for atom `i` (covers solute + solvent).
     pub fn residue_name(&self, i: usize) -> Option<&str> {
-        if !self.instances.is_empty() {
-            return self.moltype_atom(i).map(|a| a.residue_name.as_str());
-        }
-        let n_sol = self.solute.num_atoms();
-        if i < n_sol {
-            return self.solute.atoms.get(i).map(|a| a.residue_name.as_str());
-        }
-        if !self.solvents.is_empty() { return Some(self.solvents[0].name.as_str()); }
-        None
+        self.moltype_atom(i).map(|a| a.residue_name.as_str())
     }
 
     /// 0-based molecule index for atom `i` (uses the `molecules` ranges populated by `solvate()`).
@@ -807,6 +811,56 @@ impl Topology {
         None
     }
 
+    // ── Phase 3: instance-iterating bonded force iterators ───────────────────
+    // Each iterator walks all MoleculeType instances, translates local bond indices
+    // (0-based within the moltype) to global indices using inst.atom_offset, and
+    // yields values with global i/j/k/l. This handles flexible solute, flexible
+    // solvent, and any future repeated molecule type in one unified loop.
+
+    pub fn all_bonds_global(&self) -> impl Iterator<Item = Bond> + '_ {
+        self.instances.iter().flat_map(move |inst| {
+            let mt = &self.moltypes[inst.moltype_id];
+            let off = inst.atom_offset;
+            mt.bonds.iter().map(move |b| Bond { i: off + b.i, j: off + b.j, bond_type: b.bond_type })
+        })
+    }
+
+    pub fn all_angles_global(&self) -> impl Iterator<Item = Angle> + '_ {
+        self.instances.iter().flat_map(move |inst| {
+            let mt = &self.moltypes[inst.moltype_id];
+            let off = inst.atom_offset;
+            mt.angles.iter().map(move |a| Angle { i: off + a.i, j: off + a.j, k: off + a.k, angle_type: a.angle_type })
+        })
+    }
+
+    pub fn all_proper_dihedrals_global(&self) -> impl Iterator<Item = Dihedral> + '_ {
+        self.instances.iter().flat_map(move |inst| {
+            let mt = &self.moltypes[inst.moltype_id];
+            let off = inst.atom_offset;
+            mt.proper_dihedrals.iter().map(move |d| Dihedral { i: off + d.i, j: off + d.j, k: off + d.k, l: off + d.l, dihedral_type: d.dihedral_type })
+        })
+    }
+
+    pub fn all_improper_dihedrals_global(&self) -> impl Iterator<Item = Dihedral> + '_ {
+        self.instances.iter().flat_map(move |inst| {
+            let mt = &self.moltypes[inst.moltype_id];
+            let off = inst.atom_offset;
+            mt.improper_dihedrals.iter().map(move |d| Dihedral { i: off + d.i, j: off + d.j, k: off + d.k, l: off + d.l, dihedral_type: d.dihedral_type })
+        })
+    }
+
+    pub fn all_cross_dihedrals_global(&self) -> impl Iterator<Item = CrossDihedral> + '_ {
+        self.instances.iter().flat_map(move |inst| {
+            let mt = &self.moltypes[inst.moltype_id];
+            let off = inst.atom_offset;
+            mt.cross_dihedrals.iter().map(move |c| CrossDihedral {
+                a: off + c.a, b: off + c.b, c: off + c.c, d: off + c.d,
+                e: off + c.e, f: off + c.f, g: off + c.g, h: off + c.h,
+                cross_dihedral_type: c.cross_dihedral_type,
+            })
+        })
+    }
+
     /// Build exclusions from bonded topology
     ///
     /// Excludes:
@@ -817,28 +871,34 @@ impl Topology {
         let n_atoms = self.num_atoms();
         self.exclusions = vec![Vec::new(); n_atoms];
 
+        // Collect into locals first — moltypes and exclusions are different struct fields
+        // so Rust allows simultaneous borrows, but collecting avoids lifetime complexity.
+        let bonds:     Vec<Bond>     = self.moltypes[0].bonds.clone();
+        let angles:    Vec<Angle>    = self.moltypes[0].angles.clone();
+        let dihedrals: Vec<Dihedral> = self.moltypes[0].proper_dihedrals.clone();
+
         // Exclude bonded neighbors (1-2)
-        for bond in &self.solute.bonds {
+        for bond in &bonds {
             self.exclusions[bond.i].push(bond.j);
             self.exclusions[bond.j].push(bond.i);
         }
 
         // Exclude angle neighbors (1-3)
-        for angle in &self.solute.angles {
+        for angle in &angles {
             self.exclusions[angle.i].push(angle.k);
             self.exclusions[angle.k].push(angle.i);
         }
 
         // Optionally exclude or mark 1-4 pairs
         if exclude_14 {
-            for dihedral in &self.solute.proper_dihedrals {
+            for dihedral in &dihedrals {
                 self.exclusions[dihedral.i].push(dihedral.l);
                 self.exclusions[dihedral.l].push(dihedral.i);
             }
         } else {
             // Store as special 1-4 pairs
             self.one_four_pairs = vec![Vec::new(); n_atoms];
-            for dihedral in &self.solute.proper_dihedrals {
+            for dihedral in &dihedrals {
                 self.one_four_pairs[dihedral.i].push(dihedral.l);
                 self.one_four_pairs[dihedral.l].push(dihedral.i);
             }
@@ -884,6 +944,27 @@ impl Topology {
         self.atom_to_energy_group.resize(n_atoms, 0);
     }
 
+    /// Rebuild `iac`, `mass`, `charge` flat caches from `moltypes` + `instances`.
+    ///
+    /// This is the Dim 10 Phase 2a step: the flat arrays are no longer expanded
+    /// manually in `solvate()` — they are derived from the instance registry.
+    /// Calling this after adding/removing instances keeps the caches coherent.
+    pub fn rebuild_flat_arrays(&mut self) {
+        self.iac.clear();
+        self.mass.clear();
+        self.charge.clear();
+        for inst in &self.instances {
+            if let Some(mt) = self.moltypes.get(inst.moltype_id) {
+                for a in &mt.atoms {
+                    self.iac.push(a.iac);
+                    self.mass.push(a.mass);
+                    self.charge.push(a.charge);
+                }
+            }
+        }
+        self.compute_inverse_masses();
+    }
+
     /// Compute inverse masses for all atoms (for efficient integration)
     pub fn compute_inverse_masses(&mut self) {
         self.inverse_mass = self
@@ -904,7 +985,7 @@ impl Topology {
         }
 
         let atoms_per_solvent = self.solvent_atom_template.len();
-        let n_solute = self.solute.num_atoms();
+        let n_solute = self.num_solute_atoms();
 
         // Dim 10: ensure solute moltype + instance are initialised before we add solvent.
         self.init_solute_moltype();
@@ -917,34 +998,7 @@ impl Topology {
         let n_solvent_atoms = atoms_per_solvent * nsm;
         let n_total = n_solute + n_solvent_atoms;
 
-        // Create Solvent entry
-        let mut solvent = Solvent::new("SOLV".to_string());
-        for sa in &self.solvent_atom_template {
-            solvent.atoms.push(Atom {
-                name: sa.name.clone(),
-                residue_nr: 0,
-                residue_name: "SOLV".to_string(),
-                iac: sa.iac,
-                mass: sa.mass,
-                charge: sa.charge,
-                is_perturbed: false,
-                is_polarisable: false,
-                is_coarse_grained: false,
-            });
-        }
-        solvent.num_molecules = nsm;
-        self.solvents.push(solvent);
-
-        // Expand flat arrays for all solvent copies
-        for _mol in 0..nsm {
-            for sa in &self.solvent_atom_template {
-                self.mass.push(sa.mass);
-                self.charge.push(sa.charge);
-                self.iac.push(sa.iac);
-            }
-        }
-
-        self.compute_inverse_masses();
+        // Phase 2e: Solvent struct removed — solvent data lives in moltypes + instances.
 
         // Each solvent molecule is its own chargegroup
         for mol in 0..nsm {
@@ -986,24 +1040,9 @@ impl Topology {
             self.exclusions[i].sort_unstable();
         }
 
-        // Rebuild LJ matrix if solvent introduces new IAC types
-        let max_iac = self.iac.iter().max().copied().unwrap_or(0);
-        let n_types = max_iac + 1;
-        if n_types > self.lj_parameters.len() {
-            let old_len = self.lj_parameters.len();
-            self.lj_parameters.resize(n_types, vec![LJParameters::default(); n_types]);
-            for row in self.lj_parameters.iter_mut() {
-                row.resize(n_types, LJParameters::default());
-            }
-            log::debug!("LJ matrix expanded from {}x{} to {}x{} for solvent types",
-                old_len, old_len, n_types, n_types);
-        }
-
         // Dim 10: add solvent MoleculeType (stored once) + one Instance per molecule.
         {
-            let sv_name = self.solvents.last()
-                .map(|sv| sv.name.clone())
-                .unwrap_or_else(|| "SOLV".to_string());
+            let sv_name = "SOLV".to_string();
 
             let sv_moltype = MoleculeType {
                 name: sv_name,
@@ -1015,8 +1054,16 @@ impl Topology {
                         iac:   sa.iac,
                         mass:  sa.mass,
                         charge: sa.charge,
+                        ..MolTypeAtom::default()
                     }
                 }).collect(),
+                // Solvent bonded terms live in solvent_constraint_template (constraints only).
+                // No proper bonds/angles/dihedrals for rigid SPC-like solvents.
+                bonds: Vec::new(),
+                angles: Vec::new(),
+                proper_dihedrals: Vec::new(),
+                improper_dihedrals: Vec::new(),
+                cross_dihedrals: Vec::new(),
             };
             let solvent_moltype_id = self.moltypes.len();
             self.moltypes.push(sv_moltype);
@@ -1029,6 +1076,23 @@ impl Topology {
                     role: Role::Solvent,
                 });
             }
+        }
+
+        // Phase 2a: derive flat arrays from the now-complete instance registry.
+        // Must run before the LJ matrix resize which reads self.iac.
+        self.rebuild_flat_arrays();
+
+        // Rebuild LJ matrix if solvent introduces new IAC types
+        let max_iac = self.iac.iter().max().copied().unwrap_or(0);
+        let n_types = max_iac + 1;
+        if n_types > self.lj_parameters.len() {
+            let old_len = self.lj_parameters.len();
+            self.lj_parameters.resize(n_types, vec![LJParameters::default(); n_types]);
+            for row in self.lj_parameters.iter_mut() {
+                row.resize(n_types, LJParameters::default());
+            }
+            log::debug!("LJ matrix expanded from {}x{} to {}x{} for solvent types",
+                old_len, old_len, n_types, n_types);
         }
 
         log::debug!("Solvated: {} solute + {} solvent ({} molecules × {} atoms) = {} total, {} chargegroups",
@@ -1074,24 +1138,10 @@ mod tests {
     #[test]
     fn test_topology_creation() {
         let mut topo = Topology::new();
-
-        // Add a simple water molecule
-        let mut water = Solvent::new("SOL".to_string());
-        water.atoms.push(Atom {
-            name: "OW".to_string(),
-            residue_nr: 1,
-            residue_name: "SOL".to_string(),
-            iac: 0,
-            mass: 15.9994,
-            charge: -0.82,
-            is_perturbed: false,
-            is_polarisable: false,
-            is_coarse_grained: false,
-        });
-        water.num_molecules = 100;
-
-        topo.solvents.push(water);
-
+        topo.solvent_atom_template = vec![
+            SolventAtomTemplate { iac: 0, name: "OW".into(), mass: 15.9994, charge: -0.82 },
+        ];
+        topo.solvate(100);
         assert_eq!(topo.num_atoms(), 100);
     }
 
@@ -1101,7 +1151,7 @@ mod tests {
         
         // Add 3 atoms first so num_atoms() returns 3
         for i in 0..3 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(MolTypeAtom {
                 name: format!("A{}", i + 1),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -1114,17 +1164,17 @@ mod tests {
             });
         }
         
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,
         });
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 1,
             j: 2,
             bond_type: 0,
         });
-        topo.solute.angles.push(Angle {
+        topo.moltypes[0].angles.push(Angle {
             i: 0,
             j: 1,
             k: 2,

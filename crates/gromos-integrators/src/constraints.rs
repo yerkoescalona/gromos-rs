@@ -44,7 +44,7 @@ impl ShakeBuffers {
         let solute_constraints: Vec<(usize, usize, f64)> = match ntc {
             NtcMode::SolventOnly => Vec::new(),
             NtcMode::HydrogenBonds => {
-                topo.solute.bonds.iter().filter_map(|bond| {
+                topo.moltypes[0].bonds.iter().filter_map(|bond| {
                     let constraint_length = topo.bond_parameters[bond.bond_type].r0;
                     if constraint_length < 1e-10 {
                         return None;
@@ -58,7 +58,7 @@ impl ShakeBuffers {
                 }).collect()
             }
             NtcMode::AllBonds => {
-                topo.solute.bonds.iter().filter_map(|bond| {
+                topo.moltypes[0].bonds.iter().filter_map(|bond| {
                     let constraint_length = topo.bond_parameters[bond.bond_type].r0;
                     if constraint_length < 1e-10 {
                         return None;
@@ -69,10 +69,10 @@ impl ShakeBuffers {
         };
 
         let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
-        if include_solvent && !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
-            let n_solute = topo.solute.num_atoms();
+        if include_solvent && !topo.solvent_constraint_template.is_empty() && topo.num_solvent_molecules() > 0 {
+            let n_solute = topo.num_solute_atoms();
             let atoms_per_solvent = topo.solvent_atom_template.len();
-            let num_molecules = topo.solvents[0].num_molecules;
+            let num_molecules = topo.num_solvent_molecules();
 
             for mol in 0..num_molecules {
                 let base = n_solute + mol * atoms_per_solvent;
@@ -220,7 +220,7 @@ pub fn shake(
         NtcMode::SolventOnly => Vec::new(), // NTC=1: no solute constraints
         NtcMode::HydrogenBonds => {
             // NTC=2: only bonds involving hydrogen (mass < 2.0)
-            topo.solute.bonds.iter().filter_map(|bond| {
+            topo.moltypes[0].bonds.iter().filter_map(|bond| {
                 let constraint_length = topo.bond_parameters[bond.bond_type].r0;
                 if constraint_length < 1e-10 {
                     return None;
@@ -235,7 +235,7 @@ pub fn shake(
         }
         NtcMode::AllBonds => {
             // NTC=3: all bonds
-            topo.solute.bonds.iter().filter_map(|bond| {
+            topo.moltypes[0].bonds.iter().filter_map(|bond| {
                 let constraint_length = topo.bond_parameters[bond.bond_type].r0;
                 if constraint_length < 1e-10 {
                     return None;
@@ -247,10 +247,10 @@ pub fn shake(
 
     // Build solvent constraints list
     let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
-    if !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
-        let n_solute = topo.solute.num_atoms();
+    if !topo.solvent_constraint_template.is_empty() && topo.num_solvent_molecules() > 0 {
+        let n_solute = topo.num_solute_atoms();
         let atoms_per_solvent = topo.solvent_atom_template.len();
-        let num_molecules = topo.solvents[0].num_molecules;
+        let num_molecules = topo.num_solvent_molecules();
 
         for mol in 0..num_molecules {
             let base = n_solute + mol * atoms_per_solvent;
@@ -282,7 +282,7 @@ pub fn shake(
 
     // skip_now/skip_next optimization: avoid re-checking converged constraints
     // For solute: indexed by local solute atom index
-    let n_solute_atoms = topo.solute.num_atoms();
+    let n_solute_atoms = topo.num_solute_atoms();
     let n_total_atoms = topo.num_atoms();
     let mut skip_now = vec![false; n_total_atoms];
     let mut skip_next = vec![true; n_total_atoms];
@@ -773,10 +773,10 @@ pub fn perturbed_shake(
 /// - Exactly one solvent, water-like with 3 atoms and equal H masses
 /// - 3 distance constraints with the two O-H lengths equal
 pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintResult {
-    let n_solute = topo.solute.num_atoms();
+    let n_solute = topo.num_solute_atoms();
     let num_atoms = topo.num_atoms();
 
-    if topo.solvents.is_empty() || topo.solvent_constraint_template.len() != 3 {
+    if topo.num_solvent_molecules() == 0 || topo.solvent_constraint_template.len() != 3 {
         return ConstraintResult {
             converged: true,
             iterations: 0,
@@ -1031,7 +1031,7 @@ impl LincsBuffers {
         let solute_constraints: Vec<(usize, usize, f64)> = if include_solute {
             match ntc {
                 NtcMode::SolventOnly => Vec::new(),
-                NtcMode::HydrogenBonds => topo.solute.bonds.iter().filter_map(|bond| {
+                NtcMode::HydrogenBonds => topo.moltypes[0].bonds.iter().filter_map(|bond| {
                     let r0 = topo.bond_parameters[bond.bond_type].r0;
                     if r0 < 1e-10 {
                         return None;
@@ -1041,7 +1041,7 @@ impl LincsBuffers {
                     }
                     Some((bond.i, bond.j, r0))
                 }).collect(),
-                NtcMode::AllBonds => topo.solute.bonds.iter().filter_map(|bond| {
+                NtcMode::AllBonds => topo.moltypes[0].bonds.iter().filter_map(|bond| {
                     let r0 = topo.bond_parameters[bond.bond_type].r0;
                     if r0 < 1e-10 {
                         return None;
@@ -1053,16 +1053,16 @@ impl LincsBuffers {
             Vec::new()
         };
 
-        let n_solute = topo.solute.num_atoms();
+        let n_solute = topo.num_solute_atoms();
         let solute_params = LincsParameters { order: solute_order };
         let solute_data = setup_lincs(topo, &solute_constraints, 0);
 
         let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
         let mut atoms_per_solvent = 0;
         let mut num_solvent_molecules = 0;
-        if include_solvent && !topo.solvent_constraint_template.is_empty() && !topo.solvents.is_empty() {
+        if include_solvent && !topo.solvent_constraint_template.is_empty() && topo.num_solvent_molecules() > 0 {
             atoms_per_solvent = topo.solvent_atom_template.len();
-            num_solvent_molecules = topo.solvents[0].num_molecules;
+            num_solvent_molecules = topo.num_solvent_molecules();
             for constr in &topo.solvent_constraint_template {
                 solvent_constraints.push((constr.i, constr.j, constr.length));
             }
@@ -1730,17 +1730,17 @@ mod tests {
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0, 1.0 / 12.0];
 
         // Add bonds: 0-1, 0-2, 1-2
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,
         });
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 2,
             bond_type: 0,
         });
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 1,
             j: 2,
             bond_type: 0,
@@ -1791,7 +1791,7 @@ mod tests {
         topo.mass = vec![12.0, 12.0];
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0];
 
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,
@@ -1851,12 +1851,12 @@ mod tests {
         topo.inverse_mass = vec![1.0 / 16.0, 1.0 / 1.0, 1.0 / 1.0];
 
         // Two O-H bonds (coupled through atom 0)
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,
         });
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 2,
             bond_type: 0,
@@ -1979,25 +1979,8 @@ mod tests {
             SolventConstraintTemplate { i: 1, j: 2, length: dist_hh },
         ];
 
-        let make_atom = |name: &str, mass: f64, charge: f64| Atom {
-            name: name.to_string(),
-            residue_nr: 0,
-            residue_name: "SOL".to_string(),
-            iac: 0,
-            mass,
-            charge,
-            is_perturbed: false,
-            is_polarisable: false,
-            is_coarse_grained: false,
-        };
-        let mut solvent = Solvent::new("SOL".to_string());
-        solvent.atoms = vec![
-            make_atom("OW", 15.99940, -0.82),
-            make_atom("HW1", 1.00800, 0.41),
-            make_atom("HW2", 1.00800, 0.41),
-        ];
-        solvent.num_molecules = 1;
-        topo.solvents = vec![solvent];
+        // Populate molecules + instances via solvate() — replaces old Solvent struct setup.
+        topo.solvate(1);
 
         // Old (reference) geometry: exact canonical SPC triangle, centered at origin
         let half_hh = dist_hh / 2.0;

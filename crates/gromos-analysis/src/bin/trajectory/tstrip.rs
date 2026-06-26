@@ -69,7 +69,7 @@ fn main() {
     });
 
     let topo = build_topology(topo_data);
-    let num_solute = natoms.unwrap_or(topo.solute.num_atoms());
+    let num_solute = natoms.unwrap_or(topo.num_solute_atoms());
 
     // Open trajectory
     let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap_or_else(|e| {
