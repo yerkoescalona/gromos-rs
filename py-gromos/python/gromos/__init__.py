@@ -141,6 +141,21 @@ from .md_runners import (
 
 __version__ = "0.1.0"
 
+# PROTOTYPE — system builder algebra (P3 design sketch, not yet implemented)
+# Imported here so the names appear in `dir(gromos)` for inspection only.
+# Nothing below runs correctly; stubs raise NotImplementedError.
+from .system_builder import (
+    ForceField,
+    BuildingBlock,
+    MoleculeTopology,
+    SystemTopology,
+    SolvatedSystem,
+    Configuration as EnhancedConfiguration,
+    EnergyTimeseries,
+    MDResult,
+    build_system,
+)
+
 __all__ = [
     # Rust bindings
     "Vec3",
@@ -179,6 +194,16 @@ __all__ = [
     "run_ti",
     # Analysis module
     "analysis",
+    # System builder algebra (P3)
+    "ForceField",
+    "BuildingBlock",
+    "MoleculeTopology",
+    "SystemTopology",
+    "SolvatedSystem",
+    "EnhancedConfiguration",
+    "EnergyTimeseries",
+    "MDResult",
+    "build_system",
     # Version
     "__version__",
 ]

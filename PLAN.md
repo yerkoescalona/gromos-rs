@@ -303,11 +303,74 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 
 ### Priority 3 — py-gromos API & education
 
-> **Design target:** `ForceField` → `BuildingBlock` → `Topology` as an algebra; Python expresses verbs; Rust core owns every invariant.
+> **Approach: small steps, no big design commitment yet.** The full vision (the `System`
+> algebra, lazy vs eager `+`, solvation semantics, native topology building) is a *future*
+> dimension — see FUTURE.md "Compositional topology construction in py-gromos" and the code
+> sketch in `py-gromos/notebooks/00_api_design_mockup.ipynb`. Those open decisions (D1–D8)
+> are **deliberately deferred**: we figure them out by walking the path, not by drawing the
+> whole map first. P3 below is only the next concrete, decision-free steps.
+>
+> **The one settled idea:** mirror the two GROMOS files as two Rust objects —
+> `Topology` (`.top`) and `Configuration` (`.cnf`) — and a `System = Topology + Configuration`
+> that pairs them. Users normally hold a `System`. Start with loading from files; nothing else.
 
-- [ ] Phase 1 — Rust bindings (pyo3-gromos): see `pyo3-gromos/.claude/CONTEXT.md`
-- [ ] Phase 2 — Python API: method chaining, energy DataFrame, rich reprs
-- [ ] Phase 3 — Notebooks & education: rewrite `py-gromos/notebooks/` + `examples/`
+**3.1 — `System.from_files()` — load topology + coordinates as one object** ← **START HERE**
+> The smallest useful step. Commits to none of the deferred decisions. Mostly wires
+> existing `PyTopology` / `PyConfiguration` together.
+> *Invariant:* `System(topo, conf)` raises `ValueError` if `topo.n_atoms != conf.n_atoms`
+> — earliest catch of the `.top`/`.cnf` mismatch that silently corrupted vsomm_modeler runs.
+- [ ] `PyTopology.charge` `#[getter]` — `self.inner.charge.iter().sum::<f64>().round() as i32`.
+- [ ] `Topology.from_file(path)` / `Configuration.from_file(path)` `#[staticmethod]`
+  (keep the existing `__new__(path)` working — just an alias).
+- [ ] New `PySystem` in `pyo3-gromos/src/system.rs`:
+  - Holds `Topology + Configuration`; validates atom-count match at construction.
+  - Properties: `n_atoms`, `charge`, `positions`, `velocities`, `box`,
+    `topology`, `configuration`.
+  - `System.from_files(top, cnf)` `#[staticmethod]` — convenience loader.
+  - `write(path)` — write the configuration side to `.cnf`.
+- [ ] Expose `System` in `__init__.py`; add to `.pyi` stub.
+- [ ] **Unit test:** load a reference system (`water_216_box`), check `n_atoms`/`charge`;
+  mismatched topo/conf raises.
+
+**3.2 — Run an existing `System` with native parameters** (after 3.1)
+> Make a loaded `System` runnable without writing `.imd` files. Reuses the existing
+> `PySimulation`; the new piece is parameter factories so Python need not author IMD text.
+- [ ] `impl Default for ImdParameters` in `gromos-io/src/imd.rs` (sensible GROMOS defaults).
+- [ ] Factory functions: `nve(dt, steps)`, `nvt(dt, steps, temperature)`,
+  `npt(dt, steps, temperature, pressure)`, `steepest_descent(steps)`.
+- [ ] `PyInputParameters`: `from_file(path)` `#[staticmethod]` (alias of current `__new__`);
+  `#[staticmethod]` factory wrappers; `write(path)` to serialise back to `.imd`.
+- [ ] `Simulation(system, params)` constructor accepting a `System` (in addition to the
+  current topo/conf/params form).
+- [ ] **Unit test:** `nvt(...)` factory produces a runnable sim equivalent to loading the
+  matching `.imd`; energies match the reference for `water_216_box`.
+
+**3.3 — Energy out without files: reporters** (after 3.2)
+> Stream energies from a run into Python instead of parsing a `.tre` file.
+> *Trap:* reporter callbacks cross the GIL inside the Rust step loop — a panic in a callback
+> must surface as a Python exception, not a process abort. *Invariant:* with no reporters
+> attached, trajectories stay bit-identical to today (all reference tests pass).
+- [ ] Wire missing energy components into `PyEnergy`: `angle`, `dihedral`, `improper`
+  (fields exist in the Rust `Energy` struct; zeroed today at `simulation.rs:572`).
+- [ ] `sim.run(steps, ene_freq=100)` — batch loop in Rust returning an
+  `(n_frames × k)` numpy energy array (no Python-side per-step loop).
+- [ ] `EnergyTimeseries` (Python): wraps that array; `to_dataframe()` (polars→pandas→dict),
+  `plot(*components)`, `block_average(component, block_size)`.
+- [ ] **Test:** frame count correct; `run()` energies match a `step(1)` loop.
+
+**3.4 — Notebooks: teach the `from_files` path** (after 3.3)
+> Replace the three existing notebooks (they reference phantom APIs like `gromos.State`).
+- [ ] `01_load_and_inspect.ipynb` — `System.from_files()`, inspect topology + energies.
+- [ ] `02_short_md.ipynb` — load `water_216_box`, `nvt(...)`, run, plot energy via `EnergyTimeseries`.
+- [ ] Deprecate `md_runners.py` (the legacy subprocess runners) — mark deprecated; remove
+  once notebooks no longer reference it.
+
+**Deferred to FUTURE.md (do NOT start until 3.1–3.4 are solid and usable)**
+> The system-building algebra and everything that requires the open D1–D8 decisions:
+> `ForceField`/`molecule(seq)` (subprocess `make_top` + coordinate pipeline), the `+`/`*`
+> assembly algebra, `.solvate()`/`.pack()`, `.neutralize()`, native topology building, and the
+> `system_builder.py` completions. These live in FUTURE.md and the design mockup; revisit with
+> running code in hand. The traditional 8 binaries stay available throughout for back-compat.
 
 ### Priority 4 — Benchmarking
 - [ ] Baseline `cargo bench --workspace -- --save-baseline v0.1`

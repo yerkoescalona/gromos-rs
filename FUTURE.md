@@ -455,6 +455,39 @@ introspectable program."
 core algebra (`ForceField` context, `Topology` as a composable value, Rust owns invariants) right
 *first*, because the fluent/lazy sugar is cheap to change but the object model is not.
 
+### Addendum (2026-06): the `System` object and the *spatial* algebra (the genuinely hard part)
+
+The section above is about composing **topologies**. The harder, still-open problem surfaced when
+we tried to design the user-facing API: a runnable thing needs **coordinates too**, and combining
+coordinates means deciding **where things go in space**. Settled vs deferred:
+
+**Settled (the noun model).** Mirror the two GROMOS files as two first-class Rust objects —
+`Topology` (`.top`, connectivity) and `Configuration` (`.cnf`, positions/velocities/box) — and a
+`System = Topology + Configuration` that pairs them with a validation invariant
+(`topo.n_atoms == conf.n_atoms`). Users normally hold a `System`; they can still hold either half
+alone. This kills the `EnhancedConfiguration` noun-soup and gives one authoritative object. `System`
+is a Rust object exposed through pyo3.
+
+**Deferred (the spatial algebra — do NOT decide until there's running code).** When a `System`
+carries coordinates, what does `protein + water*216` *mean*? Two models:
+- **Eager** — `+` concatenates coordinates immediately; the caller must `.translate()` to avoid
+  clashes. Simple but doesn't match how GROMOS places molecules.
+- **Lazy** — `+`/`*N` build an `Assembly` *plan* (no coordinates touched); one terminal
+  `.pack()`/`.solvate()` runs `ran_box`/`sim_box` (the real placement algorithms) once at the end.
+  Matches the C++ pipeline and makes `*N` (identical replication) and `sum(distinct molecules)` (the
+  VSOMM 200-unique-molecule case) both fall out naturally.
+
+Lazy is the likely answer, but it introduces an `Assembly` concept and commits the whole object
+model — so it stays parked until the simple `System.from_files()` path is built and usable. The full
+set of open sub-decisions (D1–D8: `select()` return type, eager/lazy `+`, `*N` semantics,
+`n` vs `density` solvation, `sum()` of distinct systems, `topology(seq)` vs `molecule(seq)`,
+frozen vs live `InputParameters`, mutate-vs-return `run()`) and a concrete code sketch live in
+`py-gromos/notebooks/00_api_design_mockup.ipynb`. **The traditional 8 binaries
+(`make_top`/`com_top`/`sim_box`/`ran_box`/`ion`/`pdb2g96`/`gca`/`gch`) stay** for back-compat and
+because they carry real placement algorithms; the `System` path wraps them, and native
+re-implementations are a later, separate item. PLAN.md P3 deliberately starts with only the
+`System.from_files()` step — the rest of this dimension is figured out by walking it.
+
 ---
 
 ## Dimension 10 — Dissolve the solute/solvent split: separate *representation* from *role*
