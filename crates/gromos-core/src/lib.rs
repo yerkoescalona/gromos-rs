@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! GROMOS-RS Core: Math types, topology, and fundamental data structures
 //!
 //! This crate provides the foundational types used throughout GROMOS-RS:
