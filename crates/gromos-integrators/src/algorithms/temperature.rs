@@ -1,17 +1,17 @@
 //! Temperature / kinetic energy calculation algorithm.
 //!
-//! Equivalent to gromosXX `algorithm::Temperature_Calculation`.
-//! Computes kinetic energy using the gromosXX convention:
+//! Equivalent to GROMOS `algorithm::Temperature_Calculation`.
+//! Computes kinetic energy using the GROMOS convention:
 //! E_kin = 0.5 * sum_i( m_i * (|v_new_i|^2 + |v_old_i|^2) / 2 )
 //! where v_new = conf.current().vel, v_old = conf.old().vel
 //!
 //! **Init behavior**: `init()` calls `apply()` once before the MD loop to
 //! pre-compute `kinetic_energy_new` from the initial velocities. This is
 //! required so that the Berendsen thermostat has a valid E_kin for its very
-//! first scaling step. This matches gromosXX `Temperature_Calculation::init()`
+//! first scaling step. This matches GROMOS `Temperature_Calculation::init()`
 //! (see md++/src/algorithm/temperature/temperature_calculation.cc line ~248-260).
 //!
-//! Note: this is NOT a gromosXX bug — it is physically correct. The thermostat
+//! Note: this is NOT a GROMOS bug — it is physically correct. The thermostat
 //! needs to know the current kinetic energy to compute the first scaling factor.
 //! Without this init, E_kin_new=0 at step 0, the thermostat falls back to
 //! T_free=T0 and scale=1.0, producing an unscaled first step that cascades
@@ -23,11 +23,11 @@ use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
 
-/// Calculates kinetic energy and temperature using gromosXX's averaged formula.
+/// Calculates kinetic energy and temperature using GROMOS's averaged formula.
 ///
-/// In gromosXX, E_kin = 0.5 * sum_i( m_i * (|v_new|^2 + |v_old|^2) / 2 )
+/// In GROMOS, E_kin = 0.5 * sum_i( m_i * (|v_new|^2 + |v_old|^2) / 2 )
 /// This averages the kinetic energy between the current and old velocities.
-/// The result is stored in conf.old().energies (gromosXX convention).
+/// The result is stored in conf.old().energies (GROMOS convention).
 #[derive(Debug, Clone)]
 pub struct TemperatureCalculation;
 
@@ -46,7 +46,7 @@ impl Default for TemperatureCalculation {
 impl Algorithm for TemperatureCalculation {
     /// Initialize by running apply() once to pre-compute kinetic_energy_new.
     ///
-    /// gromosXX: Temperature_Calculation::init() calls apply() so that
+    /// GROMOS: Temperature_Calculation::init() calls apply() so that
     /// multibath.bath.ekin is populated before the first MD step. Without
     /// this, the Berendsen thermostat would see E_kin=0 at step 0 and
     /// skip scaling entirely.
@@ -66,7 +66,7 @@ impl Algorithm for TemperatureCalculation {
         conf: &mut Configuration,
         _sim: &SimulationState,
     ) -> Result<(), String> {
-        // gromosXX convention: E_kin = 0.5 * sum_i( m_i * (|v_new|^2 + |v_old|^2) / 2 )
+        // GROMOS convention: E_kin = 0.5 * sum_i( m_i * (|v_new|^2 + |v_old|^2) / 2 )
         // After Leap_Frog_Velocity's exchange_state():
         //   current().vel = new velocities v(t+dt/2)
         //   old().vel     = previous velocities v(t-dt/2)
@@ -82,7 +82,7 @@ impl Algorithm for TemperatureCalculation {
             e_kin_new += 0.5 * m * v_new.length_squared();
         }
         conf.old_mut().energies.kinetic_total = e_kin;
-        // Store "new" E_kin for thermostat scaling (gromosXX: multibath.bath.ekin)
+        // Store "new" E_kin for thermostat scaling (GROMOS: multibath.bath.ekin)
         conf.old_mut().energies.kinetic_energy_new = e_kin_new;
         log::debug!("  E_kin={:.10e}  E_kin_new={:.10e}", e_kin, e_kin_new);
         Ok(())

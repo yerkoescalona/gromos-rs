@@ -1,6 +1,6 @@
 //! Pressure tensor calculation algorithm.
 //!
-//! Equivalent to gromosXX `algorithm::Pressure_Calculation`.
+//! Equivalent to GROMOS `algorithm::Pressure_Calculation`.
 //! Computes the pressure tensor from the kinetic energy tensor and virial tensor:
 //!   P_tensor = (KE_tensor + 0.5 * virial_tensor) * (2.0 / V)
 //!
@@ -8,7 +8,7 @@
 //! The 0.5 factor is applied here.
 //!
 //! KE tensor and virial correction are now computed inside the Forcefield
-//! (prepare_virial + atomic_to_molecular_virial), matching gromosXX.
+//! (prepare_virial + atomic_to_molecular_virial), matching GROMOS.
 //! After exchange_state, they are in conf.old().
 //!
 //! Source: md++/src/algorithm/pressure/pressure_calculation.cc
@@ -28,7 +28,7 @@ pub enum VirialType {
 
 /// Calculates the pressure tensor from KE tensor and virial tensor.
 ///
-/// gromosXX sequence position: after TemperatureCalculation, before BerendsenBarostat.
+/// GROMOS sequence position: after TemperatureCalculation, before BerendsenBarostat.
 /// Reads from conf.old() (after exchange_state).
 ///
 /// The KE tensor and molecular virial correction have already been computed
@@ -87,7 +87,7 @@ impl Algorithm for PressureCalculation {
             sum.z_axis * factor,
         );
 
-        // Store pressure tensor in old() (gromosXX convention)
+        // Store pressure tensor in old() (GROMOS convention)
         conf.old_mut().pressure_tensor = p_tensor;
 
         Ok(())

@@ -12,7 +12,7 @@ use gromos_io::{gromos_args, read_g96_labeled, G96Atom};
 use std::process;
 
 /// Conversion factor from atomic mass units to kg per nm^3 at unit density
-/// (gromos++ `build_box.cc`: `vtot = nsm * (weight * 1.66056) / density`).
+/// (gromos-rs `build_box.cc`: `vtot = nsm * (weight * 1.66056) / density`).
 const AMU_TO_KG_PER_NM3: f64 = 1.66056;
 
 #[derive(Parser)]
@@ -37,7 +37,7 @@ struct Args {
 
 /// Computes (box_side, cell_side) for `nsm` copies per dimension of a molecule
 /// of the given `weight` (u) so that the system matches the target `density`
-/// (kg/m^3). Mirrors gromos++ `build_box.cc`: `vtot = nsm^3 * (weight * 1.66056) / density`.
+/// (kg/m^3). Mirrors gromos-rs `build_box.cc`: `vtot = nsm^3 * (weight * 1.66056) / density`.
 fn box_dimensions(nsm: usize, weight: f64, density: f64) -> (f64, f64) {
     let nsm_total = nsm * nsm * nsm;
     let vtot = nsm_total as f64 * (weight * AMU_TO_KG_PER_NM3) / density;

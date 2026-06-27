@@ -232,7 +232,7 @@ impl EnergyWriter {
             self.write_header = false;
         }
 
-        // Write energy values with full f64 precision (scientific notation, matching gromosXX)
+        // Write energy values with full f64 precision (scientific notation, matching GROMOS)
         write!(
             self.writer,
             "{:20.12e} {:20.12e} {:20.12e} {:20.12e} {:20.12e}",

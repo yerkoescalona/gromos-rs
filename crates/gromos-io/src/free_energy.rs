@@ -1,8 +1,8 @@
-//! Free energy trajectory writer (.trg) — gromosXX FREEENERGY03 block format.
+//! Free energy trajectory writer (.trg) — GROMOS FREEENERGY03 block format.
 //!
 //! One FREEENERGY03 block per frame, containing time, lambda, and dH/dλ components.
 //!
-//! # Format (gromosXX out_energy.cc::_print_free_energy_trajectory)
+//! # Format (GROMOS out_energy.cc::_print_free_energy_trajectory)
 //! ```text
 //! TITLE
 //!   GROMOS-RS free energy trajectory
@@ -90,7 +90,7 @@ pub fn read_free_energy_trajectory<P: AsRef<Path>>(path: P) -> Result<Vec<FreeEn
     Ok(frames)
 }
 
-/// Writer for gromosXX-compatible free-energy trajectory files (.trg).
+/// Writer for GROMOS-compatible free-energy trajectory files (.trg).
 ///
 /// Each call to `write_frame` appends one FREEENERGY03 block.
 pub struct FreeEnergyWriter {

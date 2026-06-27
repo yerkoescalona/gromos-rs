@@ -1,6 +1,6 @@
-//! Atom selection — gromos++ AtomSpecifier grammar over a flat index space.
+//! Atom selection — gromos-rs AtomSpecifier grammar over a flat index space.
 //!
-//! Parses the standard gromos++ specifier syntax and resolves it to a sorted,
+//! Parses the gromos-rs specifier syntax and resolves it to a sorted,
 //! deduplicated `Vec<usize>` of 0-based atom indices.
 //!
 //! # Grammar (subset implemented)
@@ -45,26 +45,66 @@
 use crate::topology::Topology;
 use std::collections::HashSet;
 
-/// Atom selection error.
+/// Atom selection error with syntax hints.
 #[derive(Debug, Clone)]
 pub enum SelectionError {
+    /// Generic parse failure. `input` is what was given; `hint` suggests the fix.
     ParseError(String),
+    /// A number range like `3-1` is backwards.
     InvalidRange(String),
+    /// Molecule index is out of range for the topology.
     InvalidMolecule(usize),
+    /// Residue number not found.
     InvalidResidue(usize),
+    /// Atom name not found in the selected atoms.
     InvalidAtomName(String),
+    /// The spec parsed successfully but matched zero atoms.
     EmptySelection,
 }
+
+const SYNTAX_HINT: &str = "\
+  Valid syntax examples:
+    all              → all atoms
+    1:a              → all atoms in molecule 1
+    1:1-10           → atoms 1–10 in molecule 1
+    1:CA,N,C         → atoms named CA, N or C in molecule 1
+    a:CA             → CA atoms in every molecule
+    m:a              → all solute atoms  (role == Solute)
+    m:CA             → CA atoms in solute
+    s:a              → all solvent atoms (role == Solvent)
+    s:1              → first solvent molecule
+    1:res(2:CA)      → CA of residue 2 in molecule 1
+    1:res(ALA:a)     → all atoms of ALA residues in molecule 1
+    not(a:H) 1:a     → all solute atoms except hydrogens
+    1:1-5;1:10-12    → union of two ranges";
 
 impl std::fmt::Display for SelectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            SelectionError::ParseError(m) => write!(f, "parse error: {m}"),
-            SelectionError::InvalidRange(m) => write!(f, "invalid range: {m}"),
-            SelectionError::InvalidMolecule(m) => write!(f, "invalid molecule: {m}"),
-            SelectionError::InvalidResidue(r) => write!(f, "invalid residue: {r}"),
-            SelectionError::InvalidAtomName(n) => write!(f, "invalid atom name: {n}"),
-            SelectionError::EmptySelection => write!(f, "empty selection"),
+            SelectionError::ParseError(m) => {
+                write!(f, "selection parse error: {m}\n{SYNTAX_HINT}")
+            }
+            SelectionError::InvalidRange(m) => {
+                write!(f, "invalid range '{m}' — ranges must be N-M with N ≤ M (e.g. '1-10')")
+            }
+            SelectionError::InvalidMolecule(n) => {
+                write!(f, "molecule {n} not found in topology\n  \
+                    Hint: use '1:a' for the first molecule, 'm:a' for all solute, \
+                    's:a' for all solvent")
+            }
+            SelectionError::InvalidResidue(r) => {
+                write!(f, "residue {r} not found\n  \
+                    Hint: use '1:res({r}:a)' to select all atoms of residue {r}, \
+                    or 'a:res(NAME:a)' to select by residue name")
+            }
+            SelectionError::InvalidAtomName(n) => {
+                write!(f, "atom name '{n}' not found in selected atoms\n  \
+                    Hint: check the name in your topology; \
+                    names are case-sensitive (e.g. 'CA' not 'ca')")
+            }
+            SelectionError::EmptySelection => {
+                write!(f, "selection matched no atoms\n{SYNTAX_HINT}")
+            }
         }
     }
 }
@@ -98,7 +138,7 @@ impl AtomSelection {
         Ok(Self { indices, n_atoms })
     }
 
-    /// Parse a gromos++ AtomSpecifier string against `topology`.
+    /// Parse an AtomSpecifier string against `topology`.
     pub fn from_string(spec: &str, topology: &Topology) -> Result<Self, SelectionError> {
         let n = topology.num_atoms();
         let spec = spec.trim();
@@ -237,8 +277,9 @@ fn resolve_mol_prefix(
             }
         }
         "s" => {
-            // Dim 10: route through role attribute when instances are populated;
-            // fall back to molecules[1..] (index-threshold convention) otherwise.
+            // s:N — Nth solvent molecule (role == Solvent), 1-based.
+            // s:a — all solvent molecules.
+            // Routes through role attribute (Dim 10); falls back to molecules[1..].
             use crate::topology::Role;
             let solvent_mol_indices: Vec<usize> = if !topology.instances.is_empty() {
                 topology.instances.iter().enumerate()
@@ -255,8 +296,54 @@ fn resolve_mol_prefix(
                 .filter_map(|&mi| topology.molecules.get(mi).cloned())
                 .collect())
         }
+        "m" => {
+            // m:N — Nth solute molecule (role == Solute), 1-based.  Dim 10 role-based facade:
+            // `m:1` = first solute molecule, mirrors `s:1` = first solvent molecule.
+            // Falls back to molecules[0..] when instances are not populated.
+            use crate::topology::Role;
+            let solute_mol_indices: Vec<usize> = if !topology.instances.is_empty() {
+                topology.instances.iter().enumerate()
+                    .filter(|(_, inst)| inst.role == Role::Solute)
+                    .map(|(i, _)| i)
+                    .collect()
+            } else {
+                // Legacy: assume molecule 0 is the solute
+                if !topology.molecules.is_empty() { vec![0] } else { vec![] }
+            };
+            if solute_mol_indices.is_empty() {
+                return Err(SelectionError::EmptySelection);
+            }
+            Ok(solute_mol_indices.iter()
+                .filter_map(|&mi| topology.molecules.get(mi).cloned())
+                .collect())
+        }
+        // ── Common mistake detection ──────────────────────────────────────────
+        "r" => {
+            return Err(SelectionError::ParseError(
+                "'r:' is not a valid prefix in gromos-rs AtomSpecifier\n  \
+                 To select by residue number use: 1:res(N:a) or a:res(N:a)\n  \
+                 To select by residue name use:   1:res(NAME:a)".into()
+            ));
+        }
+        "mol" | "molecule" => {
+            return Err(SelectionError::ParseError(
+                "'mol:' / 'molecule:' is not valid — use the molecule number directly, e.g. '1:a'".into()
+            ));
+        }
+        "res" | "residue" => {
+            return Err(SelectionError::ParseError(
+                "'res:' / 'residue:' is not a valid prefix — use '1:res(N:a)' or 'a:res(NAME:a)'".into()
+            ));
+        }
         other => {
             // Number or number range: "1", "1-3"
+            // Detect bare atom names used as prefix (e.g. "CA:a" instead of "a:CA")
+            if other.chars().all(|c| c.is_alphabetic()) && other.len() >= 2 && other.len() <= 4 {
+                return Err(SelectionError::ParseError(
+                    format!("'{other}' looks like an atom name used as a prefix — \
+                        did you mean 'a:{other}' (all molecules) or '1:{other}' (molecule 1)?")
+                ));
+            }
             let mol_nrs = parse_range_or_list(other)?; // 1-based
             let mut ranges = Vec::new();
             for mn in mol_nrs {
@@ -440,7 +527,7 @@ fn parse_range_or_list(spec: &str) -> Result<Vec<usize>, SelectionError> {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 //
-// All expected indices are verified against the gromos++ `atominfo` binary
+// All expected indices are verified against the gromos-rs `atominfo` binary
 // (gromosPlsPls BUILD/programs/atominfo) on the aladip topology.
 //
 // Aladip has 12 atoms, 1 molecule, 3 residues:
@@ -453,7 +540,7 @@ mod tests {
     use super::*;
     use crate::topology::{Atom, Topology};
 
-    /// Construct a topology matching the aladip system used by gromos++ atominfo reference runs.
+    /// Construct a topology matching the aladip system used by gromos-rs atominfo reference runs.
     fn aladip_topo() -> Topology {
         let atoms: &[(&str, usize, &str)] = &[
             // (name, residue_nr, residue_name)
@@ -473,7 +560,25 @@ mod tests {
             topo.mass.push(12.0);
             topo.charge.push(0.0);
         }
+        // Populate molecules[0] = 0..12 so molecule_nr() and atom_name() work.
+        topo.init_solute_moltype();
         topo
+    }
+
+    // ── m: facade (role-based solute selection) ───────────────────────────────
+
+    #[test] // m:1 = first solute molecule (role == Solute) = all 12 aladip atoms
+    fn test_m_solute_all() {
+        let t = aladip_topo();
+        let s = AtomSelection::from_string("m:a", &t).unwrap();
+        assert_eq!(s.len(), 12);
+    }
+
+    #[test] // m:CA = CA atoms in solute molecules (same as a:CA for single-solute system)
+    fn test_m_solute_name() {
+        let t = aladip_topo();
+        let s = AtomSelection::from_string("m:CA", &t).unwrap();
+        assert_eq!(s.indices(), &[5]); // CA is atom 6 (0-based 5) in ALA residue
     }
 
     // ── basic ────────────────────────────────────────────────────────────────

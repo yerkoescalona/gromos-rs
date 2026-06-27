@@ -188,7 +188,7 @@ pub struct ConstraintResult {
 /// The SHAKE algorithm (Ryckaert, Ciccotti & Berendsen, 1977) iteratively
 /// adjusts atomic positions to satisfy bond length constraints.
 ///
-/// Features matching gromosXX:
+/// Features matching GROMOS:
 /// - NTC control: 1=solvent only, 2=H-bonds, 3=all bonds
 /// - Constraint forces stored in conf.old().constraint_force
 /// - Virial tensor contribution accumulated in conf.old().virial_tensor
@@ -275,7 +275,7 @@ pub fn shake(
         constrained_atoms.insert(j);
     }
 
-    // Zero constraint forces for constrained atoms (gromosXX: done before SHAKE iterations)
+    // Zero constraint forces for constrained atoms (GROMOS: done before SHAKE iterations)
     for &atom in &constrained_atoms {
         conf.old_mut().constraint_force[atom] = Vec3::ZERO;
     }
@@ -332,7 +332,7 @@ pub fn shake(
         skip_next.iter_mut().for_each(|s| *s = true);
     }
 
-    // Finalize constraint forces: scale by 1/dt² (gromosXX convention)
+    // Finalize constraint forces: scale by 1/dt² (GROMOS convention)
     // Solute constraint forces
     for &(i, j, _) in &solute_constraints {
         conf.old_mut().constraint_force[i] *= 1.0 / dt2;
@@ -344,7 +344,7 @@ pub fn shake(
         conf.old_mut().constraint_force[j] *= 1.0 / dt2;
     }
 
-    // gromosXX velocity correction: vel = (pos_new - pos_old) / dt
+    // GROMOS velocity correction: vel = (pos_new - pos_old) / dt
     // Done AFTER all SHAKE iterations converge
     for &atom in &constrained_atoms {
         conf.current_mut().vel[atom] =
@@ -455,7 +455,7 @@ pub fn shake_buffered(
     }
 }
 
-/// Apply SHAKE to a single distance constraint with full gromosXX features.
+/// Apply SHAKE to a single distance constraint with full GROMOS features.
 /// Returns true if already converged.
 /// Accumulates constraint force (pre-1/dt² scaling) and virial tensor.
 #[inline]
@@ -471,14 +471,14 @@ fn shake_one_constraint_full(
 ) -> bool {
     let constr_length2 = constraint_length * constraint_length;
 
-    // gromosXX convention: r = pos(i) - pos(j)
+    // GROMOS convention: r = pos(i) - pos(j)
     let r = conf.current().pos[i] - conf.current().pos[j];
     let dist2 = r.dot(r);
 
-    // gromosXX: diff = constr_length2 - dist2
+    // GROMOS: diff = constr_length2 - dist2
     let diff = constr_length2 - dist2;
 
-    // gromosXX convergence: fabs(diff) >= constr_length2 * tolerance * 2.0
+    // GROMOS convergence: fabs(diff) >= constr_length2 * tolerance * 2.0
     if diff.abs() < constr_length2 * tolerance * 2.0 {
         return true; // already converged
     }
@@ -496,16 +496,16 @@ fn shake_one_constraint_full(
         return true; // fixed atoms
     }
 
-    // gromosXX: lambda = diff / (sp * 2.0 * inv_mass_sum)
+    // GROMOS: lambda = diff / (sp * 2.0 * inv_mass_sum)
     let lambda = diff / (sp * 2.0 * inv_mass_sum);
 
-    // Accumulate constraint force (gromosXX: cons_force = lambda * ref_r)
+    // Accumulate constraint force (GROMOS: cons_force = lambda * ref_r)
     // Note: final scaling by 1/dt² is done after all iterations
     let cons_force = ref_r * lambda;
     conf.old_mut().constraint_force[i] += cons_force;
     conf.old_mut().constraint_force[j] -= cons_force;
 
-    // Virial tensor contribution (gromosXX: virial_tensor(a,aa) += ref_r(a) * ref_r(aa) * lambda / dt2)
+    // Virial tensor contribution (GROMOS: virial_tensor(a,aa) += ref_r(a) * ref_r(aa) * lambda / dt2)
     let lambda_over_dt2 = lambda / dt2;
     let vt = &mut conf.old_mut().virial_tensor;
     vt.x_axis.x += ref_r.x * ref_r.x * lambda_over_dt2;
@@ -530,7 +530,7 @@ fn shake_one_constraint_full(
     false // not yet converged
 }
 
-/// Shake initial positions to satisfy constraints (gromosXX: sim.param().start.shake_pos).
+/// Shake initial positions to satisfy constraints (GROMOS: sim.param().start.shake_pos).
 ///
 /// Uses current positions as both reference and unconstrained positions.
 /// After shaking, old positions are set equal to the shaken current positions.
@@ -559,7 +559,7 @@ pub fn shake_positions(
     result
 }
 
-/// Shake initial velocities to satisfy velocity constraints (gromosXX: sim.param().start.shake_vel).
+/// Shake initial velocities to satisfy velocity constraints (GROMOS: sim.param().start.shake_vel).
 ///
 /// Ensures velocity components along constrained bonds are zero.
 /// Must be called after shake_positions.
@@ -586,7 +586,7 @@ pub fn shake_velocities(
     // For unconstrained atoms, restore original positions.
     for i in 0..n {
         conf.current_mut().pos[i] = conf.old().pos[i];
-        // Negate velocity direction (gromosXX convention for init shake_vel)
+        // Negate velocity direction (GROMOS convention for init shake_vel)
         conf.current_mut().vel[i] = -conf.current().vel[i];
         conf.old_mut().vel[i] = conf.current().vel[i];
     }
@@ -761,7 +761,7 @@ pub fn perturbed_shake(
 /// designed for rigid water molecules with fixed bond lengths and angles.
 /// It's much faster than iterative SHAKE for water.
 ///
-/// Faithful port of gromosXX `algorithm::Settle::solvent`
+/// Faithful port of GROMOS `algorithm::Settle::solvent`
 /// (md++/src/algorithm/constraints/settle.cc:179-415): builds the canonical
 /// triangle geometry from the constraint lengths and masses, transforms into
 /// a centre-of-mass/orientation frame derived from the *old* positions, solves
@@ -787,7 +787,7 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
     let m_o = topo.mass[n_solute];
     let m_h = topo.mass[n_solute + 1];
 
-    // Distance constraints: 0 = O-H1, 1 = O-H2, 2 = H1-H2 (gromosXX convention)
+    // Distance constraints: 0 = O-H1, 1 = O-H2, 2 = H1-H2 (GROMOS convention)
     let dist_oh = topo.solvent_constraint_template[0].length;
     let dist_hh = topo.solvent_constraint_template[2].length;
 
@@ -941,7 +941,7 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
         conf.current_mut().vel[i + 2] += d_c * dt_i;
 
         // atomic virial contribution (settle.cc:397-411)
-        // gromosXX: virial_tensor(row, col) += Σ_k pos_old[k](row) * cons_force[k](col);
+        // GROMOS: virial_tensor(row, col) += Σ_k pos_old[k](row) * cons_force[k](col);
         // Mat3 is column-major (mat.col(col)[row]), see forcefield.rs virial transfer.
         {
             let p = [
@@ -992,7 +992,7 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
 /// constraints are stored once as a local (0-based, within-molecule) template
 /// — since every molecule of a given solvent type has identical connectivity
 /// and masses, the coupling matrix only needs to be computed once
-/// (cf. gromosXX `Lincs::init`, `lincs.cc:391-409`, which sets up
+/// (cf. GROMOS `Lincs::init`, `lincs.cc:391-409`, which sets up
 /// `topo.solvent(i).lincs()` once and reuses it for every molecule via an
 /// `offset` in `_lincs<B>`, `lincs.cc:158-205`).
 #[derive(Debug, Clone)]
@@ -1018,7 +1018,7 @@ impl LincsBuffers {
     /// Precompute LINCS constraint lists and coupling matrices.
     ///
     /// `ntc` selects which solute bonds are constrained (mirrors `ShakeBuffers::new`);
-    /// LINCS for the solute additionally requires `ntc > 1` (gromosXX: `lincs.cc:248`).
+    /// LINCS for the solute additionally requires `ntc > 1` (GROMOS: `lincs.cc:248`).
     /// `solute_order`/`solvent_order` are the LINCS expansion orders (NTCP0/NTCS0).
     pub fn new(
         topo: &Topology,
@@ -1092,7 +1092,7 @@ impl LincsBuffers {
 
 /// Setup LINCS coupling matrix for a set of distance constraints.
 ///
-/// Mirrors gromosXX `_setup_lincs` (`lincs.cc:288-345`): computes the diagonal
+/// Mirrors GROMOS `_setup_lincs` (`lincs.cc:288-345`): computes the diagonal
 /// matrix elements `sdiag[i] = 1/sqrt(1/m_i + 1/m_j)` and, for every pair of
 /// constraints sharing a common atom, the coupling coefficient
 /// `coef = ±(1/m_common) * sdiag[i] * sdiag[j]` (sign flips when the shared
@@ -1155,17 +1155,17 @@ pub fn setup_lincs(topo: &Topology, constraints: &[(usize, usize, f64)], offset:
 /// Apply LINCS algorithm to satisfy distance constraints.
 ///
 /// LINCS (Linear Constraint Solver, Hess et al. 1997) — analytical port of
-/// gromosXX `_lincs<B>` (`lincs.cc:118-205`): builds reference direction
+/// GROMOS `_lincs<B>` (`lincs.cc:118-205`): builds reference direction
 /// vectors `B` from old positions, solves the coupled linear system via a
 /// truncated matrix expansion (`_solve_lincs`, `lincs.cc:69-112`), corrects
 /// positions, then applies a second solve for the rotational-lengthening
-/// correction. Finishes with the gromosXX velocity recovery
+/// correction. Finishes with the GROMOS velocity recovery
 /// `v = (pos - old_pos) / dt` (`lincs.cc:273-281`, applied unconditionally
 /// here — mirrors how `shake`/`settle` handle `do_velocity` in this port,
 /// since `SimulationState` has no analyze/minimise/sd flags).
 ///
 /// Note on sign convention: this port defines `B = (pos[j] - pos[old_i]) /
-/// |...|` (opposite of gromosXX's `B = (pos[i] - pos[j])/|...|`); the position
+/// |...|` (opposite of GROMOS's `B = (pos[i] - pos[j])/|...|`); the position
 /// correction signs below are flipped to match, so the net result is identical
 /// — `B` and the correction always appear together as `±B * sdiag/m * sol`.
 ///
@@ -1329,7 +1329,7 @@ pub fn lincs(
 }
 
 /// Apply LINCS using precomputed buffers — solute first, then every solvent
-/// molecule with its atom-index offset (mirrors gromosXX `Lincs::apply`,
+/// molecule with its atom-index offset (mirrors GROMOS `Lincs::apply`,
 /// `lincs.cc:238-284`: `_lincs` for the solute, then `_solvent` looping over
 /// every molecule of every solvent type with a running `first` offset).
 pub fn lincs_buffered(

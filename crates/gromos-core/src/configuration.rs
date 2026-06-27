@@ -124,7 +124,7 @@ pub struct Energy {
     pub dhdl_total: f64,
 
     // "New" kinetic energy from current velocities only (for thermostat scaling)
-    // gromosXX stores this in multibath.bath.ekin; we store it here
+    // GROMOS stores this in multibath.bath.ekin; we store it here
     pub kinetic_energy_new: f64,
 
     // Per-group energies (for temperature/energy groups)
@@ -166,7 +166,7 @@ impl Energy {
         }
     }
 
-    /// Total energy (kinetic + potential + special), mirroring gromosXX:
+    /// Total energy (kinetic + potential + special), mirroring GROMOS:
     /// total = potential_total + kinetic_total + special_total
     /// where special_total includes distanceres_total, posrest, angrest, etc.
     pub fn total(&self) -> f64 {

@@ -89,7 +89,7 @@ impl ForceWriter {
         forces: &[Vec3],
         constraint_forces: Option<&[Vec3]>,
     ) -> Result<(), IoError> {
-        // TIMESTEP block (gromosXX format: %15d%15.9f)
+        // TIMESTEP block (GROMOS format: %15d%15.9f)
         writeln!(self.writer, "TIMESTEP")?;
         writeln!(self.writer, "{:>15}{:>15.9}", step, time)?;
         writeln!(self.writer, "END")?;
@@ -100,7 +100,7 @@ impl ForceWriter {
         writeln!(self.writer, "FREEFORCERED")?;
 
         for (i, force) in forces.iter().enumerate() {
-            // gromosXX format: three values packed at width 18, no separating space
+            // GROMOS format: three values packed at width 18, no separating space
             writeln!(
                 self.writer,
                 "{:>w$.p$}{:>w$.p$}{:>w$.p$}",
@@ -109,7 +109,7 @@ impl ForceWriter {
                 force.z,
             )?;
 
-            // Comment every 10 atoms (gromosXX convention)
+            // Comment every 10 atoms (GROMOS convention)
             if (i + 1) % 10 == 0 {
                 writeln!(self.writer, "#{:>10}", i + 1)?;
             }
@@ -117,7 +117,7 @@ impl ForceWriter {
         writeln!(self.writer, "END")?;
 
         // CONSFORCERED block (constraint forces)
-        // gromosXX always writes this block (zeros if no constraints)
+        // GROMOS always writes this block (zeros if no constraints)
         if self.write_constraint_forces {
             writeln!(self.writer, "CONSFORCERED")?;
             match constraint_forces {

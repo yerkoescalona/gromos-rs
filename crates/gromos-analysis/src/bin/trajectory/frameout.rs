@@ -1,391 +1,306 @@
-//! frameout - Extract individual snapshots from molecular trajectory files
+//! frameout — Write individual snapshots from a trajectory.
 //!
-//! Usage: frameout @traj <trajectory> @frames <frame_numbers> @outformat <format> [@name <prefix>]
+//! Full port of GROMOS frameout. All I/O goes through gromos-io.
 //!
-//! Extracts specific frames from GROMOS trajectory files (.trc, .trj).
-//! Supports multiple output formats (g96, pdb).
+//! Usage:
+//!   frameout @topo <top> @traj <trc>
+//!            [@pbc <r|t|v> [gather]]
+//!            [@spec <ALL|EVERY <n>|SPEC>] [@frames <list>]
+//!            [@include <SOLUTE|SOLVENT|ALL>]
+//!            [@ref <cnf>] [@atomsfit <spec>]
+//!            [@out <cnf|pdb|trc>] [@name <prefix>] [@single]
+//!            [@notimeblock] [@time <t_start> [t_end] [dt]]
 
-use gromos_io::g96::G96Writer;
-use gromos_io::trajectory::TrajectoryReader;
-use std::env;
-use std::io::Write;
+use gromos_analysis::fit::superimpose;
+use gromos_core::{
+    gather::gather_molecules,
+    math::{Mat3, Periodicity, Rectangular, Triclinic, Vacuum, Vec3},
+    selection::AtomSelection,
+};
+use gromos_io::{
+    coordinate::read_coordinates,
+    g96::write_g96,
+    gromos_args,
+    pdb::write_pdb_positions,
+    topology::{build_topology, read_topology_file},
+    trajectory::{TrajectoryReader, TrajectoryWriter},
+};
 use std::process;
 
 fn print_usage() {
-    eprintln!("frameout - Extract trajectory frames");
+    eprintln!("frameout — write individual snapshots from a trajectory");
     eprintln!();
-    eprintln!("Usage: frameout @traj <trajectory> @frames <frame_numbers> @outformat <format> [@name <prefix>] [@single]");
-    eprintln!();
-    eprintln!("Arguments:");
-    eprintln!("  @traj         Input trajectory file (.trc)");
-    eprintln!("  @frames       Frame numbers to extract (e.g., '0,10,20' or '0-100' or 'ALL')");
-    eprintln!("  @outformat    Output format: g96 (default) or pdb");
-    eprintln!("  @name         Prefix for output filenames (default: 'frame')");
-    eprintln!("  @single       Write all frames to single file (default: separate files)");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!("  frameout @traj output.trc @frames 0,10,20 @outformat g96");
-    eprintln!("  frameout @traj output.trc @frames ALL @outformat g96 @single");
-    eprintln!("  frameout @traj output.trc @frames 0-100 @outformat g96 @name protein");
+    eprintln!("Usage: frameout @topo <top> @traj <trc> [@pbc <r|t|v>]");
+    eprintln!("                [@spec <ALL|EVERY <n>|SPEC>] [@frames <list>]");
+    eprintln!("                [@include <SOLUTE|SOLVENT|ALL>]");
+    eprintln!("                [@ref <cnf>] [@atomsfit <spec>]");
+    eprintln!("                [@out <cnf|pdb|trc>] [@name <prefix>] [@single]");
+    eprintln!("                [@notimeblock] [@time <t_start> [t_end] [dt]]");
 }
 
-#[derive(Debug)]
-struct FrameoutArgs {
-    traj_file: String,
-    frames: Vec<usize>,
-    outformat: String,
-    name_prefix: String,
-    single_file: bool,
-}
+enum FrameSpec { All, Every(usize), Spec(Vec<usize>) }
 
-fn parse_args(args: Vec<String>) -> Result<FrameoutArgs, String> {
-    let mut traj_file = None;
-    let mut frames_spec = None;
-    let mut outformat = "g96".to_string();
-    let mut name_prefix = "frame".to_string();
-    let mut single_file = false;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "@traj" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @traj".to_string());
-                }
-                traj_file = Some(args[i].clone());
-            },
-            "@frames" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @frames".to_string());
-                }
-                frames_spec = Some(args[i].clone());
-            },
-            "@outformat" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @outformat".to_string());
-                }
-                outformat = args[i].clone();
-            },
-            "@name" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @name".to_string());
-                }
-                name_prefix = args[i].clone();
-            },
-            "@single" => {
-                single_file = true;
-            },
-            _ => {
-                return Err(format!("Unknown argument: {}", args[i]));
-            },
-        }
-        i += 1;
-    }
-
-    let traj_file = traj_file.ok_or("Missing required argument @traj")?;
-    let frames_spec = frames_spec.ok_or("Missing required argument @frames")?;
-
-    // Parse frame specification
-    let frames = parse_frame_spec(&frames_spec)?;
-
-    Ok(FrameoutArgs {
-        traj_file,
-        frames,
-        outformat,
-        name_prefix,
-        single_file,
-    })
-}
-
-fn parse_frame_spec(spec: &str) -> Result<Vec<usize>, String> {
-    if spec.to_uppercase() == "ALL" {
-        // Return empty vec - will be handled specially
-        return Ok(Vec::new());
-    }
-
-    let mut frames = Vec::new();
-
-    // Handle comma-separated values and ranges
-    for part in spec.split(',') {
-        if part.contains('-') {
-            // Range: "0-100"
-            let range_parts: Vec<&str> = part.split('-').collect();
-            if range_parts.len() != 2 {
-                return Err(format!("Invalid range specification: {}", part));
-            }
-            let start: usize = range_parts[0]
-                .trim()
-                .parse()
-                .map_err(|_| format!("Invalid number: {}", range_parts[0]))?;
-            let end: usize = range_parts[1]
-                .trim()
-                .parse()
-                .map_err(|_| format!("Invalid number: {}", range_parts[1]))?;
-            for i in start..=end {
-                frames.push(i);
-            }
-        } else {
-            // Single value
-            let frame: usize = part
-                .trim()
-                .parse()
-                .map_err(|_| format!("Invalid number: {}", part))?;
-            frames.push(frame);
+impl FrameSpec {
+    fn matches(&self, idx: usize) -> bool {
+        match self {
+            FrameSpec::All        => true,
+            FrameSpec::Every(n)   => idx % n == 0,
+            FrameSpec::Spec(list) => list.contains(&idx),
         }
     }
-
-    Ok(frames)
 }
 
-fn write_frame_g96(
-    path: &str,
-    frame_number: usize,
-    frame: &gromos_io::trajectory::TrajectoryFrame,
-) -> Result<(), String> {
-    let mut writer = G96Writer::new(path)?;
-
-    let title = format!(
-        "frameout: Frame {} at time {:.3} ps",
-        frame_number, frame.time
-    );
-    writer.write_title(&title)?;
-
-    // Write TIMESTEP block
-    use std::io::Write;
-    writeln!(
-        writer.writer.get_mut(),
-        "TIMESTEP\n{:15}{:15.4}\nEND",
-        frame.step,
-        frame.time
-    )
-    .map_err(|e| format!("Write error: {}", e))?;
-
-    // Write POSITION block
-    writeln!(writer.writer.get_mut(), "POSITIONRED").map_err(|e| format!("Write error: {}", e))?;
-
-    for pos in frame.positions.iter() {
-        writeln!(
-            writer.writer.get_mut(),
-            "{:15.9}{:15.9}{:15.9}",
-            pos.x,
-            pos.y,
-            pos.z
-        )
-        .map_err(|e| format!("Write error: {}", e))?;
+fn parse_index_list(s: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    for part in s.split(',') {
+        let p = part.trim();
+        if let Some((a, b)) = p.split_once('-') {
+            if let (Ok(a), Ok(b)) = (a.parse::<usize>(), b.parse::<usize>()) {
+                out.extend(a..=b); continue;
+            }
+        }
+        if let Ok(n) = p.parse::<usize>() { out.push(n); }
     }
-
-    writeln!(writer.writer.get_mut(), "END").map_err(|e| format!("Write error: {}", e))?;
-
-    // Write GENBOX block (box dimensions)
-    writeln!(
-        writer.writer.get_mut(),
-        "GENBOX\n{:15.9}{:15.9}{:15.9}\nEND",
-        frame.box_dims.x,
-        frame.box_dims.y,
-        frame.box_dims.z
-    )
-    .map_err(|e| format!("Write error: {}", e))?;
-
-    writer.close()
-}
-
-fn write_frame_pdb(
-    path: &str,
-    frame_number: usize,
-    frame: &gromos_io::trajectory::TrajectoryFrame,
-) -> Result<(), String> {
-    use std::fs::File;
-    use std::io::BufWriter;
-
-    let file = File::create(path).map_err(|e| format!("Cannot create file: {}", e))?;
-    let mut writer = BufWriter::new(file);
-
-    // PDB header
-    writeln!(
-        writer,
-        "REMARK frameout: Frame {} at time {:.3} ps",
-        frame_number, frame.time
-    )
-    .map_err(|e| format!("Write error: {}", e))?;
-
-    // PDB ATOM records
-    for (i, pos) in frame.positions.iter().enumerate() {
-        // Convert nm to Angstrom (multiply by 10)
-        writeln!(
-            writer,
-            "ATOM  {:5} {:4} {:3} {:1}{:4}    {:8.3}{:8.3}{:8.3}{:6.2}{:6.2}          {:>2}",
-            i + 1,        // Atom serial number
-            "CA",         // Atom name (placeholder)
-            "ALA",        // Residue name (placeholder)
-            "A",          // Chain ID
-            i + 1,        // Residue sequence number
-            pos.x * 10.0, // X in Angstrom
-            pos.y * 10.0, // Y in Angstrom
-            pos.z * 10.0, // Z in Angstrom
-            1.0,          // Occupancy
-            0.0,          // Temperature factor
-            "C"           // Element symbol
-        )
-        .map_err(|e| format!("Write error: {}", e))?;
-    }
-
-    writeln!(writer, "END").map_err(|e| format!("Write error: {}", e))?;
-
-    Ok(())
+    out
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
+    let args = gromos_args();
+    if args.len() < 2 || args.contains(&"--help".to_string()) {
         print_usage();
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
-    // Parse arguments
-    let parsed_args = match parse_args(args) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            eprintln!();
-            print_usage();
-            process::exit(1);
-        },
-    };
+    let mut topo_file   = None;
+    let mut traj_file   = None;
+    let mut ref_file    = None;
+    let mut pbc_type    = "v".to_string();
+    let mut do_gather   = false;
+    let mut frame_spec  = FrameSpec::All;
+    let mut extra_frames: Vec<usize> = Vec::new();
+    let mut time_range  = (f64::NEG_INFINITY, f64::INFINITY, 0.0_f64);
+    let mut include_str = "ALL".to_string();
+    let mut fit_spec    = None::<String>;
+    let mut outfmt      = "cnf".to_string();
+    let mut name_pfx    = "frame".to_string();
+    let mut single      = false;
+    let mut notimeblock = false;
 
-    println!("frameout - Extract trajectory frames");
-    println!("  Trajectory: {}", parsed_args.traj_file);
-    println!("  Output format: {}", parsed_args.outformat);
-    println!("  Single file: {}", parsed_args.single_file);
-
-    // Open trajectory reader
-    let mut reader = match TrajectoryReader::new(&parsed_args.traj_file) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error opening trajectory file: {}", e);
-            process::exit(1);
-        },
-    };
-
-    println!("  Trajectory title: {}", reader.title());
-
-    // Read all frames if needed
-    let all_frames = if parsed_args.frames.is_empty() {
-        println!("  Reading all frames...");
-        match reader.read_all_frames() {
-            Ok(frames) => {
-                println!("  Total frames read: {}", frames.len());
-                frames
-            },
-            Err(e) => {
-                eprintln!("Error reading frames: {}", e);
-                process::exit(1);
-            },
-        }
-    } else {
-        println!("  Reading specific frames: {:?}", parsed_args.frames);
-        let mut frames = Vec::new();
-        let mut frame_idx = 0;
-
-        loop {
-            match reader.read_frame() {
-                Ok(Some(frame)) => {
-                    if parsed_args.frames.contains(&frame_idx) {
-                        frames.push(frame);
-                    }
-                    frame_idx += 1;
-                },
-                Ok(None) => break,
-                Err(e) => {
-                    eprintln!("Error reading frame {}: {}", frame_idx, e);
-                    process::exit(1);
-                },
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--topo"        => { i += 1; topo_file   = Some(args[i].clone()); }
+            "--traj"        => { i += 1; traj_file   = Some(args[i].clone()); }
+            "--ref"         => { i += 1; ref_file    = Some(args[i].clone()); }
+            "--atomsfit"    => { i += 1; fit_spec    = Some(args[i].clone()); }
+            "--out"         => { i += 1; outfmt      = args[i].clone(); }
+            "--name"        => { i += 1; name_pfx    = args[i].clone(); }
+            "--include"     => { i += 1; include_str = args[i].to_uppercase(); }
+            "--single"      => { single      = true; }
+            "--notimeblock" => { notimeblock = true; }
+            "--pbc" => {
+                i += 1;
+                pbc_type = args[i].to_lowercase();
+                if i+1 < args.len() && !args[i+1].starts_with("--") {
+                    i += 1;
+                    do_gather = !args[i].eq_ignore_ascii_case("nog");
+                } else {
+                    do_gather = pbc_type != "v";
+                }
             }
-        }
-
-        if frames.is_empty() {
-            eprintln!("Warning: No frames were extracted (requested frames may be out of range)");
-        }
-
-        println!("  Frames extracted: {}", frames.len());
-        frames
-    };
-
-    // Write frames
-    let write_func: fn(
-        &str,
-        usize,
-        &gromos_io::trajectory::TrajectoryFrame,
-    ) -> Result<(), String> = match parsed_args.outformat.as_str() {
-        "g96" => write_frame_g96,
-        "pdb" => write_frame_pdb,
-        _ => {
-            eprintln!(
-                "Error: Unsupported output format: {}",
-                parsed_args.outformat
-            );
-            eprintln!("Supported formats: g96, pdb");
-            process::exit(1);
-        },
-    };
-
-    if parsed_args.single_file {
-        // Write all frames to a single file
-        let output_path = format!("{}.{}", parsed_args.name_prefix, parsed_args.outformat);
-        println!("  Writing to single file: {}", output_path);
-
-        // For single file, we need to handle it differently
-        // For now, write the first frame as a placeholder
-        if !all_frames.is_empty() {
-            match write_func(&output_path, 0, &all_frames[0]) {
-                Ok(_) => println!(
-                    "  Successfully wrote {} frames to {}",
-                    all_frames.len(),
-                    output_path
-                ),
-                Err(e) => {
-                    eprintln!("Error writing file: {}", e);
-                    process::exit(1);
-                },
+            "--spec" => {
+                i += 1;
+                match args[i].to_uppercase().as_str() {
+                    "ALL"   => frame_spec = FrameSpec::All,
+                    "EVERY" => { i += 1; frame_spec = FrameSpec::Every(args[i].parse().unwrap_or(1)); }
+                    "SPEC"  => { /* will use extra_frames below */ }
+                    _       => {}
+                }
             }
-        }
-    } else {
-        // Write each frame to a separate file
-        println!("  Writing frames to separate files...");
-        let mut written = 0;
-
-        for (idx, frame) in all_frames.iter().enumerate() {
-            let frame_num = if parsed_args.frames.is_empty() {
-                idx
-            } else {
-                parsed_args.frames[idx]
-            };
-
-            let output_path = format!(
-                "{}_{}.{}",
-                parsed_args.name_prefix, frame_num, parsed_args.outformat
-            );
-
-            match write_func(&output_path, frame_num, frame) {
-                Ok(_) => {
-                    written += 1;
-                    if written % 10 == 0 || written == all_frames.len() {
-                        println!("    Written {}/{} frames", written, all_frames.len());
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Error writing frame {}: {}", frame_num, e);
-                    process::exit(1);
-                },
+            "--frames" => {
+                i += 1;
+                extra_frames = parse_index_list(&args[i]);
             }
+            "--time" => {
+                let mut tv = Vec::new();
+                i += 1;
+                while i < args.len() && !args[i].starts_with("--") {
+                    if let Ok(v) = args[i].parse::<f64>() { tv.push(v); i += 1; } else { break; }
+                }
+                time_range = (
+                    tv.get(0).copied().unwrap_or(f64::NEG_INFINITY),
+                    tv.get(1).copied().unwrap_or(f64::INFINITY),
+                    tv.get(2).copied().unwrap_or(0.0),
+                );
+                continue;
+            }
+            other if other.starts_with("--") => {
+                eprintln!("Unknown argument: {other}"); process::exit(1);
+            }
+            _ => {}
         }
-
-        println!("  Successfully extracted {} frames", written);
+        i += 1;
     }
 
-    println!("Done!");
+    if !extra_frames.is_empty() {
+        if matches!(frame_spec, FrameSpec::All) {
+            frame_spec = FrameSpec::Spec(extra_frames);
+        }
+    }
+
+    let traj_file = traj_file.unwrap_or_else(|| {
+        eprintln!("Error: @traj required"); process::exit(1);
+    });
+
+    // Load topology
+    let topo = topo_file.as_ref().map(|p| {
+        let data = read_topology_file(p).unwrap_or_else(|e| {
+            eprintln!("Error reading topology: {e}"); process::exit(1);
+        });
+        build_topology(data)
+    });
+    let topo_ref = topo.as_ref();
+
+    // Reference positions for fit
+    let reference = ref_file.as_ref().map(|p| {
+        read_coordinates(p).unwrap_or_else(|e| {
+            eprintln!("Error reading @ref: {e}"); process::exit(1);
+        }).positions
+    });
+
+    // Fit atom indices
+    let fit_indices: Option<Vec<usize>> = match (&topo_ref, &fit_spec, &reference) {
+        (Some(t), Some(spec), _) => {
+            Some(AtomSelection::from_string(spec, t).unwrap_or_else(|e| {
+                eprintln!("Error in @atomsfit '{spec}': {e}"); process::exit(1);
+            }).indices().to_vec())
+        }
+        (Some(t), None, Some(_)) => Some((0..t.num_solute_atoms()).collect()),
+        _ => None,
+    };
+
+    // Atom index filter for @include
+    let write_indices: Option<Vec<usize>> = topo_ref.map(|t| {
+        match include_str.as_str() {
+            "SOLUTE"  => (0..t.num_solute_atoms()).collect(),
+            "SOLVENT" => (t.num_solute_atoms()..t.num_atoms()).collect(),
+            _         => (0..t.num_atoms()).collect(),
+        }
+    });
+
+    // Periodicity builder
+    let make_periodicity = |b: Vec3| -> Periodicity {
+        match pbc_type.as_str() {
+            "r" if b.x > 0.0 => Periodicity::Rectangular(Rectangular::new(b)),
+            "t" if b.x > 0.0 => {
+                let m = Mat3::from_cols(
+                    Vec3::new(b.x,0.,0.), Vec3::new(0.,b.y,0.), Vec3::new(0.,0.,b.z));
+                Periodicity::Triclinic(Triclinic::new(m))
+            }
+            _ => Periodicity::Vacuum(Vacuum),
+        }
+    };
+
+    // Open input
+    let mut reader = TrajectoryReader::new(&traj_file).unwrap_or_else(|e| {
+        eprintln!("Error opening trajectory: {e}"); process::exit(1);
+    });
+
+    // Single-file .trc writer
+    let mut trc_writer: Option<TrajectoryWriter> = if single && outfmt == "trc" {
+        let p = format!("{name_pfx}.trc");
+        Some(TrajectoryWriter::new(&p, "frameout sub-trajectory", false, false)
+            .unwrap_or_else(|e| { eprintln!("Error creating {p}: {e}"); process::exit(1); }))
+    } else { None };
+
+    let (t_start, t_end, t_dt) = time_range;
+    let mut frame_idx = 0usize;
+    let mut written   = 0usize;
+
+    loop {
+        match reader.read_frame() {
+            Ok(None) => break,
+            Err(e)   => { eprintln!("Read error: {e}"); break; }
+            Ok(Some(frame)) => {
+                let t = frame.time;
+                let time_ok = t >= t_start - 1e-9 && t <= t_end + 1e-9
+                    && (t_dt <= 0.0 || ((t - t_start) / t_dt).round() * t_dt + t_start - t < 1e-6);
+
+                if frame_spec.matches(frame_idx) && time_ok {
+                    // 1. Gather
+                    let mut pos = frame.positions.clone();
+                    if do_gather && frame.box_dims.x > 0.0 {
+                        if let Some(ref t) = topo {
+                            let per = make_periodicity(frame.box_dims);
+                            gather_molecules(&mut pos, &t.molecules, &per, Vec3::ZERO);
+                        }
+                    }
+
+                    // 2. Rotational fit
+                    if let (Some(ref refpos), Some(ref fidx)) = (&reference, &fit_indices) {
+                        superimpose(&mut pos, refpos, fidx, None);
+                    }
+
+                    // 3. Filter atoms
+                    let out_pos: Vec<Vec3> = if let Some(ref idx) = write_indices {
+                        idx.iter().map(|&i| pos[i]).collect()
+                    } else { pos };
+
+                    let box_opt = if frame.box_dims.x > 0.0 { Some(frame.box_dims) } else { None };
+
+                    // Topology for labelling (only when writing all atoms)
+                    let topo_for_write = if write_indices.as_ref()
+                        .map_or(false, |idx| idx.len() < topo_ref.map_or(0, |t| t.num_atoms())) {
+                        None
+                    } else { topo_ref };
+
+                    // 4. Write via gromos-io
+                    let tag = format!("{frame_idx:06}_{:.6}", frame.time).replace('.', "_");
+
+                    if single {
+                        if let Some(ref mut tw) = trc_writer {
+                            tw.write_trc_frame(frame.step, frame.time, &out_pos, box_opt)
+                                .unwrap_or_else(|e| eprintln!("Write error: {e}"));
+                        } else {
+                            // cnf single: last frame wins
+                            let title = if notimeblock { "frameout".to_string() }
+                                        else { format!("t={:.9} ps step={}", frame.time, frame.step) };
+                            write_g96(format!("{name_pfx}.cnf"), &title, &out_pos, None,
+                                box_opt, topo_for_write)
+                                .unwrap_or_else(|e| eprintln!("Write error: {e}"));
+                        }
+                    } else {
+                        let ext = match outfmt.as_str() { "pdb" => "pdb", "trc" => "trc", _ => "cnf" };
+                        let path = format!("{name_pfx}_{tag}.{ext}");
+                        match outfmt.as_str() {
+                            "pdb" => {
+                                let title = format!("t={:.6} ps step={}", frame.time, frame.step);
+                                write_pdb_positions(&path, &title, &out_pos, box_opt, topo_for_write)
+                                    .unwrap_or_else(|e| eprintln!("Write error: {e}"));
+                            }
+                            "trc" => {
+                                let mut tw = TrajectoryWriter::new(&path, "frameout", false, false)
+                                    .unwrap_or_else(|e| { eprintln!("Error: {e}"); process::exit(1); });
+                                tw.write_trc_frame(frame.step, frame.time, &out_pos, box_opt)
+                                    .unwrap_or_else(|e| eprintln!("Write error: {e}"));
+                                tw.flush().ok();
+                            }
+                            _ => {
+                                let title = if notimeblock { "frameout".to_string() }
+                                            else { format!("t={:.9} ps step={}", frame.time, frame.step) };
+                                write_g96(&path, &title, &out_pos, None, box_opt, topo_for_write)
+                                    .unwrap_or_else(|e| eprintln!("Write error: {e}"));
+                            }
+                        }
+                        eprintln!("# frame {frame_idx} t={:.4} ps → {path}", frame.time);
+                    }
+                    written += 1;
+                }
+                frame_idx += 1;
+            }
+        }
+    }
+
+    if let Some(ref mut tw) = trc_writer { tw.flush().ok(); }
+    eprintln!("# frameout: {written} frames written ({frame_idx} total read)");
 }

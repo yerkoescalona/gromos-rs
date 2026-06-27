@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.21] (2026-06-27)
+
+### Features
+
+- **gromos-core:** `gather.rs` — PBC molecule gathering: `gather_chain`, `gather_bond`,
+  `gather_molecules`, `centre_of_geometry`, `centre_of_mass`; shared primitive for MD engine
+  and analysis tools; 5 unit tests
+- **gromos-core:** `fit.rs` moved to `gromos-analysis` (analysis-only); `gather.rs` stays in
+  `gromos-core` (shared with MD engine)
+- **gromos-analysis:** `fit.rs` — Kabsch rotational fit (Horn 1987 quaternion method);
+  `superimpose()`, `rmsd()`, `kabsch_rotation()`, `weighted_cog()`; 7 unit tests
+- **gromos-analysis:** `rmsd` binary — real Kabsch fit; @atomspec, @ref, @nofit, @pbc
+- **gromos-analysis:** `nhoparam` — N-H bond order parameters S²; rotational fit, window
+  averaging, `ee()`; port of GROMOS nhoparam algorithm
+- **gromos-forces:** `energy.rs` — `single_point_energy()` + `EnergyParams`; computes
+  bonded + nonbonded potential without running MD; used by `ener` binary
+- **gromos-analysis:** `ener` — real energy recalculation from trajectory; per-frame
+  E_bond, E_lj, E_crf, E_pot; optional PBC gathering
+- **gromos-analysis:** `bar` — BAR iteration (numerically stable log-sum-exp, GROMOS
+  reference, Shirts 2003); bootstrap error estimation
+- **gromos-analysis:** `ext_ti_merge` — linear interpolation between λ windows;
+  trapezoidal ΔG from merged curve
+- **gromos-analysis:** `frameout` — full GROMOS feature parity: PBC gathering (@pbc),
+  atom filtering (@include SOLUTE/SOLVENT/ALL), rotational fit (@ref @atomsfit),
+  @spec ALL/EVERY/SPEC, @time range, cnf/pdb/trc output, @single; 8 integration tests
+- **gromos-io:** `TrajectoryWriter::write_trc_frame()` — write POSITIONRED frames directly
+  from positions (no Configuration needed); standard 3-column GROMOS format
+- **gromos-io:** `write_pdb_positions()` in `pdb.rs` — write PDB from raw positions +
+  optional topology for atom names; re-exported from lib.rs
+- **gromos-io:** `TrajectoryReader` now handles both 3-column (standard GROMOS) and legacy
+  7-column POSITIONRED formats; GENBOX made optional (vacuum trajectories)
+- **gromos-core:** `selection.rs` — `m:` prefix: selects solute molecules by role
+  (mirrors `s:` for solvent); improved error messages with full syntax cheatsheet and
+  specific hints for common mistakes (`r:`, `mol:`, bare atom names as prefix)
+- **gromos-analysis:** tests — 8 `frameout` integration tests + 7 trajectory round-trip
+  unit tests in `gromos-io`
+
+### Refactor
+
+- **gromos-analysis:** `fit.rs` relocated from `gromos-core` → `gromos-analysis`;
+  `gromos-forces` added as dependency of `gromos-analysis`
+- All analysis binaries use only `gromos-io` for I/O — zero hand-rolled BufWriter/File
+  in binary entry points
+- PLAN.md restructured: Dim 10 section dissolved into Priority 2; priority order updated
+  (CellList wiring → code quality → dihedral restraints → Dim 10 Phase 3)
+
+### Reference tests
+
+- 37/37 pass (unchanged); `frameout` integration tests added to `gromos-analysis`
+
 ## [0.0.20] (2026-06-26)
 
 ### Refactor

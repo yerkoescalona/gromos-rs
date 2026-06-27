@@ -1,4 +1,4 @@
-//! Perturbed (FEP/TI) bonded force calculations — gromosXX faithful.
+//! Perturbed (FEP/TI) bonded force calculations — GROMOS faithful.
 //!
 //! References (all in md++/src/interaction/bonded/):
 //!   perturbed_quartic_bond_interaction.cc
@@ -33,7 +33,7 @@ fn chebyshev(m: i32, cos_phi: f64) -> (f64, f64) {
 
 // ─── Perturbed quartic bond ───────────────────────────────────────────────────
 
-/// Perturbed quartic bond (gromosXX `perturbed_quartic_bond_interaction.cc`).
+/// Perturbed quartic bond (GROMOS `perturbed_quartic_bond_interaction.cc`).
 ///
 /// K(λ)  = (1-λ)·K_A + λ·K_B        [k_quartic]
 /// r0(λ) = (1-λ)·r0_A + λ·r0_B
@@ -58,7 +58,7 @@ pub fn calculate_perturbed_bond_forces(
         let b_d  = pb.r0 - pa.r0;
         // b_mix = r0(λ), already computed above as `r0`
 
-        // gromosXX: v = pos(i) - pos(j)
+        // GROMOS: v = pos(i) - pos(j)
         let v     = conf.current().pos[bond.i] - conf.current().pos[bond.j];
         let dist2 = v.length_squared();
         let r02   = r0 * r0;
@@ -81,7 +81,7 @@ pub fn calculate_perturbed_bond_forces(
 
 // ─── Perturbed cos-harmonic angle ────────────────────────────────────────────
 
-/// Perturbed cos-harmonic angle (gromosXX `perturbed_angle_interaction.cc`).
+/// Perturbed cos-harmonic angle (GROMOS `perturbed_angle_interaction.cc`).
 ///
 /// K(λ)    = (1-λ)·K_A + λ·K_B       [k_cosine]
 /// cos0(λ) = (1-λ)·cos0_A + λ·cos0_B
@@ -106,7 +106,7 @@ pub fn calculate_perturbed_angle_forces(
         let k_d   = pb.k_cosine - pa.k_cosine;
         let cd_d  = cos0b - cos0a;
 
-        // gromosXX: rij = pos(i)-pos(j), rkj = pos(k)-pos(j)
+        // GROMOS: rij = pos(i)-pos(j), rkj = pos(k)-pos(j)
         let rij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
         let rkj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
         let dij = rij.length();
@@ -138,7 +138,7 @@ pub fn calculate_perturbed_angle_forces(
 
 // ─── Perturbed improper dihedral ─────────────────────────────────────────────
 
-/// Perturbed improper dihedral (gromosXX `perturbed_improper_dihedral_interaction.cc`).
+/// Perturbed improper dihedral (GROMOS `perturbed_improper_dihedral_interaction.cc`).
 ///
 /// K(λ)  = (1-λ)·K_A + λ·K_B
 /// q0(λ) = (1-λ)·q0_A + λ·q0_B
@@ -218,7 +218,7 @@ pub fn calculate_perturbed_improper_dihedral_forces(
 
 // ─── Perturbed proper dihedral ────────────────────────────────────────────────
 
-/// Perturbed proper dihedral (gromosXX `perturbed_dihedral_interaction.cc`).
+/// Perturbed proper dihedral (GROMOS `perturbed_dihedral_interaction.cc`).
 ///
 /// States A and B computed separately (may have different multiplicities):
 ///   E_A = K_A·(1 + cos(δ_A)·cos(m_A·φ))
@@ -296,7 +296,7 @@ pub fn calculate_perturbed_dihedral_forces(
 
 // ─── Soft-core perturbed harmonic bond ───────────────────────────────────────
 
-/// Soft-core perturbed harmonic bond (PERTBONDSOFT, gromosXX `perturbed_soft_bond_interaction.cc`).
+/// Soft-core perturbed harmonic bond (PERTBONDSOFT, GROMOS `perturbed_soft_bond_interaction.cc`).
 ///
 /// Handles bonds absent in one state (K=0) via soft-core suppression:
 ///   S_A = 1 + α·λ·diff²,   S_B = 1 + α·(1-λ)·diff²
@@ -346,7 +346,7 @@ pub fn calculate_soft_bond_forces(
         result.forces[sb.i] += f_i;
         result.forces[sb.j] -= f_i;
 
-        // dE/dλ (gromosXX `e_lambda` formula)
+        // dE/dλ (GROMOS `e_lambda` formula)
         let st1 = 1.0 + alpha * diff2;
         let st2 = -2.0 * alpha * lambda * (1.0 - lambda) * diff * b_diff;
         let de_dl = lambda_derivative * (
@@ -361,7 +361,7 @@ pub fn calculate_soft_bond_forces(
 
 // ─── Soft-core perturbed cos-harmonic angle ───────────────────────────────────
 
-/// Soft-core perturbed cos-harmonic angle (PERTANGLESOFT, gromosXX `perturbed_soft_angle_interaction.cc`).
+/// Soft-core perturbed cos-harmonic angle (PERTANGLESOFT, GROMOS `perturbed_soft_angle_interaction.cc`).
 ///
 /// Same soft-core formulation as soft bonds but on cosθ:
 ///   diff = cosθ - cos0(λ),  cos0(λ) = (1-λ)·cos0_A + λ·cos0_B
@@ -429,7 +429,7 @@ pub fn calculate_soft_angle_forces(
 
 // ─── Soft-core perturbed improper dihedral ────────────────────────────────────
 
-/// Soft-core perturbed improper dihedral (PERTIMPROPERDIHSOFT, gromosXX `perturbed_soft_improper_interaction.cc`).
+/// Soft-core perturbed improper dihedral (PERTIMPROPERDIHSOFT, GROMOS `perturbed_soft_improper_interaction.cc`).
 ///
 /// Same soft-core formulation as soft bonds but on the improper angle ζ (radians):
 ///   diff = ζ - q0(λ),  q0(λ) = (1-λ)·q0_A + λ·q0_B
@@ -766,7 +766,7 @@ mod tests {
         assert!(total.length() < 1e-9, "forces not conserved at λ=1: {}", total.length());
     }
 
-    // ── gromosXX reference values (aladip_special.t.cc) ─────────────────────
+    // ── GROMOS reference values (aladip_special.t.cc) ─────────────────────
     //
     // Hard-coded in check/aladip_special.t.cc:
     //   PerturbedQuarticBond      = 1.271962 kJ/mol
@@ -776,5 +776,5 @@ mod tests {
     // at λ=0.125, NLAM=1, using aladip.topo + aladip.pttopo + aladip.conf.
     //
     // These become the end-to-end reference test once the .pttopo reader is wired
-    // (P1.7 step 1).  See test_gromosXX_references::aladip_vacuum_fep.
+    // (P1.7 step 1).  See test_GROMOS_references::aladip_vacuum_fep.
 }

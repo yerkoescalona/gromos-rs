@@ -1,6 +1,6 @@
 //! LINCS constraint algorithm wrapper.
 //!
-//! Equivalent to gromosXX `algorithm::Lincs` — linear constraint solver
+//! Equivalent to GROMOS `algorithm::Lincs` — linear constraint solver
 //! (Hess et al. 1997), selectable for the solute (NTCP) and/or solvent (NTCS).
 //!
 //! Source: md++/src/algorithm/constraints/lincs.cc
@@ -15,7 +15,7 @@ use crate::constraints::{lincs_buffered, LincsBuffers, NtcMode};
 ///
 /// `init()` precomputes the coupling matrices for the solute and/or solvent
 /// (whichever is selected via `include_solute`/`include_solvent`), `apply()`
-/// runs LINCS for both groups every step (gromosXX `Lincs::apply`,
+/// runs LINCS for both groups every step (GROMOS `Lincs::apply`,
 /// `lincs.cc:238-284`).
 pub struct LincsAlgorithm {
     ntc: NtcMode,
@@ -70,7 +70,7 @@ impl Algorithm for LincsAlgorithm {
         sim: &SimulationState,
     ) -> Result<(), String> {
         if let Some(ref buffers) = self.buffers {
-            // gromosXX `Lincs::apply` (lincs.cc:238-288) always returns success —
+            // GROMOS `Lincs::apply` (lincs.cc:238-288) always returns success —
             // LINCS is a fixed-order analytical expansion, not an iterative solver
             // that can fail to converge, so we don't gate on `max_error` here
             // (unlike SHAKE, whose iteration can genuinely fail).

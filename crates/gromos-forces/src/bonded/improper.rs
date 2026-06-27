@@ -19,7 +19,7 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
 
         let params = &topo.improper_dihedral_parameters[improper.dihedral_type];
 
-        // gromosXX convention: rkj = pos(k)-pos(j), rij = pos(i)-pos(j), rkl = pos(k)-pos(l)
+        // GROMOS convention: rkj = pos(k)-pos(j), rij = pos(i)-pos(j), rkl = pos(k)-pos(l)
         let r_kj = conf.current().pos[improper.k] - conf.current().pos[improper.j];
         let r_ij = conf.current().pos[improper.i] - conf.current().pos[improper.j];
         let r_kl = conf.current().pos[improper.k] - conf.current().pos[improper.l];
@@ -87,7 +87,7 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
         result.forces[improper.k] += f_k;
         result.forces[improper.l] += f_l;
 
-        // gromosXX: virial += rij*fi + rkj*fk + rlj*fl
+        // GROMOS: virial += rij*fi + rkj*fk + rlj*fl
         let r_lj = conf.current().pos[improper.l] - conf.current().pos[improper.j];
         let rij_v = [r_ij.x, r_ij.y, r_ij.z];
         let rkj_v = [r_kj.x, r_kj.y, r_kj.z];

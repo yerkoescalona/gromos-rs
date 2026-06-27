@@ -1,7 +1,7 @@
 //! Interactive Simulation API for Python
 //!
 //! Supports both compositional and file-based construction, mirroring
-//! the internal md architecture with gromosXX naming conventions.
+//! the internal md architecture with GROMOS naming conventions.
 //!
 //! # Example (Python)
 //!
@@ -136,7 +136,7 @@ fn build_simulation(
 
     pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
 
-    // Build algorithm sequence (gromosXX Leap-Frog pattern)
+    // Build algorithm sequence (GROMOS Leap-Frog pattern)
     let mut md_sequence = AlgorithmSequence::new();
 
     // 1. COM motion removal
@@ -263,7 +263,7 @@ fn build_simulation(
             ))
         })?;
 
-    // Run step 0 (initial force evaluation, gromosXX convention)
+    // Run step 0 (initial force evaluation, GROMOS convention)
     md_sequence
         .run_step(&topo, &mut conf, &sim_state)
         .map_err(|e| {
@@ -344,7 +344,7 @@ fn build_simulation_from_sequence(
             ))
         })?;
 
-    // Run step 0 (initial force evaluation, gromosXX convention)
+    // Run step 0 (initial force evaluation, GROMOS convention)
     md_sequence
         .run_step(&topo, &mut conf, &sim_state)
         .map_err(|e| {
@@ -372,7 +372,7 @@ fn build_simulation_from_sequence(
 /// A GROMOS-RS molecular dynamics simulation.
 ///
 /// Interactive simulation object inspired by OpenMM's Simulation class,
-/// using gromosXX naming conventions and file formats.
+/// using GROMOS naming conventions and file formats.
 ///
 /// Create from Topology + Configuration + InputParameters objects,
 /// or directly from file paths. Call `step(n)` to advance and access
@@ -512,7 +512,7 @@ impl PySimulation {
     /// Current positions as an Nx3 numpy array (nm).
     ///
     /// Returns positions from the "old" state, which holds the most
-    /// recently completed step's data (gromosXX convention).
+    /// recently completed step's data (GROMOS convention).
     #[getter]
     fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         let state = self.configuration.old();

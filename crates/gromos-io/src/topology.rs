@@ -13,7 +13,7 @@
 //!                          → lj.get(iac_i, iac_j)
 //! ```
 //!
-//! This matches gromosXX, which also stores IAC 0-indexed internally
+//! This matches GROMOS, which also stores IAC 0-indexed internally
 //! (`in_topology.cc` line 1695: `topo.add_solute_atom(…, t-1, …)` and
 //! lines 1147-1148: `--i; --j;` before indexing the LJ matrix).
 //!
@@ -73,7 +73,7 @@ pub struct ParsedTopology {
     pub improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
     pub lj_parameters: HashMap<(usize, usize), LJParameters>,
     pub temperature_groups: Vec<usize>, // Last atom index of each group
-    pub pressure_groups: Vec<usize>,   // Last atom index of each pressure group (gromosXX: PRESSUREGROUPS)
+    pub pressure_groups: Vec<usize>,   // Last atom index of each pressure group (GROMOS: PRESSUREGROUPS)
     pub solvent_atoms: Vec<ParsedSolventAtom>,
     pub solvent_constraints: Vec<ParsedSolventConstraint>,
     pub solute_molecules: Vec<usize>, // last atom index of each molecule
@@ -763,7 +763,7 @@ fn parse_temperature_groups<I: Iterator<Item = Result<String, std::io::Error>>>(
 }
 
 /// Parse PRESSUREGROUPS block — cumulative last-atom indices (1-indexed).
-/// gromosXX format: first line = count, then last atom of each group.
+/// GROMOS format: first line = count, then last atom of each group.
 fn parse_pressure_groups<I: Iterator<Item = Result<String, std::io::Error>>>(
     lines: &mut I,
     pressure_groups: &mut Vec<usize>,
@@ -908,7 +908,7 @@ fn parse_solutemolecules<I: Iterator<Item = Result<String, std::io::Error>>>(
 ///
 /// Builds solute topology and stores the solvent template.
 /// To expand solvent molecules, call `topo.solvate(nsm)` afterwards
-/// (gromosXX convention: NSM comes from the IMD SYSTEM block).
+/// (GROMOS convention: NSM comes from the IMD SYSTEM block).
 pub fn build_topology(parsed: ParsedTopology) -> Topology {
     use gromos_core::topology::{Atom, ChargeGroup, SolventAtomTemplate, SolventConstraintTemplate};
 
@@ -1019,7 +1019,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     }
 
     // --- Store 1-4 pairs from INE14 and merge into exclusions ---
-    // gromosXX convention: 1-4 pairs are excluded from the regular pairlist
+    // GROMOS convention: 1-4 pairs are excluded from the regular pairlist
     // (merged into all_exclusion) but computed separately with cs6/cs12.
     // They are NOT included in topo.exclusions (used for RF excluded interactions).
     topo.one_four_pairs = vec![Vec::new(); n_solute];
@@ -1104,7 +1104,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     topo.init_solute_moltype();
 
     // --- Populate solute pressure groups from PRESSUREGROUPS block ---
-    // gromosXX: pressure_groups is a boundary vector [last_atom_1, last_atom_2, ...]
+    // GROMOS: pressure_groups is a boundary vector [last_atom_1, last_atom_2, ...]
     // Each value is 1-indexed in the file, but no subtraction is needed: a 1-indexed
     // last atom N is the correct *exclusive* upper bound for a 0-indexed Rust range
     // (the -1 for 0-indexing and the +1 for exclusivity cancel).
@@ -1116,7 +1116,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         }
         log::debug!("Parsed {} solute pressure groups from topology", topo.pressure_groups.len());
     } else {
-        // Default: all solute atoms as one pressure group (gromosXX fallback)
+        // Default: all solute atoms as one pressure group (GROMOS fallback)
         if n_solute > 0 {
             topo.pressure_groups.push(0..n_solute);
             log::debug!("Default pressure group: all {} solute atoms", n_solute);
@@ -1410,7 +1410,7 @@ END
         assert!((parsed.bond_parameters[0].k_harmonic - 500.0).abs() < 1e-6);
         assert!((parsed.bond_parameters[0].r0 - 0.15).abs() < 1e-6);
 
-        // BONDANGLEBENDTYPE conversion (gromosXX in_topology.cc:854-855):
+        // BONDANGLEBENDTYPE conversion (GROMOS in_topology.cc:854-855):
         // CT untouched, CHT *= (180/pi)^2, T0 deg -> rad
         let deg_to_rad_sq = 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI);
         let angle = &parsed.angle_parameters[0];
@@ -1451,7 +1451,7 @@ END
 
         let deg_to_rad_sq = 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI);
 
-        // TORSDIHEDRALTYPE conversion (gromosXX read_block_TORSDIHEDRALTYPE):
+        // TORSDIHEDRALTYPE conversion (GROMOS read_block_TORSDIHEDRALTYPE):
         // CP (k) untouched; PD deg -> rad, plus its cosine
         assert_eq!(parsed.dihedral_parameters.len(), 1);
         let dihedral = &parsed.dihedral_parameters[0];
@@ -1461,7 +1461,7 @@ END
         assert!((dihedral.cospd - (-1.0)).abs() < 1e-12);
         assert_eq!(dihedral.m, 2);
 
-        // IMPDIHEDRALTYPE conversion (gromosXX in_topology.cc:1055-1056):
+        // IMPDIHEDRALTYPE conversion (GROMOS in_topology.cc:1055-1056):
         // CQ (k) *= (180/pi)^2, Q0 deg -> rad
         assert_eq!(parsed.improper_dihedral_parameters.len(), 1);
         let improper = &parsed.improper_dihedral_parameters[0];

@@ -1,17 +1,17 @@
-//! End-to-end integration tests against gromosXX double-precision references.
+//! End-to-end integration tests against GROMOS double-precision references.
 //!
 //! Runs the `md` binary on each reference system (10 steps) and compares
-//! energy trajectories (all steps) against expected gromosXX output.
+//! energy trajectories (all steps) against expected GROMOS output.
 //!
 //! Output formats differ:
-//!   - gromosXX expected: ENERGY03 blocks (one per step, one value per line)
+//!   - GROMOS expected: ENERGY03 blocks (one per step, one value per line)
 //!   - gromos-rs actual:  ENERTRJ block  (one line per step, multi-column)
 //!
 //! Reference data: `.local/gromos_references/{system}/expected/`
-//! Systems matching gromosXX are active; known mismatches are `#[ignore]`.
+//! Systems matching GROMOS are active; known mismatches are `#[ignore]`.
 //!
-//! Run passing:  cargo test -p gromos-md --test test_gromosXX_references
-//! Run all:      cargo test -p gromos-md --test test_gromosXX_references -- --include-ignored
+//! Run passing:  cargo test -p gromos-md --test test_GROMOS_references
+//! Run all:      cargo test -p gromos-md --test test_GROMOS_references -- --include-ignored
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ const DHDL_REL_TOL: f64 = 1e-6; // dH/dλ relative tolerance
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 fn ref_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/gromosXX_references")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/GROMOS_references")
 }
 
 fn md_bin() -> PathBuf {
@@ -75,7 +75,7 @@ struct EnergyFrame {
     e_potential: f64,
 }
 
-// ─── Parser: gromosXX ENERGY03 format (expected) ────────────────────────────
+// ─── Parser: GROMOS ENERGY03 format (expected) ────────────────────────────
 //
 // Structure: repeated TIMESTEP→END→ENERGY03→END blocks.
 // ENERGY03 starts with "# totals", then one f64 per line:
@@ -218,7 +218,7 @@ type ForceFrame = Vec<[f64; 3]>;
 
 // ─── Parser: FREEFORCERED blocks from .trf files ────────────────────────────
 //
-// Both gromosXX and gromos-rs write FREEFORCERED blocks with 3 floats per line.
+// Both GROMOS and gromos-rs write FREEFORCERED blocks with 3 floats per line.
 // Lines starting with '#' are comments (atom count markers).
 
 fn parse_trf(path: &Path) -> Vec<ForceFrame> {
@@ -354,7 +354,7 @@ fn run_reference(system: &str) {
     let expected = parse_energy03(&sys_dir.join("expected/energies.tre"));
     let actual = parse_enertrj(&tre);
 
-    // gromos-rs writes step 0..NSTLIM (inclusive), gromosXX writes 0..NSTLIM-1;
+    // gromos-rs writes step 0..NSTLIM (inclusive), GROMOS writes 0..NSTLIM-1;
     // compare the frames that exist in both outputs.
     assert!(
         actual.len() >= expected.len(),

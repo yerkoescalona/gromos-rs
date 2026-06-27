@@ -35,7 +35,7 @@ impl PositionRestraint {
     /// Calculate restraint energy and forces
     pub fn calculate(&self, conf: &mut Configuration, periodicity: &Periodicity) -> f64 {
         // nearest_image(ri, rj) returns ri - rj
-        // v = pos - ref (same as gromosXX)
+        // v = pos - ref (same as GROMOS)
         let v =
             periodicity.nearest_image(conf.current().pos[self.atom], self.reference_pos);
 
@@ -78,7 +78,7 @@ impl PositionRestraints {
     }
 }
 
-// ─── Distance restraints (gromosXX distance_restraint_interaction.cc) ────────
+// ─── Distance restraints (GROMOS distance_restraint_interaction.cc) ────────
 
 /// Decode the RAH field into (form, dimension_mask).
 ///
@@ -152,7 +152,7 @@ fn distres_en_force(
     (energy * w, f_on_1 * w)
 }
 
-/// Single distance restraint (gromosXX-faithful, virtual atom type 0 only).
+/// Single distance restraint (GROMOS-faithful, virtual atom type 0 only).
 ///
 /// RAH encodes both the half-harmonic form and the spatial dimension;
 /// see `decode_rah` for details.  Mode 2 scales by w0 (NTDIR=2).
@@ -722,7 +722,7 @@ mod tests {
 
     #[test]
     fn test_distance_restraint_gromosxx_reference() {
-        // Reference values from gromosXX aladip_special.t.cc:
+        // Reference values from GROMOS aladip_special.t.cc:
         //   DistanceRestraint = 257.189539
         //   PerturbedDistanceRestraint = 195.899012
         //

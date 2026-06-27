@@ -47,7 +47,7 @@ fn main() {
 
     eprintln!("# SHAKE constraint analysis");
     eprintln!("# Tolerance: {} nm", tolerance);
-    eprintln!("# Bonds: {}", topo.solute_bonds().len());
+    eprintln!("# Bonds: {}", topo.moltypes[0].bonds.len());
 
     println!("# Time (ps)    Violations    Max_Error (nm)    Avg_Error (nm)");
 
@@ -59,7 +59,7 @@ fn main() {
                 let mut total_error = 0.0f64;
                 let mut bond_count = 0;
 
-                for bond in &topo.solute_bonds() {
+                for bond in &topo.moltypes[0].bonds {
                     let i = bond.i;
                     let j = bond.j;
                     if i < frame.positions.len() && j < frame.positions.len() {

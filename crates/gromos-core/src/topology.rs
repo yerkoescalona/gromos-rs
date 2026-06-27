@@ -510,7 +510,7 @@ pub struct Topology {
 
     // Temperature and pressure coupling groups
     pub temperature_groups: Vec<Vec<usize>>, // Atoms in each T-coupling group
-    pub pressure_groups: Vec<std::ops::Range<usize>>, // Pressure groups as atom ranges (gromosXX: PRESSUREGROUPS)
+    pub pressure_groups: Vec<std::ops::Range<usize>>, // Pressure groups as atom ranges (GROMOS: PRESSUREGROUPS)
     pub atom_to_temperature_group: Vec<usize>,
     pub atom_to_pressure_group: Vec<usize>,
 
@@ -673,7 +673,7 @@ impl Topology {
     }
 
     /// Check if atoms i and j are excluded OR are a 1-4 pair.
-    /// Used for pairlist exclusion (gromosXX: all_exclusion).
+    /// Used for pairlist exclusion (GROMOS: all_exclusion).
     #[inline]
     pub fn is_excluded_or_14(&self, i: usize, j: usize) -> bool {
         if self.exclusions[i].binary_search(&j).is_ok() || self.exclusions[j].binary_search(&i).is_ok() {
@@ -974,7 +974,7 @@ impl Topology {
             .collect();
     }
 
-    /// Expand solvent molecules (gromosXX: topo.solvate(0, nsm))
+    /// Expand solvent molecules (GROMOS: topo.solvate(0, nsm))
     ///
     /// Uses the solvent template stored on the topology to create `nsm` copies.
     /// Expands flat arrays (mass, charge, iac), chargegroups, and exclusions.
@@ -1025,7 +1025,7 @@ impl Topology {
             let base = n_solute + mol * atoms_per_solvent;
             // Populate molecules list
             self.molecules.push(base..base + atoms_per_solvent);
-            // Each solvent molecule is its own pressure group (gromosXX convention)
+            // Each solvent molecule is its own pressure group (GROMOS convention)
             self.pressure_groups.push(base..base + atoms_per_solvent);
             for a in 0..atoms_per_solvent {
                 for b in (a + 1)..atoms_per_solvent {

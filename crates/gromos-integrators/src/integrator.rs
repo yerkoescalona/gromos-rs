@@ -47,7 +47,7 @@ impl LeapFrog {
         self
     }
 
-    /// Velocity update (Leap_Frog_Velocity in gromosXX)
+    /// Velocity update (Leap_Frog_Velocity in GROMOS)
     ///
     /// exchange_state(), then v_current = v_old + F_old*dt/m
     pub fn velocity_step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
@@ -74,7 +74,7 @@ impl LeapFrog {
         }
     }
 
-    /// Position update (Leap_Frog_Position in gromosXX)
+    /// Position update (Leap_Frog_Position in GROMOS)
     ///
     /// r_current = r_old + v_current*dt
     pub fn position_step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {

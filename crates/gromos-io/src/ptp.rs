@@ -1,6 +1,6 @@
 //! Perturbation topology (.pttopo) reader and writer.
 //!
-//! The gromosXX `.pttopo` format defines dual-topology (state A / state B)
+//! The GROMOS `.pttopo` format defines dual-topology (state A / state B)
 //! parameters for atoms that change as λ goes from 0 to 1 (FEP / TI).
 //!
 //! Key blocks parsed by the reader:
@@ -37,7 +37,7 @@ pub struct PerturbedTopology {
     pub n_atoms_hint: usize,
 }
 
-/// Read a gromosXX perturbation topology file (`.pttopo`).
+/// Read a GROMOS perturbation topology file (`.pttopo`).
 ///
 /// Atoms are 1-indexed in the file; returned structs use 0-indexed atoms.
 /// IAC values are 1-indexed in the file; returned structs use 0-indexed IAC.
@@ -52,7 +52,7 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
     let ps = &mut result.perturbed_solute;
 
     // ── PERTATOMPAIR ─────────────────────────────────────────────────────────
-    // Must be read before PERTATOMPARAM (gromosXX convention — exclusion fixup).
+    // Must be read before PERTATOMPARAM (GROMOS convention — exclusion fixup).
     // Format: count \n i j A_type B_type \n ...   (all 1-indexed)
     for bname in &["PERTATOMPAIR", "PERTATOMPAIR03"] {
         if let Some(lines) = blocks.get(*bname) {
@@ -340,7 +340,7 @@ use gromos_core::topology::Topology;
 
 /// Writer for a simple perturbation topology file.
 /// Note: this writes a non-standard format (PERTURBEDATOM block);
-/// the reader above handles the real gromosXX PERTATOMPARAM format.
+/// the reader above handles the real GROMOS PERTATOMPARAM format.
 pub struct PtpWriter {
     file: File,
 }
@@ -457,7 +457,7 @@ END
     fn test_read_pttopo_aladip() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../.local/gromosXX/md++/src/check/data/aladip.pttopo"
+            "/../../.local/GROMOS/md++/src/check/data/aladip.pttopo"
         );
         if !std::path::Path::new(path).exists() {
             eprintln!("SKIP: aladip.pttopo not found at {path}");

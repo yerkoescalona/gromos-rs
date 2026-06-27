@@ -13,7 +13,7 @@ use std::process::Command;
 use std::time::Duration;
 
 fn ref_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/gromosXX_references")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/GROMOS_references")
 }
 
 fn md_bin() -> PathBuf {

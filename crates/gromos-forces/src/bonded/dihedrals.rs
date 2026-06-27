@@ -26,7 +26,7 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
 
         let params = &topo.dihedral_parameters[dihedral.dihedral_type];
 
-        // gromosXX convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
+        // GROMOS convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
         let r_ij = conf.current().pos[dihedral.i] - conf.current().pos[dihedral.j];
         let r_kj = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.j];
         let r_kl = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.l];
@@ -104,7 +104,7 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
         result.forces[dihedral.k] += f_k;
         result.forces[dihedral.l] += f_l;
 
-        // gromosXX: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
+        // GROMOS: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
         // rlj = pos(l) - pos(j)
         let r_lj = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.j];
         let rij_v = [r_ij.x, r_ij.y, r_ij.z];
@@ -142,7 +142,7 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
 
         let params = &topo.dihedral_parameters[dihedral.dihedral_type];
 
-        // gromosXX convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
+        // GROMOS convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
         let r_ij = conf.current().pos[dihedral.i] - conf.current().pos[dihedral.j];
         let r_kj = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.j];
         let r_kl = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.l];
@@ -218,7 +218,7 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         result.forces[dihedral.k] += f_k;
         result.forces[dihedral.l] += f_l;
 
-        // gromosXX: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
+        // GROMOS: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
         let r_lj = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.j];
         let rij_v = [r_ij.x, r_ij.y, r_ij.z];
         let rkj_v = [r_kj.x, r_kj.y, r_kj.z];

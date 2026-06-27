@@ -9,12 +9,12 @@ use crate::constraints::{shake, shake_buffered, shake_positions, shake_velocitie
 /// SHAKE constraint algorithm for the MD sequence.
 ///
 /// Applied after position update to enforce bond length constraints.
-/// Equivalent to gromosXX's constraint algorithm in the MD sequence.
+/// Equivalent to GROMOS's constraint algorithm in the MD sequence.
 pub struct ShakeAlgorithm {
     params: ShakeParameters,
-    /// Whether to shake initial positions on init (gromosXX: sim.param().start.shake_pos)
+    /// Whether to shake initial positions on init (GROMOS: sim.param().start.shake_pos)
     pub shake_initial_positions: bool,
-    /// Whether to shake initial velocities on init (gromosXX: sim.param().start.shake_vel)
+    /// Whether to shake initial velocities on init (GROMOS: sim.param().start.shake_vel)
     pub shake_initial_velocities: bool,
     /// Whether SHAKE should also constrain the solvent (false when NTCS selects
     /// a different solvent algorithm, e.g. SETTLE/LINCS)

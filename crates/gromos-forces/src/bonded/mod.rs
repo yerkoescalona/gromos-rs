@@ -32,7 +32,7 @@ use gromos_core::configuration::Configuration;
 pub struct ForceEnergy {
     pub energy: f64,
     pub forces: Vec<Vec3>,
-    /// virial[a][b] = Σ r[b] * f[a]  (gromosXX convention)
+    /// virial[a][b] = Σ r[b] * f[a]  (GROMOS convention)
     pub virial: [[f64; 3]; 3],
 }
 
@@ -115,7 +115,7 @@ pub fn calculate_bonded_forces(
     calculate_bonded_forces_ntf(topo, conf, use_quartic_bonds, true, true, true, true)
 }
 
-/// Calculate bonded forces gated by NTF flags (FORCE block in gromosXX).
+/// Calculate bonded forces gated by NTF flags (FORCE block in GROMOS).
 pub fn calculate_bonded_forces_ntf(
     topo: &Topology,
     conf: &Configuration,

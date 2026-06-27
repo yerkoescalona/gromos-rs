@@ -1,6 +1,6 @@
 //! Running statistics with block-averaging error estimate.
 //!
-//! Faithful port of gromos++ `gmath/Stat` (Oostenbrink et al.).
+//! Faithful port of gromos-rs `gmath/Stat` (Oostenbrink et al.).
 //! Implements the Allen–Tildesley block-averaging `ee()` described in
 //! "Computer Simulation of Liquids", Oxford (1987), appendix D.
 //!
@@ -15,7 +15,7 @@
 
 /// Running statistics accumulator with block-averaging error estimate.
 ///
-/// Stores all values in memory (same as gromos++ Stat<T>).
+/// Stores all values in memory (same as gromos-rs Stat<T>).
 /// Call `add()` to accumulate data, then query `ave()`, `rmsd()`, `ee()`.
 #[derive(Debug, Clone, Default)]
 pub struct Stat {
@@ -71,7 +71,7 @@ impl Stat {
         self.vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
     }
 
-    /// Block-averaging error estimate (Allen & Tildesley / gromos++ algorithm).
+    /// Block-averaging error estimate (Allen & Tildesley / gromos-rs algorithm).
     ///
     /// Partitions the series into blocks of increasing size, fits the RMSD of
     /// block averages linearly vs 1/block_size, and extrapolates to infinite

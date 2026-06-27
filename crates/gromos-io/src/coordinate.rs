@@ -1,6 +1,6 @@
 //! Parser for GROMOS coordinate files (.conf/.cnf/.g96)
 //!
-//! Supports both legacy BOX and gromosXX GENBOX block formats,
+//! Supports both legacy BOX and GROMOS GENBOX block formats,
 //! as well as POSITION/POSITIONRED and VELOCITY/VELOCITYRED blocks.
 //!
 //! # Format Example

@@ -1,11 +1,11 @@
 //! Berendsen weak-coupling thermostat algorithm.
 //!
-//! Equivalent to gromosXX `algorithm::Berendsen_Thermostat`.
+//! Equivalent to GROMOS `algorithm::Berendsen_Thermostat`.
 //! Rescales velocities to weakly couple the system to a heat bath.
 //!
 //! Placed between LeapFrogVelocity and LeapFrogPosition in the sequence.
 //! Uses the "new" kinetic energy from the previous step's TemperatureCalculation
-//! (stored in energies.kinetic_energy_new, equivalent to gromosXX multibath.bath.ekin).
+//! (stored in energies.kinetic_energy_new, equivalent to GROMOS multibath.bath.ekin).
 //!
 //! Source: md++/src/algorithm/temperature/berendsen_thermostat.cc
 //!         md++/src/algorithm/temperature/thermostat.cc (scale method)
@@ -30,7 +30,7 @@ pub struct BerendsenThermostatParams {
 
 /// Berendsen weak-coupling thermostat.
 ///
-/// gromosXX sequence position: after Leap_Frog_Velocity, before Leap_Frog_Position.
+/// GROMOS sequence position: after Leap_Frog_Velocity, before Leap_Frog_Position.
 ///
 /// The scaling factor is:
 ///   λ = sqrt(1 + dt/τ · (T₀/T_free - 1))
@@ -83,7 +83,7 @@ impl Algorithm for BerendsenThermostat {
                 0.0
             };
 
-            // Fallback: if T_free ≈ 0, use reference temperature (gromosXX convention)
+            // Fallback: if T_free ≈ 0, use reference temperature (GROMOS convention)
             if free_temp < 1e-10 {
                 free_temp = params.temperature;
             }

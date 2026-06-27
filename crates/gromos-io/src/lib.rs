@@ -44,6 +44,7 @@ pub use imd::{ImdParameters, PressureParameters, TempBathParameters};
 pub use input::{EdsBlock, GamdBlock, ReplicaBlock};
 pub use output::{EdsStatsWriter, EdsVrWriter, GamdBoostWriter, GamdStatsWriter};
 pub use ptp::{PtpWriter, PerturbedTopology, read_pttopo};
+pub use pdb::write_pdb_positions;
 pub use trajectory::TrajectoryWriter;
 pub use trajectory_binary::{
     BinaryFrame, BinaryTrajectoryReader, BinaryTrajectoryWriter, DcdReader, DcdWriter,

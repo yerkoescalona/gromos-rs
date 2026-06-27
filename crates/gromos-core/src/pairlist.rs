@@ -115,7 +115,7 @@ impl StandardPairlistAlgorithm {
 
     /// Chargegroup-based pairlist generation (GROMOS default)
     ///
-    /// Matches gromosXX standard_pairlist_algorithm.cc:
+    /// Matches GROMOS standard_pairlist_algorithm.cc:
     /// - Solute CGs: center-of-geometry distance, exclusion checks
     /// - Solvent CGs: first-atom position distance, no exclusion checks
     /// - Intra-CG non-excluded pairs added for solute CGs
@@ -132,7 +132,7 @@ impl StandardPairlistAlgorithm {
         let cutoff2_short = (pairlist.short_range_cutoff + pairlist.skin).powi(2);
         let cutoff2_long = (pairlist.long_range_cutoff + pairlist.skin).powi(2);
 
-        // Precompute solute CG centers-of-geometry (gromosXX only computes COG for solute CGs)
+        // Precompute solute CG centers-of-geometry (GROMOS only computes COG for solute CGs)
         let cg_cog: Vec<Vec3> = (0..n_solute_cg)
             .map(|i| topo.chargegroups[i].center_of_geometry(&conf.current().pos))
             .collect();
@@ -158,7 +158,7 @@ impl StandardPairlistAlgorithm {
         let mut n_intra_cg_pairs = 0usize;
 
         for cg1 in 0..n_solute_cg {
-            // Intra-CG non-excluded pairs (gromosXX lines ~185-200)
+            // Intra-CG non-excluded pairs (GROMOS lines ~185-200)
             let cg1_atoms = &topo.chargegroups[cg1].atoms;
             for ai in 0..cg1_atoms.len() {
                 let a1 = cg1_atoms[ai];
@@ -186,7 +186,7 @@ impl StandardPairlistAlgorithm {
                 n_solute_solute_cg_pairs += 1;
                 if dist2 > cutoff2_short {
                     log::debug!("  Solute-Solute CG({},{}) LONG dist={:.6}", cg1, cg2, dist2.sqrt());
-                    // Long-range (no exclusion check in gromosXX for long-range solute-solute)
+                    // Long-range (no exclusion check in GROMOS for long-range solute-solute)
                     for &a1 in &topo.chargegroups[cg1].atoms {
                         for &a2 in &topo.chargegroups[cg2].atoms {
                             pairlist.solute_long.push((a1, a2));
@@ -233,7 +233,7 @@ impl StandardPairlistAlgorithm {
                 }
 
                 log::debug!("  Solute({})-Solvent({}) SHORT dist={:.6}", cg1, cg2, dist2.sqrt());
-                // Short-range: no exclusion check for solute-solvent (gromosXX convention)
+                // Short-range: no exclusion check for solute-solvent (GROMOS convention)
                 for &a1 in &topo.chargegroups[cg1].atoms {
                     for &a2 in &topo.chargegroups[cg2].atoms {
                         pairlist.solute_short.push((a1, a2));
@@ -243,7 +243,7 @@ impl StandardPairlistAlgorithm {
         }
 
         // === Solvent-solvent CGs ===
-        // Distance uses first-atom positions (gromosXX _solvent_solvent)
+        // Distance uses first-atom positions (GROMOS _solvent_solvent)
         // Store only first-atom pairs; solvent_innerloop expands all atom pairs internally
         let mut n_solvent_solvent_cg_pairs = 0usize;
         let mut n_solvent_solvent_skip = 0usize;
@@ -270,7 +270,7 @@ impl StandardPairlistAlgorithm {
                 if dist2 > cutoff2_short {
                     log::debug!("  Solvent({},a{})-Solvent({},a{}) LONG dist={:.6}",
                         cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt());
-                    // Long-range: expand to all atom pairs (gromosXX standard
+                    // Long-range: expand to all atom pairs (GROMOS standard
                     // mode uses per-atom nearest_image, not shared PBC shift)
                     for &a1 in &topo.chargegroups[cg1].atoms {
                         for &a2 in &topo.chargegroups[cg2].atoms {

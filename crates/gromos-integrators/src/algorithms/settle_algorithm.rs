@@ -1,6 +1,6 @@
 //! SETTLE constraint algorithm wrapper.
 //!
-//! Equivalent to gromosXX `algorithm::Settle` — analytical 3-site rigid water
+//! Equivalent to GROMOS `algorithm::Settle` — analytical 3-site rigid water
 //! constraint solver (Miyamoto & Kollman, 1992). Solvent-only.
 //!
 //! Source: md++/src/algorithm/constraints/settle.cc
@@ -14,7 +14,7 @@ use crate::constraints::settle;
 /// SETTLE constraint algorithm for the MD sequence.
 ///
 /// Applied after the position update to analytically enforce the rigid
-/// 3-site water geometry. Equivalent to gromosXX's `Settle::apply`.
+/// 3-site water geometry. Equivalent to GROMOS's `Settle::apply`.
 pub struct SettleAlgorithm;
 
 impl SettleAlgorithm {
@@ -36,7 +36,7 @@ impl Algorithm for SettleAlgorithm {
         _conf: &mut Configuration,
         _sim: &SimulationState,
     ) -> Result<(), String> {
-        // gromosXX Settle::init validation (settle.cc:53-118)
+        // GROMOS Settle::init validation (settle.cc:53-118)
         if topo.num_solvent_molecules() == 0 {
             return Err("SETTLE does only work if 1 solvent.".to_string());
         }

@@ -300,7 +300,7 @@ impl PertNBCorrection {
 /// this function subtracts the state-A contribution and adds the full dual-topology
 /// perturbed result, returning the net delta.
 ///
-/// Alpha convention (faithful to gromosXX):
+/// Alpha convention (faithful to GROMOS):
 ///   single perturbed atom  →  that atom's α
 ///   both perturbed         →  average of the two atoms' α values
 pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
@@ -320,7 +320,7 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
     for &(ii, jj) in pairlist {
         let i = ii as usize;
         let j = jj as usize;
-        // gromosXX insert_pair only routes to perturbed pairlist when a1 (= i here,
+        // GROMOS insert_pair only routes to perturbed pairlist when a1 (= i here,
         // since pairs are stored with i < j) is perturbed.  Pairs where only j is
         // perturbed stay in the regular pairlist and receive state-A treatment.
         if pert[i].is_none() { continue; }
@@ -371,7 +371,7 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
 /// Correct RF self-energy for perturbed atoms.
 ///
 /// The regular `rf_excluded_interactions` computed `-0.5*q_A²*FPEPSI*crf_cut`.
-/// gromosXX adds `0.5*e_rf` from `rf_soft_interaction(r=0, selfterm_correction=true)`.
+/// GROMOS adds `0.5*e_rf` from `rf_soft_interaction(r=0, selfterm_correction=true)`.
 /// The net extra contribution is:
 ///   ΔE_self = 0.5*[(1−(1-λ)^n)*q_A² − λ^n*q_B²]*FPEPSI*crf_cut
 ///   Δ(dH/dλ)  = 0.5*n*[(1-λ)^(n-1)*q_A² − λ^(n-1)*q_B²]*FPEPSI*crf_cut
@@ -388,7 +388,7 @@ pub fn perturbed_self_energy_correction(
         let qa2 = pi.a_charge * pi.a_charge;
         let qb2 = pi.b_charge * pi.b_charge;
 
-        // gromosXX rf_soft_interaction at r=0 with selfterm_correction=true:
+        // GROMOS rf_soft_interaction at r=0 with selfterm_correction=true:
         //   e_rf = [-(1-λ)^n*qa2 - λ^n*qb2 + qa2] * crf_cut * FPEPSI
         let e_rf = (-(lp.a_crf_lambda_n * qa2) - lp.b_crf_lambda_n * qb2 + qa2)
             * crf.crf_cut * FOUR_PI_EPS_I;
@@ -440,7 +440,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             let a_q = a_q_i * a_q_j;
             let b_q = b_q_i * b_q_j;
 
-            // Soft cutoff (gromosXX rf_soft_interaction: only modifies the quadratic
+            // Soft cutoff (GROMOS rf_soft_interaction: only modifies the quadratic
             // crf_2cut3i term, NOT the crf_cut constant; uses actual cutoff², not crf_cut²)
             let cut2 = crf.cutoff_sq;
             let a_cut2soft   = cut2 + alpha_crf * lp.b_crfs_lambda2;
@@ -452,7 +452,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             let a_crf_pert   = 3.0 * a_crf_2cut3i / a_cut2soft;
             let b_crf_pert   = 3.0 * b_crf_2cut3i / b_cut2soft;
 
-            // NO 1/r term for excluded pairs (gromosXX rf_soft_interaction lines 742-743)
+            // NO 1/r term for excluded pairs (GROMOS rf_soft_interaction lines 742-743)
             let a_e_crf = a_q * (-a_crf_2cut3i * r2 - crf.crf_cut);
             let b_e_crf = b_q * (-b_crf_2cut3i * r2 - crf.crf_cut);
 
@@ -466,7 +466,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             let e_crf_a = a_q * FOUR_PI_EPS_I * (-crf.crf_2cut3i * r2 - crf.crf_cut);
             let f_a = a_q * FOUR_PI_EPS_I * crf.crf_cut3i;
 
-            // dH/dλ (gromosXX lines 756-759, no dist3isoft term for excluded)
+            // dH/dλ (GROMOS lines 756-759, no dist3isoft term for excluded)
             let n_exp = lp.lambda_exp as f64;
             let de_crf = ((lp.a_crf_lambda_n * a_q * lp.b_crfs_lambda * a_crf_pert
                 - lp.b_crf_lambda_n * b_q * lp.a_crfs_lambda * b_crf_pert)
@@ -544,7 +544,7 @@ pub fn perturbed_one_four_correction<BC: BoundaryCondition>(
             let f_crf_a = a_q * FOUR_PI_EPS_I * (inv_r * inv_r2 + crf.crf_cut3i);
 
             // Perturbed 1-4: call full dual-topology kernel with cs6/cs12 (faithful to
-            // gromosXX eds_pert_lj_crf_interaction which uses cs6/cs12 for 1-4 pairs)
+            // GROMOS eds_pert_lj_crf_interaction which uses cs6/cs12 for 1-4 pairs)
             let (f_p, e_lj_p, e_crf_p, de_lj, de_crf) = perturbed_lj_crf_interaction(
                 r, lj_a.cs6, lj_a.cs12, lj_b.cs6, lj_b.cs12,
                 a_q, b_q, alpha_lj, alpha_crf, lp, crf,
@@ -560,9 +560,9 @@ pub fn perturbed_one_four_correction<BC: BoundaryCondition>(
     }
 }
 
-/// Correct PERTATOMPAIR interactions (gromosXX `perturbed_nonbonded_pair`).
+/// Correct PERTATOMPAIR interactions (GROMOS `perturbed_nonbonded_pair`).
 ///
-/// gromosXX removes PERTATOMPAIR entries from regular exclusion/1-4 lists and
+/// GROMOS removes PERTATOMPAIR entries from regular exclusion/1-4 lists and
 /// computes them via a dedicated perturbed pair loop.  `a_type` and `b_type`
 /// encode the *interaction type* — NOT an IAC index — **already 0-indexed**
 /// (converted at the ptp.rs parse boundary):

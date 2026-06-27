@@ -1,6 +1,6 @@
 //! Centre of mass motion removal algorithm.
 //!
-//! Equivalent to gromosXX `algorithm::Remove_COM_Motion`
+//! Equivalent to GROMOS `algorithm::Remove_COM_Motion`
 //! (md++/src/algorithm/constraints/remove_com_motion.cc).
 //! Removes translational and/or rotational centre-of-mass motion from velocities.
 //!
@@ -11,18 +11,18 @@
 //! `NSCM` steps, negative removes translation *and* rotation every `|NSCM|` steps,
 //! zero turns periodic removal off.
 //!
-//! **PBC position convention.** gromosXX calls `gather_chargegroups` during
+//! **PBC position convention.** GROMOS calls `gather_chargegroups` during
 //! configuration init (`periodicity.cc:175`), which uses `put_into_box` to wrap
 //! each chargegroup's reference atom to the `[-L/2, L/2]` range (nearest image
 //! relative to the origin). This leaves `conf.current().pos` in the `[-L/2, L/2]`
 //! convention rather than the `[0, L]` range written by the coordinate file. The
 //! angular momentum and inertia tensor must use the same convention; otherwise the
-//! computed COM and angular momentum diverge from gromosXX. We replicate this by
-//! applying minimum-image wrapping (gromosXX `put_into_box`, i.e. nearest image
+//! computed COM and angular momentum diverge from GROMOS. We replicate this by
+//! applying minimum-image wrapping (GROMOS `put_into_box`, i.e. nearest image
 //! relative to origin) to each position *locally* inside `remove_com_rotation`.
 //! The stored `conf.current().pos` is NOT modified.
 //!
-//! **PBC periodic-rotation suppression.** gromosXX also disables *periodic* COM
+//! **PBC periodic-rotation suppression.** GROMOS also disables *periodic* COM
 //! rotation removal when the boundary condition is not vacuum
 //! (`configuration.cc:555-560`, `param.centreofmass.remove_rot = false`). The
 //! *initial* removal at step 0 (controlled by NTICOM) is unaffected. We mirror
@@ -34,13 +34,13 @@ use gromos_core::configuration::{BoxType, Configuration};
 use gromos_core::math::{Mat3, Vec3};
 use gromos_core::topology::Topology;
 
-/// gromosXX `math::epsilon` (gmath.h:689) — used for the inertia-tensor
+/// GROMOS `math::epsilon` (gmath.h:689) — used for the inertia-tensor
 /// determinant singularity check (signed comparison, not `abs()`).
 const EPSILON: f64 = 0.000000000001;
 
 /// Removes centre-of-mass translational and/or rotational motion from velocities.
 ///
-/// gromosXX convention: only modifies `conf.current().vel`.
+/// GROMOS convention: only modifies `conf.current().vel`.
 #[derive(Debug, Clone)]
 pub struct RemoveCOMMotion {
     /// NTICOM from INITIALISE block: 0=off, 1=remove translation, 2=remove translation+rotation
@@ -53,7 +53,7 @@ pub struct RemoveCOMMotion {
     /// Periodic removal flags, derived from the sign of NSCM
     /// (`centreofmass.remove_trans`/`remove_rot`).
     /// Note: `periodic_remove_rot` is overridden to `false` in PBC
-    /// (gromosXX `configuration.cc:555-560`).
+    /// (GROMOS `configuration.cc:555-560`).
     periodic_remove_trans: bool,
     periodic_remove_rot: bool,
 }
@@ -84,7 +84,7 @@ impl RemoveCOMMotion {
 
 /// Calculate (and optionally remove) translational COM motion.
 ///
-/// Mirrors gromosXX `Remove_COM_Motion::remove_com_translation`
+/// Mirrors GROMOS `Remove_COM_Motion::remove_com_translation`
 /// (`remove_com_motion.cc:90-119`): `v_com = Σ(m_i·v_i) / Σ(m_i)`,
 /// `E_kin_trans = 0.5 * M * |v_com|²`, then `v_i -= v_com` if `remove`.
 fn remove_com_translation(topo: &Topology, conf: &mut Configuration, remove: bool) -> f64 {
@@ -109,7 +109,7 @@ fn remove_com_translation(topo: &Topology, conf: &mut Configuration, remove: boo
     ekin_trans
 }
 
-/// Apply minimum-image wrapping to a position, equivalent to gromosXX
+/// Apply minimum-image wrapping to a position, equivalent to GROMOS
 /// `Periodicity<rectangular>::put_into_box` (`periodicity.cc:38-42`):
 /// `nearest_image(v, origin=(0,0,0), v)` which maps each component to
 /// `(-L/2, L/2]` via `v - round(v/L)*L`.
@@ -124,18 +124,18 @@ fn put_into_box_rect(pos: Vec3, box_dims: Vec3) -> Vec3 {
 
 /// Calculate (and optionally remove) rotational COM motion.
 ///
-/// Mirrors gromosXX `Remove_COM_Motion::remove_com_rotation`
+/// Mirrors GROMOS `Remove_COM_Motion::remove_com_rotation`
 /// (`remove_com_motion.cc:121-222`): builds the COM position/velocity at the
 /// velocity time point (`r - 0.5*dt*v`), the angular momentum `L = Σ m (r×v)`
 /// and inertia tensor `I`, then inverts `I` via the explicit cofactor-expansion
-/// formula (note: gromosXX checks `denom < math::epsilon`, a *signed* comparison,
+/// formula (note: GROMOS checks `denom < math::epsilon`, a *signed* comparison,
 /// not `denom.abs() < epsilon` — this is intentional and must be preserved
 /// bit-for-bit), and computes `ω = I⁻¹L / det(I)`.
 ///
-/// **Position convention.** gromosXX wraps positions to `[-L/2, L/2]` via
+/// **Position convention.** GROMOS wraps positions to `[-L/2, L/2]` via
 /// `gather_chargegroups` during init (equivalent to `put_into_box` for each atom).
 /// We replicate this locally: each `pos[i]` is wrapped before use so that the
-/// COM and angular momentum match gromosXX bit-for-bit.
+/// COM and angular momentum match GROMOS bit-for-bit.
 fn remove_com_rotation(topo: &Topology, conf: &mut Configuration, dt: f64, remove: bool) -> f64 {
     let n_atoms = topo.num_atoms();
 
@@ -145,7 +145,7 @@ fn remove_com_rotation(topo: &Topology, conf: &mut Configuration, dt: f64, remov
         _ => None,
     };
 
-    // Helper: wrap a position to [-L/2, L/2] if periodic (gromosXX put_into_box).
+    // Helper: wrap a position to [-L/2, L/2] if periodic (GROMOS put_into_box).
     let wrap = |pos: Vec3| -> Vec3 {
         if let Some(l) = box_dims {
             put_into_box_rect(pos, l)
@@ -210,7 +210,7 @@ fn remove_com_rotation(topo: &Topology, conf: &mut Configuration, dt: f64, remov
     let ii12 = i01 * i02 - i00 * i12;
     let ii22 = -i01 * i01 + i00 * i11;
 
-    // gromosXX compares the signed determinant against `math::epsilon`
+    // GROMOS compares the signed determinant against `math::epsilon`
     // (remove_com_motion.cc:212), not its absolute value.
     let com_o = if denom < EPSILON {
         Vec3::ZERO
@@ -281,7 +281,7 @@ impl Algorithm for RemoveCOMMotion {
             remove_trans = remove_trans && self.periodic_remove_trans;
         }
 
-        // gromosXX `configuration.cc:555-560`: when PBC is active, periodic COM
+        // GROMOS `configuration.cc:555-560`: when PBC is active, periodic COM
         // rotation removal is disabled (param.centreofmass.remove_rot = false).
         // The initial removal at step 0 (from NTICOM) is still applied.
         if sim.step != 0 {

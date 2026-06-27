@@ -19,7 +19,7 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
         }
 
         let params = &topo.bond_parameters[bond.bond_type];
-        // gromosXX convention: v = pos(i) - pos(j)
+        // GROMOS convention: v = pos(i) - pos(j)
         let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
 
         // Energy: V = (1/4) * k * (r^2 - r0^2)^2
@@ -28,14 +28,14 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
         let dr2 = r2 - r0_2;
         let energy = 0.25 * params.k_quartic * dr2 * dr2;
 
-        // Force: f = -K * (r^2 - r0^2) * v  (gromosXX convention)
+        // Force: f = -K * (r^2 - r0^2) * v  (GROMOS convention)
         let force = r_vec * (-params.k_quartic * dr2);
 
         result.energy += energy;
         result.forces[bond.i] += force;
         result.forces[bond.j] -= force;
 
-        // gromosXX: virial_tensor(a, c) += v(a) * f(c)
+        // GROMOS: virial_tensor(a, c) += v(a) * f(c)
         let rv = [r_vec.x, r_vec.y, r_vec.z];
         let fv = [force.x, force.y, force.z];
         for a in 0..3 {
@@ -61,7 +61,7 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
         }
 
         let params = &topo.bond_parameters[bond.bond_type];
-        // gromosXX convention: v = pos(i) - pos(j)
+        // GROMOS convention: v = pos(i) - pos(j)
         let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
         let r = r_vec.length();
 
@@ -73,14 +73,14 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
         let dr = r - params.r0;
         let energy = 0.5 * params.k_harmonic * dr * dr;
 
-        // Force: f = -k * (r - r0) * v/|v|  (gromosXX convention)
+        // Force: f = -k * (r - r0) * v/|v|  (GROMOS convention)
         let force = r_vec * (-params.k_harmonic * dr / r);
 
         result.energy += energy;
         result.forces[bond.i] += force;
         result.forces[bond.j] -= force;
 
-        // gromosXX: virial_tensor(a, c) += v(a) * f(c)
+        // GROMOS: virial_tensor(a, c) += v(a) * f(c)
         let rv = [r_vec.x, r_vec.y, r_vec.z];
         let fv = [force.x, force.y, force.z];
         for a in 0..3 {
@@ -118,7 +118,7 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
             continue;
         }
 
-        // gromosXX convention: v = pos(i) - pos(j)
+        // GROMOS convention: v = pos(i) - pos(j)
         let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
         let r = r_vec.length();
 
