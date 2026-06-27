@@ -31,14 +31,34 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
 
 ## Key files
 ```
-python/gromos/__init__.py    — top-level API
-python/gromos/md_runners.py  — simulation runner wrappers
-python/gromos/analysis.py    — analysis helpers
-python/gromos/gromos.pyi     — type stubs
-notebooks/                   — Jupyter notebooks
-examples/                    — standalone scripts
-pyproject.toml               — package metadata (maturin)
+python/gromos/__init__.py        — top-level API
+python/gromos/system_builder.py  — P3 design sketch: ForceField→BuildingBlock→Topology algebra
+python/gromos/md_runners.py      — legacy subprocess runners (to be replaced)
+python/gromos/analysis.py        — analysis helpers
+python/gromos/gromos.pyi         — type stubs
+notebooks/                       — Jupyter notebooks
+examples/                        — standalone scripts
+pyproject.toml                   — package metadata (maturin)
 ```
+
+## Design target (P3 algebra)
+
+```python
+ff = ForceField("54a7")
+mol = ff.molecule(["STA", "ALA", "GLY", "END"])
+system = mol * 10 + ff.solvent("SPC") * 216
+solvated = system.neutralize("Na+").solvate("SPC", density=900)
+result = solvated.minimize().equilibrate().run(steps=1_000_000)
+df = result.energies.to_dataframe()
+```
+
+Three documented design shapes in system_builder.py:
+- Shape A (OpenMM-style): `ff.build_topology(seq)` — implemented
+- Shape B (builder/fluent): `* / +` algebra — implemented
+- Shape C (declarative dict): `build_system(forcefield="54a7", molecules=[...])` — implemented
+
+Motivation: vsomm_modeler required manual tracking of atom counts, binary
+paths as plain strings, and `input_xxx` dicts per step — all encapsulated now.
 
 ## Crate-specific rules
 - **No physics, no data structures** — this layer only wraps what pyo3-gromos exposes.
