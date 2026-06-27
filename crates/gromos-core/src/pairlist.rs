@@ -695,10 +695,14 @@ pub enum PairlistAlgorithm {
 impl PairlistAlgorithm {
     /// Choose an algorithm from IMD PAIRLIST block parameters.
     ///
-    /// | `algorithm` | result |
-    /// |-------------|--------|
-    /// | `1`         | `CellList` (explicit override, regardless of system size/box) |
-    /// | any other   | `CellList` only when `Rectangular` + chargegroups + `n_atoms > 5000`; otherwise `Standard` |
+    /// Slot values match gromosXX `in_parameter.cc:1419-1422` exactly:
+    ///
+    /// | `algorithm` | gromosXX class | gromos-rs result |
+    /// |-------------|----------------|-----------------|
+    /// | `0` / `"standard"` | `Standard_Pairlist_Algorithm` | `Standard` |
+    /// | `1` / `"grid"`     | `Extended_Grid_Pairlist_Algorithm` | `Standard` (not yet ported; safe fallback) |
+    /// | `2` / `"grid_cell"`| `Grid_Cell_Pairlist` (Heinz & Hünenberger 2004) | `CellList` |
+    /// | any other          | auto-heuristic | `CellList` when Rectangular + CGs + `n_atoms > 5000`; else `Standard` |
     ///
     /// The `n_atoms > 5000` threshold is deliberately above the largest
     /// reference system (`ch4_water_fep`, 2998 atoms), so no reference test
@@ -710,7 +714,8 @@ impl PairlistAlgorithm {
         has_chargegroups: bool,
     ) -> Self {
         let use_cell_list = match algorithm {
-            1 => true,
+            0 | 1 => false, // 0=standard (explicit), 1=grid (ExtendedGrid not yet ported → Standard)
+            2 => true,      // grid_cell = our CellListPairlistAlgorithm
             _ => box_type == BoxType::Rectangular && has_chargegroups && n_atoms > 5000,
         };
         if use_cell_list {
@@ -821,48 +826,61 @@ mod tests {
     }
 
     #[test]
-    fn test_from_imd_explicit_cell_list() {
-        // algorithm=1 always selects CellList, regardless of size/box/chargegroups
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(1, 10, BoxType::Vacuum, false)));
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(1, 10, BoxType::Rectangular, true)));
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(1, 6000, BoxType::Rectangular, true)));
+    fn test_from_imd_explicit_standard() {
+        // algorithm=0 "standard" → Standard always
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 10, BoxType::Vacuum, false)));
+    }
+
+    #[test]
+    fn test_from_imd_grid_falls_back_to_standard() {
+        // algorithm=1 "grid" → ExtendedGrid not yet ported; must give Standard (safe fallback),
+        // never CellList — preserving faithful gromosXX slot semantics.
+        assert!(is_standard(&PairlistAlgorithm::from_imd(1, 10, BoxType::Vacuum, false)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(1, 10, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(1, 6000, BoxType::Rectangular, true)));
+    }
+
+    #[test]
+    fn test_from_imd_grid_cell_gives_cell_list() {
+        // algorithm=2 "grid_cell" → CellList (Heinz & Hünenberger 2004), regardless of size/box
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(2, 10, BoxType::Vacuum, false)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(2, 10, BoxType::Rectangular, true)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(2, 6000, BoxType::Rectangular, true)));
     }
 
     #[test]
     fn test_from_imd_auto_all_conditions_met() {
-        // Rectangular + chargegroups + n_atoms > 5000 → CellList
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(0, 5001, BoxType::Rectangular, true)));
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(0, 10000, BoxType::Rectangular, true)));
+        // unknown algorithm + Rectangular + chargegroups + n_atoms > 5000 → CellList
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 5001, BoxType::Rectangular, true)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 10000, BoxType::Rectangular, true)));
     }
 
     #[test]
     fn test_from_imd_auto_threshold_boundary() {
         // n_atoms == 5000 is NOT > 5000 → Standard
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 5000, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 5000, BoxType::Rectangular, true)));
         // n_atoms == 5001 IS > 5000 → CellList
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(0, 5001, BoxType::Rectangular, true)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 5001, BoxType::Rectangular, true)));
     }
 
     #[test]
     fn test_from_imd_auto_not_rectangular() {
-        // Vacuum: no CellList even with chargegroups + large n_atoms
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Vacuum, true)));
-        // Triclinic: same
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Triclinic, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 6000, BoxType::Vacuum, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 6000, BoxType::Triclinic, true)));
     }
 
     #[test]
     fn test_from_imd_auto_no_chargegroups() {
-        // No chargegroups → Standard even if rectangular + large
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Rectangular, false)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 6000, BoxType::Rectangular, false)));
     }
 
     #[test]
     fn test_from_imd_auto_small_system() {
-        // n_atoms <= 5000 → Standard (covers all 37 reference systems)
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 2998, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 648, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 2, BoxType::Rectangular, true)));
+        // all 37 reference systems are below 5000 → Standard regardless of box/cg
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 2998, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 648, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 2, BoxType::Rectangular, true)));
     }
 
     #[test]
