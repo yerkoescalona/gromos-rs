@@ -9,7 +9,7 @@ None — foundation crate.
 ## Outputs (public API)
 `Topology`, `Configuration`, `Vec3`/`Mat3`, `Periodicity` (Vacuum/Rectangular/Triclinic),
 `Algorithm` trait + `AlgorithmSequence`, `AtomSelection`, `Stat`,
-`StandardPairlistAlgorithm`, `CellListPairlistAlgorithm`,
+`PairlistAlgorithm` (enum: Standard/CellList), `StandardPairlistAlgorithm`, `CellListPairlistAlgorithm`,
 `gather_chain`, `gather_bond`, `gather_molecules` (PBC gathering).
 
 ## Status
@@ -21,7 +21,7 @@ None — foundation crate.
   `m:` (solute by role), `s:` (solvent by role), syntax-error hints
 - PBC gathering: `gather.rs` — `gather_chain`, `gather_bond`, `gather_molecules` ✓
 - Statistics: `stat.rs` — `Stat` with `ave()`, `rmsd()`, `ee()` (block averaging) ✓
-- Pairlist: `CellListPairlistAlgorithm` (O(N) rectangular) validated; **not yet wired into md.rs** — next priority (P1.5)
+- Pairlist: `PairlistAlgorithm` enum wired everywhere (9a-0 ✓); `CellListPairlistAlgorithm` bit-identical to Standard (9a-1 ✓, margin=0); `water_1000_spc_gridcell` reference validates against gromosXX Grid_Cell_Pairlist
 
 ## Key files
 ```

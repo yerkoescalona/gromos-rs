@@ -490,6 +490,10 @@ ref_test!(nacl_1water_settle, "nacl_1water_settle");
 ref_test!(nacl_1water_lincs, "nacl_1water_lincs");
 ref_test!(aladip_vacuum_lincs, "aladip_vacuum_lincs");
 
+// Level 2 — grid_cell pairlist: direct gromosXX Grid_Cell_Pairlist validation
+// Box (3.1057 nm) satisfies 2*RCUTL <= box-cell_size; 1000 equilibrated SPC molecules.
+ref_test!(water_1000_spc_gridcell, "water_1000_spc_gridcell");
+
 // Level 3 — bulk water, pairlist scaling, long-range
 ref_test!(water_216_box, "water_216_box");
 ref_test!(water_216_box_com, "water_216_box_com");

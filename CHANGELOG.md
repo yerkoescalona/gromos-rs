@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.22] (2026-06-27)
+
+### Features
+
+- **gromos-core:** `PairlistAlgorithm` enum (`Standard`, `CellList`) with `from_imd()` dispatch
+  and `update<BC>()` delegation via match — zero heap allocation on the hot path (9a-0)
+- **gromos-core:** `from_imd()` slots match gromosXX exactly: 0=standard (forced), 1=grid
+  (ExtendedGrid fallback→Standard), 2=grid_cell (CellList); IMD parser now recognises
+  `"grid_cell"` keyword; no auto-heuristic — every value is an explicit instruction
+- **gromos-core:** 9 unit tests covering full dispatch matrix (algorithm × box_type × n_atoms × chargegroups)
+- **gromos-integrators, gromos-md, pyo3-gromos:** `StandardPairlistAlgorithm` field swapped to
+  `PairlistAlgorithm` everywhere; `md.rs` calls `from_imd(imd.algorithm, …)` (9a-0)
+
+### Testing
+
+- **gromos-md:** `test_pairlist_margin.rs` — empirical CellList vs Standard margin test on
+  `water_216_box` (100 steps); observed margin = 0.000e0 (bit-identical) (9a-1)
+- **gromos-md:** `water_1000_spc_gridcell` reference — 1000 equilibrated SPC molecules
+  (3.1057 nm box, vol7 tutorial), gromosXX Grid_Cell_Pairlist (7×7×7 grid); directly
+  validates gromos-rs CellList against gromosXX; completes the proof chain
+
+### Reference tests
+
+- 38/38 pass (37 original + `water_1000_spc_gridcell`)
+
 ## [0.0.21] (2026-06-27)
 
 ### Features
