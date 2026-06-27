@@ -20,7 +20,7 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
 
         let params = &topo.angle_parameters[angle.angle_type];
 
-        // gromosXX convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
+        // GROMOS convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
         let rij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
         let rkj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
 
@@ -38,7 +38,7 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
         let d_cos = cost - cos0;
         let energy = 0.5 * params.k_cosine * d_cos * d_cos;
 
-        // Force: gromosXX convention (angle_interaction.cc)
+        // Force: GROMOS convention (angle_interaction.cc)
         // df = -K * (cos(θ) - cos(θ0))
         // fi = df/dij * (rkj/dkj - rij/dij * cos(θ))
         // fk = df/dkj * (rij/dij - rkj/dkj * cos(θ))
@@ -53,7 +53,7 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
         result.forces[angle.j] += f_j;
         result.forces[angle.k] += f_k;
 
-        // gromosXX: virial_tensor(a, bb) += rij(a) * fi(bb) + rkj(a) * fk(bb)
+        // GROMOS: virial_tensor(a, bb) += rij(a) * fi(bb) + rkj(a) * fk(bb)
         let rij_v = [rij.x, rij.y, rij.z];
         let rkj_v = [rkj.x, rkj.y, rkj.z];
         let fi_v = [f_i.x, f_i.y, f_i.z];
@@ -91,7 +91,7 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
 
         let params = &topo.angle_parameters[angle.angle_type];
 
-        // gromosXX convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
+        // GROMOS convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
         let r_ij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
         let r_kj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
 
@@ -161,7 +161,7 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
         result.forces[angle.j] += f_j;
         result.forces[angle.k] += f_k;
 
-        // gromosXX: virial_tensor(a, bb) += rij(a) * fi(bb) + rkj(a) * fk(bb)
+        // GROMOS: virial_tensor(a, bb) += rij(a) * fi(bb) + rkj(a) * fk(bb)
         let rij_v = [r_ij.x, r_ij.y, r_ij.z];
         let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
         let fi_v = [f_i.x, f_i.y, f_i.z];

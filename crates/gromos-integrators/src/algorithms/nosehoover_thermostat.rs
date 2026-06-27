@@ -1,11 +1,11 @@
 //! Nosé-Hoover (chain) thermostat algorithm.
 //!
 //! Implements both single NHC (nhc=1) and NHC chain (nhc≥2), equivalent to
-//! gromosXX `algorithm::NoseHoover_Thermostat`.
+//! GROMOS `algorithm::NoseHoover_Thermostat`.
 //!
 //! Placed between LeapFrogVelocity and LeapFrogPosition in the sequence.
 //! Uses the "new" kinetic energy from the previous step's TemperatureCalculation
-//! (stored in energies.kinetic_energy_new, equivalent to gromosXX multibath.bath.ekin).
+//! (stored in energies.kinetic_energy_new, equivalent to GROMOS multibath.bath.ekin).
 //!
 //! # Single NHC (nhc = 1)
 //! ```text
@@ -51,10 +51,10 @@ pub struct NoseHooverThermostatParams {
 
 /// Nosé-Hoover (chain) thermostat.
 ///
-/// gromosXX sequence position: after Leap_Frog_Velocity, before Leap_Frog_Position.
+/// GROMOS sequence position: after Leap_Frog_Velocity, before Leap_Frog_Position.
 ///
 /// The ζ chain state is persisted across steps in `zeta`. On construction all
-/// ζ values are initialised to zero (gromosXX convention: see `init()` in the
+/// ζ values are initialised to zero (GROMOS convention: see `init()` in the
 /// C++ source).
 #[derive(Debug, Clone)]
 pub struct NoseHooverThermostat {
@@ -131,7 +131,7 @@ impl Algorithm for NoseHooverThermostat {
             let dof = self.params[bath_idx].dof;
             let nhc = self.params[bath_idx].nhc;
 
-            // τ < 0 → no coupling for this bath (gromosXX: bath.tau == -1 check)
+            // τ < 0 → no coupling for this bath (GROMOS: bath.tau == -1 check)
             if tau < 0.0 {
                 continue;
             }
@@ -150,7 +150,7 @@ impl Algorithm for NoseHooverThermostat {
                 0.0
             };
 
-            // Guard against division-by-zero / zero temperature (gromosXX: epsilon check)
+            // Guard against division-by-zero / zero temperature (GROMOS: epsilon check)
             if free_temp < f64::EPSILON {
                 free_temp = temperature;
             }
@@ -182,7 +182,7 @@ impl Algorithm for NoseHooverThermostat {
 
                 // 2. Middle links: i from N-2 down to 1
                 //    ζ[i] += ((τ_vec[i-1]·ζ[i-1]² - 1/dof)/τ_vec[i] - ζ[i]·ζ[i+1]) · dt
-                //    Note: ζ[i+1] is already updated (tail-to-head order, mirrors gromosXX).
+                //    Note: ζ[i+1] is already updated (tail-to-head order, mirrors GROMOS).
                 for i in (1..nhc - 1).rev() {
                     let z_prev = self.zeta[bath_idx][i - 1]; // old ζ[i-1]
                     let z_curr = self.zeta[bath_idx][i]; // old ζ[i]
@@ -193,7 +193,7 @@ impl Algorithm for NoseHooverThermostat {
                 }
 
                 // 3. Head: ζ[0] += ((T_free/T₀ - 1)/τ_vec[0] - ζ[1]·ζ[0]) · dt
-                //    Uses freshly updated ζ[1] (mirrors gromosXX).
+                //    Uses freshly updated ζ[1] (mirrors GROMOS).
                 {
                     let z0 = self.zeta[bath_idx][0]; // old ζ[0]
                     let z1 = self.zeta[bath_idx][1]; // already updated ζ[1]

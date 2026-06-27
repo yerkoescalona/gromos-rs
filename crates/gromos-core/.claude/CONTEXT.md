@@ -1,32 +1,41 @@
 # gromos-core — stage contract
 
 ## Job
-L0 data core. Owns the one `(Topology, Configuration)` that everything else shares. No physics, no I/O.
+L0 data core. Owns `(Topology, Configuration)` shared by everything. No physics, no I/O.
 
 ## Inputs (consumes from)
-None — foundation crate. All other crates depend on this one.
+None — foundation crate.
 
 ## Outputs (public API)
-`Topology`, `Configuration`, `Vec3`, `BoundaryCondition` (Vacuum / Rectangular / Triclinic),
-`Algorithm` trait + `AlgorithmSequence`, `AtomSelection`,
-`StandardPairlistAlgorithm`, `CellListPairlistAlgorithm`.
+`Topology`, `Configuration`, `Vec3`/`Mat3`, `Periodicity` (Vacuum/Rectangular/Triclinic),
+`Algorithm` trait + `AlgorithmSequence`, `AtomSelection`, `Stat`,
+`StandardPairlistAlgorithm`, `CellListPairlistAlgorithm`,
+`gather_chain`, `gather_bond`, `gather_molecules` (PBC gathering).
 
 ## Status
-- Boundary: Vacuum ✓, Rectangular ✓, Triclinic ✓ (NTB=-1 truncated-octahedron, wired)
-- Topology: solvent expansion, chargegroups, exclusions ✓
-- AtomSelection: **underbuilt** — `parse_solvent` ignores spec; `parse_molecule` rejects non-first molecules; name/residue search solute-only → P2.1
-- Pairlist: `CellListPairlistAlgorithm` (O(N) for rectangular boxes) implemented and validated by set-equality vs `StandardPairlistAlgorithm`; **not yet wired into md.rs** — system-size heuristic is the remaining step (P1.6 deferred)
+- Boundary: Vacuum ✓, Rectangular ✓, Triclinic ✓ (NTB=-1 truncated-octahedron)
+- Topology: Dim 10 instancing model complete — `moltypes[0]` = solute, `moltypes[1..]` = solvent types,
+  `instances[k].role` = Solute/Solvent; flat arrays derived from instances; `Solvent` struct removed;
+  `Solute` is a ZST shell (atoms moved to moltypes). Direct field access: `topo.moltypes[0].bonds`.
+- AtomSelection: full gromos-rs grammar ✓ — `a:name`, `1:res(N:CA)`, `not()`, `minus()`, `;`-union,
+  `m:` (solute by role), `s:` (solvent by role), syntax-error hints
+- PBC gathering: `gather.rs` — `gather_chain`, `gather_bond`, `gather_molecules` ✓
+- Statistics: `stat.rs` — `Stat` with `ave()`, `rmsd()`, `ee()` (block averaging) ✓
+- Pairlist: `CellListPairlistAlgorithm` (O(N) rectangular) validated; **not yet wired into md.rs** — next priority (P1.5)
 
 ## Key files
 ```
-src/algorithm.rs      — Algorithm trait, AlgorithmSequence
-src/math.rs           — Vec3, BoundaryCondition, truncoct_triclinic_*
-src/topology.rs       — Topology struct
-src/selection.rs      — AtomSelection (P2.1: extend to AtomSpecifier facade)
-src/pairlist.rs       — StandardPairlistAlgorithm, CellListPairlistAlgorithm
+src/topology.rs   — Topology, MoleculeType, MoleculeInstance, Role
+src/selection.rs  — AtomSelection, full grammar + error hints
+src/gather.rs     — PBC molecule gathering
+src/stat.rs       — Stat, block-averaging ee()
+src/pairlist.rs   — StandardPairlistAlgorithm, CellListPairlistAlgorithm
+src/math.rs       — Vec3, Periodicity, truncoct_triclinic_*
 ```
 
 ## Crate-specific rules
-- **No physics here.** Energy/force computation belongs in gromos-forces (L1), never in this crate.
-- **Solvent-ness is an attribute, not a partition.** Do AtomSelection work in a way that doesn't calcify around the old solute/solvent index split before the Dim 10 instancing refactor lands.
-- **BoundaryCondition:** vacuum if box_dims = (0,0,0), rectangular otherwise; GENBOX `box_type` field is parsed but only the dimensions matter — except NTB=-1 which routes to Triclinic via `truncoct_triclinic_box`.
+- **No physics.** Energy/force belongs in gromos-forces.
+- **Dim 10 convention:** `moltypes[0]` is always the solute (GROMOS `moltype[0]` convention).
+  Direct field access: `topo.moltypes[0].bonds.push(...)` — no accessor methods.
+- **Role-based dispatch:** `is_solvent_atom(i)`, `role_of_atom(i)` — never check `i >= num_solute_atoms()`.
+- **gather.rs:** `nearest_image(ri, rj)` returns `ri − rj` (displacement); gathered position = `rj + nearest_image(ri, rj)`.

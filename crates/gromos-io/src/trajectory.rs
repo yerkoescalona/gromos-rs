@@ -71,7 +71,7 @@ impl TrajectoryWriter {
         })
     }
 
-    /// Write a trajectory frame
+    /// Write a trajectory frame from a Configuration.
     pub fn write_frame(
         &mut self,
         step: usize,
@@ -79,80 +79,57 @@ impl TrajectoryWriter {
         config: &Configuration,
     ) -> Result<(), IoError> {
         let state = config.current();
+        let dims = state.box_config.dimensions();
+        let box_opt = if dims.x > 0.0 { Some(dims) } else { None };
+        self.write_trc_frame(step, time, &state.pos, box_opt)?;
 
-        // TIMESTEP block
-        writeln!(self.writer, "TIMESTEP")?;
-        writeln!(self.writer, "{:>10} {:15.6}", step, time)?;
-        writeln!(self.writer, "END")?;
-
-        // POSITIONRED block (reduced precision for smaller files)
-        writeln!(self.writer, "POSITIONRED")?;
-        for (i, pos) in state.pos.iter().enumerate() {
-            writeln!(
-                self.writer,
-                "{:>6} {:>6} {:>6} {:>6} {:12.6} {:12.6} {:12.6}",
-                i + 1,  // Atom number (1-indexed)
-                "RES",  // Residue name (placeholder)
-                "ATOM", // Atom name (placeholder)
-                i + 1,  // Atom serial
-                pos.x,
-                pos.y,
-                pos.z
-            )?;
-        }
-        writeln!(self.writer, "END")?;
-
-        // VELOCITYRED block (optional)
         if self.write_velocities {
             writeln!(self.writer, "VELOCITYRED")?;
-            for (i, vel) in state.vel.iter().enumerate() {
-                writeln!(
-                    self.writer,
-                    "{:>6} {:>6} {:>6} {:>6} {:12.6} {:12.6} {:12.6}",
-                    i + 1,
-                    "RES",
-                    "ATOM",
-                    i + 1,
-                    vel.x,
-                    vel.y,
-                    vel.z
-                )?;
+            for vel in &state.vel {
+                writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", vel.x, vel.y, vel.z)?;
             }
             writeln!(self.writer, "END")?;
         }
 
-        // FORCERED block (optional) - uses higher precision for forces
         if self.write_forces {
-            writeln!(self.writer, "FORCERED")?;
-            for (i, force) in state.force.iter().enumerate() {
-                writeln!(
-                    self.writer,
-                    "{:>6} {:>6} {:>6} {:>6} {:18.9} {:18.9} {:18.9}",
-                    i + 1,
-                    "RES",
-                    "ATOM",
-                    i + 1,
-                    force.x,
-                    force.y,
-                    force.z
-                )?;
-                // Add comment every 10 atoms (GROMOS convention)
-                if (i + 1) % 10 == 0 {
-                    writeln!(self.writer, "#{:>10}", i + 1)?;
-                }
+            writeln!(self.writer, "FREEFORCERED")?;
+            for force in &state.force {
+                writeln!(self.writer, "{:18.9}{:18.9}{:18.9}", force.x, force.y, force.z)?;
             }
             writeln!(self.writer, "END")?;
         }
 
-        // GENBOX block (box dimensions)
-        let dims = state.box_config.dimensions();
-        writeln!(self.writer, "GENBOX")?;
-        writeln!(
-            self.writer,
-            " {:15.9} {:15.9} {:15.9}",
-            dims.x, dims.y, dims.z
-        )?;
+        Ok(())
+    }
+
+    /// Write a frame from raw positions (no Configuration needed).
+    ///
+    /// Writes TIMESTEP + POSITIONRED in standard 3-column GROMOS format,
+    /// plus GENBOX if `box_dims` is Some.
+    pub fn write_trc_frame(
+        &mut self,
+        step: usize,
+        time: f64,
+        positions: &[Vec3],
+        box_dims: Option<Vec3>,
+    ) -> Result<(), IoError> {
+        writeln!(self.writer, "TIMESTEP")?;
+        writeln!(self.writer, "{:>15}{:20.9}", step, time)?;
         writeln!(self.writer, "END")?;
+
+        writeln!(self.writer, "POSITIONRED")?;
+        for pos in positions {
+            writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", pos.x, pos.y, pos.z)?;
+        }
+        writeln!(self.writer, "END")?;
+
+        if let Some(b) = box_dims {
+            if b.x > 0.0 {
+                writeln!(self.writer, "GENBOX")?;
+                writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", b.x, b.y, b.z)?;
+                writeln!(self.writer, "END")?;
+            }
+        }
 
         self.step_count += 1;
         Ok(())
@@ -270,8 +247,8 @@ impl TrajectoryReader {
         let forces = Self::try_read_force_block(&mut self.reader, &mut self.buffer)?;
         let lattice_shifts = Self::try_read_lattice_shifts(&mut self.reader, &mut self.buffer)?;
 
-        // Read GENBOX block (required)
-        let box_dims = Self::read_genbox_block(&mut self.reader, &mut self.buffer)?;
+        // Read GENBOX block (optional — vacuum systems may omit it)
+        let box_dims = Self::try_read_genbox_block(&mut self.reader, &mut self.buffer)?;
 
         self.frames_read += 1;
 
@@ -404,17 +381,16 @@ impl TrajectoryReader {
             }
 
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 7 {
-                // Format: atom_num RES ATOM serial x y z
-                let x = parts[4]
-                    .parse::<f64>()
-                    .map_err(|e| IoError::FormatError(format!("Invalid x coordinate: {}", e)))?;
-                let y = parts[5]
-                    .parse::<f64>()
-                    .map_err(|e| IoError::FormatError(format!("Invalid y coordinate: {}", e)))?;
-                let z = parts[6]
-                    .parse::<f64>()
-                    .map_err(|e| IoError::FormatError(format!("Invalid z coordinate: {}", e)))?;
+            // Standard GROMOS POSITIONRED: 3 columns (x y z)
+            // Legacy 7-column format: atom_num RES ATOM serial x y z
+            let (xi, yi, zi) = if parts.len() == 3 { (0, 1, 2) } else { (4, 5, 6) };
+            if parts.len() >= zi + 1 {
+                let x = parts[xi].parse::<f64>()
+                    .map_err(|e| IoError::FormatError(format!("Invalid x: {e}")))?;
+                let y = parts[yi].parse::<f64>()
+                    .map_err(|e| IoError::FormatError(format!("Invalid y: {e}")))?;
+                let z = parts[zi].parse::<f64>()
+                    .map_err(|e| IoError::FormatError(format!("Invalid z: {e}")))?;
                 positions.push(Vec3::new(x, y, z));
             }
         }
@@ -599,56 +575,166 @@ impl TrajectoryReader {
 
         Ok(Vec3::new(lx, ly, lz))
     }
+
+    /// Try to read GENBOX; return Vec3::ZERO if missing (vacuum trajectory).
+    fn try_read_genbox_block(
+        reader: &mut BufReader<File>,
+        buffer: &mut String,
+    ) -> Result<Vec3, IoError> {
+        let pos = reader.stream_position()?;
+        buffer.clear();
+        if reader.read_line(buffer)? == 0 { return Ok(Vec3::ZERO); }
+        if !buffer.trim().starts_with("GENBOX") {
+            // Not GENBOX — rewind and return zero box (vacuum)
+            reader.seek(std::io::SeekFrom::Start(pos))?;
+            return Ok(Vec3::ZERO);
+        }
+        // Delegate to existing reader (already positioned past "GENBOX" line)
+        buffer.clear();
+        reader.read_line(buffer)?;
+        let parts: Vec<&str> = buffer.trim().split_whitespace().collect();
+        if parts.len() < 3 { return Ok(Vec3::ZERO); }
+        let lx = parts[0].parse::<f64>().unwrap_or(0.0);
+        let ly = parts[1].parse::<f64>().unwrap_or(0.0);
+        let lz = parts[2].parse::<f64>().unwrap_or(0.0);
+        // Consume END + potential extra lines
+        buffer.clear();
+        reader.read_line(buffer)?; // END
+        Ok(Vec3::new(lx, ly, lz))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gromos_core::configuration::Box as SimBox;
+    use gromos_core::math::Vec3;
+    use std::io::Read;
+    use gromos_core::configuration::{Box as SimBox, Configuration};
 
-    #[test]
-    fn test_trajectory_writer_creation() {
-        let temp_file = "/tmp/test_traj.trc";
-        let writer = TrajectoryWriter::new(temp_file, "Test trajectory", false, false);
-        assert!(writer.is_ok());
+    fn round_trip(positions: Vec<Vec3>, box_dims: Option<Vec3>) -> TrajectoryFrame {
+        let tmp = std::env::temp_dir().join(format!("gromos_trc_test_{}.trc", std::process::id()));
+        {
+            let mut w = TrajectoryWriter::new(&tmp, "test", false, false).unwrap();
+            w.write_trc_frame(42, 0.084, &positions, box_dims).unwrap();
+            w.flush().unwrap();
+        }
+        let mut r = TrajectoryReader::new(&tmp).unwrap();
+        let frame = r.read_frame().unwrap().expect("expected one frame");
+        std::fs::remove_file(&tmp).ok();
+        frame
     }
 
     #[test]
-    fn test_write_frame() {
-        let temp_file = "/tmp/test_traj2.trc";
-        let mut config = Configuration::new(3, 1, 1);
-        config.current_mut().pos = vec![
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(0.1, 0.0, 0.0),
-            Vec3::new(0.0, 0.1, 0.0),
-        ];
-        config.current_mut().box_config = SimBox::rectangular(3.0, 3.0, 3.0);
+    fn write_trc_frame_produces_3column_positionred() {
+        let tmp = std::env::temp_dir().join(format!("gromos_fmt_{}.trc", std::process::id()));
+        {
+            let mut w = TrajectoryWriter::new(&tmp, "fmt test", false, false).unwrap();
+            w.write_trc_frame(1, 0.002, &[Vec3::new(1.0, 2.0, 3.0)], None).unwrap();
+            w.flush().unwrap();
+        }
+        let content = std::fs::read_to_string(&tmp).unwrap();
+        std::fs::remove_file(&tmp).ok();
 
-        let mut writer = TrajectoryWriter::new(temp_file, "Test", false, false).unwrap();
-        let result = writer.write_frame(0, 0.0, &config);
-        assert!(result.is_ok());
-        assert_eq!(writer.frame_count(), 1);
+        // POSITIONRED line must have exactly 3 floats (standard GROMOS format)
+        let pos_line = content.lines()
+            .skip_while(|l| !l.starts_with("POSITIONRED"))
+            .nth(1).unwrap().trim().to_string();
+        let cols: Vec<&str> = pos_line.split_whitespace().collect();
+        assert_eq!(cols.len(), 3, "POSITIONRED must have 3 columns, got: {pos_line}");
+        assert!((cols[0].parse::<f64>().unwrap() - 1.0).abs() < 1e-9);
+        assert!((cols[1].parse::<f64>().unwrap() - 2.0).abs() < 1e-9);
+        assert!((cols[2].parse::<f64>().unwrap() - 3.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_write_frame_with_forces() {
-        let temp_file = "/tmp/test_traj_forces.trc";
-        let mut config = Configuration::new(3, 1, 1);
-        config.current_mut().pos = vec![
+    fn round_trip_vacuum() {
+        let positions = vec![
+            Vec3::new(0.1, 0.2, 0.3),
+            Vec3::new(1.5, -0.5, 2.1),
             Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(0.1, 0.0, 0.0),
-            Vec3::new(0.0, 0.1, 0.0),
         ];
-        config.current_mut().force = vec![
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec3::new(0.0, 0.0, 1.0),
-        ];
-        config.current_mut().box_config = SimBox::rectangular(3.0, 3.0, 3.0);
+        let frame = round_trip(positions.clone(), None);
+        assert_eq!(frame.step, 42);
+        assert!((frame.time - 0.084).abs() < 1e-9);
+        assert_eq!(frame.positions.len(), 3);
+        for (a, b) in positions.iter().zip(&frame.positions) {
+            assert!((a.x - b.x).abs() < 1e-9, "x mismatch: {a:?} vs {b:?}");
+            assert!((a.y - b.y).abs() < 1e-9);
+            assert!((a.z - b.z).abs() < 1e-9);
+        }
+    }
 
-        let mut writer = TrajectoryWriter::new(temp_file, "Test with forces", false, true).unwrap();
-        let result = writer.write_frame(0, 0.0, &config);
-        assert!(result.is_ok());
-        assert_eq!(writer.frame_count(), 1);
+    #[test]
+    fn round_trip_with_box() {
+        let positions = vec![Vec3::new(0.5, 0.5, 0.5), Vec3::new(1.0, 1.0, 1.0)];
+        let box_dims = Vec3::new(2.0, 2.0, 2.0);
+        let frame = round_trip(positions.clone(), Some(box_dims));
+        assert!((frame.box_dims.x - 2.0).abs() < 1e-9);
+        assert!((frame.box_dims.y - 2.0).abs() < 1e-9);
+        assert!((frame.box_dims.z - 2.0).abs() < 1e-9);
+        for (a, b) in positions.iter().zip(&frame.positions) {
+            assert!((a.x - b.x).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn reads_3column_gromos_format() {
+        // Standard GROMOS .trc with 3-column POSITIONRED (as written by gromosXX)
+        let tmp = std::env::temp_dir().join(format!("gromos_3col_{}.trc", std::process::id()));
+        std::fs::write(&tmp,
+            "TITLE\n  test\nEND\nTIMESTEP\n              5    0.010000000\nEND\n\
+             POSITIONRED\n    1.234567890    2.345678901    3.456789012\nEND\n\
+             GENBOX\n    4.000000000    4.000000000    4.000000000\nEND\n").unwrap();
+        let mut r = TrajectoryReader::new(&tmp).unwrap();
+        let frame = r.read_frame().unwrap().unwrap();
+        std::fs::remove_file(&tmp).ok();
+        assert_eq!(frame.step, 5);
+        assert!((frame.time - 0.01).abs() < 1e-9);
+        assert_eq!(frame.positions.len(), 1);
+        assert!((frame.positions[0].x - 1.234567890).abs() < 1e-9);
+        assert!((frame.box_dims.x - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn reads_7column_legacy_format() {
+        // Legacy 7-column format (written by older gromos-rs)
+        let tmp = std::env::temp_dir().join(format!("gromos_7col_{}.trc", std::process::id()));
+        std::fs::write(&tmp,
+            "TITLE\n  legacy\nEND\nTIMESTEP\n              1    0.002000000\nEND\n\
+             POSITIONRED\n     1    RES   ATOM      1    1.100000    2.200000    3.300000\nEND\n\
+             GENBOX\n    3.000000000    3.000000000    3.000000000\nEND\n").unwrap();
+        let mut r = TrajectoryReader::new(&tmp).unwrap();
+        let frame = r.read_frame().unwrap().unwrap();
+        std::fs::remove_file(&tmp).ok();
+        assert!((frame.positions[0].x - 1.1).abs() < 1e-6);
+        assert!((frame.positions[0].y - 2.2).abs() < 1e-6);
+        assert!((frame.positions[0].z - 3.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn multi_frame_round_trip() {
+        let tmp = std::env::temp_dir().join(format!("gromos_multi_{}.trc", std::process::id()));
+        let frames_in = vec![
+            (0usize, 0.0_f64, vec![Vec3::new(0.1, 0.2, 0.3)]),
+            (1, 0.002, vec![Vec3::new(0.4, 0.5, 0.6)]),
+            (2, 0.004, vec![Vec3::new(0.7, 0.8, 0.9)]),
+        ];
+        {
+            let mut w = TrajectoryWriter::new(&tmp, "multi", false, false).unwrap();
+            for (step, time, ref pos) in &frames_in {
+                w.write_trc_frame(*step, *time, pos, None).unwrap();
+            }
+            w.flush().unwrap();
+        }
+        let mut r = TrajectoryReader::new(&tmp).unwrap();
+        let frames_out = r.read_all_frames().unwrap();
+        std::fs::remove_file(&tmp).ok();
+        assert_eq!(frames_out.len(), 3);
+        for (i, ((_step, time, pos), frame)) in frames_in.iter().zip(&frames_out).enumerate() {
+            assert!((frame.time - time).abs() < 1e-9, "frame {i} time mismatch");
+            assert!((frame.positions[0].x - pos[0].x).abs() < 1e-9, "frame {i} x mismatch");
+        }
     }
 }
+
+// (merged into the tests module above)

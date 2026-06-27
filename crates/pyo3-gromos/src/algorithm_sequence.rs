@@ -175,7 +175,7 @@ impl PyForcefield {
 /// **Important:** In the algorithm sequence, this expands to TWO internal steps:
 /// `LeapFrogVelocity` (which also exchanges state) and `LeapFrogPosition`.
 /// They are placed adjacently. If you need a thermostat BETWEEN them
-/// (gromosXX convention), use the individual `LeapFrogVelocity` and
+/// (GROMOS convention), use the individual `LeapFrogVelocity` and
 /// `LeapFrogPosition` classes instead.
 ///
 /// # Example (Python)
@@ -482,7 +482,7 @@ impl PyEnergyCalculation {
 /// Centre of mass motion removal.
 ///
 /// Removes translational COM velocity from all atoms.
-/// Placed first in the sequence (before Forcefield, gromosXX convention).
+/// Placed first in the sequence (before Forcefield, GROMOS convention).
 ///
 /// # Example (Python)
 ///
@@ -838,7 +838,7 @@ impl PyAlgorithmSequence {
             PyLeapFrogVelocity {},
         ));
 
-        // Berendsen thermostat (between velocity and position, gromosXX convention)
+        // Berendsen thermostat (between velocity and position, GROMOS convention)
         let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
             imd.temp_bath[0].temp0[0]
         } else {

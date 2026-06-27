@@ -219,7 +219,7 @@ fn process_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
 ///
 /// Single source of truth for solvent-solvent interactions with shared PBC shift.
 /// Precomputes LJ params and charge products for the N×N atom type combinations
-/// within a solvent molecule (gromosXX optimization: avoids repeated lookups).
+/// within a solvent molecule (GROMOS optimization: avoids repeated lookups).
 #[inline]
 fn process_solvent_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
     pairs: &[(u32, u32)],
@@ -443,7 +443,7 @@ fn lj_crf_innerloop_cg_grouped_parallel_virial<BC: BoundaryCondition, const VIRI
 
 /// Parallel nonbonded innerloop — same physics as `lj_crf_innerloop`.
 ///
-/// Uses Rayon fold/reduce with thread-local ForceStorage buffers (gromosXX pattern:
+/// Uses Rayon fold/reduce with thread-local ForceStorage buffers (GROMOS pattern:
 /// per-thread Nonbonded_Set with private force arrays, sequential reduction).
 ///
 /// Automatically falls back to serial for small pairlists.
@@ -506,7 +506,7 @@ fn lj_crf_innerloop_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
     result
 }
 
-/// Solvent-solvent innerloop with shared PBC shift (gromosXX convention).
+/// Solvent-solvent innerloop with shared PBC shift (GROMOS convention).
 ///
 /// For each solvent-solvent CG pair, the PBC shift is computed once from
 /// the first atoms (typically O-O for water) and reused for all atom pairs.

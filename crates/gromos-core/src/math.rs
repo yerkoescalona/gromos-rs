@@ -88,7 +88,7 @@ impl Triclinic {
 impl BoundaryCondition for Triclinic {
     /// Iterative z -> y -> x lattice reduction, ported from
     /// `Boundary_Implementation<triclinic>::nearest_image`
-    /// (gromosXX `math/boundary_implementation.cc`). Requires the GROMOS
+    /// (GROMOS `math/boundary_implementation.cc`). Requires the GROMOS
     /// "lower triangular" box vector convention (a=(ax,0,0), b=(bx,by,0),
     /// c=(cx,cy,cz)), as guaranteed by GENBOX / `truncoct_triclinic_box`.
     ///
@@ -142,7 +142,7 @@ impl BoundaryCondition for Triclinic {
 
 /// Rotation matrix between the truncated-octahedron ("cubic") frame and the
 /// lower-triangular triclinic frame produced by `truncoct_triclinic_box`,
-/// ported from gromosXX `math::truncoct_triclinic_rotmat`
+/// ported from GROMOS `math::truncoct_triclinic_rotmat`
 /// (`math/transformation.cc`). `forward` rotates truncoct -> triclinic
 /// (applied to positions/velocities on read for NTB=-1); `!forward` is its
 /// transpose (triclinic -> truncoct, applied when writing forces back out).
@@ -150,13 +150,13 @@ pub fn truncoct_triclinic_rotmat(forward: bool) -> Mat3 {
     let sq3i = 1.0 / 3.0_f64.sqrt();
     let sq2i = 1.0 / 2.0_f64.sqrt();
 
-    // gromosXX builds `rot` from rows (sq3i,-2*sq2i*sq3i,0), (sq3i,
+    // GROMOS builds `rot` from rows (sq3i,-2*sq2i*sq3i,0), (sq3i,
     // sq3i*sq2i,-sq2i), (sq3i,sq2i*sq3i,sq2i). `rot` below is that same
-    // matrix `M` (its columns are gromosXX's rows, per glam's column-major
-    // storage). gromosXX applies the rotation via `product(rot, v)`, which
+    // matrix `M` (its columns are GROMOS's rows, per glam's column-major
+    // storage). GROMOS applies the rotation via `product(rot, v)`, which
     // (per gmath.h's `product`) computes `rot^T * v`, not `rot * v`. So for
-    // `forward=true` (gromosXX's `rot` = `M`, untransposed) the applied
-    // rotation is `M^T`; for `forward=false` (gromosXX transposes `rot` to
+    // `forward=true` (GROMOS's `rot` = `M`, untransposed) the applied
+    // rotation is `M^T`; for `forward=false` (GROMOS transposes `rot` to
     // `M^T`, then `product` transposes again) the applied rotation is `M`.
     // See PLAN.md P1.4 derivation.
     let rot = Mat3::from_cols(
@@ -176,7 +176,7 @@ pub fn truncoct_triclinic_rotmat(forward: bool) -> Mat3 {
 /// (NTB=-1 BOX block, `forward=true`, where `box_matrix.x_axis.x = L`) and
 /// the lower-triangular truncated-octahedron triclinic box vectors
 /// (`forward=false` recovers the cubic box from the triclinic `a` vector),
-/// ported from gromosXX `math::truncoct_triclinic_box`
+/// ported from GROMOS `math::truncoct_triclinic_box`
 /// (`math/transformation.cc`).
 pub fn truncoct_triclinic_box(box_matrix: Mat3, forward: bool) -> Mat3 {
     if forward {
@@ -193,7 +193,7 @@ pub fn truncoct_triclinic_box(box_matrix: Mat3, forward: bool) -> Mat3 {
 }
 
 /// Rotates every position/velocity vector between the truncated-octahedron
-/// and triclinic frames in place, ported from gromosXX
+/// and triclinic frames in place, ported from GROMOS
 /// `math::truncoct_triclinic` (`math/transformation.cc`). `forward` rotates
 /// truncoct -> triclinic (applied on read for NTB=-1); `!forward` is the
 /// inverse (applied when writing forces back out).
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn test_triclinic_truncoct_tie_boundary_diverges_from_frac_round() {
         // FUTURE.md Dim 11 finding #1 / PLAN.md P1.4: the textbook
-        // `frac - frac.round()` reduction and gromosXX's while-loop z->y->x
+        // `frac - frac.round()` reduction and GROMOS's while-loop z->y->x
         // reduction are NOT equivalent for strongly triclinic cells. At an
         // exact half-lattice-vector displacement they land on opposite sides
         // of the cell, a full lattice vector apart.
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_truncoct_triclinic_rotmat_forward_backward_are_transposes() {
-        // gromosXX: `truncoct_triclinic_rotmat(false) == transpose(truncoct_triclinic_rotmat(true))`,
+        // GROMOS: `truncoct_triclinic_rotmat(false) == transpose(truncoct_triclinic_rotmat(true))`,
         // and the matrix is orthogonal, so backward is also the inverse.
         let fwd = truncoct_triclinic_rotmat(true);
         let bwd = truncoct_triclinic_rotmat(false);
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn test_truncoct_triclinic_box_round_trip() {
         // forward (cubic -> triclinic) then backward (triclinic -> cubic)
-        // recovers the original cube edge length L, per gromosXX
+        // recovers the original cube edge length L, per GROMOS
         // `math::truncoct_triclinic_box`.
         let l = 3.767055681;
         let cubic = Mat3::from_diagonal(Vec3::splat(l));
@@ -411,10 +411,10 @@ mod tests {
 
     #[test]
     fn test_truncoct_triclinic_forward_matches_gromosxx_reference() {
-        // gromosXX's `product(rot, v)` (gmath.h) computes `rot^T * v`, not
+        // GROMOS's `product(rot, v)` (gmath.h) computes `rot^T * v`, not
         // `rot * v` - the forward/backward branches in
         // `truncoct_triclinic_rotmat` must account for that transpose.
-        // Reference value from a gromosXX debug build: atom 21 of
+        // Reference value from a GROMOS debug build: atom 21 of
         // crates/gromos-md/tests/aladip.conf, rotated via
         // `math::truncoct_triclinic(pos, true)` after
         // `math::truncoct_triclinic_box(box, true)` (PLAN 1.4 / FUTURE Dim

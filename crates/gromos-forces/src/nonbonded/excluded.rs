@@ -18,17 +18,17 @@ use super::params::FOUR_PI_EPS_I;
 /// * `boundary` - Boundary condition for nearest-image calculation
 /// Calculate reaction-field excluded-pair corrections (energy + forces).
 ///
-/// In gromosXX, excluded atom pairs (bonded neighbours) are removed from the
+/// In GROMOS, excluded atom pairs (bonded neighbours) are removed from the
 /// pairlist.  With `NSLFEXCL=1` (default), they receive only the RF
 /// **correction** — NOT the full Coulomb 1/r term.
 ///
-/// **Solute atoms** (gromosXX `RF_excluded_interaction_innerloop`):
+/// **Solute atoms** (GROMOS `RF_excluded_interaction_innerloop`):
 ///   Self-term: `E_self = -0.5 * qi² * FPEPSI * crf_cut`
 ///   Excluded pairs: full `rf_interaction` with force + energy:
 ///     Force  = q_prod * FPEPSI * crf_cut3i * r_vec
 ///     Energy = q_prod * FPEPSI * (-crf_2cut3i * r² - crf_cut)
 ///
-/// **Solvent atoms** (gromosXX `RF_solvent_interaction_innerloop`):
+/// **Solvent atoms** (GROMOS `RF_solvent_interaction_innerloop`):
 ///   NO self-term (distance-independent parts cancel for neutral charge groups)
 ///   NO forces (rigid molecules)
 ///   Only energy: `E = -qi*qj * FPEPSI * crf_2cut3i * r²` (distance-dependent part only)
@@ -70,7 +70,7 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
                 storage.forces[i] += force;
                 storage.forces[j] -= force;
 
-                // Virial: gromosXX convention virial_tensor(b, a) += r(b) * force(a)
+                // Virial: GROMOS convention virial_tensor(b, a) += r(b) * force(a)
                 let rv = [r.x, r.y, r.z];
                 let fv = [force.x, force.y, force.z];
                 for a in 0..3 {
@@ -83,7 +83,7 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
     }
 
     // === Solvent atoms ===
-    // gromosXX: no self-term, no forces, only distance-dependent energy
+    // GROMOS: no self-term, no forces, only distance-dependent energy
     let mut e_excl_solvent = 0.0;
     let mut n_solvent_excl = 0usize;
 
@@ -110,7 +110,7 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
 
 /// Calculate 1-4 nonbonded interactions (LJ with cs6/cs12 + CRF with coulomb scaling).
 ///
-/// In gromosXX, 1-4 pairs are excluded from the pairlist and computed separately
+/// In GROMOS, 1-4 pairs are excluded from the pairlist and computed separately
 /// using scaled LJ parameters (cs6, cs12) and optionally scaled Coulomb.
 /// No cutoff is applied — all 1-4 pairs are always computed.
 ///
@@ -179,7 +179,7 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
             e_lj_14 += e_lj;
             e_crf_14 += e_crf;
 
-            // Virial: gromosXX convention virial_tensor(b, a) += r(b) * force(a)
+            // Virial: GROMOS convention virial_tensor(b, a) += r(b) * force(a)
             let rv = [r.x, r.y, r.z];
             let fv = [force.x, force.y, force.z];
             for a in 0..3 {

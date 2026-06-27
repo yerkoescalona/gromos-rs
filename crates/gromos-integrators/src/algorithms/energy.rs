@@ -1,6 +1,6 @@
 //! Energy calculation algorithm.
 //!
-//! Equivalent to gromosXX `algorithm::Energy_Calculation`.
+//! Equivalent to GROMOS `algorithm::Energy_Calculation`.
 //! Finalizes total energy = E_kin + E_pot.
 
 use gromos_core::algorithm::{Algorithm, SimulationState};
@@ -33,7 +33,7 @@ impl Algorithm for EnergyCalculation {
         conf: &mut Configuration,
         _sim: &SimulationState,
     ) -> Result<(), String> {
-        // gromosXX convention: energies are stored in old() after exchange_state.
+        // GROMOS convention: energies are stored in old() after exchange_state.
         // Forcefield wrote potential energies to what is now old(),
         // TemperatureCalculation wrote kinetic energy to old().
         // Finalize the potential total here.

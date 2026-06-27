@@ -318,7 +318,7 @@ impl Default for TempBathParameters {
 
 /// Parse GROMOS .imd/.in parameter file.
 ///
-/// Handles both key-value format and gromosXX positional format.
+/// Handles both key-value format and GROMOS positional format.
 /// In positional format, comment lines starting with `#` describe fields,
 /// and the following data line contains values in that order.
 pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> {
@@ -366,10 +366,10 @@ pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> 
     Ok(params)
 }
 
-/// Parse a specific IMD block using gromosXX positional format.
+/// Parse a specific IMD block using GROMOS positional format.
 ///
 /// Data lines are the non-comment lines within the block, in order.
-/// The format follows gromosXX conventions where each data line
+/// The format follows GROMOS conventions where each data line
 /// corresponds to a group of parameters described by preceding comments.
 fn parse_block(
     params: &mut ImdParameters,
@@ -420,7 +420,7 @@ fn parse_block(
             }
         },
         "MULTIBATH" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: algorithm name (e.g. "weak-coupling")
             //   Line 1: NBATHS
             //   Line 2: TEMP0 TAU (per bath, may have multiple values)
@@ -434,7 +434,7 @@ fn parse_block(
             let mut line_idx = 0;
 
             // Line 0: algorithm (string like "weak-coupling" or number)
-            // Matches gromosXX in_parameter.cc logic:
+            // Matches GROMOS in_parameter.cc logic:
             //   "weak-coupling" / 0  → algorithm = 0  (Berendsen)
             //   "nose-hoover"   / 1  → algorithm = 1  (NHC single)
             //   "nose-hoover-chains" / 2 → reads next token as chain length N, algorithm = N
@@ -494,13 +494,13 @@ fn parse_block(
             }
 
             // Lines 4+: LAST COM-BATH IR-BATH
-            // (skip, used internally by gromosXX)
+            // (skip, used internally by GROMOS)
             let _ = line_idx;
 
             params.temp_bath = vec![bath];
         },
         "PRESSURESCALE" => {
-            // gromosXX PRESSURESCALE block format:
+            // GROMOS PRESSURESCALE block format:
             //   Line 0: COUPLE SCALE COMP TAUP VIRIAL
             //     COUPLE: off/calc/scale (or 0/1/2)
             //     SCALE: off/iso/aniso/full/semianiso (or 0/1/2/3/4)
@@ -584,7 +584,7 @@ fn parse_block(
             }
         },
         "CONSTRAINT" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: NTC
             //   Line 1: NTCP (string: "shake" or number)
             //   Line 2: NTCP0 (tolerance)
@@ -639,7 +639,7 @@ fn parse_block(
             }
         },
         "FORCE" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: bonds angles imp dih charge nonbonded (6 NTF values)
             //   Line 1: NEGR NRE(1) NRE(2) ... NRE(NEGR)
             if let Some(line) = data_lines.first() {
@@ -657,7 +657,7 @@ fn parse_block(
             }
         },
         "PAIRLIST" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: ALGORITHM NSNB RCUTP RCUTL SIZE TYPE
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
@@ -695,7 +695,7 @@ fn parse_block(
             }
         },
         "NONBONDED" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: NLRELE
             //   Line 1: APPAK RCRF EPSRF NSLFEXCL
             //   Line 2: NSHAPE ASHAPE NA2CLC TOLA2 EPSLS
@@ -731,7 +731,7 @@ fn parse_block(
             }
         },
         "INITIALISE" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: NTIVEL NTISHK NTINHT NTINHB
             //   Line 1: NTISHI NTIRTC NTICOM
             //   Line 2: NTISTI
@@ -772,7 +772,7 @@ fn parse_block(
             }
         },
         "WRITETRAJ" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: NTWX NTWSE NTWV NTWF NTWE NTWG NTWB
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
@@ -792,7 +792,7 @@ fn parse_block(
             }
         },
         "PRINTOUT" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: NTPR NTPP
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
@@ -811,7 +811,7 @@ fn parse_block(
             }
         },
         "POSITIONRES" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: NTPOR NTPORB NTPORS CPOR
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
@@ -830,7 +830,7 @@ fn parse_block(
             }
         },
         "DISTANCERES" => {
-            // gromosXX format (one data line):
+            // GROMOS format (one data line):
             //   NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE VDIR NTWDIR
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
@@ -845,7 +845,7 @@ fn parse_block(
             }
         },
         "PERTURBATION" => {
-            // gromosXX format: 8 values, possibly split over multiple non-comment lines:
+            // GROMOS format: 8 values, possibly split over multiple non-comment lines:
             //   NTG NRDGL RLAM DLAMT
             //   ALPHLJ ALPHC NLAM NSCALE
             let combined: Vec<String> = data_lines.iter()
@@ -862,7 +862,7 @@ fn parse_block(
             if v.len() >= 8 { params.nscale = parse_i32(&v[7]); }
         },
         "ENERGYMIN" => {
-            // gromosXX format:
+            // GROMOS format:
             //   Line 0: NTEM NCYC DELE DX0 DXM NMIN FLIM
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
@@ -898,7 +898,7 @@ fn parse_block(
 impl ImdParameters {
     /// Compute the individual lambda and its derivative with respect to RLAM.
     ///
-    /// Following gromosXX: individual_lambda = RLAM^NLAM,
+    /// Following GROMOS: individual_lambda = RLAM^NLAM,
     /// d(individual_lambda)/d(RLAM) = NLAM * RLAM^(NLAM-1).
     pub fn lambda_and_derivative(&self) -> (f64, f64) {
         let nlam = self.nlam as f64;
@@ -951,7 +951,7 @@ mod tests {
 
     #[test]
     fn test_parse_gromosxx_format() {
-        // Actual gromosXX .in file format (positional)
+        // Actual GROMOS .in file format (positional)
         let content = "\
 TITLE
 Two Argon atoms - LJ pair reference
@@ -1029,7 +1029,7 @@ INITIALISE
 END
 ";
         let path = write_tmp(content, "gxx_format");
-        let params = read_imd_file(&path).expect("Failed to parse gromosXX format");
+        let params = read_imd_file(&path).expect("Failed to parse GROMOS format");
 
         assert_eq!(params.npm, 1);
         assert_eq!(params.nsm, 0);
@@ -1118,7 +1118,7 @@ END
         std::fs::remove_file(path).ok();
     }
 
-    /// PERTURBATION block: multi-line format (gromosXX splits 8 values across 2 non-comment
+    /// PERTURBATION block: multi-line format (GROMOS splits 8 values across 2 non-comment
     /// lines). This was a real bug: `data_lines.first()` silently dropped ALPHLJ/ALPHC/NLAM/NSCALE.
     #[test]
     fn test_perturbation_block_multiline() {
@@ -1176,7 +1176,7 @@ END
         std::fs::remove_file(path).ok();
     }
 
-    /// Verify MULTIBATH algorithm mapping matches gromosXX exactly:
+    /// Verify MULTIBATH algorithm mapping matches GROMOS exactly:
     ///   "weak-coupling" → 0, "nose-hoover" → 1, "nose-hoover-chains N" → N (N ≥ 2)
     #[test]
     fn test_multibath_algorithm_mapping() {

@@ -3,7 +3,7 @@
 //! Wraps the SteepestDescent integrator as an Algorithm for the AlgorithmSequence.
 //! This replaces both LeapFrogVelocity and LeapFrogPosition in the sequence.
 //!
-//! In gromosXX, steepest descent is an integrator that replaces the leap-frog
+//! In GROMOS, steepest descent is an integrator that replaces the leap-frog
 //! steps. The rest of the sequence (Forcefield, EnergyCalculation) stays the same.
 
 use gromos_core::algorithm::{Algorithm, SimulationState};
@@ -120,10 +120,10 @@ impl Algorithm for SteepestDescentAlgorithm {
 
         let n_atoms = topo.num_atoms();
 
-        // gromosXX: only check convergence if past nmin steps
+        // GROMOS: only check convergence if past nmin steps
         // Uses sim.steps() (the global step counter), not an internal counter
         if sim.step > self.min_steps {
-            // gromosXX uses potential_total + special_total for convergence
+            // GROMOS uses potential_total + special_total for convergence
             let ecur = conf.current().energies.potential_total
                 + conf.current().energies.special_total;
             let eold = conf.old().energies.potential_total
@@ -146,31 +146,31 @@ impl Algorithm for SteepestDescentAlgorithm {
                 return Ok(());
             }
 
-            // Adaptive step sizing (gromosXX: *1.2 if decrease, *0.5 if increase)
+            // Adaptive step sizing (GROMOS: *1.2 if decrease, *0.5 if increase)
             if ecur < eold {
                 self.step_size = (self.step_size * 1.2).min(self.max_step_size);
             } else {
                 self.step_size *= 0.5;
             }
         } else {
-            // gromosXX: reset step size to dx0 for initial steps
+            // GROMOS: reset step size to dx0 for initial steps
             self.step_size = self.initial_step_size;
         }
 
-        // Apply force limiting (gromosXX: per-atom |f| > flim → scale down)
+        // Apply force limiting (GROMOS: per-atom |f| > flim → scale down)
         self.apply_force_limit(&mut conf.current_mut().force);
 
         // Calculate <f|f>^-0.5 (normalized force magnitude)
         let f_norm = self.calculate_force_norm(&conf.current().force);
 
-        // NaN check (gromosXX: gisnan)
+        // NaN check (GROMOS: gisnan)
         if f_norm.is_nan() {
             return Err("Force is NaN during steepest descent".to_string());
         }
 
         // exchange_state: swap old <-> current
         conf.exchange_state();
-        // Copy box to current (gromosXX convention)
+        // Copy box to current (GROMOS convention)
         conf.current_mut().box_config = conf.old().box_config.clone();
 
         // Update positions: r_new = r_old + step_size * f_norm * force_old
@@ -180,7 +180,7 @@ impl Algorithm for SteepestDescentAlgorithm {
             conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().force[i] * step_scale;
         }
 
-        // Zero velocities in both states (gromosXX: conf.old().vel = 0; conf.current().vel = 0)
+        // Zero velocities in both states (GROMOS: conf.old().vel = 0; conf.current().vel = 0)
         for vel in &mut conf.old_mut().vel {
             *vel = Vec3::ZERO;
         }

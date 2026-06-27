@@ -1,6 +1,6 @@
-//! Algorithm trait and sequence - the gromosXX Algorithm_Sequence pattern
+//! Algorithm trait and sequence - the GROMOS Algorithm_Sequence pattern
 //!
-//! In gromosXX, the MD loop is driven by an ordered sequence of algorithms.
+//! In GROMOS, the MD loop is driven by an ordered sequence of algorithms.
 //! Each algorithm implements `apply()` which operates on the shared state
 //! (topology, configuration, simulation parameters). The main loop simply
 //! iterates over the sequence each step.
@@ -12,7 +12,7 @@ use crate::topology::Topology;
 
 /// Simulation parameters passed to each algorithm per step.
 ///
-/// Equivalent to gromosXX's `simulation::Simulation` - holds time step,
+/// Equivalent to GROMOS's `simulation::Simulation` - holds time step,
 /// current step number, and other per-step state.
 #[derive(Debug, Clone)]
 pub struct SimulationState {
@@ -42,7 +42,7 @@ impl SimulationState {
     }
 }
 
-/// The core Algorithm trait - equivalent to gromosXX's `algorithm::Algorithm`.
+/// The core Algorithm trait - equivalent to GROMOS's `algorithm::Algorithm`.
 ///
 /// Each algorithm in the MD sequence implements this trait.
 /// The `apply()` method is called once per step in the order defined
@@ -74,7 +74,7 @@ pub trait Algorithm {
 
 /// An ordered sequence of algorithms that defines the MD step.
 ///
-/// Equivalent to gromosXX's `algorithm::Algorithm_Sequence`.
+/// Equivalent to GROMOS's `algorithm::Algorithm_Sequence`.
 /// The main MD loop calls `run_step()` which iterates through all algorithms.
 pub struct AlgorithmSequence {
     algorithms: Vec<Box<dyn Algorithm>>,

@@ -1,10 +1,10 @@
-//! Integration tests validating gromos-rs against gromosXX reference data
+//! Integration tests validating gromos-rs against GROMOS reference data
 //!
 //! These tests parse the reference topology/coordinates/parameters,
 //! compute forces using the gromos-rs force kernels, and compare
-//! against the expected forces/energies from gromosXX (double precision).
+//! against the expected forces/energies from GROMOS (double precision).
 //!
-//! Reference data is in gromosXX_references/ and must NOT be modified.
+//! Reference data is in GROMOS_references/ and must NOT be modified.
 //!
 //! Test levels (simplest first):
 //!   Level 0: pair_lj, nacl_pair, pair_lj_mixed (2 atoms, vacuum, no PBC)
@@ -28,12 +28,12 @@ fn init_logging() {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Path to gromosXX_references (in gromos-md/tests/)
+/// Path to GROMOS_references (in gromos-md/tests/)
 fn ref_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("gromos-md/tests/gromosXX_references")
+        .join("gromos-md/tests/GROMOS_references")
 }
 
 /// Parse the FREEFORCERED block from forces.trf at a given step

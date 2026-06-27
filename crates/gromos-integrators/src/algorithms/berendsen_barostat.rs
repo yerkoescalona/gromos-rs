@@ -1,10 +1,10 @@
 //! Berendsen barostat algorithm (weak pressure coupling).
 //!
-//! Equivalent to gromosXX `algorithm::Berendsen_Barostat`.
+//! Equivalent to GROMOS `algorithm::Berendsen_Barostat`.
 //! Isotropic scaling: mu = (1 - comp * dt / tau * (P0 - P))^(1/3)
 //! Then scale box and positions by mu.
 //!
-//! gromosXX sequence position: after PressureCalculation, before EnergyCalculation.
+//! GROMOS sequence position: after PressureCalculation, before EnergyCalculation.
 //! Reads pressure_tensor from conf.old(), scales conf.current() positions and box.
 //!
 //! Source: md++/src/algorithm/pressure/berendsen_barostat.cc
@@ -16,7 +16,7 @@ use gromos_core::topology::Topology;
 /// Berendsen barostat parameters.
 #[derive(Debug, Clone)]
 pub struct BerendsenBarostatParams {
-    /// Reference pressure P0 (kJ/(mol·nm³)) — gromosXX uses internal units
+    /// Reference pressure P0 (kJ/(mol·nm³)) — GROMOS uses internal units
     pub pressure0: f64,
     /// Isothermal compressibility κ (kJ/(mol·nm³))⁻¹
     pub compressibility: f64,

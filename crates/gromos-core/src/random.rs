@@ -1,12 +1,12 @@
 //! GSL-compatible random number generation.
 //!
-//! gromosXX generates initial velocities (NTIVEL=1) using GSL's default
+//! GROMOS generates initial velocities (NTIVEL=1) using GSL's default
 //! generator, `mt19937`, combined with `gsl_ran_gaussian` (the Marsaglia
-//! polar / Box-Muller method). To reproduce gromosXX trajectories bit-for-bit
+//! polar / Box-Muller method). To reproduce GROMOS trajectories bit-for-bit
 //! we re-implement those two algorithms exactly rather than relying on a
 //! generic RNG crate.
 //!
-//! Refs: gromosXX `math/random.{h,cc}` (`RandomGeneratorGSL`),
+//! Refs: GROMOS `math/random.{h,cc}` (`RandomGeneratorGSL`),
 //! `util/generate_velocities.cc`.
 
 use crate::math::Vec3;
@@ -100,11 +100,11 @@ pub fn gsl_ran_gaussian(rng: &mut GslMt19937, sigma: f64) -> f64 {
 /// temperature `temperature`, one Gaussian draw per Cartesian component with
 /// `sigma = sqrt(k_B * T / m)`.
 ///
-/// Mirrors gromosXX `util::generate_velocities`: both the "current" and "old"
-/// velocity arrays are filled with the same freshly generated values (gromosXX
+/// Mirrors GROMOS `util::generate_velocities`: both the "current" and "old"
+/// velocity arrays are filled with the same freshly generated values (GROMOS
 /// stores the same draw into `old_vel` and `vel`).
 ///
-/// Ref: `util/generate_velocities.cc`. Uses gromosXX's `math::k_Boltzmann`
+/// Ref: `util/generate_velocities.cc`. Uses GROMOS's `math::k_Boltzmann`
 /// (`math/math.cc`), not the CODATA value used elsewhere in this codebase, so
 /// that the generated trajectory matches the reference bit-for-bit.
 pub fn generate_velocities(temperature: f64, seed: u32, masses: &[f64]) -> Vec<Vec3> {

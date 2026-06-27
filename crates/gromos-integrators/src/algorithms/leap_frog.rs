@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 /// Leap-Frog velocity update algorithm.
 ///
-/// Equivalent to gromosXX `Leap_Frog_Velocity::apply()`:
+/// Equivalent to GROMOS `Leap_Frog_Velocity::apply()`:
 /// 1. `exchange_state()` - swap current/old pointers
 /// 2. `v_current = v_old + f_old * dt / m`
 ///
@@ -40,9 +40,9 @@ impl Algorithm for LeapFrogVelocity {
         conf: &mut Configuration,
         sim: &SimulationState,
     ) -> Result<(), String> {
-        // gromosXX: exchange_state() first, then velocity update
+        // GROMOS: exchange_state() first, then velocity update
         conf.exchange_state();
-        // Copy the box to current state (gromosXX does this)
+        // Copy the box to current state (GROMOS does this)
         conf.current_mut().box_config = conf.old().box_config.clone();
 
         let n_atoms = topo.inverse_mass.len();
@@ -81,7 +81,7 @@ impl Algorithm for LeapFrogVelocity {
 
 /// Leap-Frog position update algorithm.
 ///
-/// Equivalent to gromosXX `Leap_Frog_Position::apply()`:
+/// Equivalent to GROMOS `Leap_Frog_Position::apply()`:
 /// `r_current = r_old + v_current * dt`
 ///
 /// Must be called AFTER `LeapFrogVelocity` (which sets up current velocities).
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_leapfrog_kinetic_energy_after_velocity_step() {
-        // gromosXX convention for E_kin:
+        // GROMOS convention for E_kin:
         // E_kin = 0.5 * sum_i(m_i * (|v_new_i|^2 + |v_old_i|^2) / 2)
         // This averages the kinetic energy between old and new velocities.
         //
@@ -295,7 +295,7 @@ mod tests {
         let mut vel_step = LeapFrogVelocity::new();
         vel_step.apply(&topo, &mut conf, &sim).unwrap();
 
-        // gromosXX formula: E_kin = 0.5 * sum(m_i * (|v_new|^2 + |v_old|^2) / 2)
+        // GROMOS formula: E_kin = 0.5 * sum(m_i * (|v_new|^2 + |v_old|^2) / 2)
         // After exchange_state in velocity_step, old() has original v=0
         let mut e_kin = 0.0;
         for i in 0..2 {

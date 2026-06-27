@@ -1,6 +1,6 @@
 //! Forcefield algorithm — wraps the complete force calculation.
 //!
-//! Equivalent to gromosXX `algorithm::Forcefield`:
+//! Equivalent to GROMOS `algorithm::Forcefield`:
 //! 1. Update pairlist (if needed)
 //! 2. Calculate bonded forces (bonds, angles, dihedrals)
 //! 3. Calculate nonbonded forces (LJ + CRF)
@@ -52,7 +52,7 @@ pub struct Forcefield {
     pub use_quartic_bonds: bool,
     /// Whether to run nonbonded in parallel
     pub parallel_nonbonded: bool,
-    /// NTF flags: which bonded terms to include (gromosXX FORCE block)
+    /// NTF flags: which bonded terms to include (GROMOS FORCE block)
     pub ntf_bond: bool,
     pub ntf_angle: bool,
     pub ntf_improper: bool,
@@ -107,7 +107,7 @@ pub struct Forcefield {
     pub lambda_exp: i32,
     /// Global soft-core alpha for LJ (ALPHLJ from imd PERTURBATION block).
     /// Per-atom lj_soft from .ptp is multiplied by this to get effective alpha_lj,
-    /// matching gromosXX in_perturbation.cc:1308 `lj_soft *= param.perturbation.soft_vdw`.
+    /// matching GROMOS in_perturbation.cc:1308 `lj_soft *= param.perturbation.soft_vdw`.
     pub global_alphlj: f64,
     /// Global soft-core alpha for CRF (ALPHC from imd PERTURBATION block).
     pub global_alphc: f64,
@@ -168,7 +168,7 @@ impl Forcefield {
 
     /// Build per-atom perturbation info from the topology's perturbed_solute.
     ///
-    /// gromosXX multiplies the per-atom lj_soft/crf_soft from the .ptp file by the
+    /// GROMOS multiplies the per-atom lj_soft/crf_soft from the .ptp file by the
     /// global ALPHLJ/ALPHC from the .imd PERTURBATION block before storing them
     /// (in_perturbation.cc:1308: `lj_soft *= param.perturbation.soft_vdw`).
     /// We replicate that here: effective alpha_lj = pa.lj_soft * global_alphlj.
@@ -277,7 +277,7 @@ impl Algorithm for Forcefield {
             Periodicity::Triclinic(_) => false, // be conservative for triclinic
         };
 
-        // --- prepare_virial: compute kinetic energy tensor (gromosXX: before force calc) ---
+        // --- prepare_virial: compute kinetic energy tensor (GROMOS: before force calc) ---
         // Uses current velocities and positions; stored in current().kinetic_energy_tensor
         if self.virial_type != VirialType::None {
             let ke_tensor = if self.virial_type == VirialType::Molecular && !topo.pressure_groups.is_empty() {
@@ -685,7 +685,7 @@ impl Algorithm for Forcefield {
         );
 
         // 1-4 interactions: LJ with cs6/cs12 + CRF with coulomb scaling
-        // gromosXX: computed separately from pairlist, no cutoff
+        // GROMOS: computed separately from pairlist, no cutoff
         if !topo.one_four_pairs.is_empty() {
             one_four_interaction_loop(
                 &topo.one_four_pairs,
@@ -701,7 +701,7 @@ impl Algorithm for Forcefield {
         }
 
         // --- 3b. Perturbed nonbonded corrections (FEP/TI) ---
-        // The four steps below mirror gromosXX's perturbed_nonbonded_outerloop:
+        // The four steps below mirror GROMOS's perturbed_nonbonded_outerloop:
         //   perturbed_pairlist_correction   → replaces state-A contribution for perturbed pairs
         //   perturbed_self_energy_correction → corrects RF self for perturbed atoms
         //   perturbed_excluded_correction    → corrects RF excluded pairs for perturbed atoms
@@ -875,7 +875,7 @@ impl Algorithm for Forcefield {
             state.energies.update_potential_total();
 
             // Transfer virial tensor to configuration (nonbonded + bonded)
-            // gromosXX convention: virial[a][b] = Σ r[a] * force[b]
+            // GROMOS convention: virial[a][b] = Σ r[a] * force[b]
             let vir = &self.nonbonded_storage.virial;
             let bvir = &bonded_result.virial;
             state.virial_tensor = Mat3::from_cols(
@@ -911,7 +911,7 @@ impl Algorithm for Forcefield {
         }
 
         // --- 5. atomic_to_molecular_virial: correct virial from atomic to molecular ---
-        // gromosXX: last interaction in forcefield, subtracts intramolecular virial contributions
+        // GROMOS: last interaction in forcefield, subtracts intramolecular virial contributions
         if self.virial_type == VirialType::Molecular && !topo.pressure_groups.is_empty() {
             apply_molecular_virial_correction(topo, conf, &self.periodicity);
         }
@@ -924,10 +924,10 @@ impl Algorithm for Forcefield {
     }
 }
 
-// === Virial helper functions (gromosXX: prepare_virial.cc) ===
+// === Virial helper functions (GROMOS: prepare_virial.cc) ===
 
 /// Compute atomic kinetic energy tensor: KE_ij = 0.5 * Σ_k m_k * v_k_i * v_k_j
-/// Uses conf.current().vel (gromosXX convention: computed before force calc)
+/// Uses conf.current().vel (GROMOS convention: computed before force calc)
 fn compute_atomic_ke_tensor(topo: &Topology, conf: &Configuration, n_atoms: usize) -> Mat3 {
     let vel = &conf.current().vel;
     let mut ke = [[0.0f64; 3]; 3];
@@ -949,7 +949,7 @@ fn compute_atomic_ke_tensor(topo: &Topology, conf: &Configuration, n_atoms: usiz
 }
 
 /// Compute molecular kinetic energy tensor using COM velocities per pressure group.
-/// gromosXX: prepare_virial.cc _centre_of_mass with chain-gathering.
+/// GROMOS: prepare_virial.cc _centre_of_mass with chain-gathering.
 /// Uses conf.current().vel and conf.current().pos.
 fn compute_molecular_ke_tensor(topo: &Topology, conf: &Configuration, _periodicity: &Periodicity) -> Mat3 {
     let vel = &conf.current().vel;
@@ -982,14 +982,14 @@ fn compute_molecular_ke_tensor(topo: &Topology, conf: &Configuration, _periodici
 }
 
 /// Apply molecular virial correction: transform atomic virial to molecular virial.
-/// gromosXX: atomic_to_molecular_virial in prepare_virial.cc
+/// GROMOS: atomic_to_molecular_virial in prepare_virial.cc
 ///
 /// For each pressure group: compute COM position (chain-gathered), then for each atom:
 ///   r = nearest_image(pos_atom, com_pos)
 ///   corrP(b, a) += force(a) * r(b)
 /// Finally: virial -= corrP
 ///
-/// Operates on conf.current() (gromosXX convention).
+/// Operates on conf.current() (GROMOS convention).
 fn apply_molecular_virial_correction(topo: &Topology, conf: &mut Configuration, periodicity: &Periodicity) {
     let pos = &conf.current().pos;
     let force = &conf.current().force;
@@ -997,7 +997,7 @@ fn apply_molecular_virial_correction(topo: &Topology, conf: &mut Configuration, 
     let mut corr = [[0.0f64; 3]; 3];
 
     for pg in &topo.pressure_groups {
-        // Chain-gather COM position (gromosXX: _centre_of_mass)
+        // Chain-gather COM position (GROMOS: _centre_of_mass)
         let first = pg.start;
         let mut com = [0.0f64; 3];
         let mut m_total = 0.0f64;

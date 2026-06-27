@@ -1,10 +1,10 @@
-//! atominfo — Report information about selected atoms (gromos++ compatible).
+//! atominfo — Report information about selected atoms (gromos-rs compatible).
 //!
 //! Usage:
 //!   atominfo @topo <topology> @atomspec <spec> [@sort]
 //!
 //! Reads a GROMOS topology, resolves the AtomSpecifier, and prints the TITLE +
-//! ATOMS block in gromos++ format for every selected atom.
+//! ATOMS block in gromos-rs format for every selected atom.
 //!
 //! Output columns (ATOMS block):
 //!   mol:atom  gromos_nr  residue_nr  residue_name  atom_name  iac(1-based)  charge
@@ -22,7 +22,7 @@ fn print_usage() {
     eprintln!("Usage: atominfo @topo <topology> @atomspec <spec> [@sort]");
     eprintln!();
     eprintln!("  @topo     <file>    GROMOS topology (.top/.topo)");
-    eprintln!("  @atomspec <spec>    gromos++ AtomSpecifier string");
+    eprintln!("  @atomspec <spec>    gromos-rs AtomSpecifier string");
     eprintln!("  @sort               sort selected atoms by global index (default: yes)");
 }
 

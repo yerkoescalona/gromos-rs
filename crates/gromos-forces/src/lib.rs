@@ -11,6 +11,7 @@
 
 pub mod bonded;
 pub mod nonbonded;
+pub mod energy;
 pub mod electrostatics;
 pub mod restraints;
 pub mod pme;

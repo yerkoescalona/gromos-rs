@@ -1,9 +1,9 @@
-//! ext_ti_ana — Thermodynamic Integration analysis (gromos++-compatible).
+//! ext_ti_ana — Thermodynamic Integration analysis (gromos-rs-compatible).
 //!
 //! Reads one `.trg` file per λ window, computes ⟨dH/dλ⟩ ± ee() for each,
 //! integrates with the trapezoidal rule, and reports ΔG.
 //!
-//! Usage (gromosXX style):
+//! Usage (GROMOS style):
 //!   ext_ti_ana @trg run_lam0.trg run_lam1.trg ... @lambda 0.0 0.25 0.5 0.75 1.0
 //!
 //!   @trg <file> [<file> ...]   One .trg file per λ window (in λ order).

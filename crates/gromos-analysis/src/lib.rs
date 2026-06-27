@@ -17,6 +17,7 @@ pub use gromos_core::{
     Topology,
 };
 
+pub mod fit;
 pub mod rdf;
 pub mod rmsd;
 pub mod hbond;

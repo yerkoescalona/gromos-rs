@@ -10,6 +10,7 @@ autobins = false
 [dependencies]
 gromos-core = { workspace = true }
 gromos-io = { workspace = true }
+gromos-forces = { workspace = true }
 
 # SIMD and math
 glam = { workspace = true }
@@ -176,6 +177,10 @@ path = "src/bin/dynamics/eps_field.rs"
 [[bin]]
 name = "bar"
 path = "src/bin/free_energy/bar.rs"
+
+[[bin]]
+name = "ext_ti_merge"
+path = "src/bin/free_energy/ext_ti_merge.rs"
 
 [[bin]]
 name = "ext_ti_ana"

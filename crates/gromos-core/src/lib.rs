@@ -36,6 +36,7 @@ pub mod configuration;
 pub mod pairlist;
 pub mod selection;
 pub mod stat;
+pub mod gather;
 pub mod validation;
 pub mod algorithm;
 

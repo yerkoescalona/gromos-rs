@@ -1,11 +1,11 @@
-//! md - Molecular Dynamics simulation engine (gromosXX-compatible CLI)
+//! md - Molecular Dynamics simulation engine (GROMOS-compatible CLI)
 //!
 //! Usage: md @topo <topology> @conf <coordinates> @input <parameters> [@fin <final_conf>]
 //!           [@trc <trajectory>] [@tre <energies>] [@trf <forces>] [@trv <velocities>]
 //!           [@verb <level>]
 //!
 //! The main GROMOS-RS molecular dynamics simulation program.
-//! Command-line interface matches gromosXX md++ conventions.
+//! Command-line interface matches GROMOS md++ conventions.
 //! All simulation parameters are read from the @input (.imd/.in) file.
 
 use gromos::{
@@ -69,7 +69,7 @@ impl Drop for Timer {
 }
 
 fn print_usage() {
-    eprintln!("md - Molecular Dynamics simulation (gromosXX-compatible)");
+    eprintln!("md - Molecular Dynamics simulation (GROMOS-compatible)");
     eprintln!();
     eprintln!("Usage: md @topo <topology> @conf <coordinates> @input <parameters>");
     eprintln!("          [@fin <final_conf>] [@trc <trajectory>] [@tre <energies>]");
@@ -116,7 +116,7 @@ fn print_usage() {
     eprintln!("  @develop    Run untested development code");
     eprintln!();
     eprintln!("All simulation parameters (timestep, cutoffs, thermostat, etc.)");
-    eprintln!("are specified in the @input file, following gromosXX conventions.");
+    eprintln!("are specified in the @input file, following GROMOS conventions.");
     eprintln!();
     eprintln!("Examples:");
     eprintln!("  md @topo system.topo @conf initial.cnf @input run.imd");
@@ -124,7 +124,7 @@ fn print_usage() {
     eprintln!("  md @topo system.topo @conf initial.cnf @input run.imd @verb 1");
 }
 
-/// gromosXX-compatible command-line arguments.
+/// GROMOS-compatible command-line arguments.
 /// These are file paths and control flags — all simulation parameters
 /// come from the @input file.
 #[derive(Debug)]
@@ -276,7 +276,7 @@ fn main() {
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
-    // Parse command-line arguments (file paths only, gromosXX style)
+    // Parse command-line arguments (file paths only, GROMOS style)
     let md_args = match parse_args(args) {
         Ok(a) => a,
         Err(e) => {
@@ -333,7 +333,7 @@ fn main() {
     let ntf_angle = ntf[1] != 0;
     let ntf_improper = ntf[2] != 0;
     let ntf_dihedral = ntf[3] != 0;
-    // Constraint algorithm selection: gromosXX dispatches the solute algorithm
+    // Constraint algorithm selection: GROMOS dispatches the solute algorithm
     // on NTCP (only relevant when NTC>1) and the solvent algorithm on NTCS
     // (only relevant when solvent molecules exist), independently.
     let solute_constrained = imd.ntc > 1;
@@ -384,7 +384,7 @@ fn main() {
         .clone()
         .unwrap_or_else(|| "md.tre".to_string());
 
-    // === gromosXX initialization order: parameters → topology → coordinates ===
+    // === GROMOS initialization order: parameters → topology → coordinates ===
 
     // === 1. Load topology (read_topology) ===
     println!("Loading topology: {}", md_args.topo_file);
@@ -400,7 +400,7 @@ fn main() {
         },
     };
 
-    // gromosXX convention: read_topology() then topo.solvate(0, nsm)
+    // GROMOS convention: read_topology() then topo.solvate(0, nsm)
     let mut topo = build_topology(topo_data);
 
     // Load perturbation topology if provided and FEP is on (NTG != 0)
@@ -414,7 +414,7 @@ fn main() {
                     topo.is_perturbed.resize(n, false);
 
                     // Remove from solute the bonds/angles/impropers/dihedrals that
-                    // are perturbed — gromosXX keeps them in disjoint sets.
+                    // are perturbed — GROMOS keeps them in disjoint sets.
                     {
                         use std::collections::HashSet;
                         let pb: HashSet<(usize,usize)> = topo.perturbed_solute.bonds
@@ -485,7 +485,7 @@ fn main() {
     let mut velocities = coord_data.velocities;
     let box_dims = coord_data.box_dims;
 
-    // NTB=-1: truncated octahedron. gromosXX converts the legacy "cube edge
+    // NTB=-1: truncated octahedron. GROMOS converts the legacy "cube edge
     // length L" BOX block into the lower-triangular triclinic box vectors
     // and rotates positions/velocities into that frame on read
     // (io/configuration/in_configuration.cc, math::truncoct_triclinic_box /
@@ -920,7 +920,7 @@ fn main() {
         None
     };
 
-    // === Build Algorithm Sequence (gromosXX pattern) ===
+    // === Build Algorithm Sequence (GROMOS pattern) ===
     let is_minimization = imd.ntem > 0;
 
     if is_minimization {
@@ -983,7 +983,7 @@ fn main() {
             .with_force_limit(imd.flim);
         md_sequence.push(Box::new(sd));
 
-        // SHAKE constraints (gromosXX applies constraints even during minimization)
+        // SHAKE constraints (GROMOS applies constraints even during minimization)
         if shake_enabled {
             let ntc_mode = if solute_shake {
                 match imd.ntc {
@@ -1031,13 +1031,13 @@ fn main() {
         }
 
         // Energy calculation (finalize totals)
-        // Note: TemperatureCalculation is NOT included for EM — gromosXX EM
+        // Note: TemperatureCalculation is NOT included for EM — GROMOS EM
         // does not compute kinetic energy (E_total = E_pot).
         md_sequence.push(Box::new(EnergyCalculation::new()));
     } else {
         // Standard MD sequence
 
-        // 1. COM motion removal (gromosXX: first in sequence, before forcefield)
+        // 1. COM motion removal (GROMOS: first in sequence, before forcefield)
         if imd.nticom >= 1 || imd.nscm != 0 {
             md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
         }
@@ -1089,7 +1089,7 @@ fn main() {
         // 3. Leap-Frog velocity step (exchange_state + v update)
         md_sequence.push(Box::new(LeapFrogVelocity::new()));
 
-        // 3b. Thermostat (between velocity and position update, gromosXX convention)
+        // 3b. Thermostat (between velocity and position update, GROMOS convention)
         // algorithm 0 → Berendsen, 1 → NHC single, N≥2 → NHC chain length N
         if thermostat_on {
             // Compute degrees of freedom: 3N - N_constraints - NDFMIN
@@ -1169,7 +1169,7 @@ fn main() {
                 ntc: ntc_mode,
             });
             shake_alg.include_solvent = solvent_shake;
-            // gromosXX: NTISHK controls initial position/velocity shaking
+            // GROMOS: NTISHK controls initial position/velocity shaking
             // NTISHK=1: shake positions, NTISHK=2: shake positions + velocities
             if imd.ntishk >= 1 {
                 shake_alg.shake_initial_positions = true;
@@ -1630,7 +1630,7 @@ fn main() {
         }
 
         // Validate energy
-        // gromosXX convention: after the algorithm sequence, energies are in old()
+        // GROMOS convention: after the algorithm sequence, energies are in old()
         // (Forcefield wrote to current(), exchange_state moved it to old(),
         //  Temperature_Calculation and Energy_Calculation also write to old())
         let state = conf.old();
@@ -1670,7 +1670,7 @@ fn main() {
             0.0
         };
 
-        // Minimization convergence check (mirrors gromosXX: compare potential_total + special_total)
+        // Minimization convergence check (mirrors GROMOS: compare potential_total + special_total)
         if is_minimization && step > imd.nmin {
             if min_de.abs() < imd.dele {
                 minimization_converged = true;
@@ -1771,7 +1771,7 @@ fn main() {
                     None
                 };
 
-                // gromosXX out_configuration.cc::_print_forcered rotates
+                // GROMOS out_configuration.cc::_print_forcered rotates
                 // FREEFORCERED/CONSFORCERED back into the original (cube)
                 // frame via truncoct_triclinic_rotmat(false) when
                 // boundary_type==truncoct (no ROTTRANS block here, so
