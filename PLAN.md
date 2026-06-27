@@ -143,8 +143,9 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 > CellList iteration order happens to match Standard's on this system. Safe to lower threshold.
 - [x] `test_pairlist_margin.rs`: runs `water_216_box` twice (Standard vs CellList via `"grid_cell"`),
   asserts per-step max |ΔE|/|E| < 1e-8. Observed margin = 0.000e0 (bit-identical).
-- [x] Auto-threshold lowered from `n_atoms > 5000` to `n_atoms > 100` — water_216_box family
-  (648 atoms) now auto-selects CellList. 37/37 reference tests pass unchanged.
+- [x] No auto-heuristic: `ALGORITHM standard` (0) always means Standard. CellList is only
+  activated when the input explicitly says `ALGORITHM grid_cell` (2), matching gromosXX
+  semantics. All 37 reference files use `standard` → all still run Standard. 37/37 pass.
 - [ ] Benchmark `water_216_box` step time: Standard vs CellList — confirm O(N) gap is real.
 
 **9d — Charge groups as first-class queryable primitive** (independent; can land alongside 9a)
