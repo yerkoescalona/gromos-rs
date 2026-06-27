@@ -673,6 +673,68 @@ fn process_cg_pair<BC: BoundaryCondition>(
     }
 }
 
+/// Dispatch enum for pairlist construction algorithms.
+///
+/// Owned by `Forcefield` and other integrators. The hot-path `update()` call
+/// inlines to a direct dispatch with zero heap allocation (no trait objects).
+///
+/// # Selection
+///
+/// Use [`PairlistAlgorithm::from_imd`] to pick the algorithm from IMD
+/// parameters. Manual construction is also supported for tests and advanced
+/// use cases.
+pub enum PairlistAlgorithm {
+    /// O(N²) reference algorithm — always correct, used for all non-rectangular
+    /// boxes and as the default for small systems.
+    Standard(StandardPairlistAlgorithm),
+    /// O(N) cell-list algorithm — rectangular boxes only; falls back to
+    /// `Standard` internally for vacuum/triclinic input.
+    CellList(CellListPairlistAlgorithm),
+}
+
+impl PairlistAlgorithm {
+    /// Choose an algorithm from IMD PAIRLIST block parameters.
+    ///
+    /// | `algorithm` | result |
+    /// |-------------|--------|
+    /// | `1`         | `CellList` (explicit override, regardless of system size/box) |
+    /// | any other   | `CellList` only when `Rectangular` + chargegroups + `n_atoms > 5000`; otherwise `Standard` |
+    ///
+    /// The `n_atoms > 5000` threshold is deliberately above the largest
+    /// reference system (`ch4_water_fep`, 2998 atoms), so no reference test
+    /// flips algorithm in 9a-0.
+    pub fn from_imd(
+        algorithm: i32,
+        n_atoms: usize,
+        box_type: BoxType,
+        has_chargegroups: bool,
+    ) -> Self {
+        let use_cell_list = match algorithm {
+            1 => true,
+            _ => box_type == BoxType::Rectangular && has_chargegroups && n_atoms > 5000,
+        };
+        if use_cell_list {
+            Self::CellList(CellListPairlistAlgorithm::new())
+        } else {
+            Self::Standard(StandardPairlistAlgorithm::new(has_chargegroups))
+        }
+    }
+
+    /// Update the pairlist, delegating to the selected algorithm.
+    pub fn update<BC: BoundaryCondition>(
+        &self,
+        topo: &Topology,
+        conf: &Configuration,
+        pairlist: &mut PairlistContainer,
+        periodicity: &BC,
+    ) {
+        match self {
+            Self::Standard(a) => a.update(topo, conf, pairlist, periodicity),
+            Self::CellList(a) => a.update(topo, conf, pairlist, periodicity),
+        }
+    }
+}
+
 /// Parallel pairlist generation using Rayon
 pub struct ParallelPairlistAlgorithm {
     base_algorithm: StandardPairlistAlgorithm,
@@ -744,8 +806,64 @@ impl ParallelPairlistAlgorithm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::configuration::BoxType;
     use crate::math::Rectangular;
     use crate::topology::ChargeGroup;
+
+    // --- PairlistAlgorithm::from_imd dispatch tests (pure logic, no floats) ---
+
+    fn is_standard(a: &PairlistAlgorithm) -> bool {
+        matches!(a, PairlistAlgorithm::Standard(_))
+    }
+
+    fn is_cell_list(a: &PairlistAlgorithm) -> bool {
+        matches!(a, PairlistAlgorithm::CellList(_))
+    }
+
+    #[test]
+    fn test_from_imd_explicit_cell_list() {
+        // algorithm=1 always selects CellList, regardless of size/box/chargegroups
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(1, 10, BoxType::Vacuum, false)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(1, 10, BoxType::Rectangular, true)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(1, 6000, BoxType::Rectangular, true)));
+    }
+
+    #[test]
+    fn test_from_imd_auto_all_conditions_met() {
+        // Rectangular + chargegroups + n_atoms > 5000 → CellList
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(0, 5001, BoxType::Rectangular, true)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(0, 10000, BoxType::Rectangular, true)));
+    }
+
+    #[test]
+    fn test_from_imd_auto_threshold_boundary() {
+        // n_atoms == 5000 is NOT > 5000 → Standard
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 5000, BoxType::Rectangular, true)));
+        // n_atoms == 5001 IS > 5000 → CellList
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(0, 5001, BoxType::Rectangular, true)));
+    }
+
+    #[test]
+    fn test_from_imd_auto_not_rectangular() {
+        // Vacuum: no CellList even with chargegroups + large n_atoms
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Vacuum, true)));
+        // Triclinic: same
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Triclinic, true)));
+    }
+
+    #[test]
+    fn test_from_imd_auto_no_chargegroups() {
+        // No chargegroups → Standard even if rectangular + large
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Rectangular, false)));
+    }
+
+    #[test]
+    fn test_from_imd_auto_small_system() {
+        // n_atoms <= 5000 → Standard (covers all 37 reference systems)
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 2998, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 648, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 2, BoxType::Rectangular, true)));
+    }
 
     #[test]
     fn test_pairlist_container() {

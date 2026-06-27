@@ -68,7 +68,7 @@ pub use topology::{
 };
 
 // Re-export pairlist types
-pub use pairlist::{CellListPairlistAlgorithm, Pairlist, PairlistContainer, StandardPairlistAlgorithm};
+pub use pairlist::{CellListPairlistAlgorithm, Pairlist, PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
 
 // Re-export selection
 pub use selection::AtomSelection;

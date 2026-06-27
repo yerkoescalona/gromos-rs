@@ -35,7 +35,7 @@ use gromos::{
         truncoct_triclinic, truncoct_triclinic_box, truncoct_triclinic_rotmat, Mat3, Periodicity,
         Rectangular, Triclinic, Vacuum, Vec3,
     },
-    pairlist::{PairlistContainer, StandardPairlistAlgorithm},
+    pairlist::{PairlistAlgorithm, PairlistContainer},
     random::generate_velocities,
     validation::{
         validate_configuration, validate_coordinates, validate_energy, validate_topology,
@@ -799,8 +799,6 @@ fn main() {
         pairlist.update_frequency
     );
 
-    let use_chargegroups = !topo.chargegroups.is_empty();
-    let pairlist_algorithm = StandardPairlistAlgorithm::new(use_chargegroups);
     let periodicity = if let Some(triclinic_box) = truncoct_box_matrix {
         Periodicity::Triclinic(Triclinic::new(triclinic_box))
     } else if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
@@ -808,6 +806,17 @@ fn main() {
     } else {
         Periodicity::Rectangular(Rectangular::new(box_dims))
     };
+    let box_type = match &periodicity {
+        Periodicity::Rectangular(_) => BoxType::Rectangular,
+        Periodicity::Triclinic(_) => BoxType::Triclinic,
+        Periodicity::Vacuum(_) => BoxType::Vacuum,
+    };
+    let pairlist_algorithm = PairlistAlgorithm::from_imd(
+        imd.algorithm,
+        topo.num_atoms(),
+        box_type,
+        !topo.chargegroups.is_empty(),
+    );
 
     // Initial pairlist generation
     log::debug!("Generating initial pairlist");
