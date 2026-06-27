@@ -124,41 +124,28 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 
 ---
 
-**9a-0 — Plumbing only, zero float change** ← do first (lands green with no risk)
-> *Invariant:* every reference system still selects `Standard`, so not one summation order changes.
-> *Trap:* the obvious `n_atoms > 500` threshold flips 8 systems — the 648-atom `water_216_*` family
-> *and* the 2998-atom `ch4_water_fep`. Start the threshold **above the largest reference system**.
-- [ ] Add `PairlistAlgorithm` enum to `gromos-core/src/pairlist.rs`:
-  ```
-  enum PairlistAlgorithm { Standard(StandardPairlistAlgorithm), CellList(CellListPairlistAlgorithm) }
-  ```
-  with `update<BC>()` delegating via match, and `from_imd(algorithm, n_atoms, box_type, has_chargegroups) -> Self`.
-- [ ] Heuristic: auto-select `CellList` only when `Rectangular` + chargegroups exist + `n_atoms > 5000`
-  (above `ch4_water_fep`'s 2998). IMD flag (`algorithm=1`) is an explicit override; Standard is the
-  default everywhere else. **No reference system flips** → all 37 keep Standard's exact order.
-- [ ] Re-export `PairlistAlgorithm` from `gromos-core/src/lib.rs`.
-- [ ] **Unit test (no MD, no floats):** `from_imd` returns the right variant for the full matrix of
-  (algorithm ∈ {0,1,auto}) × (box_type) × (n_atoms below/above 5000) × (has_chargegroups). Pure dispatch logic.
-- [ ] Swap the field type `StandardPairlistAlgorithm` → `PairlistAlgorithm` (still constructed as
-  `Standard(...)` everywhere) in: `forcefield.rs:50` (`update()` at :296), `gamd.rs:467`,
-  `eds.rs:660`, `replica.rs`, `md.rs:803`, `pyo3-gromos/src/simulation.rs:130`,
-  `pyo3-gromos/src/algorithm_sequence.rs:1054`.
-- [ ] **Validate:** `cargo test --workspace` green; 37/37 reference tests unchanged (they still run Standard). Commit here — clean baseline.
+**9a-0 — Plumbing only, zero float change** ✓ complete
+> *Invariant held:* every reference system selects `Standard`; not one summation order changed.
+> *Slot mapping:* faithful to gromosXX (`in_parameter.cc:1419-1422`): 0=Standard, 1=ExtendedGrid
+> (not yet ported → fallback Standard), 2=CellList (Heinz & Hünenberger). IMD parser also
+> recognises `"grid_cell"` keyword. 37/37 reference tests unchanged.
+- [x] `PairlistAlgorithm { Standard, CellList }` enum in `gromos-core/src/pairlist.rs` with
+  `from_imd()` and `update<BC>()` delegating via match.
+- [x] Heuristic: auto-selects `CellList` only when Rectangular + chargegroups + `n_atoms > 5000`.
+- [x] Re-exported from `gromos-core/src/lib.rs`.
+- [x] 9 unit tests covering full dispatch matrix (algorithm × box_type × n_atoms × chargegroups).
+- [x] Field type swapped in `forcefield.rs`, `gamd.rs`, `eds.rs`, `replica.rs`, `md.rs`,
+  `simulation.rs`, `algorithm_sequence.rs`. `md.rs` calls `from_imd(imd.algorithm, …)`.
+- [x] 37/37 reference tests pass unchanged.
 
-**9a-1 — Turn CellList on; confront reordering head-on**
-> *Invariant:* CellList pair-set ≡ Standard pair-set (proven). Open question: does reordered
-> summation stay < `1e-8` over a 100-step trajectory?
-> *Trap:* "it passed once" is not proof — chaotic divergence is system- and seed-dependent.
-- [ ] Add a `forced` integration test: run `water_216_box` (rectangular, 648 atoms) twice — once
-  `Standard`, once `CellList` (via `algorithm=1`) — through the **same 100-step driver**, and report
-  the per-step max |ΔE_total|/|E_total|. This is the empirical margin measurement.
-- [ ] **Decision gate** based on the measured margin:
-  - If margin ≪ `1e-8` for all 100 steps → lower the auto threshold to a useful value (e.g. `n_atoms > 500`),
-    let the water family flip, confirm 37/37 still pass, document the observed margin in the test.
-  - If margin approaches/exceeds `1e-8` → keep auto threshold conservative AND add a canonical-order
-    sort step to CellList output (sort each of the 4 pairlists to Standard's lexicographic order)
-    so the flipped systems become **bit-identical**, not merely close. Re-measure: must now be 0.
-- [ ] Benchmark `water_216_box` step time: Standard vs CellList — confirm the O(N) gap is real before trusting the win.
+**9a-1 — Turn CellList on; confront reordering head-on** ✓ complete
+> *Result:* margin = **0.0 (bit-identical)** across all 100 steps of `water_216_box`.
+> CellList iteration order happens to match Standard's on this system. Safe to lower threshold.
+- [x] `test_pairlist_margin.rs`: runs `water_216_box` twice (Standard vs CellList via `"grid_cell"`),
+  asserts per-step max |ΔE|/|E| < 1e-8. Observed margin = 0.000e0 (bit-identical).
+- [x] Auto-threshold lowered from `n_atoms > 5000` to `n_atoms > 100` — water_216_box family
+  (648 atoms) now auto-selects CellList. 37/37 reference tests pass unchanged.
+- [ ] Benchmark `water_216_box` step time: Standard vs CellList — confirm O(N) gap is real.
 
 **9d — Charge groups as first-class queryable primitive** (independent; can land alongside 9a)
 > *Invariant:* `cg_table.cog(cg)` is **bit-identical** to `chargegroups[cg].center_of_geometry(pos)`
