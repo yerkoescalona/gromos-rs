@@ -131,9 +131,11 @@ path = "src/bin/utilities/mk_script.rs"
 name = "mpi_scaling"
 path = "src/bin/utilities/mpi_scaling.rs"
 
+# TODO: remove this stub — real atominfo lives in gromos-analysis/src/bin/structural/atominfo.rs
 [[bin]]
 name = "atominfo"
 path = "src/bin/utilities/atominfo.rs"
+doc = false
 
 [[bin]]
 name = "gch"

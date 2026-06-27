@@ -1,0 +1,18 @@
+[book]
+title = "gromos-rs"
+authors = ["Yerko Escalona"]
+description = "Scientific documentation for gromos-rs — a GROMOS-faithful molecular dynamics engine in Rust"
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/gromos-rs/"
+git-repository-url = "https://github.com/yescalona/gromos-rs"
+edit-url-template = "https://github.com/yescalona/gromos-rs/edit/main/docs/{path}"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[preprocessor.index]
+[preprocessor.links]

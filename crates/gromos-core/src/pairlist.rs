@@ -1,9 +1,42 @@
-//! Pairlist (neighbor list) generation
+//! Pairlist (neighbor list) generation.
 //!
-//! Direct Rust translation of GROMOS pairlist algorithms from:
-//! - md++/src/interaction/nonbonded/pairlist/pairlist.h
-//! - md++/src/interaction/nonbonded/pairlist/standard_pairlist_algorithm.cc
-//! - md++/src/interaction/nonbonded/pairlist/grid_cell_pairlist.cc
+//! A pairlist pre-computes which atom pairs are within the nonbonded cutoff
+//! so the inner force loop only evaluates close pairs, not all N² combinations.
+//!
+//! # GROMOS charge-group cutoff convention
+//!
+//! gromos-rs uses **charge groups** as the cutoff unit, matching gromosXX.
+//! A charge group is a set of covalently-bonded atoms whose partial charges sum
+//! to zero. The cutoff test is applied to charge-group centers-of-geometry (COG),
+//! not individual atoms. This keeps neutral charge groups wholly inside or outside
+//! the cutoff sphere, which is required for reaction-field electrostatics to be
+//! correct: splitting a charge group across the cutoff boundary leaves a net-charge
+//! imbalance that the RF formula is not designed to handle.
+//!
+//! # Twin-range cutoffs
+//!
+//! Two radii are supported: `short_range_cutoff` (`RCUTP`) and `long_range_cutoff`
+//! (`RCUTL`). Pairs within the short range are evaluated every step; pairs in
+//! `(RCUTP, RCUTL]` are evaluated only on pairlist-update steps and their forces
+//! are reused between updates. When `RCUTP == RCUTL` the long lists are always empty.
+//!
+//! # Algorithms
+//!
+//! Two implementations are available. Both produce **identical pair sets**; the
+//! difference is runtime complexity:
+//!
+//! - [`StandardPairlistAlgorithm`] — O(N²) over charge-group pairs; always correct;
+//!   used as the reference oracle in tests.
+//! - [`CellListPairlistAlgorithm`] — O(N) for rectangular boxes via a spatial grid;
+//!   falls back to [`StandardPairlistAlgorithm`] for triclinic/vacuum boxes.
+//!
+//! See the [pairlist algorithm chapter](https://gromos-rs.github.io/algorithms/pairlist.html)
+//! in the gromos-rs book for the scientific rationale.
+//!
+//! # Source references
+//!
+//! - `md++/src/interaction/nonbonded/pairlist/standard_pairlist_algorithm.cc`
+//! - `md++/src/interaction/nonbonded/pairlist/grid_cell_pairlist.cc`
 
 use crate::configuration::{BoxType, Configuration};
 use crate::math::{BoundaryCondition, Vec3};
@@ -11,34 +44,49 @@ use crate::topology::Topology;
 use rayon::prelude::*;
 use std::collections::HashSet;
 
-/// Pairlist for nonbonded interactions
-///
-/// Stores atom pairs (i, j) where i < j that are within cutoff distance.
-/// Updated periodically (typically every 5-10 MD steps).
+/// Ordered list of atom-index pairs `(i, j)` with `i < j` within the cutoff.
 pub type Pairlist = Vec<(usize, usize)>;
 
-/// Complete pairlist container
+/// Holds all nonbonded atom pairs, split by range and solute/solvent role.
 ///
-/// Separates short-range and long-range interactions,
-/// and solute vs. solvent for optimization.
+/// The four lists correspond to the twin-range + solute/solvent classification
+/// used by gromosXX. When `short_range_cutoff == long_range_cutoff` the `*_long`
+/// lists are always empty and all forces are evaluated every step.
+///
+/// The `skin` extra distance is added to both cutoffs when building the lists so
+/// that pairs which enter the true cutoff before the next rebuild are already
+/// present. Rebuild is triggered every `update_frequency` steps (IMD `NSNB`).
 #[derive(Debug, Clone)]
 pub struct PairlistContainer {
+    /// Solute–solute pairs within `short_range_cutoff` (1-4 and excluded pairs removed).
     pub solute_short: Pairlist,
+    /// Solute–solute pairs in `(short_range_cutoff, long_range_cutoff]` (twin-range).
     pub solute_long: Pairlist,
+    /// Solute–solvent and solvent–solvent pairs within `short_range_cutoff`.
+    /// For solvent–solvent, stores one sentinel pair per molecule pair; the
+    /// `solvent_innerloop` kernel expands it to all atom pairs within the molecule type.
     pub solvent_short: Pairlist,
+    /// Solute–solvent and solvent–solvent pairs in `(short_range_cutoff, long_range_cutoff]`.
     pub solvent_long: Pairlist,
 
-    // Pairlist parameters
+    /// Short-range cutoff radius in nm (IMD `RCUTP`).
     pub short_range_cutoff: f64,
+    /// Long-range cutoff radius in nm (IMD `RCUTL`). Equal to `short_range_cutoff`
+    /// when twin-range is disabled.
     pub long_range_cutoff: f64,
-    pub skin: f64, // Extra distance for pairlist stability
+    /// Extra distance added to both cutoffs during list construction (nm).
+    /// Ensures pairs that enter the true cutoff before the next rebuild are
+    /// already present. See `needs_update` for the rebuild criterion.
+    pub skin: f64,
 
-    // Tracking for update frequency
+    /// Steps elapsed since the last rebuild.
     pub steps_since_update: usize,
+    /// Rebuild the pairlist every this many steps (IMD `NSNB`).
     pub update_frequency: usize,
 }
 
 impl PairlistContainer {
+    /// Create a new container with the given cutoffs and skin distance (all in nm).
     pub fn new(short_cutoff: f64, long_cutoff: f64, skin: f64) -> Self {
         Self {
             solute_short: Vec::new(),
@@ -53,22 +101,22 @@ impl PairlistContainer {
         }
     }
 
-    /// Check if pairlist needs updating
+    /// Returns `true` if the pairlist should be rebuilt this step.
     pub fn needs_update(&self) -> bool {
         self.steps_since_update >= self.update_frequency
     }
 
-    /// Increment step counter
+    /// Advance the step counter. Call once per MD step.
     pub fn step(&mut self) {
         self.steps_since_update += 1;
     }
 
-    /// Reset step counter after update
+    /// Reset the step counter after a rebuild. Called automatically by each algorithm's `update()`.
     pub fn reset_counter(&mut self) {
         self.steps_since_update = 0;
     }
 
-    /// Total number of pairs
+    /// Total number of pairs across all four lists.
     pub fn total_pairs(&self) -> usize {
         self.solute_short.len()
             + self.solute_long.len()
@@ -77,14 +125,26 @@ impl PairlistContainer {
     }
 }
 
-/// Standard pairlist algorithm using chargegroups
+/// O(N²) pairlist algorithm — tests every charge-group pair.
 ///
-/// Translation of md++/src/interaction/nonbonded/pairlist/standard_pairlist_algorithm.cc
+/// Faithful translation of `standard_pairlist_algorithm.cc` from gromosXX.
+/// Correct for all box types (rectangular, triclinic, vacuum) and all system
+/// sizes. Kept as the reference oracle for validating [`CellListPairlistAlgorithm`].
+///
+/// For production runs with more than ~500 atoms in a rectangular box, prefer
+/// [`CellListPairlistAlgorithm`] which scales O(N) instead of O(N²).
 pub struct StandardPairlistAlgorithm {
+    /// When `true`, uses charge-group COGs as the cutoff unit (GROMOS default).
+    /// When `false`, uses individual atom positions (faster for small vacuum systems).
     pub use_chargegroups: bool,
 }
 
 impl StandardPairlistAlgorithm {
+    /// Create a new algorithm instance.
+    ///
+    /// Pass `use_chargegroups: true` for all periodic-box simulations (required for
+    /// correct reaction-field electrostatics). `false` is only appropriate for small
+    /// vacuum systems without solvent.
     pub fn new(use_chargegroups: bool) -> Self {
         Self { use_chargegroups }
     }
@@ -354,6 +414,7 @@ impl StandardPairlistAlgorithm {
 pub struct CellListPairlistAlgorithm;
 
 impl CellListPairlistAlgorithm {
+    /// Create a new cell-list algorithm instance.
     pub fn new() -> Self {
         Self
     }
