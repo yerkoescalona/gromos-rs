@@ -145,7 +145,11 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
   asserts per-step max |ΔE|/|E| < 1e-8. Observed margin = 0.000e0 (bit-identical).
 - [x] No auto-heuristic: `ALGORITHM standard` (0) always means Standard. CellList is only
   activated when the input explicitly says `ALGORITHM grid_cell` (2), matching gromosXX
-  semantics. All 37 reference files use `standard` → all still run Standard. 37/37 pass.
+  semantics. All 37 reference files use `standard` → all still run Standard.
+- [x] `water_1000_spc_gridcell` reference — 1000 equilibrated SPC (3.1057 nm, vol7 tutorial);
+  gromosXX Grid_Cell_Pairlist (7×7×7), 10 steps; gromos-rs CellList passes. Proof chain:
+  gromos-rs CellList == gromosXX grid_cell (this) + gromos-rs CellList == Standard (margin=0).
+  38/38 reference tests pass.
 - [ ] Benchmark `water_216_box` step time: Standard vs CellList — confirm O(N) gap is real.
 
 **9d — Charge groups as first-class queryable primitive** (independent; can land alongside 9a)
