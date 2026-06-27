@@ -662,10 +662,14 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    // ALGORITHM can be "standard" or a number
+                    // ALGORITHM: faithful to gromosXX in_parameter.cc:1419-1422
+                    //   "standard" / 0 → Standard_Pairlist_Algorithm
+                    //   "grid"     / 1 → Extended_Grid_Pairlist_Algorithm (production default)
+                    //   "grid_cell"/ 2 → Grid_Cell_Pairlist (Heinz & Hünenberger 2004)
                     params.algorithm = match v[0].as_str() {
                         "standard" => 0,
-                        "grid" => 1,
+                        "grid"     => 1,
+                        "grid_cell"=> 2,
                         _ => parse_i32(&v[0]),
                     };
                 }
