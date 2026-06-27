@@ -9,7 +9,7 @@
 use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
 use gromos_core::math::{Mat3, Periodicity, Vec3};
-use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
+use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer};
 use gromos_core::topology::Topology;
 
 use gromos_forces::bonded::{calculate_bonded_forces_ntf, calculate_perturbed_bonded_forces};
@@ -47,7 +47,7 @@ pub struct Forcefield {
     /// Pairlist container
     pub pairlist: PairlistContainer,
     /// Pairlist construction algorithm
-    pub pairlist_algorithm: StandardPairlistAlgorithm,
+    pub pairlist_algorithm: PairlistAlgorithm,
     /// Whether to use quartic bond potentials (vs harmonic)
     pub use_quartic_bonds: bool,
     /// Whether to run nonbonded in parallel
@@ -122,7 +122,7 @@ impl Forcefield {
         crf_params: CRFParameters,
         periodicity: Periodicity,
         pairlist: PairlistContainer,
-        pairlist_algorithm: StandardPairlistAlgorithm,
+        pairlist_algorithm: PairlistAlgorithm,
     ) -> Self {
         let twin_range_active = pairlist.short_range_cutoff < pairlist.long_range_cutoff - 1e-10;
         Self {
@@ -1055,6 +1055,7 @@ fn apply_molecular_virial_correction(topo: &Topology, conf: &mut Configuration, 
 mod tests {
     use super::*;
     use gromos_core::math::{Vacuum, Vec3};
+    use gromos_core::pairlist::StandardPairlistAlgorithm;
     use gromos_forces::nonbonded::CRFParameters;
 
     /// Test that the forcefield algorithm computes correct LJ forces for the pair_lj system.
@@ -1086,7 +1087,7 @@ mod tests {
         pairlist.solute_short = vec![(0, 1)];
         pairlist.update_frequency = 1000; // Don't auto-update in test
 
-        let pairlist_algorithm = StandardPairlistAlgorithm::new(false);
+        let pairlist_algorithm = PairlistAlgorithm::Standard(StandardPairlistAlgorithm::new(false));
 
         let mut ff = Forcefield::new(
             lj_params,

@@ -65,7 +65,7 @@ use gromos_forces::nonbonded::{
 };
 use gromos_core::math::Rectangular;
 use gromos_core::math::Vec3;
-use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
+use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
 
 /// GaMD search mode
@@ -464,7 +464,7 @@ pub struct GamdRunner {
     pairlist: PairlistContainer,
 
     /// Pairlist algorithm
-    pairlist_algorithm: StandardPairlistAlgorithm,
+    pairlist_algorithm: PairlistAlgorithm,
 
     /// Use parallel force calculation
     parallel_forces: bool,
@@ -492,7 +492,7 @@ impl GamdRunner {
     /// Create a new GaMD runner
     pub fn new(gamd: GamdParameters, cutoff: f64, parallel_forces: bool) -> Self {
         let pairlist = PairlistContainer::new(cutoff, cutoff, 0.2);
-        let pairlist_algorithm = StandardPairlistAlgorithm::new(true);
+        let pairlist_algorithm = PairlistAlgorithm::Standard(StandardPairlistAlgorithm::new(true));
 
         // Calculate CRF parameters
         let eps = 1.0;

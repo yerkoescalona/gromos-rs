@@ -48,7 +48,8 @@ use pyo3::prelude::*;
 use gromos_core::algorithm::AlgorithmSequence;
 use gromos_core::configuration::{Box as SimBox, Configuration};
 use gromos_core::math::{Periodicity, Rectangular, Vacuum, Vec3};
-use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
+use gromos_core::configuration::BoxType;
+use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer};
 use gromos_core::topology::Topology;
 use gromos_forces::nonbonded::CRFParameters;
 use gromos_integrators::algorithms::{
@@ -1050,13 +1051,22 @@ pub(crate) fn resolve_algorithm_sequence(
                 let mut pairlist = PairlistContainer::new(rcutp, cutoff, 0.0);
                 pairlist.update_frequency = pairlist_update;
 
-                let use_chargegroups = !topo.chargegroups.is_empty();
-                let pairlist_algorithm = StandardPairlistAlgorithm::new(use_chargegroups);
                 let periodicity = if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
                     Periodicity::Vacuum(Vacuum)
                 } else {
                     Periodicity::Rectangular(Rectangular::new(box_dims))
                 };
+                let box_type = match &periodicity {
+                    Periodicity::Rectangular(_) => BoxType::Rectangular,
+                    Periodicity::Triclinic(_) => BoxType::Triclinic,
+                    Periodicity::Vacuum(_) => BoxType::Vacuum,
+                };
+                let pairlist_algorithm = PairlistAlgorithm::from_imd(
+                    imd.algorithm,
+                    topo.num_atoms(),
+                    box_type,
+                    !topo.chargegroups.is_empty(),
+                );
 
                 pairlist_algorithm.update(topo, conf, &mut pairlist, &periodicity);
 

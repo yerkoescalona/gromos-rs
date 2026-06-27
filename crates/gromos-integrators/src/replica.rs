@@ -13,7 +13,7 @@ use gromos_forces::nonbonded::{
     lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage, LJParamMatrix,
 };
 use gromos_core::math::Rectangular;
-use gromos_core::pairlist::{PairlistContainer, StandardPairlistAlgorithm};
+use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
 use std::sync::Arc;
 
@@ -94,7 +94,7 @@ pub struct Replica {
     pairlist: PairlistContainer,
 
     /// Pairlist algorithm
-    pairlist_algorithm: StandardPairlistAlgorithm,
+    pairlist_algorithm: PairlistAlgorithm,
 
     /// Use parallel force calculation
     parallel_forces: bool,
@@ -112,7 +112,7 @@ impl Replica {
         cutoff: f64,
     ) -> Self {
         let pairlist = PairlistContainer::new(cutoff, cutoff, 0.2);
-        let pairlist_algorithm = StandardPairlistAlgorithm::new(true);
+        let pairlist_algorithm = PairlistAlgorithm::Standard(StandardPairlistAlgorithm::new(true));
 
         // Calculate CRF parameters
         // crf = (eps_rf - eps) * (2*eps + eps_rf) / (eps_rf + 2*eps) / cutoff^3
