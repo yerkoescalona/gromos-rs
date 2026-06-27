@@ -695,33 +695,29 @@ pub enum PairlistAlgorithm {
 impl PairlistAlgorithm {
     /// Choose an algorithm from IMD PAIRLIST block parameters.
     ///
-    /// Slot values match gromosXX `in_parameter.cc:1419-1422` exactly:
+    /// Slot values match gromosXX `in_parameter.cc:1419-1422` exactly.
+    /// Every value is an **explicit instruction** — matching gromosXX where
+    /// `ALGORITHM standard` always means Standard, with no auto-heuristic.
     ///
     /// | `algorithm` | gromosXX class | gromos-rs result |
     /// |-------------|----------------|-----------------|
-    /// | `0` / `"standard"` | `Standard_Pairlist_Algorithm` | `Standard` |
+    /// | `0` / `"standard"` | `Standard_Pairlist_Algorithm` | `Standard` (forced) |
     /// | `1` / `"grid"`     | `Extended_Grid_Pairlist_Algorithm` | `Standard` (not yet ported; safe fallback) |
-    /// | `2` / `"grid_cell"`| `Grid_Cell_Pairlist` (Heinz & Hünenberger 2004) | `CellList` |
-    /// | any other          | auto-heuristic | `CellList` when Rectangular + CGs + `n_atoms > 5000`; else `Standard` |
+    /// | `2` / `"grid_cell"`| `Grid_Cell_Pairlist` (Heinz & Hünenberger 2004) | `CellList` (forced) |
+    /// | any other          | — | `Standard` (safe fallback) |
     ///
-    /// The `n_atoms > 100` threshold is set empirically (9a-1): CellList produces
-    /// bit-identical energies to Standard on `water_216_box` (648 atoms, 100 steps,
-    /// margin = 0.0). It flips rectangular+CG systems above 100 atoms to CellList.
+    /// 9a-1 verified: CellList produces bit-identical energies to Standard on
+    /// `water_216_box` (648 atoms, 100 steps, margin = 0.000e0). CellList is
+    /// only activated when the input explicitly requests `ALGORITHM grid_cell`.
     pub fn from_imd(
         algorithm: i32,
-        n_atoms: usize,
-        box_type: BoxType,
+        _n_atoms: usize,
+        _box_type: BoxType,
         has_chargegroups: bool,
     ) -> Self {
-        let use_cell_list = match algorithm {
-            0 | 1 => false, // 0=standard (explicit), 1=grid (ExtendedGrid not yet ported → Standard)
-            2 => true,      // grid_cell = our CellListPairlistAlgorithm
-            _ => box_type == BoxType::Rectangular && has_chargegroups && n_atoms > 100,
-        };
-        if use_cell_list {
-            Self::CellList(CellListPairlistAlgorithm::new())
-        } else {
-            Self::Standard(StandardPairlistAlgorithm::new(has_chargegroups))
+        match algorithm {
+            2 => Self::CellList(CellListPairlistAlgorithm::new()),
+            _ => Self::Standard(StandardPairlistAlgorithm::new(has_chargegroups)),
         }
     }
 
@@ -850,39 +846,19 @@ mod tests {
     }
 
     #[test]
-    fn test_from_imd_auto_all_conditions_met() {
-        // unknown algorithm + Rectangular + chargegroups + n_atoms > 5000 → CellList
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 5001, BoxType::Rectangular, true)));
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 10000, BoxType::Rectangular, true)));
+    fn test_from_imd_standard_is_always_standard() {
+        // algorithm=0 "standard" forces Standard regardless of size or box type —
+        // ALGORITHM standard means Standard, no auto-heuristic overrides it.
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 648, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 2998, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 10000, BoxType::Rectangular, true)));
     }
 
     #[test]
-    fn test_from_imd_auto_threshold_boundary() {
-        // n_atoms == 100 is NOT > 100 → Standard
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 100, BoxType::Rectangular, true)));
-        // n_atoms == 101 IS > 100 → CellList
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 101, BoxType::Rectangular, true)));
-    }
-
-    #[test]
-    fn test_from_imd_auto_not_rectangular() {
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 6000, BoxType::Vacuum, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 6000, BoxType::Triclinic, true)));
-    }
-
-    #[test]
-    fn test_from_imd_auto_no_chargegroups() {
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 6000, BoxType::Rectangular, false)));
-    }
-
-    #[test]
-    fn test_from_imd_auto_small_system() {
-        // n_atoms <= 100 → Standard (vacuum/tiny systems)
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 100, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 2, BoxType::Rectangular, true)));
-        // n_atoms > 100 with rectangular + cg → CellList (water_216_box: 648 atoms, margin=0)
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 648, BoxType::Rectangular, true)));
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 2998, BoxType::Rectangular, true)));
+    fn test_from_imd_unknown_algorithm_falls_back_to_standard() {
+        // Unrecognised algorithm values → Standard (safe fallback, no auto-heuristic)
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 10000, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(-1, 648, BoxType::Rectangular, true)));
     }
 
     #[test]
