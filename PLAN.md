@@ -96,12 +96,149 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 - [x] Triclinic nearest-image: replaced fractional `round()` with GROMOS while-loop z→y→x reduction
 - [x] NTB=-1 truncated-octahedron: `truncoct_triclinic_box` + position/velocity rotation — `aladip_trunc_oct` passes
 
-**1.5 — O(N) cell-list pairlist** — algorithm complete, **wiring deferred** ← **NEXT (highest impact)**
-- [x] `CellListPairlistAlgorithm` — bins chargegroup COGs; validated by set-equality vs `StandardPairlistAlgorithm`; O(N) for rectangular boxes, falls back to O(N²) for triclinic/vacuum
+**1.5 — Dim 9: Pairlist from O(N²) to cache-coherent O(N)** ← **NEXT (highest impact)**
+
+> Maps to FUTURE.md §Dimension 9. Five sub-dimensions; 9a is the scaling blocker.
+> Dispatch decision: **enum, not trait object** — `pairlist_algorithm.update()` is on the hot path
+> every NSNB steps; an enum match inlines to a direct call with zero heap allocation. Two arms now;
+> the spatial-index service (9e) is a separate struct, not a third arm.
+
+> **⚠ The math reality that drives the whole test strategy.** Reference tests are NOT byte-identical:
+> `test_gromosXX_references.rs` compares every MD step to GROMOS at `ENERGY_REL_TOL = 1e-8`
+> (`FORCE_ABS_TOL = 1e-6`). The production pairlist is **not** order-normalized (`normalize_pairs`
+> is a `#[cfg(test)]` helper only). So switching Standard→CellList keeps the pair *set* identical
+> (already proven by set-equality tests) but changes pair *iteration order* → changes
+> floating-point summation order → perturbs each step's energy by ~1e-13 relative → the perturbation
+> grows under MD's positive Lyapunov exponent over a trajectory. `water_216_box` runs **100 steps**;
+> `ch4_water_fep` runs perturbation on **2998 atoms**. Whether reordered sums stay under `1e-8` to
+> step 100 is *empirical, not guaranteed*. Every sub-step below therefore states (a) its exact math
+> invariant, (b) the isolated test that proves it *before* any MD wiring, and (c) the "math trap" it
+> hides. **Discipline: prove the invariant in a unit test against a brute-force oracle first; only
+> then touch the engine.** A sub-step that changes pair *order* must declare whether it targets
+> bit-identical (sort to canonical order) or within-tolerance (measure the margin empirically).
+
+**Done**
+- [x] `CellListPairlistAlgorithm` — bins chargegroup COGs; O(N) for rectangular boxes, falls back to O(N²) for triclinic/vacuum
 - [x] Martina bug NOT reproduced; solute/solvent classification by both atoms' roles
-- [ ] **Wire CellList into md.rs** — add system-size heuristic (e.g. `n_atoms > 500` + rectangular box → CellList). This is the single biggest performance win: gromos-rs is currently O(N²) for all simulations, making 50k-atom production runs unusable. The algorithm is done, this is just the dispatch logic.
-- [ ] Validate: 37/37 tests pass byte-identical after wiring
-- [ ] Benchmark: confirm O(N) scaling on `water_216_box`
+- [x] Set-equality validated vs `StandardPairlistAlgorithm` on all reference systems
+
+---
+
+**9a-0 — Plumbing only, zero float change** ← do first (lands green with no risk)
+> *Invariant:* every reference system still selects `Standard`, so not one summation order changes.
+> *Trap:* the obvious `n_atoms > 500` threshold flips 8 systems — the 648-atom `water_216_*` family
+> *and* the 2998-atom `ch4_water_fep`. Start the threshold **above the largest reference system**.
+- [ ] Add `PairlistAlgorithm` enum to `gromos-core/src/pairlist.rs`:
+  ```
+  enum PairlistAlgorithm { Standard(StandardPairlistAlgorithm), CellList(CellListPairlistAlgorithm) }
+  ```
+  with `update<BC>()` delegating via match, and `from_imd(algorithm, n_atoms, box_type, has_chargegroups) -> Self`.
+- [ ] Heuristic: auto-select `CellList` only when `Rectangular` + chargegroups exist + `n_atoms > 5000`
+  (above `ch4_water_fep`'s 2998). IMD flag (`algorithm=1`) is an explicit override; Standard is the
+  default everywhere else. **No reference system flips** → all 37 keep Standard's exact order.
+- [ ] Re-export `PairlistAlgorithm` from `gromos-core/src/lib.rs`.
+- [ ] **Unit test (no MD, no floats):** `from_imd` returns the right variant for the full matrix of
+  (algorithm ∈ {0,1,auto}) × (box_type) × (n_atoms below/above 5000) × (has_chargegroups). Pure dispatch logic.
+- [ ] Swap the field type `StandardPairlistAlgorithm` → `PairlistAlgorithm` (still constructed as
+  `Standard(...)` everywhere) in: `forcefield.rs:50` (`update()` at :296), `gamd.rs:467`,
+  `eds.rs:660`, `replica.rs`, `md.rs:803`, `pyo3-gromos/src/simulation.rs:130`,
+  `pyo3-gromos/src/algorithm_sequence.rs:1054`.
+- [ ] **Validate:** `cargo test --workspace` green; 37/37 reference tests unchanged (they still run Standard). Commit here — clean baseline.
+
+**9a-1 — Turn CellList on; confront reordering head-on**
+> *Invariant:* CellList pair-set ≡ Standard pair-set (proven). Open question: does reordered
+> summation stay < `1e-8` over a 100-step trajectory?
+> *Trap:* "it passed once" is not proof — chaotic divergence is system- and seed-dependent.
+- [ ] Add a `forced` integration test: run `water_216_box` (rectangular, 648 atoms) twice — once
+  `Standard`, once `CellList` (via `algorithm=1`) — through the **same 100-step driver**, and report
+  the per-step max |ΔE_total|/|E_total|. This is the empirical margin measurement.
+- [ ] **Decision gate** based on the measured margin:
+  - If margin ≪ `1e-8` for all 100 steps → lower the auto threshold to a useful value (e.g. `n_atoms > 500`),
+    let the water family flip, confirm 37/37 still pass, document the observed margin in the test.
+  - If margin approaches/exceeds `1e-8` → keep auto threshold conservative AND add a canonical-order
+    sort step to CellList output (sort each of the 4 pairlists to Standard's lexicographic order)
+    so the flipped systems become **bit-identical**, not merely close. Re-measure: must now be 0.
+- [ ] Benchmark `water_216_box` step time: Standard vs CellList — confirm the O(N) gap is real before trusting the win.
+
+**9d — Charge groups as first-class queryable primitive** (independent; can land alongside 9a)
+> *Invariant:* `cg_table.cog(cg)` is **bit-identical** to `chargegroups[cg].center_of_geometry(pos)`
+> (same atoms, same summation order). If true, 9d cannot change any energy — the pairlist sees
+> identical COGs. This makes 9d provably energy-neutral.
+> *Trap:* a stale cache. The COG cache must be recomputed when positions change; reading `cog()`
+> before `update_cogs()` must be unambiguous (return `None`, not a stale/zero value).
+- [ ] Add `ChargeGroupTable` to `gromos-core/src/topology.rs`: `groups: Vec<ChargeGroup>`,
+  `atom_to_cg: Vec<usize>`, `n_solute: usize`, `cog_cache: Vec<Option<Vec3>>`. Methods:
+  `cg_of_atom`, `atoms_of_cg`, `n_solute_cgs`, `is_solute_cg`, `update_cogs(positions)`, `cog(cg)`.
+- [ ] Add `pub cg_table: Option<ChargeGroupTable>` to `Topology`; `Topology::build_cg_table()`;
+  call it after topology finalization in `gromos-io/src/topology.rs`.
+- [ ] **Unit tests (exact, fast, no MD):** (1) round-trip — `cg_of_atom(a)` ∋ `a` in `atoms_of_cg`;
+  (2) **bit-exact** — `assert_eq!(table.cog(cg), chargegroups[cg].center_of_geometry(pos))` with `==`,
+  not approx, for every CG; (3) staleness — `cog()` is `None` before `update_cogs`; after moving an
+  atom + `update_cogs`, `cog` reflects the new position.
+- [ ] Switch `CellList`/`Standard` to read `cg_table.cog(i)` (cached) instead of recomputing
+  `center_of_geometry` each rebuild. **Validate:** all existing pairlist set-equality tests still pass.
+
+**9e — Cell list as spatial-index service** (after 9a-1 is stable)
+> *Invariant:* `pairs_within()` returns exactly the brute-force-N² set for the same cutoff; the
+> refactored `CellList` produces the identical pair-set to the pre-refactor one (regression guard).
+> *Trap (the big one):* `neighbors_within(query, radius)` with **radius > the grid build cutoff**.
+> The grid is cells of size ≥ build-cutoff with a ±1 stencil; a larger query radius reaches beyond
+> ±1 cells and **silently misses neighbors**. The API must either expand the stencil to
+> `ceil(radius/cell_size)` or reject radius > cutoff. This is a "math won't land" landmine — test it.
+- [ ] Add `SpatialIndex` to `gromos-core/src/pairlist.rs` (or `spatial_index.rs`):
+  `build(positions, box_dims, cutoff)`, `pairs_within<BC>(...) -> impl Iterator<Item=(u32,u32)>`
+  (i<j within cutoff), `neighbors_of<BC>(query_idx, ...)`, `neighbors_within<BC>(query_pos, radius, ...)`.
+- [ ] **Unit tests vs brute-force oracle (no MD):** (1) `pairs_within` set == N² set on a random
+  small box, periodic; (2) `neighbors_within` set == N² scan, **including a case with
+  radius > build cutoff** and a case with radius < cell size; (3) query point not in the particle set.
+- [ ] Refactor `CellListPairlistAlgorithm::update_cell_list()` to drive pair classification
+  (solute/solvent, short/long, exclusion check) over `pairs_within()`. **Validate:** pre- vs
+  post-refactor `CellList` pair-sets identical on all reference systems (regression).
+- [ ] Re-export `SpatialIndex` from `lib.rs`.
+
+**9c — Parallel cell build + displacement-triggered rebuild** (after 9e)
+> *Parallel invariant:* parallel pair-set ≡ serial pair-set, every run (nondeterministic completion
+> order must not change the *set*). *Trap:* if 9a-1 chose canonical sorting for bit-identity, the
+> parallel merge must re-sort, or determinism is lost.
+> *Trigger invariant (the subtle math):* rebuild when `2·max_disp > skin`. The factor **2** is because
+> two atoms can each move `max_disp` toward each other, closing the gap by `2·max_disp`; a pair just
+> outside the list at build time can enter the cutoff. Factor-1 silently misses pairs under motion.
+- [ ] Parallelize the cell-pair enumeration loop with rayon `into_par_iter()` (already imported,
+  `pairlist.rs:11`); each thread emits a partial pair vec, then concatenate (+ re-sort if 9a-1 needs canonical order).
+- [ ] Add `use_displacement_trigger: bool` + `ref_positions: Vec<Vec3>` to `PairlistContainer`;
+  in `Forcefield::apply()` compute `max_disp = max|pos − ref_pos|`, rebuild when `2·max_disp > skin`,
+  refresh `ref_positions` on rebuild. NSNB step-counter stays the default (keeps reference tests fixed).
+- [ ] **Tests:** (1) parallel vs serial set-equality, looped many times (nondeterminism guard);
+  (2) **hand-built skin test** — one atom displaced just under `skin/2` (no rebuild needed: the pair
+  was already listed thanks to skin → energy still exact) vs just over `skin/2` (rebuild fires);
+  compare energy to an always-rebuild reference. This is the load-bearing correctness test for 9c.
+
+**9b — Spatial reordering for cache coherence** (last; most invasive)
+> *Invariant:* permute∘unpermute = identity ⇒ energies and forces **bit-identical** to the unsorted path.
+> *Trap 1:* swapping `sorted_to_orig` and `orig_to_sorted` gives plausible-looking garbage forces.
+> *Trap 2 (the one the first draft glossed):* the inner loop's **pair indices must also be remapped
+> into sorted space** — positions in sorted order but pairs in original indices = total garbage. Pairs,
+> positions, charges, IAC must all live in the same index space inside the loop; forces un-map on exit.
+- [ ] Add `SpatialOrder { sorted_to_orig: Vec<u32>, orig_to_sorted: Vec<u32> }` to `pairlist.rs`,
+  built from `SpatialIndex` cell assignments after each rebuild.
+- [ ] **Unit tests first (no MD):** (1) `unpermute(permute(x)) == x` on random `Vec<Vec3>`;
+  (2) `orig_to_sorted[sorted_to_orig[i]] == i` for all i (the two maps are true inverses).
+- [ ] Confine permutation to `Forcefield`: working copies `sorted_pos`, `sorted_charges`, `sorted_iac`,
+  remapped `sorted_pairs`; do NOT permute `Topology`/canonical `Configuration` (avoids exclusion-index
+  rebuild + I/O complexity). Inner loops consume sorted slices; forces un-map via `sorted_to_orig`
+  before accumulation into `conf.current_mut().force`. Trajectory writers read original-order `pos` — no I/O change.
+- [ ] Gate on `n_atoms > 5000` (cache wins only dominate at scale).
+- [ ] **Validate:** energies + forces bit-identical to unsorted on all reference tests (mathematical
+  identity if maps are correct); benchmark 50k-atom synthetic box — expect >20% inner-loop speedup.
+
+**Sequencing**
+```
+9a-0 (plumbing, zero float) → 9a-1 (CellList on, measure margin) → 9e (SpatialIndex) → 9c (parallel + trigger)
+                          \                                                                    \
+                           └→ 9d (CG table, exact COG cache, independent) ────────────────────→ 9b (spatial reorder, last)
+```
+> Each arrow is a commit boundary with green tests. 9a-0 and 9d carry zero numerical risk (prove-then-
+> wire); 9a-1, 9c, 9b each isolate exactly one source of float divergence and test it against an oracle.
 
 **1.6 — Restraints & special interactions** — distance done; dihedral next
 - [x] Distance restraints — `nacl_1water_distres` passes (NTDIR=2, CDIR*w0, instantaneous).
@@ -162,7 +299,7 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 - [x] `ext_ti_merge` — linear interpolation between λ windows, trapezoidal ΔG
 - [ ] `reweight`, `m_widom`, `dg_ener` — stubs exist; skip for now (rarely used)
 
-**2.4 — Code quality** ← **NEXT after CellList** (390 warnings hide real bugs)
+**2.4 — Code quality** ← **NEXT after Dim 9** (390 warnings hide real bugs)
 - [ ] Clippy pass: `gromos-forces` (89), `gromos-integrators` (77), `gromos-io` (31), `gromos-core` (15)
 - [ ] Replace bare `unwrap()` in non-test code with `.expect("msg")` or `?`
 - [ ] Add missing `#[test]`: SHAKE constraints (0 today), improper dihedral unit test
@@ -183,7 +320,7 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 ### Priority 4 — Benchmarking
 - [ ] Baseline `cargo bench --workspace -- --save-baseline v0.1`
 - [ ] End-to-end MD step / pairlist / SHAKE / bonded benches
-- [ ] Confirm O(N) scaling after CellList wiring
+- [ ] Confirm O(N) scaling after Dim 9a wiring (see 1.5 benchmark tasks)
 
 ---
 
