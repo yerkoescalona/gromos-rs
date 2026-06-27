@@ -704,9 +704,9 @@ impl PairlistAlgorithm {
     /// | `2` / `"grid_cell"`| `Grid_Cell_Pairlist` (Heinz & Hünenberger 2004) | `CellList` |
     /// | any other          | auto-heuristic | `CellList` when Rectangular + CGs + `n_atoms > 5000`; else `Standard` |
     ///
-    /// The `n_atoms > 5000` threshold is deliberately above the largest
-    /// reference system (`ch4_water_fep`, 2998 atoms), so no reference test
-    /// flips algorithm in 9a-0.
+    /// The `n_atoms > 100` threshold is set empirically (9a-1): CellList produces
+    /// bit-identical energies to Standard on `water_216_box` (648 atoms, 100 steps,
+    /// margin = 0.0). It flips rectangular+CG systems above 100 atoms to CellList.
     pub fn from_imd(
         algorithm: i32,
         n_atoms: usize,
@@ -716,7 +716,7 @@ impl PairlistAlgorithm {
         let use_cell_list = match algorithm {
             0 | 1 => false, // 0=standard (explicit), 1=grid (ExtendedGrid not yet ported → Standard)
             2 => true,      // grid_cell = our CellListPairlistAlgorithm
-            _ => box_type == BoxType::Rectangular && has_chargegroups && n_atoms > 5000,
+            _ => box_type == BoxType::Rectangular && has_chargegroups && n_atoms > 100,
         };
         if use_cell_list {
             Self::CellList(CellListPairlistAlgorithm::new())
@@ -858,10 +858,10 @@ mod tests {
 
     #[test]
     fn test_from_imd_auto_threshold_boundary() {
-        // n_atoms == 5000 is NOT > 5000 → Standard
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 5000, BoxType::Rectangular, true)));
-        // n_atoms == 5001 IS > 5000 → CellList
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 5001, BoxType::Rectangular, true)));
+        // n_atoms == 100 is NOT > 100 → Standard
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 100, BoxType::Rectangular, true)));
+        // n_atoms == 101 IS > 100 → CellList
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 101, BoxType::Rectangular, true)));
     }
 
     #[test]
@@ -877,10 +877,12 @@ mod tests {
 
     #[test]
     fn test_from_imd_auto_small_system() {
-        // all 37 reference systems are below 5000 → Standard regardless of box/cg
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 2998, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 648, BoxType::Rectangular, true)));
+        // n_atoms <= 100 → Standard (vacuum/tiny systems)
+        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 100, BoxType::Rectangular, true)));
         assert!(is_standard(&PairlistAlgorithm::from_imd(99, 2, BoxType::Rectangular, true)));
+        // n_atoms > 100 with rectangular + cg → CellList (water_216_box: 648 atoms, margin=0)
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 648, BoxType::Rectangular, true)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(99, 2998, BoxType::Rectangular, true)));
     }
 
     #[test]
