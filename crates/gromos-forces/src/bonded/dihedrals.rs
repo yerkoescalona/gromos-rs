@@ -327,8 +327,6 @@ mod tests {
 
     #[test]
     fn test_dihedral_new_vs_old() {
-        use std::f64::consts::PI;
-
         // Compare new and old dihedral formulas at φ = 0° (cis)
         // For δ = 0°, both formulas should give same result
         let mut topo = Topology::new();

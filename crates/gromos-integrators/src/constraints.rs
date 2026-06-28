@@ -1790,7 +1790,6 @@ mod tests {
 
     #[test]
     fn test_setup_lincs_simple() {
-        use gromos_core::math::Vec3;
         use gromos_core::topology::*;
 
         // Create a simple topology with 3 atoms forming a triangle of constraints

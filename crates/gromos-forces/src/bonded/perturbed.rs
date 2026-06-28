@@ -649,7 +649,7 @@ pub fn calculate_perturbed_bonded_forces(
 mod tests {
     use super::*;
     use gromos_core::configuration::Configuration;
-    use gromos_core::math::{Periodicity, Rectangular, Vec3};
+    use gromos_core::math::Vec3;
     use gromos_core::topology::{
         AngleParameters, Atom, BondParameters, DihedralParameters, ImproperDihedralParameters,
         PerturbedAngle, PerturbedBond, PerturbedDihedral, Topology,
