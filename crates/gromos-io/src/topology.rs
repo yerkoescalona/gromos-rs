@@ -55,6 +55,9 @@ pub struct ParsedSolventConstraint {
 /// Parsed topology data from GROMOS .topo file
 #[derive(Debug)]
 pub struct ParsedTopology {
+    /// Physical constants parsed from the PHYSICALCONSTANTS block.
+    /// If the block is absent, falls back to the gromos_core defaults.
+    pub physical_constants: gromos_core::units::PhysicalConstants,
     pub n_atoms: usize,
     pub atom_names: Vec<String>,      // PANM from SOLUTEATOM
     pub residue_numbers: Vec<usize>,  // MRES from SOLUTEATOM
@@ -115,6 +118,12 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     let mut solvent_atoms = Vec::new();
     let mut solvent_constraints = Vec::new();
     let mut solute_molecules = Vec::new();
+    let mut physical_constants = gromos_core::units::PhysicalConstants {
+        four_pi_eps_i: gromos_core::units::four_pi_eps_i,
+        kB: gromos_core::units::kB,
+        hBar: gromos_core::units::hBar,
+        spd_l: gromos_core::units::spd_l,
+    };
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
@@ -187,6 +196,9 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
             "SOLUTEMOLECULES" => {
                 parse_solutemolecules(&mut lines, &mut solute_molecules)?;
             },
+            "PHYSICALCONSTANTS" => {
+                parse_physical_constants(&mut lines, &mut physical_constants)?;
+            },
             _ => {
                 // Skip unknown blocks
                 continue;
@@ -195,6 +207,7 @@ pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoE
     }
 
     Ok(ParsedTopology {
+        physical_constants,
         n_atoms,
         atom_names,
         residue_numbers,
@@ -973,6 +986,47 @@ fn parse_solutemolecules<I: Iterator<Item = Result<String, std::io::Error>>>(
     Ok(())
 }
 
+/// Parse the PHYSICALCONSTANTS block.
+///
+/// Reads FPEPSI, HBAR, SPDL, BOLTZ in that order (gromosXX convention).
+/// Any value that fails to parse is left at its default.
+fn parse_physical_constants<I: Iterator<Item = Result<String, std::io::Error>>>(
+    lines: &mut I,
+    constants: &mut gromos_core::units::PhysicalConstants,
+) -> Result<(), IoError> {
+    let mut values: Vec<f64> = Vec::with_capacity(4);
+
+    for line in lines.by_ref() {
+        let line = line.map_err(|e| IoError::ParseError(e.to_string()))?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
+        if let Ok(v) = trimmed.parse::<f64>() {
+            values.push(v);
+        }
+    }
+
+    // gromosXX order: FPEPSI, HBAR, SPDL, BOLTZ
+    if let Some(&fpepsi) = values.first() {
+        constants.four_pi_eps_i = fpepsi;
+    }
+    if let Some(&hbar) = values.get(1) {
+        constants.hBar = hbar;
+    }
+    if let Some(&spdl) = values.get(2) {
+        constants.spd_l = spdl;
+    }
+    if let Some(&boltz) = values.get(3) {
+        constants.kB = boltz;
+    }
+
+    Ok(())
+}
+
 /// Convert ParsedTopology to Topology.
 ///
 /// Builds solute topology and stores the solvent template.
@@ -1270,17 +1324,19 @@ pub fn write_topology_file<P: AsRef<Path>>(
         "# FPEPSI: 1.0/(4.0*PI*EPS0) (EPS0 is the permittivity of vacuum)"
     )
     .map_err(|e| IoError::WriteError(e.to_string()))?;
-    writeln!(writer, "  {:.7}", gromos_core::units::four_pi_eps_i)
+    writeln!(writer, "  {:.7}", gromos_core::units::four_pi_eps_i) // gromosXX legacy value
         .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "# HBAR: Planck's constant HBAR = H/(2* PI)")
         .map_err(|e| IoError::WriteError(e.to_string()))?;
-    writeln!(writer, "  0.0635078").map_err(|e| IoError::WriteError(e.to_string()))?;
+    writeln!(writer, "  {}", gromos_core::units::hBar)
+        .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "# SPDL: Speed of light (nm/ps)")
         .map_err(|e| IoError::WriteError(e.to_string()))?;
-    writeln!(writer, "  299792.458").map_err(|e| IoError::WriteError(e.to_string()))?;
+    writeln!(writer, "  {}", gromos_core::units::spd_l)
+        .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "# BOLTZ: Boltzmann's constant kB")
         .map_err(|e| IoError::WriteError(e.to_string()))?;
-    writeln!(writer, "  {:.8}", gromos_core::units::kB)
+    writeln!(writer, "  {:.8}", gromos_core::units::kB) // gromosXX legacy value
         .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "END").map_err(|e| IoError::WriteError(e.to_string()))?;
 
@@ -1514,8 +1570,8 @@ END
         assert_eq!(parsed.bonds.len(), 3);
         assert_eq!(parsed.angles.len(), 2);
 
-        // First atom: IAC=6, mass=62.0, charge=0.0
-        assert_eq!(parsed.iac[0], 6);
+        // First atom: IAC=6 in file (1-indexed) → 5 in memory (0-indexed)
+        assert_eq!(parsed.iac[0], 5);
         assert!((parsed.masses[0] - 62.0).abs() < 1e-6);
         assert!((parsed.charges[0] - 0.0).abs() < 1e-6);
 

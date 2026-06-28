@@ -1,1 +1,158 @@
-../water_3_box/water_3_box.topo
+TITLE
+3 SPC water molecules in a small rectangular box
+Tests PBC, minimum image, pairlist, intermolecular LJ+CRF
+END
+PHYSICALCONSTANTS
+# FPEPSI: 1.0/(4.0*PI*EPS0) (EPS0 is the permittivity of vacuum)
+138.9354
+# HBAR: Planck's constant HBAR = H/(2* PI)
+0.0635078
+# SPDL: Speed of light (nm/ps)
+299792.458
+# BOLTZ: Boltzmann's constant kB
+0.00831441
+END
+TOPVERSION
+2.0
+END
+ATOMTYPENAME
+# NRATT: number of van der Waals atom types
+2
+# TYPE: atom type names
+OW
+H
+END
+RESNAME
+# NRAA2: number of residues in a solute molecule
+3
+# AANM: residue names
+SOL
+SOL
+SOL
+END
+SOLUTEATOM
+#   NRP: number of solute atoms
+   9
+# ATNM MRES PANM IAC     MASS       CG  CGC INE
+#                                           INE14
+    1    1    OW   1   15.99940   -0.82000  0  2    2    3
+                                              0
+    2    1   HW1   2    1.00800    0.41000  0  1    3
+                                              0
+    3    1   HW2   2    1.00800    0.41000  1  0
+                                              0
+    4    2    OW   1   15.99940   -0.82000  0  2    5    6
+                                              0
+    5    2   HW1   2    1.00800    0.41000  0  1    6
+                                              0
+    6    2   HW2   2    1.00800    0.41000  1  0
+                                              0
+    7    3    OW   1   15.99940   -0.82000  0  2    8    9
+                                              0
+    8    3   HW1   2    1.00800    0.41000  0  1    9
+                                              0
+    9    3   HW2   2    1.00800    0.41000  1  0
+                                              0
+END
+BONDSTRETCHTYPE
+#  NBTY: number of covalent bond types
+1
+#         CB         CHB         B0
+     1.87000e+07     3.74000e+05     1.00000e-01
+END
+BONDH
+#  NBONH: number of bonds involving H atoms in solute
+6
+#   IBH    JBH ICBH
+      1      2    1
+      1      3    1
+      4      5    1
+      4      6    1
+      7      8    1
+      7      9    1
+END
+BOND
+#  NBON: number of bonds NOT involving H atoms in solute
+0
+END
+BONDANGLEBENDTYPE
+#  NTTY: number of bond angle types
+1
+#         CT         CHT          T0
+     6.80000e+02     1.84130e-01     1.09470e+02
+END
+BONDANGLEH
+#  NTHEH: number of bond angles involving H atoms in solute
+3
+#   ITH    JTH    KTH ICTH
+      2      1      3    1
+      5      4      6    1
+      8      7      9    1
+END
+BONDANGLE
+#  NTHE: number of bond angles NOT involving H atoms in solute
+0
+END
+IMPDIHEDRALTYPE
+#  NQTY: number of improper dihedrals
+0
+END
+IMPDIHEDRALH
+0
+END
+IMPDIHEDRAL
+0
+END
+TORSDIHEDRALTYPE
+#  NPTY: number of dihedral types
+0
+END
+DIHEDRALH
+0
+END
+DIHEDRAL
+0
+END
+CROSSDIHEDRALH
+0
+END
+CROSSDIHEDRAL
+0
+END
+LJPARAMETERS
+#  NRATT2: number of LJ interaction types = NRATT*(NRATT+1)/2
+3
+# IAC  JAC           C12            C6          CS12           CS6
+    1    1  2.634129e-06  2.617346e-03  2.634129e-06  2.617346e-03
+    1    2  0.000000e+00  0.000000e+00  0.000000e+00  0.000000e+00
+    2    2  0.000000e+00  0.000000e+00  0.000000e+00  0.000000e+00
+END
+SOLUTEMOLECULES
+# NSPM  NSP[1...NSPM]
+         3
+    3
+    6
+    9
+END
+TEMPERATUREGROUPS
+# NSTM  NST[1...NSTM]
+         1
+    9
+END
+PRESSUREGROUPS
+# NSVM  NSV[1...NSVM]
+         1
+    9
+END
+LJEXCEPTIONS
+# NEX: number of exceptions
+0
+END
+SOLVENTATOM
+#  NRAM: number of atoms per solvent molecule
+0
+END
+SOLVENTCONSTR
+#  NCONS: number of constraints
+0
+END

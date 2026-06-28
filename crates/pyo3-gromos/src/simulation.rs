@@ -399,11 +399,11 @@ impl PySimulation {
     ///
     /// Accepts either file paths (str) or pre-loaded objects:
     ///
-    ///     # From objects (compositional)
-    ///     sim = Simulation(topology, configuration, parameters)
+    ///     // From objects (compositional)
+    ///     // sim = Simulation(topology, configuration, parameters)
     ///
-    ///     # From file paths (convenience)
-    ///     sim = Simulation("system.topo", "initial.cnf", "run.imd")
+    ///     // From file paths (convenience)
+    ///     // sim = Simulation("system.topo", "initial.cnf", "run.imd")
     #[new]
     fn new(
         arg1: &Bound<'_, PyAny>,

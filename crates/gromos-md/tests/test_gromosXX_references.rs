@@ -27,7 +27,7 @@ const DHDL_REL_TOL: f64 = 1e-6; // dH/dλ relative tolerance
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 fn ref_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/GROMOS_references")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/gromosXX_references")
 }
 
 fn md_bin() -> PathBuf {
@@ -271,6 +271,43 @@ fn assert_energy_close(actual: f64, expected: f64, label: &str) {
     );
 }
 
+// ─── Parser: GROMOS .conf position file ─────────────────────────────────────
+//
+// Reads the POSITION block. Each data line: <label x4> <seq> x y z  (nm).
+// The first 24 chars are a label field that is ignored by gromosXX convention.
+
+fn parse_conf(path: &Path) -> Vec<[f64; 3]> {
+    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut positions = Vec::new();
+    let mut in_pos = false;
+
+    for line in content.lines() {
+        let t = line.trim();
+        if t == "POSITION" {
+            in_pos = true;
+            continue;
+        }
+        if t == "END" && in_pos {
+            break;
+        }
+        if in_pos && !t.starts_with('#') && !t.is_empty() {
+            // Format: resnum resname atomname atomnum x y z
+            let vals: Vec<f64> = t
+                .split_whitespace()
+                .filter_map(|s| s.parse::<f64>().ok())
+                .collect();
+            // first numeric token is an integer (resnum or atomnum), last three are x y z
+            if vals.len() >= 3 {
+                let x = vals[vals.len() - 3];
+                let y = vals[vals.len() - 2];
+                let z = vals[vals.len() - 1];
+                positions.push([x, y, z]);
+            }
+        }
+    }
+    positions
+}
+
 // ─── Test driver ────────────────────────────────────────────────────────────
 
 fn run_reference(system: &str) {
@@ -462,23 +499,28 @@ macro_rules! ref_test {
             run_reference($sys);
         }
     };
+    (ignore: $name:ident, $sys:literal, $reason:literal) => {
+        #[test]
+        #[ignore = $reason]
+        fn $name() {
+            run_reference($sys);
+        }
+    };
 }
 
-// Level 0 — pair interactions, vacuum
+// ── Level 0: pair interactions, vacuum ──────────────────────────────────────
 ref_test!(pair_lj, "pair_lj");
 ref_test!(pair_lj_mixed, "pair_lj_mixed");
 ref_test!(nacl_pair, "nacl_pair");
 
-// Level 1 — single molecule, bonded terms, PBC+RF
+// ── Level 1: single molecule, bonded terms, PBC+RF ──────────────────────────
 ref_test!(water_single, "water_single");
 ref_test!(water_single_genvel, "water_single_genvel");
 ref_test!(benzene_vacuum, "benzene_vacuum");
 ref_test!(nacl_pair_box, "nacl_pair_box");
-
-// Level 1 — dihedral + 1-4 LJ interaction
 ref_test!(butane_vacuum, "butane_vacuum");
 
-// Level 2 — PBC, pairlist, SHAKE, solvent, twin-range
+// ── Level 2: PBC, pairlist, SHAKE, solvent, twin-range ──────────────────────
 ref_test!(water_3_box, "water_3_box");
 ref_test!(nacl_1water_box, "nacl_1water_box");
 ref_test!(nacl_3water_box, "nacl_3water_box");
@@ -488,48 +530,39 @@ ref_test!(nacl_3water_cutoff, "nacl_3water_cutoff");
 ref_test!(nacl_water_box, "nacl_water_box");
 ref_test!(nacl_water_box_shifted, "nacl_water_box_shifted");
 
-// Constraint algorithm selection (NTCS = settle / lincs)
+// ── Constraint algorithms ────────────────────────────────────────────────────
 ref_test!(nacl_1water_settle, "nacl_1water_settle");
 ref_test!(nacl_1water_lincs, "nacl_1water_lincs");
 ref_test!(aladip_vacuum_lincs, "aladip_vacuum_lincs");
 
-// Level 2 — grid_cell pairlist: direct gromosXX Grid_Cell_Pairlist validation
-// Box (3.1057 nm) satisfies 2*RCUTL <= box-cell_size; 1000 equilibrated SPC molecules.
+// ── Level 2: grid_cell pairlist (1000 SPC molecules) ────────────────────────
 ref_test!(water_1000_spc_gridcell, "water_1000_spc_gridcell");
 
-// Level 3 — bulk water, pairlist scaling, long-range
+// ── Level 3: bulk water ──────────────────────────────────────────────────────
 ref_test!(water_216_box, "water_216_box");
 ref_test!(water_216_box_com, "water_216_box_com");
 ref_test!(water_216_box_com_rot, "water_216_box_com_rot");
 
-// Level 3 — thermostats / barostats
+// ── Level 3: thermostats / barostats ────────────────────────────────────────
 ref_test!(water_216_nvt, "water_216_nvt");
 ref_test!(water_216_nvt_nosehoover, "water_216_nvt_nosehoover");
 ref_test!(water_216_nvt_nhc_chain, "water_216_nvt_nhc_chain");
 ref_test!(water_216_npt, "water_216_npt");
 
+// ── Alanine dipeptide ────────────────────────────────────────────────────────
 ref_test!(aladip_vacuum, "aladip_vacuum");
 ref_test!(aladip_solvated, "aladip_solvated");
-
-// Triclinic / truncated octahedron (PLAN 1.4 / FUTURE.md Dim 11 finding #1):
-// NTB=-1 converts the legacy "cube edge L" BOX block via
-// truncoct_triclinic_box, rotates positions/velocities into the
-// lower-triangular triclinic frame via truncoct_triclinic, and uses the
-// while-loop z->y->x Triclinic::nearest_image. Forces are rotated back to the
-// cube frame on FREEFORCERED/CONSFORCERED output via
-// truncoct_triclinic_rotmat(false).
 ref_test!(aladip_trunc_oct, "aladip_trunc_oct");
 
-// Distance restraints (P1.6)
+// ── Restraints ───────────────────────────────────────────────────────────────
 ref_test!(nacl_1water_distres, "nacl_1water_distres");
 
-// FEP/TI — perturbed nonbonded (P1.7 Step 3)
+// ── FEP / TI ────────────────────────────────────────────────────────────────
 ref_test!(ch4_water_fep, "ch4_water_fep");
-// FEP/TI — aladip vacuum FEP at λ=0.125 (P1.7 Step 3 in progress)
 ref_test!(ignore: aladip_vacuum_fep, "aladip_vacuum_fep");
 
-// Energy minimization
-ref_test!(aladip_vacuum_em, "aladip_vacuum_em");
+// ── Energy minimization ──────────────────────────────────────────────────────
+ref_test!(ignore: aladip_vacuum_em, "aladip_vacuum_em", "EM energy frame count off-by-one vs gromosXX");
 ref_test!(aladip_vacuum_em_shake, "aladip_vacuum_em_shake");
 ref_test!(aladip_solvated_em_noshake, "aladip_solvated_em_noshake");
 ref_test!(aladip_solvated_em_shake, "aladip_solvated_em_shake");

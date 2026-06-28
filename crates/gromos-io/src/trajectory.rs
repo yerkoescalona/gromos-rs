@@ -628,7 +628,11 @@ mod tests {
     use gromos_core::math::Vec3;
 
     fn round_trip(positions: Vec<Vec3>, box_dims: Option<Vec3>) -> TrajectoryFrame {
-        let tmp = std::env::temp_dir().join(format!("gromos_trc_test_{}.trc", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("gromos_trc_test_{}_{}.trc", std::process::id(), {
+                static C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                C.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            }));
         {
             let mut w = TrajectoryWriter::new(&tmp, "test", false, false).unwrap();
             w.write_trc_frame(42, 0.084, &positions, box_dims).unwrap();
@@ -642,7 +646,10 @@ mod tests {
 
     #[test]
     fn write_trc_frame_produces_3column_positionred() {
-        let tmp = std::env::temp_dir().join(format!("gromos_fmt_{}.trc", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("gromos_fmt_{}_{}.trc", std::process::id(), {
+            static C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            C.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        }));
         {
             let mut w = TrajectoryWriter::new(&tmp, "fmt test", false, false).unwrap();
             w.write_trc_frame(1, 0.002, &[Vec3::new(1.0, 2.0, 3.0)], None)
@@ -705,7 +712,11 @@ mod tests {
     #[test]
     fn reads_3column_gromos_format() {
         // Standard GROMOS .trc with 3-column POSITIONRED (as written by gromosXX)
-        let tmp = std::env::temp_dir().join(format!("gromos_3col_{}.trc", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("gromos_3col_{}_{}.trc", std::process::id(), {
+                static C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                C.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            }));
         std::fs::write(
             &tmp,
             "TITLE\n  test\nEND\nTIMESTEP\n              5    0.010000000\nEND\n\
@@ -726,7 +737,11 @@ mod tests {
     #[test]
     fn reads_7column_legacy_format() {
         // Legacy 7-column format (written by older gromos-rs)
-        let tmp = std::env::temp_dir().join(format!("gromos_7col_{}.trc", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("gromos_7col_{}_{}.trc", std::process::id(), {
+                static C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                C.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            }));
         std::fs::write(
             &tmp,
             "TITLE\n  legacy\nEND\nTIMESTEP\n              1    0.002000000\nEND\n\
@@ -744,7 +759,11 @@ mod tests {
 
     #[test]
     fn multi_frame_round_trip() {
-        let tmp = std::env::temp_dir().join(format!("gromos_multi_{}.trc", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("gromos_multi_{}_{}.trc", std::process::id(), {
+                static C: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                C.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            }));
         let frames_in = vec![
             (0usize, 0.0_f64, vec![Vec3::new(0.1, 0.2, 0.3)]),
             (1, 0.002, vec![Vec3::new(0.4, 0.5, 0.6)]),

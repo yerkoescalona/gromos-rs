@@ -57,9 +57,6 @@ impl LJParamMatrix {
     }
 }
 
-/// Coulomb constant: 1/(4*pi*eps0) in GROMOS units [kJ*nm/(mol*e^2)]
-pub use gromos_core::units::four_pi_eps_i as FOUR_PI_EPS_I;
-
 /// Coulomb Reaction Field parameters
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

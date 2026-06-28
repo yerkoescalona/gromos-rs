@@ -428,7 +428,7 @@ impl StochasticDynamics {
             gamma,
             temperature,
             seed: None,
-            kb: 0.008314462618, // GROMOS kB in kJ/(mol·K)
+            kb: gromos_core::units::kB,
             coefficients: Vec::new(),
         }
     }

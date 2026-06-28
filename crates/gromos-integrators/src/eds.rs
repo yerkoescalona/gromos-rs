@@ -651,6 +651,7 @@ pub struct EDSRunner {
 
     /// CRF parameters for nonbonded interactions
     crf_params: CRFParameters,
+    four_pi_eps_i: f64,
 
     /// Current MD step
     current_step: usize,
@@ -682,6 +683,7 @@ impl EDSRunner {
             pairlist_algorithm,
             parallel_forces,
             crf_params,
+            four_pi_eps_i: gromos_core::units::four_pi_eps_i,
             current_step: 0,
         }
     }
@@ -765,6 +767,7 @@ impl EDSRunner {
                 &lj_params,
                 &self.crf_params,
                 &periodicity,
+                self.four_pi_eps_i,
                 n_atoms,
             )
         } else {
@@ -777,6 +780,7 @@ impl EDSRunner {
                 &lj_params,
                 &self.crf_params,
                 &periodicity,
+                self.four_pi_eps_i,
                 &mut storage,
             );
             storage

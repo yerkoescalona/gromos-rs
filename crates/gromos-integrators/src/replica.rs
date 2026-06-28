@@ -100,6 +100,7 @@ pub struct Replica {
 
     /// CRF parameters for nonbonded interactions
     crf_params: CRFParameters,
+    four_pi_eps_i: f64,
 }
 
 impl Replica {
@@ -136,6 +137,7 @@ impl Replica {
             pairlist_algorithm,
             parallel_forces: true,
             crf_params,
+            four_pi_eps_i: gromos_core::units::four_pi_eps_i,
         }
     }
 
@@ -217,6 +219,7 @@ impl Replica {
                 &lj_params,
                 &self.crf_params,
                 &periodicity,
+                self.four_pi_eps_i,
                 topology.num_atoms(),
             )
         } else {
@@ -242,6 +245,7 @@ impl Replica {
                 &lj_params,
                 &self.crf_params,
                 &periodicity,
+                self.four_pi_eps_i,
                 &mut storage,
             );
             storage
