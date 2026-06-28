@@ -296,7 +296,9 @@ jobs:
         run: cargo install cargo-llvm-cov
 
       - name: Generate Rust coverage
-        run: cargo llvm-cov --workspace --all-features --lcov --output-path ./lcov-rust.info
+        # --all-features is intentionally excluded: gpu/mpi/fftw modules are stubs
+        # not yet ready for compilation. Coverage runs default features only.
+        run: cargo llvm-cov --workspace --lcov --output-path ./lcov-rust.info
 
       - name: Install maturin and pytest
         run: pip install maturin pytest pytest-cov
