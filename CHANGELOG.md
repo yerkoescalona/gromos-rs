@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.23] (2026-06-29)
+
+### Features
+
+- **pyo3-gromos:** `PySystem` — paired `Topology` + `Configuration` with atom-count validation at construction; `System.from_files(topo, cnf)` convenience loader; `write(path)` for `.cnf` output (P3.1)
+- **pyo3-gromos:** `InputParameters` factory methods `nve(dt, steps)`, `nvt(dt, steps, temperature)`, `npt(dt, steps, temperature, pressure)`, `steepest_descent(steps)` — no `.imd` file required (P3.2)
+- **pyo3-gromos:** `InputParameters.from_file(path)` staticmethod alias of the constructor
+- **pyo3-gromos:** `Simulation(system, params)` two-argument constructor accepting `System` + `InputParameters`; existing three-argument forms unchanged (P3.2)
+- **gromos-io:** `ImdParameters::nve / nvt / npt / steepest_descent` factory methods on the Rust struct
+
+### Testing
+
+- **py-gromos:** `test_system_constructor_matches_file_constructor` — `Simulation(System, params)` is bit-identical to `Simulation(Topology, Configuration, params)` on `water_216_nvt` (energy rel=1e-8)
+- **py-gromos:** `test_system_factory_workflow` — full P3.2 workflow: `System.from_files` + `InputParameters.nvt` + `Simulation` + `step(10)` on `water_3_box`
+- **py-gromos:** `test_factory_nvt_properties` — factory stores `dt`, `nstlim`, `temperature` correctly
+- **gromos-io:** unit tests for all four factory methods (`test_factory_nve/nvt/npt/steepest_descent`)
+- **py-gromos:** fixed 6 stale `test_advanced_features.py` test classes missing `@pytest.mark.skip`
+
+### Build
+
+- **Makefile (root):** added `.venv`, `requirements`, `build-python`, `build-release`, `test-python`, `docs`, `docs-serve` targets
+- **py-gromos/Makefile:** added `docs`, `docs-serve` targets
+- **`.gitignore`:** added `py-gromos/site/`
+
+### Documentation
+
+- **py-gromos/docs:** full rewrite of all seven documentation pages to reflect the working API; removed all phantom class references (`State`, `Box`, `LeapFrog`, GaMD/EDS/REMD runners); added accurate status tables, P3.3/FUTURE roadmap sections
+- **py-gromos/python/gromos/__init__.py:** stripped to only working names; removed `system_builder` stubs, `md_runners` functions, and `analysis` wrappers from top-level namespace
+- **py-gromos/python/gromos/gromos.pyi:** added `InputParameters` factory stubs, `System` class, `Simulation` two-arg `@overload`
+
 ## [0.0.22] (2026-06-27)
 
 ### Features

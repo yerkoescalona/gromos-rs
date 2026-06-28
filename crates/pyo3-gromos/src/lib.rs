@@ -24,6 +24,7 @@ pub mod algorithm_sequence;
 pub mod parameters;
 pub mod py_conf;
 mod simulation;
+pub mod system;
 pub mod topology;
 
 // Re-export core types
@@ -325,6 +326,8 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     topology::register_topology(m)?;
     py_conf::register_configuration(m)?;
     parameters::register_parameters(m)?;
+    // System (topology + configuration pair)
+    system::register_system(m)?;
     // Algorithm sequence API
     algorithm_sequence::register_algorithm_sequence(m)?;
     Ok(())

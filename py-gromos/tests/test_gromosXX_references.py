@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gromos import Configuration, InputParameters, Simulation, Topology
+from gromos import Configuration, InputParameters, Simulation, System, Topology
 
 # Paths
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -388,3 +388,85 @@ def test_reference_forces(system_name):
         diff = np.abs(act - exp)
         max_diff = diff.max()
         assert max_diff < FORCE_ABS_TOL, f"{system_name} frame {i}: max force diff = {max_diff:.2e}"
+
+
+# ============================================================================
+# 3.2 — System constructor produces identical results to topo/conf/params form
+# ============================================================================
+
+
+def test_system_constructor_matches_file_constructor():
+    """Simulation(System, params) must be bit-identical to Simulation(topo, conf, params).
+
+    Uses the same params object for both paths — isolates the constructor
+    change from any parameter difference.
+    """
+    system_dir = REF_DIR / "water_216_nvt"
+    if not system_dir.exists():
+        pytest.skip("water_216_nvt reference not found")
+
+    inputs = _parse_input_toml(system_dir)
+    topo_path = str((system_dir / inputs["topology"]).resolve())
+    conf_path = str((system_dir / inputs["configuration"]).resolve())
+    params_path = str((system_dir / inputs["parameters"]).resolve())
+
+    params = InputParameters(params_path)
+
+    # Old three-arg path
+    sim_old = Simulation(Topology(topo_path), Configuration(conf_path), params)
+
+    # New two-arg path: Simulation(System, params)
+    system = System.from_files(topo_path, conf_path)
+    sim_new = Simulation(system, params)
+
+    assert sim_new.total_energy == pytest.approx(sim_old.total_energy, rel=ENERGY_REL_TOL), (
+        f"total energy: {sim_new.total_energy} vs {sim_old.total_energy}"
+    )
+    assert sim_new.kinetic_energy == pytest.approx(sim_old.kinetic_energy, rel=ENERGY_REL_TOL), (
+        f"kinetic energy: {sim_new.kinetic_energy} vs {sim_old.kinetic_energy}"
+    )
+    assert sim_new.potential_energy == pytest.approx(sim_old.potential_energy, rel=ENERGY_REL_TOL), (
+        f"potential energy: {sim_new.potential_energy} vs {sim_old.potential_energy}"
+    )
+
+
+def test_factory_nvt_properties():
+    """InputParameters.nvt(...) stores dt, nstlim and temperature correctly."""
+    p = InputParameters.nvt(0.001, 500, 298.0)
+    assert p.dt == pytest.approx(0.001)
+    assert p.nstlim == 500
+    assert p.temperature == pytest.approx(298.0)
+
+
+def test_system_factory_workflow():
+    """Full 3.2 workflow: System.from_files + InputParameters.nvt + Simulation + step.
+
+    Mirrors the intended API:
+        system = System.from_files("system.topo", "initial.cnf")
+        params = InputParameters.nvt(0.002, 1000, 300.0)
+        sim = Simulation(system, params)
+        sim.step(100)
+
+    Uses water_3_box (9 atoms) so factory cutoff defaults are safe regardless
+    of what the config was equilibrated at.
+    """
+    system_dir = REF_DIR / "water_3_box"
+    if not system_dir.exists():
+        pytest.skip("water_3_box reference not found")
+
+    inputs = _parse_input_toml(system_dir)
+    topo_path = str((system_dir / inputs["topology"]).resolve())
+    conf_path = str((system_dir / inputs["configuration"]).resolve())
+
+    system = System.from_files(topo_path, conf_path)
+    assert system.n_atoms == 9
+
+    params = InputParameters.nvt(0.002, 10, 300.0)
+    sim = Simulation(system, params)
+
+    e0 = sim.total_energy
+    sim.step(10)
+    e10 = sim.total_energy
+
+    assert np.isfinite(e0), f"step-0 energy not finite: {e0}"
+    assert np.isfinite(e10), f"step-10 energy not finite: {e10}"

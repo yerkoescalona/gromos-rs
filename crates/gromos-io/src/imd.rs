@@ -930,6 +930,84 @@ fn parse_block(
 }
 
 impl ImdParameters {
+    /// NVE ensemble: microcanonical, no thermostat or barostat.
+    pub fn nve(dt: f64, steps: usize) -> Self {
+        Self {
+            title: String::from("NVE simulation"),
+            nstlim: steps,
+            dt,
+            num_temp_baths: 1,
+            temp_bath: vec![TempBathParameters {
+                tau: vec![-1.0], // tau=-1 → no coupling (NVE)
+                ..TempBathParameters::default()
+            }],
+            ..Self::default()
+        }
+    }
+
+    /// NVT ensemble: canonical, Berendsen thermostat.
+    pub fn nvt(dt: f64, steps: usize, temperature: f64) -> Self {
+        Self {
+            title: String::from("NVT simulation"),
+            nstlim: steps,
+            dt,
+            num_temp_baths: 1,
+            temp_bath: vec![TempBathParameters {
+                algorithm: 0,
+                temp0: vec![temperature],
+                tau: vec![0.1],
+                ..TempBathParameters::default()
+            }],
+            tempi: temperature,
+            ..Self::default()
+        }
+    }
+
+    /// NPT ensemble: isothermal-isobaric, Berendsen thermostat + barostat.
+    pub fn npt(dt: f64, steps: usize, temperature: f64, pressure: f64) -> Self {
+        let p_tensor = [[pressure; 3]; 3];
+        let comp_tensor = [[4.575e-4; 3]; 3]; // water compressibility (nm² kJ⁻¹ mol)
+        Self {
+            title: String::from("NPT simulation"),
+            nstlim: steps,
+            dt,
+            num_temp_baths: 1,
+            temp_bath: vec![TempBathParameters {
+                algorithm: 0,
+                temp0: vec![temperature],
+                tau: vec![0.1],
+                ..TempBathParameters::default()
+            }],
+            tempi: temperature,
+            couple_pressure: true,
+            pressure_parameters: Some(PressureParameters {
+                algorithm: 1,
+                pressure0: p_tensor,
+                compressibility: comp_tensor,
+                tau_p: 0.5,
+                virial: 1,
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// Steepest-descent energy minimization.
+    pub fn steepest_descent(steps: usize) -> Self {
+        Self {
+            title: String::from("Energy minimization"),
+            nstlim: steps,
+            dt: 0.0,
+            ntem: 1,
+            nmin: 1,
+            dele: 0.1,
+            dx0: 0.01,
+            dxm: 0.05,
+            ntb: 1,
+            ntc: 1,
+            ..Self::default()
+        }
+    }
+
     /// Compute the individual lambda and its derivative with respect to RLAM.
     ///
     /// Following GROMOS: individual_lambda = RLAM^NLAM,
@@ -1250,4 +1328,40 @@ MULTIBATH\n    {algo_line}\n#   NBATHS\n    1\n#   TEMP0  TAU\n    300.0  0.1\n#
         let p = read_imd_file(&write_tmp(&make_imd("1"), "nhc_num1")).unwrap();
         assert_eq!(p.temp_bath[0].algorithm, 1, "numeric 1 should map to 1");
     }
+
+    #[test]
+    fn test_factory_nve() {
+        let p = ImdParameters::nve(0.001, 500);
+        assert_eq!(p.nstlim, 500);
+        assert!((p.dt - 0.001).abs() < 1e-15);
+        assert!((p.temp_bath[0].tau[0] - (-1.0)).abs() < 1e-15, "NVE needs tau=-1");
+    }
+
+    #[test]
+    fn test_factory_nvt() {
+        let p = ImdParameters::nvt(0.002, 1000, 298.0);
+        assert_eq!(p.nstlim, 1000);
+        assert!((p.dt - 0.002).abs() < 1e-15);
+        assert!((p.temp_bath[0].temp0[0] - 298.0).abs() < 1e-10);
+        assert_eq!(p.temp_bath[0].algorithm, 0, "NVT uses Berendsen");
+        assert!(!p.couple_pressure);
+    }
+
+    #[test]
+    fn test_factory_npt() {
+        let p = ImdParameters::npt(0.002, 1000, 300.0, 1.0);
+        assert_eq!(p.nstlim, 1000);
+        assert!((p.temp_bath[0].temp0[0] - 300.0).abs() < 1e-10);
+        assert!(p.couple_pressure, "NPT must couple pressure");
+        let pp = p.pressure_parameters.unwrap();
+        assert!((pp.pressure0[0][0] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_factory_steepest_descent() {
+        let p = ImdParameters::steepest_descent(200);
+        assert_eq!(p.nstlim, 200);
+        assert_eq!(p.ntem, 1);
+    }
+
 }

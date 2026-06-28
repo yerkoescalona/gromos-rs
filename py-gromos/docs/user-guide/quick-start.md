@@ -1,247 +1,196 @@
-# Quick Start Guide
-
-Python bindings for GROMOS-RS molecular dynamics simulations.
-
-!!! warning "Educational Project - Not Functional"
-    **py-gromos cannot currently be built** because gromos-rs has ~140+ compilation errors. This guide shows the intended API design for educational purposes.
-
-## Architecture
-
-Inspired by [Polars](https://github.com/pola-rs/polars)' design:
-
-- **Rust core**: Rust MD engine (when functional)
-- **PyO3 bindings**: Safe, zero-copy data sharing between Rust and Python
-- **NumPy integration**: Direct array conversion without copying
-- **Memory safety**: Guaranteed by Rust's type system
+# Quick Start
 
 ## Installation
 
-!!! danger "Not Currently Possible"
-    py-gromos cannot be built because gromos-rs doesn't compile. These instructions are aspirational.
-
-### From source (when working)
-
 ```bash
-# Install maturin (Rust-Python build tool)
-pip install maturin
-
-# Build and install in development mode
-cd py-gromos
-maturin develop --release
-
-# Or build wheel for distribution
-maturin build --release
-pip install target/wheels/gromos-*.whl
+git clone https://github.com/yerkoescalona/gromos-rs.git
+cd gromos-rs
+make build-python        # creates .venv, compiles Rust, installs gromos
+source .venv/bin/activate
 ```
 
-### From PyPI (future)
+See [Installation](installation.md) for details and troubleshooting.
 
-```bash
-pip install gromos  # Not available yet
-```
+---
 
-## Quick Start Example
+## Loading a system
 
-!!! note "API Design Only"
-    This shows the intended API. The code cannot actually run yet.
+A `System` is a topology + coordinate file pair.  
+The atom count is validated at construction — mismatched files raise `ValueError` immediately.
 
 ```python
-import gromos
+from gromos import System
+
+system = System.from_files("water_216.topo", "equilibrated.cnf")
+print(system)
+# System(n_atoms=648, charge=0, box=(3.105, 3.105, 3.105))
+
+print(system.n_atoms)           # 648
+print(system.charge)            # 0  — integer, units of e
+print(system.positions.shape)   # (648, 3) — float64, nm
+print(system.velocities.shape)  # (648, 3) — float64, nm/ps
+print(system.box)               # (3.105, 3.105, 3.105) nm
+```
+
+You can also build a `System` from pre-loaded objects:
+
+```python
+from gromos import Topology, Configuration, System
+
+topo   = Topology("water_216.topo")
+conf   = Configuration("equilibrated.cnf")
+system = System(topo, conf)   # same validation
+```
+
+### Inspecting topology and configuration directly
+
+```python
+topo = Topology("water_216.topo")
+print(topo.n_atoms)          # total atoms (solute + solvent)
+print(topo.n_solute_atoms)   # solute-only
+print(topo.n_solvent_atoms)  # solvent-only
+print(topo.masses.shape)     # (N,) float64, g/mol
+print(topo.charges.shape)    # (N,) float64, e
+
+conf = Configuration("equilibrated.cnf")
+print(conf.positions.shape)   # (N, 3) float64, nm
+print(conf.velocities.shape)  # (N, 3) float64, nm/ps
+print(conf.box_dimensions)    # (Lx, Ly, Lz) nm
+```
+
+---
+
+## Creating simulation parameters
+
+Use a factory — no `.imd` file authoring required.
+
+```python
+from gromos import InputParameters
+
+# NVT — Berendsen thermostat, τ = 0.1 ps
+params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0)
+
+# NVE — microcanonical, no thermostat
+params = InputParameters.nve(dt=0.002, steps=5000)
+
+# NPT — Berendsen thermostat + barostat, water compressibility by default
+params = InputParameters.npt(dt=0.002, steps=5000, temperature=300.0, pressure=1.0)
+
+# Energy minimisation — steepest descent
+params = InputParameters.steepest_descent(steps=500)
+
+# Or load an existing GROMOS input file
+params = InputParameters.from_file("run.imd")
+params = InputParameters("run.imd")   # identical
+
+print(params.dt, params.nstlim, params.temperature, params.cutoff)
+```
+
+---
+
+## Running a simulation
+
+```python
+from gromos import Simulation
+
+# Recommended: two-argument form
+sim = Simulation(system, params)
+
+# Legacy three-argument forms also work
+sim = Simulation(topo, conf, params)
+sim = Simulation("water_216.topo", "equilibrated.cnf", "run.imd")
+```
+
+### Advancing and reading state
+
+```python
+sim.step(100)   # advance 100 MD steps
+
+# Energies (kJ/mol)
+print(sim.total_energy)
+print(sim.kinetic_energy)
+print(sim.potential_energy)
+
+# Positions and velocities ((N, 3) float64 NumPy arrays)
+print(sim.positions.shape)   # nm
+print(sim.velocities.shape)  # nm/ps
+print(sim.forces.shape)      # kJ/(mol·nm)
+
+# Clock
+print(sim.time)          # ps
+print(sim.current_step)  # step number
+
+# Thermostat temperature
+print(sim.temperature)   # K
+```
+
+### Collecting energies over a run
+
+```python
 import numpy as np
 
-# Create system state
-state = gromos.State(
-    num_atoms=1000,
-    num_temp_groups=1,
-    num_energy_groups=1
-)
+energies = []
+for _ in range(50):
+    sim.step(100)
+    energies.append(sim.total_energy)
 
-# Set up simulation box
-box = gromos.Box.rectangular(5.0, 5.0, 5.0)  # 5x5x5 nm
-
-# Create integrator
-integrator = gromos.LeapFrog(dt=0.002)  # 2 fs timestep
-
-# Work with 3D vectors
-v1 = gromos.Vec3(1.0, 2.0, 3.0)
-v2 = gromos.Vec3(4.0, 5.0, 6.0)
-distance = v1.distance(v2)
-print(f"Distance: {distance:.3f} nm")
-
-# Convert to/from NumPy
-vec_array = v1.to_numpy()
-v3 = gromos.Vec3.from_numpy(np.array([1.0, 2.0, 3.0]))
-
-# Access simulation data as NumPy arrays (zero-copy)
-positions = state.positions()  # Shape: (N, 3)
-velocities = state.velocities()  # Shape: (N, 3)
-forces = state.forces()  # Shape: (N, 3)
+energies = np.array(energies)
+print(f"Mean: {energies.mean():.1f} ± {energies.std():.1f} kJ/mol")
 ```
 
-## Advanced Sampling
+---
 
-### Gaussian Accelerated MD (GaMD)
+## Inspecting the algorithm sequence
+
+Every `Simulation` runs a fixed sequence of algorithms each step. You can read
+it out and even build a custom sequence before constructing the simulation.
 
 ```python
-# Create GaMD parameters
-gamd_params = gromos.GamdParameters(
-    sigma0=6.0,
-    threshold_mode='lower'
-)
+# Inspect what's running
+print(sim.algorithm_names)
+# ['RemoveCOMMotion', 'Forcefield', 'LeapFrogVelocity', 'BerendsenThermostat',
+#  'LeapFrogPosition', 'TemperatureCalculation', 'EnergyCalculation']
 
-# Initialize GaMD runner
-gamd = gromos.GamdRunner(gamd_params)
+# Build and modify a sequence before constructing the simulation
+from gromos import AlgorithmSequence
+
+seq = AlgorithmSequence.nvt(topo, params)
+seq.remove("RemoveCOMMotion")   # disable COM motion removal
+print(seq.names)
+print("Forcefield" in seq)      # True
+
+sim = Simulation.from_sequence(topo, conf, params, seq)
+sim.step(100)
 ```
 
-### Enveloping Distribution Sampling (EDS)
+---
+
+## Writing output
 
 ```python
-# Create EDS parameters for 4 states
-eds_params = gromos.EDSParameters(
-    num_states=4,
-    smoothness=1.0
-)
-
-# Initialize EDS runner
-eds = gromos.EDSRunner(eds_params)
+# Write current coordinates to a GROMOS .cnf file
+system.write("output.cnf")
 ```
 
-### Replica Exchange MD (REMD)
+---
 
-```python
-# Create REMD controller
-remd = gromos.ReplicaController(
-    num_replicas=8,
-    exchange_interval=1000  # Attempt exchange every 1000 steps
-)
+## Units
 
-print(f"Managing {remd.num_replicas()} replicas")
-```
+| Quantity | Unit |
+|----------|------|
+| Length | nm |
+| Time | ps |
+| Energy | kJ/mol |
+| Force | kJ/(mol·nm) |
+| Velocity | nm/ps |
+| Temperature | K |
+| Pressure | bar |
+| Mass | g/mol |
+| Charge | elementary charge (e) |
 
-## Features
+---
 
-### Math Types
-- `Vec3`: SIMD-accelerated 3D vectors
-- `Mat3`: SIMD-accelerated 3×3 matrices
+## Next steps
 
-### Core Structures
-- `State`: System state (positions, velocities, forces)
-- `Energy`: Energy tracking (kinetic, potential, components)
-- `Configuration`: Complete system configuration
-- `Topology`: Molecular topology (atoms, bonds, parameters)
-- `Box`: Simulation box (vacuum, rectangular, triclinic)
-
-### Integrators
-- `LeapFrog`: Fast velocity Verlet variant
-- `VelocityVerlet`: Higher accuracy integrator
-- `StochasticDynamics`: Langevin dynamics for implicit solvent
-
-### Advanced Sampling
-- `GamdParameters`, `GamdRunner`: Gaussian Accelerated MD
-- `EDSParameters`, `EDSRunner`: Enveloping Distribution Sampling
-- `ReplicaController`: Replica Exchange MD
-
-## Design Goals
-
-py-gromos aims to provide (when functional):
-
-| Feature | Design Intention |
-|---------|------------------|
-| SIMD vectorization | Automatic via glam + wide |
-| Parallel execution | Rayon multi-threading |
-| Zero-copy arrays | NumPy integration via PyO3 |
-| Memory safety | Rust guarantees, no segfaults |
-| Zero-cost abstractions | No runtime overhead |
-
-!!! warning "Performance Not Validated"
-    Performance claims like "2-3x speedup" have NOT been measured. gromos-rs doesn't compile yet, so no benchmarks exist.
-
-### Why Zero-Copy Matters
-
-Like Polars, GROMOS-RS uses Apache Arrow-compatible memory layout:
-
-```python
-# No data copying - direct memory access
-positions = state.positions()  # Returns view of Rust memory
-positions[0] = [1.0, 2.0, 3.0]  # Would need copy for mutation
-
-# Setting data requires a copy
-new_positions = np.random.rand(1000, 3).astype(np.float32)
-state.set_positions(new_positions)  # Copies into Rust
-```
-
-## Comparison with Polars
-
-| Aspect | Polars | GROMOS-RS |
-|--------|--------|-----------|
-| Core language | Rust | Rust |
-| Python bindings | PyO3 | PyO3 |
-| Data sharing | Arrow zero-copy | NumPy zero-copy |
-| Parallelism | Rayon | Rayon |
-| SIMD | Yes | Yes (glam) |
-| Domain | DataFrames | Molecular dynamics |
-
-## Development
-
-### Building
-
-```bash
-# Install Rust toolchain
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install maturin
-pip install maturin
-
-# Build in development mode (includes debug symbols)
-maturin develop
-
-# Build optimized release
-maturin develop --release
-```
-
-### Testing
-
-```bash
-# Run Python tests
-pytest tests/
-
-# Run Rust tests
-cargo test -p gromos-rs
-```
-
-### Project Structure
-
-```
-py-gromos/
-├── Cargo.toml           # Rust package manifest
-├── pyproject.toml       # Python package config
-├── src/
-│   └── lib.rs          # Rust ↔ Python bindings (PyO3)
-├── python/
-│   └── gromos/
-│       └── __init__.py  # Python API
-├── tests/              # Python tests
-└── examples/           # Example scripts
-```
-
-## Next Steps
-
-- **[API Reference](../api/reference.md)**: Complete API documentation
-- **[Learning Guide](learning-guide.md)**: Learn PyO3 and Rust-Python integration
-- **[Contributing](../development/contributing.md)**: Help make this functional
-
-## License
-
-GPL-2.0 - Same as GROMOS
-
-## References
-
-- **GROMOS**: [www.gromos.net](https://www.gromos.net)
-- **Polars**: [github.com/pola-rs/polars](https://github.com/pola-rs/polars)
-- **PyO3**: [pyo3.rs](https://pyo3.rs)
-- **NumPy**: [numpy.org](https://numpy.org)
-
-## Citation
-
-!!! warning "Not for Research Use"
-    This is an educational project. Use official GROMOS software for research.
+- **[API Reference](../api/reference.md)** — every class and method documented
+- **[Installation](installation.md)** — build options, troubleshooting
