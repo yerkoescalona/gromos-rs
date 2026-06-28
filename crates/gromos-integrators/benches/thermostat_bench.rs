@@ -28,7 +28,7 @@ fn make_system(n_atoms: usize) -> (Topology, Configuration) {
 
     let mut conf = Configuration::new(n_atoms, 1, 1);
     for i in 0..n_atoms {
-        let t = i * 0.1;
+        let t = i as f64 * 0.1;
         conf.current_mut().vel[i] = Vec3::new(t.sin() * 0.1, t.cos() * 0.1, t * 0.01);
     }
 

@@ -530,7 +530,7 @@ mod tests {
 
         assert!((a + b).to_f64() - 5.0 < F::EPSILON.to_f64());
         assert!((a * b).to_f64() - 6.0 < F::EPSILON.to_f64());
-        assert!((a.sqrt().to_f64() - 1.41421356).abs() < 0.0001);
+        assert!((a.sqrt().to_f64() - std::f64::consts::SQRT_2).abs() < 0.0001);
     }
 
     #[test]

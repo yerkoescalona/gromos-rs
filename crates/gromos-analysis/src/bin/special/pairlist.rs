@@ -49,32 +49,25 @@ fn main() {
 
     eprintln!("# Generating pairlist with cutoff {} nm", cutoff);
 
-    loop {
-        match traj.read_frame() {
-            Ok(Some(frame)) => {
-                let mut pair_count = 0;
+    if let Ok(Some(frame)) = traj.read_frame() {
+        let mut pair_count = 0;
 
-                println!("# Frame at time {} ps", frame.time);
+        println!("# Frame at time {} ps", frame.time);
 
-                for i in 0..frame.positions.len() {
-                    for j in (i + 1)..frame.positions.len() {
-                        let dx = frame.positions[i].x - frame.positions[j].x;
-                        let dy = frame.positions[i].y - frame.positions[j].y;
-                        let dz = frame.positions[i].z - frame.positions[j].z;
-                        let dist_sq = dx * dx + dy * dy + dz * dz;
+        for i in 0..frame.positions.len() {
+            for j in (i + 1)..frame.positions.len() {
+                let dx = frame.positions[i].x - frame.positions[j].x;
+                let dy = frame.positions[i].y - frame.positions[j].y;
+                let dz = frame.positions[i].z - frame.positions[j].z;
+                let dist_sq = dx * dx + dy * dy + dz * dz;
 
-                        if dist_sq <= cutoff_sq {
-                            println!("{:6} {:6}", i + 1, j + 1);
-                            pair_count += 1;
-                        }
-                    }
+                if dist_sq <= cutoff_sq {
+                    println!("{:6} {:6}", i + 1, j + 1);
+                    pair_count += 1;
                 }
-
-                eprintln!("  {} pairs within cutoff", pair_count);
-                break; // Only first frame
-            },
-            Ok(None) => break,
-            Err(_) => break,
+            }
         }
+
+        eprintln!("  {} pairs within cutoff", pair_count);
     }
 }

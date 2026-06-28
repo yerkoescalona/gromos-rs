@@ -64,43 +64,33 @@ fn main() {
     println!("  Replicated simulation box");
     println!("END");
 
-    loop {
-        match traj.read_frame() {
-            Ok(Some(frame)) => {
-                let box_dims = frame.box_dims;
-                let new_box = Vec3::new(
-                    box_dims.x * nx as f64,
-                    box_dims.y * ny as f64,
-                    box_dims.z * nz as f64,
-                );
+    if let Ok(Some(frame)) = traj.read_frame() {
+        let box_dims = frame.box_dims;
+        let new_box = Vec3::new(
+            box_dims.x * nx as f64,
+            box_dims.y * ny as f64,
+            box_dims.z * nz as f64,
+        );
 
-                println!("POSITION");
-                println!("  {:15.9} {:15.9} {:15.9}", new_box.x, new_box.y, new_box.z);
+        println!("POSITION");
+        println!("  {:15.9} {:15.9} {:15.9}", new_box.x, new_box.y, new_box.z);
 
-                for ix in 0..nx {
-                    for iy in 0..ny {
-                        for iz in 0..nz {
-                            let offset = Vec3::new(
-                                ix as f64 * box_dims.x,
-                                iy as f64 * box_dims.y,
-                                iz as f64 * box_dims.z,
-                            );
+        for ix in 0..nx {
+            for iy in 0..ny {
+                for iz in 0..nz {
+                    let offset = Vec3::new(
+                        ix as f64 * box_dims.x,
+                        iy as f64 * box_dims.y,
+                        iz as f64 * box_dims.z,
+                    );
 
-                            for pos in &frame.positions {
-                                let new_pos = *pos + offset;
-                                println!(
-                                    "{:15.9} {:15.9} {:15.9}",
-                                    new_pos.x, new_pos.y, new_pos.z
-                                );
-                            }
-                        }
+                    for pos in &frame.positions {
+                        let new_pos = *pos + offset;
+                        println!("{:15.9} {:15.9} {:15.9}", new_pos.x, new_pos.y, new_pos.z);
                     }
                 }
-                println!("END");
-                break; // Only first frame
-            },
-            Ok(None) => break,
-            Err(_) => break,
+            }
         }
+        println!("END");
     }
 }

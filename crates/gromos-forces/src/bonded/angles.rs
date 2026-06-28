@@ -371,7 +371,8 @@ mod tests {
         // Calculate expected energy: V = 0.5 * K * (θ - θ₀)²
         // θ = π/2 = 1.5708 rad, θ₀ = 2.0944 rad
         // dθ = 1.5708 - 2.0944 = -0.5236 rad (30° difference)
-        let expected_energy = 0.5 * 500.0 * 0.5236 * 0.5236; // ≈ 68.5 kJ/mol
+        let d_theta = std::f64::consts::FRAC_PI_6; // 30° = π/6 rad
+        let expected_energy = 0.5 * 500.0 * d_theta * d_theta; // ≈ 68.5 kJ/mol
 
         println!("Expected energy: {:.6} kJ/mol", expected_energy);
         assert!(

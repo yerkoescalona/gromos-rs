@@ -9,7 +9,7 @@ use gromos_io::{
 fn make_conf(n_atoms: usize) -> Configuration {
     let mut conf = Configuration::new(n_atoms, 1, 1);
     for i in 0..n_atoms {
-        let t = i * 0.1;
+        let t = i as f64 * 0.1;
         conf.current_mut().pos[i] = Vec3::new(t.sin(), t.cos(), t * 0.01);
     }
     conf
@@ -64,7 +64,9 @@ fn bench_force_write(c: &mut Criterion) {
 
     for n in [10usize, 100, 1_000] {
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
-            let forces: Vec<Vec3> = (0..n).map(|i| Vec3::new(i, i * 0.5, i * 0.25)).collect();
+            let forces: Vec<Vec3> = (0..n)
+                .map(|i| Vec3::new(i as f64, i as f64 * 0.5, i as f64 * 0.25))
+                .collect();
 
             b.iter_with_setup(
                 || {
