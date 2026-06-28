@@ -468,6 +468,7 @@ pub struct GamdRunner {
 
     /// CRF parameters for nonbonded interactions
     crf_params: CRFParameters,
+    four_pi_eps_i: f64,
 
     /// Current MD step
     current_step: usize,
@@ -511,6 +512,7 @@ impl GamdRunner {
             pairlist_algorithm,
             parallel_forces,
             crf_params,
+            four_pi_eps_i: gromos_core::units::four_pi_eps_i,
             current_step: 0,
             dihedral_forces: Vec::new(),
             other_forces: Vec::new(),
@@ -608,6 +610,7 @@ impl GamdRunner {
                 &lj_params,
                 &self.crf_params,
                 &periodicity,
+                self.four_pi_eps_i,
                 n_atoms,
             )
         } else {
@@ -620,6 +623,7 @@ impl GamdRunner {
                 &lj_params,
                 &self.crf_params,
                 &periodicity,
+                self.four_pi_eps_i,
                 &mut storage,
             );
             storage

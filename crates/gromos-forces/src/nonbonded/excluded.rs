@@ -1,21 +1,8 @@
 //! RF excluded-pair corrections and 1-4 interaction loop
 
-use super::params::FOUR_PI_EPS_I;
 use super::{CRFParameters, ForceStorage, LJParamMatrix};
 use gromos_core::math::{BoundaryCondition, Vec3};
 
-/// Calculate reaction-field self-energy and excluded-pair corrections.
-///
-/// In GROMOS, excluded atom pairs (bonded neighbours) are removed from the
-/// pairlist but still contribute a reaction-field correction.  This function
-/// computes both the atomic self-term and the excluded-pair term.
-///
-/// # Arguments
-/// * `charges` - Per-atom partial charges
-/// * `exclusions` - Per-atom sets of excluded partner indices
-/// * `positions` - Current atomic positions
-/// * `crf` - CRF parameters
-/// * `boundary` - Boundary condition for nearest-image calculation
 /// Calculate reaction-field excluded-pair corrections (energy + forces).
 ///
 /// In GROMOS, excluded atom pairs (bonded neighbours) are removed from the
@@ -32,12 +19,16 @@ use gromos_core::math::{BoundaryCondition, Vec3};
 ///   NO self-term (distance-independent parts cancel for neutral charge groups)
 ///   NO forces (rigid molecules)
 ///   Only energy: `E = -qi*qj * FPEPSI * crf_2cut3i * r²` (distance-dependent part only)
+///
+/// # Arguments
+/// * `constants` - Physical constants (controls `four_pi_eps_i` value)
 pub fn rf_excluded_interactions<BC: BoundaryCondition>(
     charges: &[f64],
     exclusions: &[Vec<usize>],
     positions: &[Vec3],
     crf: &CRFParameters,
     boundary: &BC,
+    four_pi_eps_i: f64,
     storage: &mut ForceStorage,
     num_solute_atoms: usize,
 ) {
@@ -48,7 +39,7 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
 
     for i in 0..num_solute_atoms {
         // Self term: -0.5 * qi^2 * FPEPSI * crf_cut
-        let term = -0.5 * charges[i] * charges[i] * FOUR_PI_EPS_I * crf.crf_cut;
+        let term = -0.5 * charges[i] * charges[i] * four_pi_eps_i * crf.crf_cut;
         e_self += term;
         storage.e_crf += term;
 
@@ -57,7 +48,7 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
             if j > i {
                 let r = boundary.nearest_image(positions[i], positions[j]);
                 let r2 = r.length_squared();
-                let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
+                let q_prod = charges[i] * charges[j] * four_pi_eps_i;
 
                 // Energy: q_prod * (-crf_2cut3i * r² - crf_cut)
                 let term = q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
@@ -94,7 +85,7 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
                 let r2 = r.length_squared();
 
                 // Only: -qi*qj * FPEPSI * crf_2cut3i * r²
-                let term = -charges[i] * charges[j] * FOUR_PI_EPS_I * crf.crf_2cut3i * r2;
+                let term = -charges[i] * charges[j] * four_pi_eps_i * crf.crf_2cut3i * r2;
                 e_excl_solvent += term;
                 storage.e_crf += term;
                 n_solvent_excl += 1;
@@ -134,6 +125,7 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
 /// * `lj_params` - LJ parameter matrix (indexed by atom type)
 /// * `crf` - CRF parameters
 /// * `boundary` - Boundary condition for nearest-image calculation
+/// * `constants` - Physical constants (controls `four_pi_eps_i` value)
 /// * `storage` - Force/energy accumulator
 /// * `coulomb_scaling` - Scaling factor for Coulomb 1-4 interactions (1.0 for GROMOS, 0.5 for AMBER)
 pub fn one_four_interaction_loop<BC: BoundaryCondition>(
@@ -144,6 +136,7 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
     lj_params: &LJParamMatrix,
     crf: &CRFParameters,
     boundary: &BC,
+    four_pi_eps_i: f64,
     storage: &mut ForceStorage,
     coulomb_scaling: f64,
 ) {
@@ -153,7 +146,6 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
 
     for i in 0..one_four_pairs.len() {
         for &j in &one_four_pairs[i] {
-            // Only process j > i to avoid double-counting
             if j <= i {
                 continue;
             }
@@ -177,7 +169,7 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
             let f_lj = (12.0 * lj.cs12 * inv_r6 - 6.0 * lj.cs6) * inv_r6 * inv_r2;
 
             // CRF with coulomb scaling
-            let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
+            let q_prod = charges[i] * charges[j] * four_pi_eps_i;
             let inv_r = inv_r2.sqrt();
             let e_crf = q_prod * (inv_r * coulomb_scaling - crf.crf_2cut3i * r2 - crf.crf_cut);
             let f_crf = q_prod * (inv_r * coulomb_scaling * inv_r2 + crf.crf_cut3i);
@@ -191,7 +183,6 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
             e_lj_14 += e_lj;
             e_crf_14 += e_crf;
 
-            // Virial: GROMOS convention virial_tensor(b, a) += r(b) * force(a)
             let rv = [r.x, r.y, r.z];
             let fv = [force.x, force.y, force.z];
             for a in 0..3 {

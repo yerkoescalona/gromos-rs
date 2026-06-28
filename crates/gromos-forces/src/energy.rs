@@ -175,6 +175,7 @@ pub fn single_point_energy(
             &lj_mat,
             &crf,
             &periodicity,
+            gromos_core::units::four_pi_eps_i,
             &mut nb,
         );
     }
@@ -188,6 +189,7 @@ pub fn single_point_energy(
             &crf,
             &periodicity,
             params.atoms_per_solvent,
+            gromos_core::units::four_pi_eps_i,
             &mut nb,
         );
     }
@@ -198,6 +200,7 @@ pub fn single_point_energy(
         &conf.current().pos,
         &crf,
         &periodicity,
+        gromos_core::units::four_pi_eps_i,
         &mut nb,
         topo.num_solute_atoms(),
     );
@@ -211,6 +214,7 @@ pub fn single_point_energy(
             &lj_mat,
             &crf,
             &periodicity,
+            gromos_core::units::four_pi_eps_i,
             &mut nb,
             1.0,
         );

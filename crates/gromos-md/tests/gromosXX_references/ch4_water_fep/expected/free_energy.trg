@@ -1,9 +1,10 @@
 TITLE
-  GROMOS-RS free energy trajectory
+	MD++
+CH4 in water FEP/TI: CH4 -> dummy, RLAM=0.5, NLAM=1
+One step for reference energy validation.
+
+	free energy trajectory
 END
-FREEENERGY03
-        0.000000000e0       5.000000000e-1        0.000000000e0        0.000000000e0        0.000000000e0        0.000000000e0        0.000000000e0        0.000000000e0       -1.053079633e2
-END
-FREEENERGY03
-       2.000000000e-3       5.000000000e-1        0.000000000e0        0.000000000e0        0.000000000e0        0.000000000e0        0.000000000e0        0.000000000e0       -1.039452633e2
+ENEVERSION
+	2023-04-15
 END

@@ -95,20 +95,27 @@ fn parse_forces_trf(path: &Path, step: usize) -> Vec<Vec3> {
     forces
 }
 
-/// Parse ENERGY03 block from energies.tre at a given step
-/// Returns (e_total, e_kinetic, e_potential, e_vdw, e_crf)
-#[allow(dead_code)] // TODO: wire up when energy validation against .tre is implemented
+/// Parse ENERGY03 block from energies.tre at a given step.
+///
+/// Reads the `# totals` section (one float per line) and the `# nonbonded`
+/// section (6 floats per line: e_lj, e_crf, ...) summing across molecule-type
+/// pair rows to produce system totals.
 fn parse_energies_tre(path: &Path, step: usize) -> EnergyValues {
     let content = std::fs::read_to_string(path).expect("Cannot read energies.tre");
     let mut current_step = None;
-    let mut in_energy = false;
-    let mut energy_values: Vec<f64> = Vec::new();
+    let mut in_energy03 = false;
+    let mut in_nonbonded = false;
+    let mut totals: Vec<f64> = Vec::new();
+    let mut e_lj = 0.0_f64;
+    let mut e_crf = 0.0_f64;
 
     for line in content.lines() {
         let trimmed = line.trim();
 
         if trimmed == "TIMESTEP" {
             current_step = None;
+            in_energy03 = false;
+            in_nonbonded = false;
             continue;
         }
 
@@ -127,44 +134,68 @@ fn parse_energies_tre(path: &Path, step: usize) -> EnergyValues {
             continue;
         }
 
-        if trimmed == "ENERGY03" {
-            if current_step == Some(step) {
-                in_energy = true;
-                energy_values.clear();
-            }
+        if trimmed == "ENERGY03" && current_step == Some(step) {
+            in_energy03 = true;
+            totals.clear();
+            e_lj = 0.0;
+            e_crf = 0.0;
             continue;
         }
 
         if trimmed == "END" {
-            if in_energy {
+            if in_energy03 {
                 break;
             }
             continue;
         }
 
-        if in_energy && !trimmed.starts_with('#') && !trimmed.is_empty() {
-            if let Ok(val) = trimmed.parse::<f64>() {
-                energy_values.push(val);
+        if !in_energy03 || trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with('#') {
+            in_nonbonded = trimmed == "# nonbonded";
+            continue;
+        }
+
+        if in_nonbonded {
+            // Each row: e_lj  e_crf  ... (6 values, one row per molecule-type pair).
+            let vals: Vec<f64> = trimmed
+                .split_whitespace()
+                .filter_map(|s| s.parse::<f64>().ok())
+                .collect();
+            if vals.len() >= 2 {
+                e_lj += vals[0];
+                e_crf += vals[1];
+            }
+        } else if totals.len() < 3 {
+            // # totals section has one float per line.
+            if let Ok(v) = trimmed.parse::<f64>() {
+                totals.push(v);
             }
         }
     }
 
-    // ENERGY03 format (GROMOS standard):
-    // [0] = E_total, [1] = E_kinetic, [2] = E_potential
-    // ... more fields follow. VdW and CRF positions depend on the system.
     EnergyValues {
-        e_total: energy_values.get(0).copied().unwrap_or(0.0),
-        e_kinetic: energy_values.get(1).copied().unwrap_or(0.0),
-        e_potential: energy_values.get(2).copied().unwrap_or(0.0),
+        e_total: totals.first().copied().unwrap_or(0.0),
+        e_kinetic: totals.get(1).copied().unwrap_or(0.0),
+        e_potential: totals.get(2).copied().unwrap_or(0.0),
+        e_lj,
+        e_crf,
     }
 }
 
 #[derive(Debug)]
-#[allow(dead_code)] // TODO: used by parse_energies_tre above
 struct EnergyValues {
+    #[allow(dead_code)]
     e_total: f64,
+    #[allow(dead_code)]
     e_kinetic: f64,
+    #[allow(dead_code)]
     e_potential: f64,
+    e_lj: f64,
+    #[allow(dead_code)]
+    e_crf: f64,
 }
 
 /// Convert topology LJ parameters to the nonbonded format
@@ -267,6 +298,7 @@ fn test_pair_lj_forces_step0() {
         &lj_params,
         &crf,
         &bc,
+        gromos_core::units::four_pi_eps_i,
         &mut storage,
     );
 
@@ -317,14 +349,13 @@ fn test_pair_lj_energy_step0() {
         &lj_params,
         &crf,
         &bc,
+        gromos_core::units::four_pi_eps_i,
         &mut storage,
     );
 
-    // Expected VdW energy from input.toml: E_Vdw = -4.9395e-01
-    // More precise from energies.tre: -4.939549393e-01
-    let expected_e_lj = -4.939549393e-01;
+    let energies = parse_energies_tre(&base.join("expected/energies.tre"), 0);
     let tol = 1e-8;
-    assert_f64_rel(storage.e_lj, expected_e_lj, tol, "pair_lj E_Vdw");
+    assert_f64_rel(storage.e_lj, energies.e_lj, tol, "pair_lj E_Vdw");
 }
 
 // ─── Level 0: nacl_pair ─────────────────────────────────────────────────────
@@ -347,13 +378,12 @@ fn test_nacl_pair_forces_step0() {
     let charges: Vec<f64> = topo.charge.clone();
     let lj_params = convert_lj_params(&topo.lj_parameters);
 
-    // For nacl_pair, electrostatics are active. Use CRF with large cutoff (vacuum, no PBC).
-    // In vacuum with no PBC, cutoff > distance means plain Coulomb.
-    // CRF formula: E = q*(1/r + crf_2cut3i*r^2 - crf_cut3i)
-    // For no reaction field (epsrf=1, rcrf=rcutl): crf=0, so crf_2cut3i=0, crf_cut3i=1/rc
-    // But for vacuum (no RF), just use large cutoff with crf terms = 0
+    // nacl_pair.in: EPSRF=1.0 (vacuum), RCRF=RCUTL=1.4 nm.
+    // gromosXX with EPSRF=1 uses plain Coulomb: crf=0, so all correction
+    // terms vanish (crf_cut=0, not 1/rc — confirmed by oracle e_crf=-463.118
+    // which equals four_pi_eps_i*q1*q2/r with no shift).
     let crf = CRFParameters {
-        crf_cut: 1.4,
+        crf_cut: 0.0,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
         cutoff_sq: 1.4_f64.powi(2),
@@ -369,6 +399,7 @@ fn test_nacl_pair_forces_step0() {
         &lj_params,
         &crf,
         &bc,
+        gromos_core::units::four_pi_eps_i,
         &mut storage,
     );
 
@@ -376,10 +407,8 @@ fn test_nacl_pair_forces_step0() {
     let expected_forces = parse_forces_trf(&base.join("expected/forces.trf"), 0);
     assert_eq!(expected_forces.len(), n_atoms);
 
-    // Tolerance is 1e-3 (not 1e-6) because gromos-rs uses four_pi_eps_i = 138.9354859
-    // (CODATA 2018) while gromosXX uses 138.9354 (truncated). The ~0.006% precision
-    // improvement causes a ~9.5e-4 kJ/(mol·nm) difference on Coulomb forces — deliberate.
-    let tol = 1e-3;
+    // Oracle uses gromosXX legacy constants (138.9354) from the topo PHYSICALCONSTANTS block.
+    let tol = 1e-9;
     for i in 0..n_atoms {
         assert_vec3_approx(
             storage.forces[i],
@@ -404,8 +433,9 @@ fn test_nacl_pair_energy_step0() {
     let iac: Vec<u32> = topo.iac.iter().map(|&i| i as u32).collect();
     let charges: Vec<f64> = topo.charge.clone();
     let lj_params = convert_lj_params(&topo.lj_parameters);
+    // EPSRF=1.0 → plain Coulomb, all CRF correction terms zero.
     let crf = CRFParameters {
-        crf_cut: 1.4,
+        crf_cut: 0.0,
         crf_2cut3i: 0.0,
         crf_cut3i: 0.0,
         cutoff_sq: 1.4_f64.powi(2),
@@ -421,14 +451,15 @@ fn test_nacl_pair_energy_step0() {
         &lj_params,
         &crf,
         &bc,
+        gromos_core::units::four_pi_eps_i,
         &mut storage,
     );
 
-    // Expected from input.toml: E_Vdw = 1.4529e+00 (repulsive LJ at short range)
-    // E_Non_bonded = -4.6167e+02 (dominated by Coulomb attraction)
-    let expected_e_vdw = 1.4529e+00;
-    let tol = 1e-3; // Relaxed since we only have 4 sigfigs from input.toml
-    assert_f64_rel(storage.e_lj, expected_e_vdw, tol, "nacl_pair E_Vdw");
+    let energies = parse_energies_tre(&base.join("expected/energies.tre"), 0);
+    assert_f64_rel(storage.e_lj, energies.e_lj, 1e-8, "nacl_pair E_Vdw");
+
+    // Oracle uses gromosXX legacy constants from the topo — constants agree so tolerance is tight.
+    assert_f64_rel(storage.e_crf, energies.e_crf, 1e-7, "nacl_pair E_crf");
 }
 
 // ─── Level 0: pair_lj_mixed ─────────────────────────────────────────────────
@@ -467,6 +498,7 @@ fn test_pair_lj_mixed_forces_step0() {
         &lj_params,
         &crf,
         &bc,
+        gromos_core::units::four_pi_eps_i,
         &mut storage,
     );
 
@@ -516,11 +548,11 @@ fn test_pair_lj_mixed_energy_step0() {
         &lj_params,
         &crf,
         &bc,
+        gromos_core::units::four_pi_eps_i,
         &mut storage,
     );
 
-    // Expected from input.toml: E_Vdw = -1.1219e+00
-    let expected_e_vdw = -1.1219e+00;
-    let tol = 1e-3;
-    assert_f64_rel(storage.e_lj, expected_e_vdw, tol, "pair_lj_mixed E_Vdw");
+    let energies = parse_energies_tre(&base.join("expected/energies.tre"), 0);
+    let tol = 1e-8;
+    assert_f64_rel(storage.e_lj, energies.e_lj, tol, "pair_lj_mixed E_Vdw");
 }

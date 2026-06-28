@@ -400,6 +400,15 @@ fn main() {
         },
     };
 
+    // Extract physical constants from topo before build_topology consumes it.
+    // These override the defaults in Forcefield — same as gromosXX reading PHYSICALCONSTANTS.
+    let physical_constants = topo_data.physical_constants;
+    log::info!(
+        "Physical constants from topo: four_pi_eps_i={}, kB={}",
+        physical_constants.four_pi_eps_i,
+        physical_constants.kB
+    );
+
     // GROMOS convention: read_topology() then topo.solvate(0, nsm)
     let mut topo = build_topology(topo_data);
 
@@ -805,7 +814,8 @@ fn main() {
     log::debug!("Calculating CRF parameters");
     let crf_params = CRFParameters::new(cutoff, epsilon, rf_epsilon, rf_kappa);
     log::debug!(
-        "CRF parameters: crf_2cut3i={:.6}, crf_cut3i={:.6}",
+        "CRF parameters: crf_cut={:.6}, crf_2cut3i={:.6}, crf_cut3i={:.6}",
+        crf_params.crf_cut,
         crf_params.crf_2cut3i,
         crf_params.crf_cut3i
     );
@@ -994,6 +1004,8 @@ fn main() {
             pairlist,
             pairlist_algorithm,
         );
+        // Use constants from topo PHYSICALCONSTANTS block (mirrors gromosXX behavior)
+        forcefield.four_pi_eps_i = physical_constants.four_pi_eps_i;
         forcefield.ntf_bond = ntf_bond;
         forcefield.ntf_angle = ntf_angle;
         forcefield.ntf_improper = ntf_improper;
@@ -1093,6 +1105,7 @@ fn main() {
             pairlist,
             pairlist_algorithm,
         );
+        forcefield.four_pi_eps_i = physical_constants.four_pi_eps_i;
         forcefield.ntf_bond = ntf_bond;
         forcefield.ntf_angle = ntf_angle;
         forcefield.ntf_improper = ntf_improper;

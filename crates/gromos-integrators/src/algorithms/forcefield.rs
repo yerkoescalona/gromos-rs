@@ -39,6 +39,8 @@ pub struct Forcefield {
     pub lj_params: LJParamMatrix,
     /// Coulomb reaction field parameters
     pub crf_params: CRFParameters,
+    /// Coulomb prefactor 1/(4πε₀) in GROMOS units (kJ mol⁻¹ nm e⁻²).
+    pub four_pi_eps_i: f64,
     /// Boundary conditions
     pub periodicity: Periodicity,
     /// Pairlist container
@@ -125,6 +127,7 @@ impl Forcefield {
         Self {
             lj_params: LJParamMatrix::from_nested(&lj_params),
             crf_params,
+            four_pi_eps_i: gromos_core::units::four_pi_eps_i,
             periodicity,
             pairlist,
             pairlist_algorithm,
@@ -430,6 +433,7 @@ impl Algorithm for Forcefield {
                         &self.lj_params,
                         &self.crf_params,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         n_atoms,
                     )
                 } else {
@@ -442,6 +446,7 @@ impl Algorithm for Forcefield {
                         &self.lj_params,
                         &self.crf_params,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         n_atoms,
                     )
                 };
@@ -456,6 +461,7 @@ impl Algorithm for Forcefield {
                     &self.lj_params,
                     &self.crf_params,
                     &self.periodicity,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             } else {
@@ -468,6 +474,7 @@ impl Algorithm for Forcefield {
                     &self.lj_params,
                     &self.crf_params,
                     &self.periodicity,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             }
@@ -483,6 +490,7 @@ impl Algorithm for Forcefield {
                         &self.lj_params,
                         &self.crf_params,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         n_atoms,
                     )
                 } else {
@@ -494,6 +502,7 @@ impl Algorithm for Forcefield {
                         &self.lj_params,
                         &self.crf_params,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         n_atoms,
                     )
                 };
@@ -507,6 +516,7 @@ impl Algorithm for Forcefield {
                     &self.lj_params,
                     &self.crf_params,
                     &self.periodicity,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             } else {
@@ -518,6 +528,7 @@ impl Algorithm for Forcefield {
                     &self.lj_params,
                     &self.crf_params,
                     &self.periodicity,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             }
@@ -549,6 +560,7 @@ impl Algorithm for Forcefield {
                         &self.crf_params,
                         &self.periodicity,
                         self.atoms_per_solvent,
+                        self.four_pi_eps_i,
                         n_atoms,
                     )
                 } else {
@@ -561,6 +573,7 @@ impl Algorithm for Forcefield {
                         &self.crf_params,
                         &self.periodicity,
                         self.atoms_per_solvent,
+                        self.four_pi_eps_i,
                         n_atoms,
                     )
                 };
@@ -575,6 +588,7 @@ impl Algorithm for Forcefield {
                     &self.crf_params,
                     &self.periodicity,
                     self.atoms_per_solvent,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             } else {
@@ -587,6 +601,7 @@ impl Algorithm for Forcefield {
                     &self.crf_params,
                     &self.periodicity,
                     self.atoms_per_solvent,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             }
@@ -619,6 +634,7 @@ impl Algorithm for Forcefield {
                         &self.lj_params,
                         &self.crf_params,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         &mut lr_storage,
                     );
                 }
@@ -636,6 +652,7 @@ impl Algorithm for Forcefield {
                         &self.lj_params,
                         &self.crf_params,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         &mut lr_storage,
                     );
                 }
@@ -689,6 +706,7 @@ impl Algorithm for Forcefield {
                     &self.lj_params,
                     &self.crf_params,
                     &self.periodicity,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             }
@@ -702,6 +720,7 @@ impl Algorithm for Forcefield {
                     &self.crf_params,
                     &self.periodicity,
                     self.atoms_per_solvent,
+                    self.four_pi_eps_i,
                     &mut self.nonbonded_storage,
                 );
             }
@@ -714,6 +733,7 @@ impl Algorithm for Forcefield {
             &conf.current().pos,
             &self.crf_params,
             &self.periodicity,
+            self.four_pi_eps_i,
             &mut self.nonbonded_storage,
             topo.num_solute_atoms(),
         );
@@ -729,6 +749,7 @@ impl Algorithm for Forcefield {
                 &self.lj_params,
                 &self.crf_params,
                 &self.periodicity,
+                self.four_pi_eps_i,
                 &mut self.nonbonded_storage,
                 1.0, // coulomb_scaling: 1.0 for standard GROMOS
             );
@@ -768,6 +789,7 @@ impl Algorithm for Forcefield {
                     &self.crf_params,
                     &lp,
                     &self.periodicity,
+                    self.four_pi_eps_i,
                 );
                 self.nonbonded_storage.e_lj += corr_pl.delta_e_lj;
                 self.nonbonded_storage.e_crf += corr_pl.delta_e_crf;
@@ -797,6 +819,7 @@ impl Algorithm for Forcefield {
                         &self.crf_params,
                         &lp,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                     );
                     self.nonbonded_storage.e_lj += corr.delta_e_lj;
                     self.nonbonded_storage.e_crf += corr.delta_e_crf;
@@ -819,8 +842,12 @@ impl Algorithm for Forcefield {
                 );
 
                 // 3b-2: RF self-energy correction for perturbed atoms
-                let (de_self, dhdl_self) =
-                    perturbed_self_energy_correction(&self.pert_info, &self.crf_params, &lp);
+                let (de_self, dhdl_self) = perturbed_self_energy_correction(
+                    &self.pert_info,
+                    &self.crf_params,
+                    &lp,
+                    self.four_pi_eps_i,
+                );
                 self.nonbonded_storage.e_crf += de_self;
                 dhdl_nb += dhdl_self;
 
@@ -837,6 +864,7 @@ impl Algorithm for Forcefield {
                         &lp,
                         &self.periodicity,
                         topo.num_solute_atoms(),
+                        self.four_pi_eps_i,
                         &mut corr_ex,
                     );
                     self.nonbonded_storage.e_crf += corr_ex.delta_e_crf;
@@ -860,6 +888,7 @@ impl Algorithm for Forcefield {
                         &self.crf_params,
                         &lp,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         &mut corr14,
                     );
                     log::debug!(
@@ -888,6 +917,7 @@ impl Algorithm for Forcefield {
                         &self.crf_params,
                         &lp,
                         &self.periodicity,
+                        self.four_pi_eps_i,
                         &mut corr_ap,
                     );
                     self.nonbonded_storage.e_lj += corr_ap.delta_e_lj;

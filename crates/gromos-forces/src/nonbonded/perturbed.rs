@@ -1,7 +1,6 @@
 //! Perturbed (free-energy) LJ+CRF interactions with soft-core potentials
 
 use super::lj_crf_interaction;
-use super::params::FOUR_PI_EPS_I;
 use super::{CRFParameters, LJParamMatrix};
 use gromos_core::math::{BoundaryCondition, Vec3};
 use gromos_core::topology::PerturbedAtomPair;
@@ -134,6 +133,7 @@ pub fn perturbed_lj_crf_interaction(
     alpha_crf: f64,
     lambda_params: &PerturbedLambdaParams,
     crf: &CRFParameters,
+    four_pi_eps_i: f64,
 ) -> (f64, f64, f64, f64, f64) {
     let r2 = r.length_squared();
 
@@ -201,7 +201,7 @@ pub fn perturbed_lj_crf_interaction(
     // CRF force
     let mut force = (lambda_params.a_crf_lambda_n * a_q * (a_dist3isoft + a_crf_cut3i)
         + lambda_params.b_crf_lambda_n * b_q * (b_dist3isoft + b_crf_cut3i))
-        * FOUR_PI_EPS_I;
+        * four_pi_eps_i;
 
     // LJ attractive force: -6 * C6 / r⁸
     force += -6.0
@@ -226,7 +226,7 @@ pub fn perturbed_lj_crf_interaction(
     // Total energy: E = (1-λ)^n * E_A + λ^n * E_B
     let e_lj = lambda_params.a_lj_lambda_n * a_e_lj + lambda_params.b_lj_lambda_n * b_e_lj;
     let e_crf = (lambda_params.a_crf_lambda_n * a_e_crf + lambda_params.b_crf_lambda_n * b_e_crf)
-        * FOUR_PI_EPS_I;
+        * four_pi_eps_i;
 
     // ===== LAMBDA DERIVATIVES (dH/dλ) =====
     // LJ derivative: soft-core contribution + direct lambda contribution
@@ -256,11 +256,11 @@ pub fn perturbed_lj_crf_interaction(
             * b_q
             * lambda_params.a_crfs_lambda
             * (b_dist3isoft - b_crf_pert * r2))
-        * FOUR_PI_EPS_I
+        * four_pi_eps_i
         * alpha_crf
         + (lambda_params.lambda_exp as f64)
             * (lambda_params.b_crf_lambda_n_1 * b_e_crf - lambda_params.a_crf_lambda_n_1 * a_e_crf)
-            * FOUR_PI_EPS_I;
+            * four_pi_eps_i;
 
     (force, e_lj, e_crf, de_lj, de_crf)
 }
@@ -316,6 +316,7 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
     crf: &CRFParameters,
     lp: &PerturbedLambdaParams,
     bc: &BC,
+    four_pi_eps_i: f64,
 ) -> PertNBCorrection {
     let n = pos.len();
     let mut out = PertNBCorrection::new(n);
@@ -356,11 +357,22 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
         };
 
         let r = bc.nearest_image(pos[i], pos[j]);
-        // lj_crf_interaction expects q_prod already scaled by FOUR_PI_EPS_I
+        // lj_crf_interaction expects q_prod already scaled by four_pi_eps_i
         let (f_a, e_lj_a, e_crf_a) =
-            lj_crf_interaction(r, lj_a.c6, lj_a.c12, a_q * FOUR_PI_EPS_I, crf);
+            lj_crf_interaction(r, lj_a.c6, lj_a.c12, a_q * four_pi_eps_i, crf);
         let (f_p, e_lj_p, e_crf_p, de_lj, de_crf) = perturbed_lj_crf_interaction(
-            r, lj_a.c6, lj_a.c12, lj_b.c6, lj_b.c12, a_q, b_q, alpha_lj, alpha_crf, lp, crf,
+            r,
+            lj_a.c6,
+            lj_a.c12,
+            lj_b.c6,
+            lj_b.c12,
+            a_q,
+            b_q,
+            alpha_lj,
+            alpha_crf,
+            lp,
+            crf,
+            four_pi_eps_i,
         );
 
         let df = r * (f_p - f_a);
@@ -384,6 +396,7 @@ pub fn perturbed_self_energy_correction(
     pert: &[Option<PertAtomInfo>],
     crf: &CRFParameters,
     lp: &PerturbedLambdaParams,
+    four_pi_eps_i: f64,
 ) -> (f64, f64) {
     let mut delta_e = 0.0;
     let mut dhdl = 0.0;
@@ -397,7 +410,7 @@ pub fn perturbed_self_energy_correction(
         //   e_rf = [-(1-λ)^n*qa2 - λ^n*qb2 + qa2] * crf_cut * FPEPSI
         let e_rf = (-(lp.a_crf_lambda_n * qa2) - lp.b_crf_lambda_n * qb2 + qa2)
             * crf.crf_cut
-            * FOUR_PI_EPS_I;
+            * four_pi_eps_i;
         delta_e += 0.5 * e_rf;
 
         // de_rf from lines 756-759 with dist2=0 (soft terms vanish):
@@ -405,7 +418,7 @@ pub fn perturbed_self_energy_correction(
         let de_rf = n
             * (lp.a_crf_lambda_n_1 * qa2 - lp.b_crf_lambda_n_1 * qb2)
             * crf.crf_cut
-            * FOUR_PI_EPS_I;
+            * four_pi_eps_i;
         dhdl += 0.5 * de_rf;
     }
     (delta_e, dhdl)
@@ -424,6 +437,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
     lp: &PerturbedLambdaParams,
     bc: &BC,
     n_solute: usize,
+    four_pi_eps_i: f64,
     out: &mut PertNBCorrection,
 ) {
     for i in 0..n_solute {
@@ -469,14 +483,14 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             let b_e_crf = b_q * (-b_crf_2cut3i * r2 - crf.crf_cut);
 
             let e_crf_p =
-                (lp.a_crf_lambda_n * a_e_crf + lp.b_crf_lambda_n * b_e_crf) * FOUR_PI_EPS_I;
+                (lp.a_crf_lambda_n * a_e_crf + lp.b_crf_lambda_n * b_e_crf) * four_pi_eps_i;
             let f_p = (lp.a_crf_lambda_n * a_q * a_crf_cut3i
                 + lp.b_crf_lambda_n * b_q * b_crf_cut3i)
-                * FOUR_PI_EPS_I;
+                * four_pi_eps_i;
 
             // State-A: what the regular excluded loop computed (same formula, no 1/r)
-            let e_crf_a = a_q * FOUR_PI_EPS_I * (-crf.crf_2cut3i * r2 - crf.crf_cut);
-            let f_a = a_q * FOUR_PI_EPS_I * crf.crf_cut3i;
+            let e_crf_a = a_q * four_pi_eps_i * (-crf.crf_2cut3i * r2 - crf.crf_cut);
+            let f_a = a_q * four_pi_eps_i * crf.crf_cut3i;
 
             // dH/dλ (GROMOS lines 756-759, no dist3isoft term for excluded)
             let n_exp = lp.lambda_exp as f64;
@@ -485,7 +499,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
                 * r2
                 * alpha_crf
                 + n_exp * (lp.b_crf_lambda_n_1 * b_e_crf - lp.a_crf_lambda_n_1 * a_e_crf))
-                * FOUR_PI_EPS_I;
+                * four_pi_eps_i;
 
             let df = r * (f_p - f_a);
             out.forces[i] += df;
@@ -510,6 +524,7 @@ pub fn perturbed_one_four_correction<BC: BoundaryCondition>(
     crf: &CRFParameters,
     lp: &PerturbedLambdaParams,
     bc: &BC,
+    four_pi_eps_i: f64,
     out: &mut PertNBCorrection,
 ) {
     let _n_exp = lp.lambda_exp as f64;
@@ -559,13 +574,24 @@ pub fn perturbed_one_four_correction<BC: BoundaryCondition>(
             // State-A 1-4 what the regular one_four_interaction_loop computed (no soft-core)
             let e_lj_a = (lj_a.cs12 * inv_r6 - lj_a.cs6) * inv_r6;
             let f_lj_a = (12.0 * lj_a.cs12 * inv_r6 - 6.0 * lj_a.cs6) * inv_r6 * inv_r2;
-            let e_crf_a = a_q * FOUR_PI_EPS_I * (inv_r - crf.crf_2cut3i * r2 - crf.crf_cut);
-            let f_crf_a = a_q * FOUR_PI_EPS_I * (inv_r * inv_r2 + crf.crf_cut3i);
+            let e_crf_a = a_q * four_pi_eps_i * (inv_r - crf.crf_2cut3i * r2 - crf.crf_cut);
+            let f_crf_a = a_q * four_pi_eps_i * (inv_r * inv_r2 + crf.crf_cut3i);
 
             // Perturbed 1-4: call full dual-topology kernel with cs6/cs12 (faithful to
             // GROMOS eds_pert_lj_crf_interaction which uses cs6/cs12 for 1-4 pairs)
             let (f_p, e_lj_p, e_crf_p, de_lj, de_crf) = perturbed_lj_crf_interaction(
-                r, lj_a.cs6, lj_a.cs12, lj_b.cs6, lj_b.cs12, a_q, b_q, alpha_lj, alpha_crf, lp, crf,
+                r,
+                lj_a.cs6,
+                lj_a.cs12,
+                lj_b.cs6,
+                lj_b.cs12,
+                a_q,
+                b_q,
+                alpha_lj,
+                alpha_crf,
+                lp,
+                crf,
+                four_pi_eps_i,
             );
 
             let df = r * (f_p - (f_lj_a + f_crf_a));
@@ -605,6 +631,7 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
     crf: &CRFParameters,
     lp: &PerturbedLambdaParams,
     bc: &BC,
+    four_pi_eps_i: f64,
     out: &mut PertNBCorrection,
 ) {
     let n_exp = lp.lambda_exp as f64;
@@ -634,7 +661,7 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
         let e_lj_reg = (lj_ij.cs12 * inv_r6 - lj_ij.cs6) * inv_r6;
         let f_lj_reg = (12.0 * lj_ij.cs12 * inv_r6 - 6.0 * lj_ij.cs6) * inv_r6 * inv_r2;
 
-        let q_prod = charges[i] * charges[j] * FOUR_PI_EPS_I;
+        let q_prod = charges[i] * charges[j] * four_pi_eps_i;
         let e_crf_reg = q_prod * (inv_r - crf.crf_2cut3i * r2 - crf.crf_cut);
         let f_crf_reg = q_prod * (inv_r * inv_r2 + crf.crf_cut3i);
 
@@ -760,6 +787,7 @@ mod tests {
             alpha_crf,
             &lambda_params,
             &crf,
+            gromos_core::units::four_pi_eps_i,
         );
 
         // At λ=0: should be dominated by state A
@@ -819,6 +847,7 @@ mod tests {
             alpha_crf,
             &lambda_params,
             &crf,
+            gromos_core::units::four_pi_eps_i,
         );
 
         // At λ=1: should be dominated by state B
@@ -877,6 +906,7 @@ mod tests {
                 alpha_crf,
                 &lambda_params,
                 &crf,
+                gromos_core::units::four_pi_eps_i,
             );
 
             energies.push(e_lj + e_crf);
@@ -951,6 +981,7 @@ mod tests {
             alpha_crf,
             &lambda_params_0,
             &crf,
+            gromos_core::units::four_pi_eps_i,
         );
 
         // At λ=1 (particle fully present), will have high energy but should be finite
@@ -969,6 +1000,7 @@ mod tests {
             alpha_crf,
             &lambda_params_1,
             &crf,
+            gromos_core::units::four_pi_eps_i,
         );
 
         // Energies should be finite (no NaN or Inf)
@@ -1019,7 +1051,18 @@ mod tests {
         );
 
         let (_, e_lj_n1, _e_crf_n1, de_lj_n1, _de_crf_n1) = perturbed_lj_crf_interaction(
-            r, a_c6, a_c12, b_c6, b_c12, a_q, b_q, alpha_lj, alpha_crf, &params_n1, &crf,
+            r,
+            a_c6,
+            a_c12,
+            b_c6,
+            b_c12,
+            a_q,
+            b_q,
+            alpha_lj,
+            alpha_crf,
+            &params_n1,
+            &crf,
+            gromos_core::units::four_pi_eps_i,
         );
 
         // Test n=2 (quadratic coupling)
@@ -1028,7 +1071,18 @@ mod tests {
         );
 
         let (_, e_lj_n2, _e_crf_n2, de_lj_n2, _de_crf_n2) = perturbed_lj_crf_interaction(
-            r, a_c6, a_c12, b_c6, b_c12, a_q, b_q, alpha_lj, alpha_crf, &params_n2, &crf,
+            r,
+            a_c6,
+            a_c12,
+            b_c6,
+            b_c12,
+            a_q,
+            b_q,
+            alpha_lj,
+            alpha_crf,
+            &params_n2,
+            &crf,
+            gromos_core::units::four_pi_eps_i,
         );
 
         // Energies should differ due to different λ^n weighting

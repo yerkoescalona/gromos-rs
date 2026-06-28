@@ -65,7 +65,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 2   | nacl_1water_distres | 5  | distance restraint on Na-Cl pair (NTDIR=2, CDIR*w0) | **PASS** |
 | 4   | ch4_water_fep | 2998 | CH4→dummy in 999 SPC water, λ=0.5, twin-range NB FEP | **PASS** |
 
-**37 of 37 tests pass.** (1 ignored: aladip_vacuum_fep)
+**37 of 39 tests pass.** (2 ignored: `aladip_vacuum_fep` — known FEP mismatch; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
