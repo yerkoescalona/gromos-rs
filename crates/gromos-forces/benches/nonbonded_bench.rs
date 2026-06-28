@@ -34,13 +34,15 @@ fn bench_nonbonded_n_pairs(c: &mut Criterion) {
     let lj = LJParameters {
         c6: 0.001,
         c12: 0.0001,
+        cs6: 0.001,
+        cs12: 0.0001,
     };
     let mut group = c.benchmark_group("nonbonded_n_pairs");
 
     for n in [100usize, 1_000, 10_000] {
         let pairs: Vec<Vec3> = (0..n)
             .map(|i| {
-                let t = i * 0.05 + 0.3;
+                let t = i as f64 * 0.05 + 0.3;
                 Vec3::new(t, t * 0.5, t * 0.3)
             })
             .collect();

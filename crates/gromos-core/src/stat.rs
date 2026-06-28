@@ -165,7 +165,7 @@ mod tests {
     fn test_ee_constant_series() {
         let mut s = Stat::new();
         for _ in 0..1000 {
-            s.add(3.14);
+            s.add(3.0); // arbitrary constant — just needs to be non-zero and repeated
         }
         // All values identical → rmsd=0 → ee=0
         assert_eq!(s.ee(), 0.0);

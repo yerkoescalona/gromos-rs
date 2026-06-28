@@ -53,7 +53,7 @@ fn bench_nearest_image_scaling(c: &mut Criterion) {
     for n in [100usize, 1_000, 10_000] {
         let pairs: Vec<(Vec3, Vec3)> = (0..n)
             .map(|i| {
-                let t = i * 0.1;
+                let t = i as f64 * 0.1;
                 (
                     Vec3::new(t.sin(), t.cos(), t * 0.01),
                     Vec3::new(t.cos(), t.sin(), t * 0.02),

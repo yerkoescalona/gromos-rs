@@ -377,7 +377,7 @@ fn test_topology_read_integration() {
     assert_eq!(topo.n_atoms, 4);
     assert_eq!(topo.bonds.len(), 3);
     assert_eq!(topo.angles.len(), 2);
-    assert_eq!(topo.iac[0], 6);
+    assert_eq!(topo.iac[0], 5); // file stores IAC 1-indexed; parser subtracts 1 at boundary
     assert!((topo.masses[0] - 12.0).abs() < 1e-6);
 
     // Bond 0: atoms 1-2 in file → 0-1 (0-indexed)
