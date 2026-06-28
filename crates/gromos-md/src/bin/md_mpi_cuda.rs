@@ -106,7 +106,7 @@ mod enabled {
 
         // TODO: Initialize MPI+CUDA force calculator when gpu module is available
         eprintln!("MPI+CUDA force calculator not yet implemented in new architecture");
-        
+
         let start_time = std::time::Instant::now();
 
         // Final synchronization

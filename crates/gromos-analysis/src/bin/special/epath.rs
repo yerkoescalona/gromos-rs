@@ -4,8 +4,8 @@
 //!
 //! Analyzes transition paths between two reference structures
 
-use gromos_io::trajectory::TrajectoryReader;
 use gromos_core::math::Vec3;
+use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};

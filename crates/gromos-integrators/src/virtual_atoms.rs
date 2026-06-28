@@ -23,7 +23,6 @@
 
 use gromos_core::configuration::Configuration;
 use gromos_core::math::Vec3;
-use gromos_core::topology::Topology;
 
 /// Virtual atom definition
 ///
@@ -198,7 +197,7 @@ impl VirtualAtom {
         let total_mass: f64 = self.masses.iter().sum();
 
         for (i, &parent_idx) in self.parent_atoms.iter().enumerate() {
-            let weight = (self.masses[i] / total_mass);
+            let weight = self.masses[i] / total_mass;
             conf.current_mut().force[parent_idx] += force_on_virt * weight;
         }
     }

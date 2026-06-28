@@ -434,7 +434,10 @@ fn run_reference(system: &str) {
                 assert_dhdl_close(
                     af.dhdl_total,
                     ef.dhdl_total,
-                    &format!("{system}[{i}] dH/dλ (t={:.3}ps λ={:.3})", ef.time, ef.lambda),
+                    &format!(
+                        "{system}[{i}] dH/dλ (t={:.3}ps λ={:.3})",
+                        ef.time, ef.lambda
+                    ),
                 );
             }
         }

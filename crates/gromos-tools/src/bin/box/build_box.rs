@@ -16,7 +16,11 @@ use std::process;
 const AMU_TO_KG_PER_NM3: f64 = 1.66056;
 
 #[derive(Parser)]
-#[command(name = "build_box", version, about = "Generate a condensed-phase system on a grid")]
+#[command(
+    name = "build_box",
+    version,
+    about = "Generate a condensed-phase system on a grid"
+)]
 struct Args {
     /// Molecular topology file for a single molecule
     #[arg(long)]
@@ -153,8 +157,13 @@ fn main() {
     for atom in &all_atoms {
         println!(
             "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-            atom.res_num, atom.res_name, atom.atom_name, atom.atom_num,
-            atom.pos.x, atom.pos.y, atom.pos.z
+            atom.res_num,
+            atom.res_name,
+            atom.atom_name,
+            atom.atom_num,
+            atom.pos.x,
+            atom.pos.y,
+            atom.pos.z
         );
     }
     println!("END");
@@ -182,9 +191,27 @@ mod tests {
     fn center_of_mass_is_mass_weighted() {
         let masses = vec![16.0, 1.0, 1.0];
         let atoms = vec![
-            G96Atom { res_num: 1, res_name: "SOL".into(), atom_name: "OW".into(), atom_num: 1, pos: Vec3::new(0.0, 0.0, 0.0) },
-            G96Atom { res_num: 1, res_name: "SOL".into(), atom_name: "HW1".into(), atom_num: 2, pos: Vec3::new(1.0, 0.0, 0.0) },
-            G96Atom { res_num: 1, res_name: "SOL".into(), atom_name: "HW2".into(), atom_num: 3, pos: Vec3::new(0.0, 1.0, 0.0) },
+            G96Atom {
+                res_num: 1,
+                res_name: "SOL".into(),
+                atom_name: "OW".into(),
+                atom_num: 1,
+                pos: Vec3::new(0.0, 0.0, 0.0),
+            },
+            G96Atom {
+                res_num: 1,
+                res_name: "SOL".into(),
+                atom_name: "HW1".into(),
+                atom_num: 2,
+                pos: Vec3::new(1.0, 0.0, 0.0),
+            },
+            G96Atom {
+                res_num: 1,
+                res_name: "SOL".into(),
+                atom_name: "HW2".into(),
+                atom_num: 3,
+                pos: Vec3::new(0.0, 1.0, 0.0),
+            },
         ];
         let com = center_of_mass(&atoms, &masses);
         let total_mass: f64 = masses.iter().sum();

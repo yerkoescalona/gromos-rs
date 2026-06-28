@@ -43,8 +43,10 @@ impl ShakeBuffers {
     pub fn new(topo: &Topology, ntc: NtcMode, include_solvent: bool) -> Self {
         let solute_constraints: Vec<(usize, usize, f64)> = match ntc {
             NtcMode::SolventOnly => Vec::new(),
-            NtcMode::HydrogenBonds => {
-                topo.moltypes[0].bonds.iter().filter_map(|bond| {
+            NtcMode::HydrogenBonds => topo.moltypes[0]
+                .bonds
+                .iter()
+                .filter_map(|bond| {
                     let constraint_length = topo.bond_parameters[bond.bond_type].r0;
                     if constraint_length < 1e-10 {
                         return None;
@@ -55,21 +57,26 @@ impl ShakeBuffers {
                         return None;
                     }
                     Some((bond.i, bond.j, constraint_length))
-                }).collect()
-            }
-            NtcMode::AllBonds => {
-                topo.moltypes[0].bonds.iter().filter_map(|bond| {
+                })
+                .collect(),
+            NtcMode::AllBonds => topo.moltypes[0]
+                .bonds
+                .iter()
+                .filter_map(|bond| {
                     let constraint_length = topo.bond_parameters[bond.bond_type].r0;
                     if constraint_length < 1e-10 {
                         return None;
                     }
                     Some((bond.i, bond.j, constraint_length))
-                }).collect()
-            }
+                })
+                .collect(),
         };
 
         let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
-        if include_solvent && !topo.solvent_constraint_template.is_empty() && topo.num_solvent_molecules() > 0 {
+        if include_solvent
+            && !topo.solvent_constraint_template.is_empty()
+            && topo.num_solvent_molecules() > 0
+        {
             let n_solute = topo.num_solute_atoms();
             let atoms_per_solvent = topo.solvent_atom_template.len();
             let num_molecules = topo.num_solvent_molecules();
@@ -126,14 +133,14 @@ pub enum NtcMode {
 pub struct ShakeParameters {
     pub tolerance: f64,        // Convergence tolerance for constraint satisfaction
     pub max_iterations: usize, // Maximum number of iterations
-    pub ntc: NtcMode,         // Which solute bonds to constrain
+    pub ntc: NtcMode,          // Which solute bonds to constrain
 }
 
 impl Default for ShakeParameters {
     fn default() -> Self {
         Self {
-            tolerance: 1e-4,      // GROMOS default: 0.0001
-            max_iterations: 1000, // GROMOS default
+            tolerance: 1e-4,             // GROMOS default: 0.0001
+            max_iterations: 1000,        // GROMOS default
             ntc: NtcMode::HydrogenBonds, // NTC=2
         }
     }
@@ -220,29 +227,37 @@ pub fn shake(
         NtcMode::SolventOnly => Vec::new(), // NTC=1: no solute constraints
         NtcMode::HydrogenBonds => {
             // NTC=2: only bonds involving hydrogen (mass < 2.0)
-            topo.moltypes[0].bonds.iter().filter_map(|bond| {
-                let constraint_length = topo.bond_parameters[bond.bond_type].r0;
-                if constraint_length < 1e-10 {
-                    return None;
-                }
-                let mass_i = topo.mass[bond.i];
-                let mass_j = topo.mass[bond.j];
-                if mass_i > 2.0 && mass_j > 2.0 {
-                    return None;
-                }
-                Some((bond.i, bond.j, constraint_length))
-            }).collect()
-        }
+            topo.moltypes[0]
+                .bonds
+                .iter()
+                .filter_map(|bond| {
+                    let constraint_length = topo.bond_parameters[bond.bond_type].r0;
+                    if constraint_length < 1e-10 {
+                        return None;
+                    }
+                    let mass_i = topo.mass[bond.i];
+                    let mass_j = topo.mass[bond.j];
+                    if mass_i > 2.0 && mass_j > 2.0 {
+                        return None;
+                    }
+                    Some((bond.i, bond.j, constraint_length))
+                })
+                .collect()
+        },
         NtcMode::AllBonds => {
             // NTC=3: all bonds
-            topo.moltypes[0].bonds.iter().filter_map(|bond| {
-                let constraint_length = topo.bond_parameters[bond.bond_type].r0;
-                if constraint_length < 1e-10 {
-                    return None;
-                }
-                Some((bond.i, bond.j, constraint_length))
-            }).collect()
-        }
+            topo.moltypes[0]
+                .bonds
+                .iter()
+                .filter_map(|bond| {
+                    let constraint_length = topo.bond_parameters[bond.bond_type].r0;
+                    if constraint_length < 1e-10 {
+                        return None;
+                    }
+                    Some((bond.i, bond.j, constraint_length))
+                })
+                .collect()
+        },
     };
 
     // Build solvent constraints list
@@ -282,7 +297,7 @@ pub fn shake(
 
     // skip_now/skip_next optimization: avoid re-checking converged constraints
     // For solute: indexed by local solute atom index
-    let n_solute_atoms = topo.num_solute_atoms();
+    let _n_solute_atoms = topo.num_solute_atoms();
     let n_total_atoms = topo.num_atoms();
     let mut skip_now = vec![false; n_total_atoms];
     let mut skip_next = vec![true; n_total_atoms];
@@ -306,7 +321,13 @@ pub fn shake(
             }
 
             if !shake_one_constraint_full(
-                conf, topo, i, j, constraint_length, tolerance, dt2,
+                conf,
+                topo,
+                i,
+                j,
+                constraint_length,
+                tolerance,
+                dt2,
                 &mut skip_next,
             ) {
                 converged = false;
@@ -320,7 +341,13 @@ pub fn shake(
             }
 
             if !shake_one_constraint_full(
-                conf, topo, i, j, constraint_length, tolerance, dt2,
+                conf,
+                topo,
+                i,
+                j,
+                constraint_length,
+                tolerance,
+                dt2,
                 &mut skip_next,
             ) {
                 converged = false;
@@ -406,7 +433,13 @@ pub fn shake_buffered(
             }
 
             if !shake_one_constraint_full(
-                conf, topo, i, j, constraint_length, tolerance, dt2,
+                conf,
+                topo,
+                i,
+                j,
+                constraint_length,
+                tolerance,
+                dt2,
                 &mut buffers.skip_next,
             ) {
                 converged = false;
@@ -420,7 +453,13 @@ pub fn shake_buffered(
             }
 
             if !shake_one_constraint_full(
-                conf, topo, i, j, constraint_length, tolerance, dt2,
+                conf,
+                topo,
+                i,
+                j,
+                constraint_length,
+                tolerance,
+                dt2,
                 &mut buffers.skip_next,
             ) {
                 converged = false;
@@ -639,6 +678,7 @@ pub fn m_shake(
 ///
 /// # Returns
 /// - `ConstraintResult` with convergence status and statistics
+#[allow(non_snake_case)]
 pub fn perturbed_shake(
     topo: &Topology,
     conf: &mut Configuration,
@@ -722,15 +762,15 @@ pub fn perturbed_shake(
             let lambda_constr = diff / denominator;
 
             // Position corrections
-            let delta_i = r_ij_old * ((-lambda_constr * inv_mass_i));
-            let delta_j = r_ij_old * ((lambda_constr * inv_mass_j));
+            let delta_i = r_ij_old * (-lambda_constr * inv_mass_i);
+            let delta_j = r_ij_old * (lambda_constr * inv_mass_j);
 
             conf.current_mut().pos[i] += delta_i;
             conf.current_mut().pos[j] += delta_j;
 
             // Store constraint force for virial calculation
             // F_constraint = λ · r_old / dt²
-            let constraint_force = r_ij_old * (lambda_constr / dt_sq);
+            let _constraint_force = r_ij_old * (lambda_constr / dt_sq);
 
             // Accumulate to frame-level constraint forces if available
             // (In production, these would be stored in Configuration)
@@ -739,7 +779,7 @@ pub fn perturbed_shake(
             // ∂H/∂λ = (dλ/dt) · (λ/dt²) · √(constraint_length²) · (r₀_B - r₀_A)
             if lambda_deriv.abs() > 1e-20 {
                 let ref_dist = constraint_length; // Current constraint length
-                let dH_dlambda_contrib =
+                let _dH_dlambda_contrib =
                     lambda_deriv * lambda_constr / dt_sq * ref_dist * (r0_b - r0_a);
 
                 // Store in energy derivatives (would be added to Configuration in production)
@@ -806,8 +846,16 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
 
     let mut i = n_solute;
     while i + 3 <= num_atoms {
-        let pos_old = [conf.old().pos[i], conf.old().pos[i + 1], conf.old().pos[i + 2]];
-        let pos_new = [conf.current().pos[i], conf.current().pos[i + 1], conf.current().pos[i + 2]];
+        let pos_old = [
+            conf.old().pos[i],
+            conf.old().pos[i + 1],
+            conf.old().pos[i + 2],
+        ];
+        let pos_new = [
+            conf.current().pos[i],
+            conf.current().pos[i + 1],
+            conf.current().pos[i + 2],
+        ];
 
         // vectors in the plane of the old positions
         let mut b0 = pos_old[1] - pos_old[0];
@@ -893,7 +941,8 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
 
         let alpha2_beta2 = alpha * alpha + beta * beta;
         // (A17)
-        let sintheta = (alpha * gamma - beta * (alpha2_beta2 - gamma * gamma).sqrt()) / alpha2_beta2;
+        let sintheta =
+            (alpha * gamma - beta * (alpha2_beta2 - gamma * gamma).sqrt()) / alpha2_beta2;
         let one_minus_sintheta2 = 1.0 - sintheta * sintheta;
         if one_minus_sintheta2 < 0.0 {
             error_count += 1;
@@ -1031,43 +1080,58 @@ impl LincsBuffers {
         let solute_constraints: Vec<(usize, usize, f64)> = if include_solute {
             match ntc {
                 NtcMode::SolventOnly => Vec::new(),
-                NtcMode::HydrogenBonds => topo.moltypes[0].bonds.iter().filter_map(|bond| {
-                    let r0 = topo.bond_parameters[bond.bond_type].r0;
-                    if r0 < 1e-10 {
-                        return None;
-                    }
-                    if topo.mass[bond.i] > 2.0 && topo.mass[bond.j] > 2.0 {
-                        return None;
-                    }
-                    Some((bond.i, bond.j, r0))
-                }).collect(),
-                NtcMode::AllBonds => topo.moltypes[0].bonds.iter().filter_map(|bond| {
-                    let r0 = topo.bond_parameters[bond.bond_type].r0;
-                    if r0 < 1e-10 {
-                        return None;
-                    }
-                    Some((bond.i, bond.j, r0))
-                }).collect(),
+                NtcMode::HydrogenBonds => topo.moltypes[0]
+                    .bonds
+                    .iter()
+                    .filter_map(|bond| {
+                        let r0 = topo.bond_parameters[bond.bond_type].r0;
+                        if r0 < 1e-10 {
+                            return None;
+                        }
+                        if topo.mass[bond.i] > 2.0 && topo.mass[bond.j] > 2.0 {
+                            return None;
+                        }
+                        Some((bond.i, bond.j, r0))
+                    })
+                    .collect(),
+                NtcMode::AllBonds => topo.moltypes[0]
+                    .bonds
+                    .iter()
+                    .filter_map(|bond| {
+                        let r0 = topo.bond_parameters[bond.bond_type].r0;
+                        if r0 < 1e-10 {
+                            return None;
+                        }
+                        Some((bond.i, bond.j, r0))
+                    })
+                    .collect(),
             }
         } else {
             Vec::new()
         };
 
         let n_solute = topo.num_solute_atoms();
-        let solute_params = LincsParameters { order: solute_order };
+        let solute_params = LincsParameters {
+            order: solute_order,
+        };
         let solute_data = setup_lincs(topo, &solute_constraints, 0);
 
         let mut solvent_constraints: Vec<(usize, usize, f64)> = Vec::new();
         let mut atoms_per_solvent = 0;
         let mut num_solvent_molecules = 0;
-        if include_solvent && !topo.solvent_constraint_template.is_empty() && topo.num_solvent_molecules() > 0 {
+        if include_solvent
+            && !topo.solvent_constraint_template.is_empty()
+            && topo.num_solvent_molecules() > 0
+        {
             atoms_per_solvent = topo.solvent_atom_template.len();
             num_solvent_molecules = topo.num_solvent_molecules();
             for constr in &topo.solvent_constraint_template {
                 solvent_constraints.push((constr.i, constr.j, constr.length));
             }
         }
-        let solvent_params = LincsParameters { order: solvent_order };
+        let solvent_params = LincsParameters {
+            order: solvent_order,
+        };
         // Coupling matrix only depends on masses/connectivity, identical for every
         // molecule of this solvent type — compute once using the first molecule's offset.
         let solvent_data = setup_lincs(topo, &solvent_constraints, n_solute);
@@ -1101,7 +1165,11 @@ impl LincsBuffers {
 /// `constraints` are `(atom_i, atom_j, r0)` triples using indices local to
 /// `offset` (pass `offset = 0` for already-global indices, e.g. solute bonds;
 /// pass the first-atom index of a solvent molecule for solvent templates).
-pub fn setup_lincs(topo: &Topology, constraints: &[(usize, usize, f64)], offset: usize) -> LincsData {
+pub fn setup_lincs(
+    topo: &Topology,
+    constraints: &[(usize, usize, f64)],
+    offset: usize,
+) -> LincsData {
     let num_constr = constraints.len();
     let mut lincs = LincsData::new();
 
@@ -1343,9 +1411,13 @@ pub fn lincs_buffered(
 
     if !buffers.solute_constraints.is_empty() {
         let result = lincs(
-            topo, conf,
-            &buffers.solute_constraints, &buffers.solute_data, &buffers.solute_params,
-            0, dt,
+            topo,
+            conf,
+            &buffers.solute_constraints,
+            &buffers.solute_data,
+            &buffers.solute_params,
+            0,
+            dt,
         );
         converged &= result.converged;
         max_error = max_error.max(result.max_error);
@@ -1355,9 +1427,13 @@ pub fn lincs_buffered(
         for mol in 0..buffers.num_solvent_molecules {
             let offset = buffers.solvent_offset0 + mol * buffers.atoms_per_solvent;
             let result = lincs(
-                topo, conf,
-                &buffers.solvent_constraints, &buffers.solvent_data, &buffers.solvent_params,
-                offset, dt,
+                topo,
+                conf,
+                &buffers.solvent_constraints,
+                &buffers.solvent_data,
+                &buffers.solvent_params,
+                offset,
+                dt,
             );
             converged &= result.converged;
             max_error = max_error.max(result.max_error);
@@ -1366,7 +1442,10 @@ pub fn lincs_buffered(
 
     ConstraintResult {
         converged,
-        iterations: buffers.solute_params.order.max(buffers.solvent_params.order),
+        iterations: buffers
+            .solute_params
+            .order
+            .max(buffers.solvent_params.order),
         max_error,
     }
 }
@@ -1438,7 +1517,7 @@ pub fn angle_constraints(
     dt: f64,
     params: &AngleConstraintParameters,
 ) -> ConstraintResult {
-    let dt_sq = dt * dt;
+    let _dt_sq = dt * dt;
     let tolerance_sq = params.tolerance * params.tolerance;
 
     let mut max_error = std::f64::MAX;
@@ -1489,12 +1568,10 @@ pub fn angle_constraints(
             // Auxiliary vectors (eq. 18 from paper)
             // a123 = (d12² * r32 - (r12·r32) * r12) / (d12³ * d32)
             let dot_12_32 = r12_old.dot(r32_old);
-            let a123 = (r32_old * (d12 * d12) - r12_old * dot_12_32)
-                / (d12 * d12 * d12 * d32);
+            let a123 = (r32_old * (d12 * d12) - r12_old * dot_12_32) / (d12 * d12 * d12 * d32);
 
             // a321 = (d32² * r12 - (r12·r32) * r32) / (d12 * d32³)
-            let a321 = (r12_old * (d32 * d32) - r32_old * dot_12_32)
-                / (d12 * d32 * d32 * d32);
+            let a321 = (r12_old * (d32 * d32) - r32_old * dot_12_32) / (d12 * d32 * d32 * d32);
 
             // Masses
             let m1 = topo.mass[i];
@@ -1510,9 +1587,9 @@ pub fn angle_constraints(
 
             // Constants for Lagrange multiplier calculation
             let c1 = r12_old.dot(r32_old); // eq. 39
-            let c2 = (r12_old.dot(b321) + r32_old.dot(b123)); // eq. 39
+            let c2 = r12_old.dot(b321) + r32_old.dot(b123); // eq. 39
             let c3 = d12 * d32; // eq. 40
-            let c4 = (d12 / d32 * r32_old.dot(b321) + d32 / d12 * r12_old.dot(b123)); // eq. 41
+            let c4 = d12 / d32 * r32_old.dot(b321) + d32 / d12 * r12_old.dot(b123); // eq. 41
 
             // Lagrange multiplier (eq. 43)
             // λ/dt² = (c1 - c3*cos(θ0)) / (c2 - c4*cos(θ0))
@@ -1569,7 +1646,7 @@ pub fn perturbed_angle_constraints(
     lambda_deriv: f64,
     params: &AngleConstraintParameters,
 ) -> ConstraintResult {
-    let dt_sq = dt * dt;
+    let _dt_sq = dt * dt;
     let tolerance_sq = params.tolerance * params.tolerance;
 
     let mut max_error = std::f64::MAX;
@@ -1621,10 +1698,8 @@ pub fn perturbed_angle_constraints(
 
             // Auxiliary vectors
             let dot_12_32 = r12_old.dot(r32_old);
-            let a123 = (r32_old * (d12 * d12) - r12_old * dot_12_32)
-                / (d12 * d12 * d12 * d32);
-            let a321 = (r12_old * (d32 * d32) - r32_old * dot_12_32)
-                / (d12 * d32 * d32 * d32);
+            let a123 = (r32_old * (d12 * d12) - r12_old * dot_12_32) / (d12 * d12 * d12 * d32);
+            let a321 = (r12_old * (d32 * d32) - r32_old * dot_12_32) / (d12 * d32 * d32 * d32);
 
             // Masses
             let m1 = topo.mass[i];
@@ -1637,9 +1712,9 @@ pub fn perturbed_angle_constraints(
 
             // Lagrange multiplier constants
             let c1 = r12_old.dot(r32_old);
-            let c2 = (r12_old.dot(b321) + r32_old.dot(b123));
+            let c2 = r12_old.dot(b321) + r32_old.dot(b123);
             let c3 = d12 * d32;
-            let c4 = (d12 / d32 * r32_old.dot(b321) + d32 / d12 * r12_old.dot(b123));
+            let c4 = d12 / d32 * r32_old.dot(b321) + d32 / d12 * r12_old.dot(b123);
 
             let numerator = c1 - c3 * theta0.cos();
             let denominator = c2 - c4 * theta0.cos();
@@ -1815,7 +1890,15 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.16, 0.0, 0.0); // Slightly stretched
 
         // Apply LINCS
-        let result = lincs(&topo, &mut conf, &constraints, &lincs_data, &params, 0, 0.002);
+        let result = lincs(
+            &topo,
+            &mut conf,
+            &constraints,
+            &lincs_data,
+            &params,
+            0,
+            0.002,
+        );
 
         // Check that constraint is satisfied
         let r = conf.current().pos[1] - conf.current().pos[0];
@@ -1966,17 +2049,44 @@ mod tests {
         topo.inverse_mass = topo.mass.iter().map(|m| 1.0 / m).collect();
 
         topo.solvent_atom_template = vec![
-            SolventAtomTemplate { iac: 0, name: "OW".into(), mass: 15.99940, charge: -0.82 },
-            SolventAtomTemplate { iac: 1, name: "HW1".into(), mass: 1.00800, charge: 0.41 },
-            SolventAtomTemplate { iac: 1, name: "HW2".into(), mass: 1.00800, charge: 0.41 },
+            SolventAtomTemplate {
+                iac: 0,
+                name: "OW".into(),
+                mass: 15.99940,
+                charge: -0.82,
+            },
+            SolventAtomTemplate {
+                iac: 1,
+                name: "HW1".into(),
+                mass: 1.00800,
+                charge: 0.41,
+            },
+            SolventAtomTemplate {
+                iac: 1,
+                name: "HW2".into(),
+                mass: 1.00800,
+                charge: 0.41,
+            },
         ];
 
         let dist_oh = 0.1;
         let dist_hh = 0.1633;
         topo.solvent_constraint_template = vec![
-            SolventConstraintTemplate { i: 0, j: 1, length: dist_oh },
-            SolventConstraintTemplate { i: 0, j: 2, length: dist_oh },
-            SolventConstraintTemplate { i: 1, j: 2, length: dist_hh },
+            SolventConstraintTemplate {
+                i: 0,
+                j: 1,
+                length: dist_oh,
+            },
+            SolventConstraintTemplate {
+                i: 0,
+                j: 2,
+                length: dist_oh,
+            },
+            SolventConstraintTemplate {
+                i: 1,
+                j: 2,
+                length: dist_hh,
+            },
         ];
 
         // Populate molecules + instances via solvate() — replaces old Solvent struct setup.
@@ -1997,7 +2107,10 @@ mod tests {
 
         let dt = 0.002;
         let result = settle(&topo, &mut conf, dt);
-        assert!(result.converged, "SETTLE failed to find a valid analytical solution");
+        assert!(
+            result.converged,
+            "SETTLE failed to find a valid analytical solution"
+        );
 
         let pos_o = conf.current().pos[0];
         let pos_h1 = conf.current().pos[1];
@@ -2007,8 +2120,17 @@ mod tests {
         let d_oh2 = (pos_h2 - pos_o).length();
         let d_hh = (pos_h2 - pos_h1).length();
 
-        assert!((d_oh1 - dist_oh).abs() < 1e-10, "O-H1 distance = {d_oh1}, expected {dist_oh}");
-        assert!((d_oh2 - dist_oh).abs() < 1e-10, "O-H2 distance = {d_oh2}, expected {dist_oh}");
-        assert!((d_hh - dist_hh).abs() < 1e-10, "H-H distance = {d_hh}, expected {dist_hh}");
+        assert!(
+            (d_oh1 - dist_oh).abs() < 1e-10,
+            "O-H1 distance = {d_oh1}, expected {dist_oh}"
+        );
+        assert!(
+            (d_oh2 - dist_oh).abs() < 1e-10,
+            "O-H2 distance = {d_oh2}, expected {dist_oh}"
+        );
+        assert!(
+            (d_hh - dist_hh).abs() < 1e-10,
+            "H-H distance = {d_hh}, expected {dist_hh}"
+        );
     }
 }

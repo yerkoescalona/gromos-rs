@@ -1,4 +1,4 @@
-use gromos_integrators::gamd::{GamdParameters, GamdStatistics};
+use gromos_integrators::gamd::GamdParameters;
 /// GaMD statistics output writer
 ///
 /// Writes GaMD statistics to file for parameter estimation and analysis.

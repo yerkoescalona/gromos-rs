@@ -29,7 +29,6 @@
 //! - Individual lambda values per interaction type
 //! - Energy group-specific scaling
 
-use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
 
 /// Lambda controller for free energy perturbation

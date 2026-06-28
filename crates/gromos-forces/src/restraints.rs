@@ -36,8 +36,7 @@ impl PositionRestraint {
     pub fn calculate(&self, conf: &mut Configuration, periodicity: &Periodicity) -> f64 {
         // nearest_image(ri, rj) returns ri - rj
         // v = pos - ref (same as GROMOS)
-        let v =
-            periodicity.nearest_image(conf.current().pos[self.atom], self.reference_pos);
+        let v = periodicity.nearest_image(conf.current().pos[self.atom], self.reference_pos);
 
         let dist_sq = v.length_squared();
 
@@ -96,7 +95,7 @@ fn decode_rah(rah: i32) -> (i32, Vec3) {
         40 => Vec3::new(1.0, 0.0, 0.0),
         50 => Vec3::new(0.0, 1.0, 0.0),
         60 => Vec3::new(0.0, 0.0, 1.0),
-        _  => Vec3::new(1.0, 1.0, 1.0), // dim_base=0 (XYZ)
+        _ => Vec3::new(1.0, 1.0, 1.0), // dim_base=0 (XYZ)
     };
     (form, mask)
 }
@@ -176,8 +175,28 @@ pub struct DistanceRestraint {
 }
 
 impl DistanceRestraint {
-    pub fn new(atom1: usize, atom2: usize, r0: f64, w0: f64, rah: i32, k: f64, r_linear: f64, mode: i32) -> Self {
-        Self { atom1, atom2, r0, w0, rah, k, r_linear, mode, avg_r_inv3: None, exp_mem: None }
+    pub fn new(
+        atom1: usize,
+        atom2: usize,
+        r0: f64,
+        w0: f64,
+        rah: i32,
+        k: f64,
+        r_linear: f64,
+        mode: i32,
+    ) -> Self {
+        Self {
+            atom1,
+            atom2,
+            r0,
+            w0,
+            rah,
+            k,
+            r_linear,
+            mode,
+            avg_r_inv3: None,
+            exp_mem: None,
+        }
     }
 
     pub fn with_time_averaging(mut self, tau: f64, dt: f64) -> Self {
@@ -208,7 +227,15 @@ impl DistanceRestraint {
             v
         };
 
-        let (energy, f1) = distres_en_force(v_eff, self.r0, self.w0, self.rah, self.k, self.r_linear, self.mode);
+        let (energy, f1) = distres_en_force(
+            v_eff,
+            self.r0,
+            self.w0,
+            self.rah,
+            self.k,
+            self.r_linear,
+            self.mode,
+        );
         conf.current_mut().force[self.atom1] += f1;
         conf.current_mut().force[self.atom2] -= f1;
         energy
@@ -222,12 +249,21 @@ pub struct DistanceRestraints {
 }
 
 impl DistanceRestraints {
-    pub fn new() -> Self { Self { restraints: Vec::new() } }
+    pub fn new() -> Self {
+        Self {
+            restraints: Vec::new(),
+        }
+    }
 
-    pub fn add(&mut self, r: DistanceRestraint) { self.restraints.push(r); }
+    pub fn add(&mut self, r: DistanceRestraint) {
+        self.restraints.push(r);
+    }
 
     pub fn calculate_all(&mut self, conf: &mut Configuration, periodicity: &Periodicity) -> f64 {
-        self.restraints.iter_mut().map(|r| r.calculate(conf, periodicity)).sum()
+        self.restraints
+            .iter_mut()
+            .map(|r| r.calculate(conf, periodicity))
+            .sum()
     }
 }
 
@@ -256,11 +292,33 @@ pub struct PerturbedDistanceRestraint {
 
 impl PerturbedDistanceRestraint {
     pub fn new(
-        atom1: usize, atom2: usize, n: i32, m: i32,
-        a_r0: f64, b_r0: f64, a_w0: f64, b_w0: f64,
-        rah: i32, k: f64, r_linear: f64, mode: i32,
+        atom1: usize,
+        atom2: usize,
+        n: i32,
+        m: i32,
+        a_r0: f64,
+        b_r0: f64,
+        a_w0: f64,
+        b_w0: f64,
+        rah: i32,
+        k: f64,
+        r_linear: f64,
+        mode: i32,
     ) -> Self {
-        Self { atom1, atom2, n, m, a_r0, b_r0, a_w0, b_w0, rah, k, r_linear, mode }
+        Self {
+            atom1,
+            atom2,
+            n,
+            m,
+            a_r0,
+            b_r0,
+            a_w0,
+            b_w0,
+            rah,
+            k,
+            r_linear,
+            mode,
+        }
     }
 
     pub fn calculate(
@@ -271,9 +329,8 @@ impl PerturbedDistanceRestraint {
     ) -> f64 {
         let r0 = (1.0 - lambda) * self.a_r0 + lambda * self.b_r0;
         let w0 = (1.0 - lambda) * self.a_w0 + lambda * self.b_w0;
-        let prefactor = 2_f64.powi(self.n + self.m)
-            * lambda.powi(self.n)
-            * (1.0 - lambda).powi(self.m);
+        let prefactor =
+            2_f64.powi(self.n + self.m) * lambda.powi(self.n) * (1.0 - lambda).powi(self.m);
 
         let v = periodicity.nearest_image(
             conf.current().pos[self.atom2],
@@ -299,9 +356,15 @@ pub struct PerturbedDistanceRestraints {
 }
 
 impl PerturbedDistanceRestraints {
-    pub fn new() -> Self { Self { restraints: Vec::new() } }
+    pub fn new() -> Self {
+        Self {
+            restraints: Vec::new(),
+        }
+    }
 
-    pub fn add(&mut self, r: PerturbedDistanceRestraint) { self.restraints.push(r); }
+    pub fn add(&mut self, r: PerturbedDistanceRestraint) {
+        self.restraints.push(r);
+    }
 
     pub fn calculate_all(
         &self,
@@ -309,7 +372,10 @@ impl PerturbedDistanceRestraints {
         periodicity: &Periodicity,
         lambda: f64,
     ) -> f64 {
-        self.restraints.iter().map(|r| r.calculate(conf, periodicity, lambda)).sum()
+        self.restraints
+            .iter()
+            .map(|r| r.calculate(conf, periodicity, lambda))
+            .sum()
     }
 }
 
@@ -410,11 +476,11 @@ impl AngleRestraint {
         let f_factor = force_magnitude / sin_theta;
 
         // Force on atom i
-        let f_i_term = (r_kj * (cos_theta) - r_ij) * ((f_factor / r_ij_len));
+        let f_i_term = (r_kj * (cos_theta) - r_ij) * (f_factor / r_ij_len);
         conf.current_mut().force[self.atom_i] += f_i_term;
 
         // Force on atom k
-        let f_k_term = (r_ij * (cos_theta) - r_kj) * ((f_factor / r_kj_len));
+        let f_k_term = (r_ij * (cos_theta) - r_kj) * (f_factor / r_kj_len);
         conf.current_mut().force[self.atom_k] += f_k_term;
 
         // Force on atom j (conservation)
@@ -581,15 +647,15 @@ impl DihedralRestraint {
         let f_factor = force_magnitude / r_kj_len;
 
         // Forces on atoms i and l (perpendicular to planes)
-        let f_i = m * ((f_factor / m_len));
-        let f_l = n * ((-f_factor / n_len));
+        let f_i = m * (f_factor / m_len);
+        let f_l = n * (-f_factor / n_len);
 
         conf.current_mut().force[self.atom_i] += f_i;
         conf.current_mut().force[self.atom_l] += f_l;
 
         // Forces on atoms j and k (derived from torque balance)
-        let r_ij_len = r_ij.length();
-        let r_kl_len = r_kl.length();
+        let _r_ij_len = r_ij.length();
+        let _r_kl_len = r_kl.length();
 
         let dot_ij_kj = r_ij.dot(r_kj);
         let dot_kl_kj = r_kl.dot(r_kj);
@@ -643,8 +709,9 @@ mod tests {
 
         let restraint = PositionRestraint::new(0, Vec3::new(0.0, 0.0, 0.0), 100.0);
 
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         let energy = restraint.calculate(&mut conf, &periodicity);
 
@@ -665,8 +732,9 @@ mod tests {
         // rah=0 → full harmonic XYZ, mode=1 (no w0), r_linear > delta so stays harmonic
         let mut restraint = DistanceRestraint::new(0, 1, 1.0, 1.0, 0, 100.0, 10.0, 1);
 
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         let energy = restraint.calculate(&mut conf, &periodicity);
 
@@ -689,8 +757,9 @@ mod tests {
         // rah=0 → full harmonic XYZ, r_linear=0.1
         let mut restraint = DistanceRestraint::new(0, 1, 1.0, 1.0, 0, 100.0, 0.1, 1);
 
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         let energy = restraint.calculate(&mut conf, &periodicity);
 
@@ -702,22 +771,29 @@ mod tests {
     #[test]
     fn test_restraint_types() {
         let mut conf = Configuration::new(2, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Repulsive restraint (rah=-1): only active when distance < r0
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(0.5, 0.0, 0.0);
         let mut restraint = DistanceRestraint::new(0, 1, 1.0, 1.0, -1, 100.0, 10.0, 1);
         let energy = restraint.calculate(&mut conf, &periodicity);
-        assert!(energy > 0.0, "Repulsive restraint should have energy when dist < r0");
+        assert!(
+            energy > 0.0,
+            "Repulsive restraint should have energy when dist < r0"
+        );
 
         // Same restraint but distance > r0 - no energy
         conf.current_mut().pos[1] = Vec3::new(2.0, 0.0, 0.0);
         conf.current_mut().clear_forces();
         let mut restraint2 = DistanceRestraint::new(0, 1, 1.0, 1.0, -1, 100.0, 10.0, 1);
         let energy = restraint2.calculate(&mut conf, &periodicity);
-        assert_eq!(energy, 0.0, "Repulsive restraint should have no energy when dist > r0");
+        assert_eq!(
+            energy, 0.0,
+            "Repulsive restraint should have no energy when dist > r0"
+        );
     }
 
     #[test]
@@ -733,14 +809,14 @@ mod tests {
         //   atom12 → 0-indexed11: (3.001529656, 0.996657605, 1.693520228)
         let n_atoms = 12;
         let mut conf = Configuration::new(n_atoms, 1, 1);
-        conf.current_mut().pos[4]  = Vec3::new(2.506319188, 0.858753474, 1.635829769);
-        conf.current_mut().pos[8]  = Vec3::new(2.722961726, 1.075330732, 1.724773551);
+        conf.current_mut().pos[4] = Vec3::new(2.506319188, 0.858753474, 1.635829769);
+        conf.current_mut().pos[8] = Vec3::new(2.722961726, 1.075330732, 1.724773551);
         conf.current_mut().pos[11] = Vec3::new(3.001529656, 0.996657605, 1.693520228);
 
         let box_l = 3.767055681_f64;
-        let periodicity = Periodicity::Rectangular(
-            gromos_core::math::Rectangular::new(Vec3::new(box_l, box_l, box_l)),
-        );
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            box_l, box_l, box_l,
+        )));
 
         let k = 1000.0_f64;
         let r_linear = 0.3_f64;
@@ -749,11 +825,11 @@ mod tests {
         // Unperturbed restraints from aladip.distrest (all type-0 virtual atoms):
         // pairs: (4,8) and (8,11), rah={1,1,0,0,-1,-1}, r0 and w0 vary per entry
         let specs: &[(usize, usize, f64, f64, i32)] = &[
-            (4,  8, 0.21, 1.0,  1),
-            (8, 11, 0.80, 1.0,  1),
-            (4,  8, 0.21, 1.0,  0),
-            (8, 11, 0.90, 1.0,  0),
-            (4,  8, 0.21, 1.0, -1),
+            (4, 8, 0.21, 1.0, 1),
+            (8, 11, 0.80, 1.0, 1),
+            (4, 8, 0.21, 1.0, 0),
+            (8, 11, 0.90, 1.0, 0),
+            (4, 8, 0.21, 1.0, -1),
             (8, 11, 0.80, 1.0, -1),
         ];
 
@@ -770,11 +846,11 @@ mod tests {
         // Perturbed restraints (lambda=0.125, NLAM=1, RLAM=0.125)
         let lambda = 0.125_f64;
         let pspecs: &[(usize, usize, i32, i32, f64, f64, f64, f64, i32)] = &[
-            (4,  8, 1, 1, 0.19, 2.0, 0.21, 1.0,  1),
-            (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0,  1),
-            (4,  8, 1, 1, 0.19, 2.0, 0.21, 1.0,  0),
-            (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0,  0),
-            (4,  8, 1, 1, 0.19, 2.0, 0.21, 1.0, -1),
+            (4, 8, 1, 1, 0.19, 2.0, 0.21, 1.0, 1),
+            (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0, 1),
+            (4, 8, 1, 1, 0.19, 2.0, 0.21, 1.0, 0),
+            (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0, 0),
+            (4, 8, 1, 1, 0.19, 2.0, 0.21, 1.0, -1),
             (8, 11, 1, 1, 0.80, 2.0, 0.90, 1.0, -1),
         ];
 
@@ -782,7 +858,9 @@ mod tests {
         conf.current_mut().clear_forces();
         let mut ptotal = 0.0_f64;
         for &(a1, a2, n, m, a_r0, a_w0, b_r0, b_w0, rah) in pspecs {
-            let r = PerturbedDistanceRestraint::new(a1, a2, n, m, a_r0, b_r0, a_w0, b_w0, rah, k, r_linear, mode);
+            let r = PerturbedDistanceRestraint::new(
+                a1, a2, n, m, a_r0, b_r0, a_w0, b_w0, rah, k, r_linear, mode,
+            );
             ptotal += r.calculate(&mut conf, &periodicity, lambda);
         }
         assert!(
@@ -794,8 +872,9 @@ mod tests {
     #[test]
     fn test_angle_restraint_linear() {
         let mut conf = Configuration::new(3, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up linear angle (180 degrees)
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -813,8 +892,9 @@ mod tests {
     #[test]
     fn test_angle_restraint_90_degrees() {
         let mut conf = Configuration::new(3, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up 90 degree angle
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -845,8 +925,9 @@ mod tests {
     #[test]
     fn test_angle_restraint_violation() {
         let mut conf = Configuration::new(3, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up 90 degree angle
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -870,8 +951,9 @@ mod tests {
     #[test]
     fn test_dihedral_restraint_trans() {
         let mut conf = Configuration::new(4, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up trans dihedral (180 degrees)
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -894,8 +976,9 @@ mod tests {
     #[test]
     fn test_dihedral_restraint_gauche() {
         let mut conf = Configuration::new(4, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up gauche+ dihedral (~60 degrees)
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -918,8 +1001,9 @@ mod tests {
     #[test]
     fn test_dihedral_restraint_periodicity() {
         let mut conf = Configuration::new(4, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up dihedral at -170 degrees
         let angle = -170.0f64.to_radians();
@@ -944,8 +1028,9 @@ mod tests {
     #[test]
     fn test_angle_collection() {
         let mut conf = Configuration::new(6, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up multiple angles
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -972,8 +1057,9 @@ mod tests {
     #[test]
     fn test_dihedral_collection() {
         let mut conf = Configuration::new(8, 1, 1);
-        let periodicity =
-            Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(10.0, 10.0, 10.0)));
+        let periodicity = Periodicity::Rectangular(gromos_core::math::Rectangular::new(Vec3::new(
+            10.0, 10.0, 10.0,
+        )));
 
         // Set up multiple trans dihedrals
         for i in 0..8 {
@@ -1228,9 +1314,9 @@ impl JValueRestraint {
 
         // Calculate force derivatives dphi/dr for each atom
         let dkj = dkj2.sqrt();
-        let dphi_dri = rmj * ((dkj / dmj2));
+        let dphi_dri = rmj * (dkj / dmj2);
         let dphi_drl = rnk * (-(dkj / dnk2));
-        let dphi_drj = dphi_dri * ((frim - 1.0)) - dphi_drl * (frln);
+        let dphi_drj = dphi_dri * (frim - 1.0) - dphi_drl * (frln);
         let dphi_drk = -(dphi_dri + dphi_drj + dphi_drl);
 
         // Apply forces: F = -dV/dφ * dφ/dr
@@ -1484,14 +1570,11 @@ impl RDCRestraint {
         let dv_dp2 = dv_dd * dd_dp2 * memory_decay;
 
         // dn/dr accounting for normalization: dn/dr = (I - n⊗n)/r
-        let factor = (dv_dp2 / r);
+        let factor = dv_dp2 / r;
 
-        let grad_x =
-            ((dp2_dnx - nx * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz))) * factor;
-        let grad_y =
-            ((dp2_dny - ny * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz))) * factor;
-        let grad_z =
-            ((dp2_dnz - nz * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz))) * factor;
+        let grad_x = (dp2_dnx - nx * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz)) * factor;
+        let grad_y = (dp2_dny - ny * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz)) * factor;
+        let grad_z = (dp2_dnz - nz * (dp2_dnx * nx + dp2_dny * ny + dp2_dnz * nz)) * factor;
 
         let force_vec = Vec3::new(grad_x, grad_y, grad_z);
 
@@ -1552,8 +1635,8 @@ impl RDCRestraints {
     /// Returns the fitted Saupe matrix [Sxx, Syy, Szz, Sxy, Sxz]
     pub fn fit_alignment_tensor(
         &self,
-        conf: &Configuration,
-        periodicity: &Periodicity,
+        _conf: &Configuration,
+        _periodicity: &Periodicity,
     ) -> [f64; 5] {
         // TODO: Implement SVD fitting of alignment tensor
         // This requires numerical linear algebra (SVD decomposition)

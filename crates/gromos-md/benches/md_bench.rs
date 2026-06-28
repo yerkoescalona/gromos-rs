@@ -42,10 +42,14 @@ fn run_md_steps(system: &str, nstlim: u32) -> Duration {
     let start = std::time::Instant::now();
 
     let result = Command::new(md_bin())
-        .arg("@topo").arg(&topo)
-        .arg("@conf").arg(&conf)
-        .arg("@input").arg(&bench_input)
-        .arg("@fin").arg(out.join("final.conf"))
+        .arg("@topo")
+        .arg(&topo)
+        .arg("@conf")
+        .arg(&conf)
+        .arg("@input")
+        .arg(&bench_input)
+        .arg("@fin")
+        .arg(out.join("final.conf"))
         .output()
         .expect("failed to run md");
 
@@ -139,7 +143,9 @@ fn patch_nstlim(input: &str, nstlim: u32) -> String {
                 continue;
             }
             // Disable all trajectory output: NTWX NTWSE NTWV NTWF NTWE NTWG NTWB = 0
-            result.push_str("         0         0         0         0         0         0         0\n");
+            result.push_str(
+                "         0         0         0         0         0         0         0\n",
+            );
             continue;
         }
 
@@ -214,15 +220,13 @@ fn bench_scaling(c: &mut Criterion) {
 
     // Compare systems of different sizes to measure scaling behavior
     for (system, label) in [
-        ("nacl_water_box", "62atoms"),      // 62 atoms
-        ("aladip_solvated", "72atoms"),     // 72 atoms
-        ("water_216_box", "648atoms"),      // 648 atoms
+        ("nacl_water_box", "62atoms"),  // 62 atoms
+        ("aladip_solvated", "72atoms"), // 72 atoms
+        ("water_216_box", "648atoms"),  // 648 atoms
     ] {
-        group.bench_with_input(
-            BenchmarkId::new("100steps", label),
-            &system,
-            |b, &sys| b.iter(|| run_md_steps(black_box(sys), 100)),
-        );
+        group.bench_with_input(BenchmarkId::new("100steps", label), &system, |b, &sys| {
+            b.iter(|| run_md_steps(black_box(sys), 100))
+        });
     }
 
     group.finish();

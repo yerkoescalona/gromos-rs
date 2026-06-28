@@ -8,7 +8,7 @@
 use gromos_core::configuration::{BoxType, Configuration};
 use gromos_core::math::{Mat3, Vec3};
 use gromos_core::topology::Topology;
-use rand::{Rng, SeedableRng};
+use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
 
@@ -92,8 +92,7 @@ impl LeapFrog {
                 });
         } else {
             for i in 0..n_atoms {
-                conf.current_mut().pos[i] =
-                    conf.old().pos[i] + conf.current().vel[i] * dt;
+                conf.current_mut().pos[i] = conf.old().pos[i] + conf.current().vel[i] * dt;
             }
         }
     }
@@ -278,7 +277,7 @@ impl SteepestDescent {
             for force in forces.iter_mut() {
                 let magnitude = force.length();
                 if magnitude > self.force_limit {
-                    *force *= (self.force_limit / magnitude);
+                    *force *= self.force_limit / magnitude;
                 }
             }
         }
@@ -348,7 +347,7 @@ impl Integrator for SteepestDescent {
         conf.exchange_state();
 
         // Update positions: r_new = r_old + step_size * f_norm * force_old
-        let step_scale = (self.step_size * f_norm);
+        let step_scale = self.step_size * f_norm;
 
         for i in 0..n_atoms {
             conf.current_mut().pos[i] = conf.old().pos[i] + conf.old().force[i] * step_scale;
@@ -460,7 +459,7 @@ impl StochasticDynamics {
     /// Analytical coefficient calculation (|γdt| > 0.05)
     ///
     /// From stochastic.cc lines 91-129
-    fn compute_analytical(&self, dt: f64, mass: f64, gamma_dt: f64) -> LangevinCoefficients {
+    fn compute_analytical(&self, _dt: f64, mass: f64, gamma_dt: f64) -> LangevinCoefficients {
         let exp_gamma_dt = (-gamma_dt).exp();
         let exp_2gamma_dt = (-2.0 * gamma_dt).exp();
 
@@ -578,11 +577,10 @@ impl Integrator for StochasticDynamics {
 
         // Step 1: Update velocities with Langevin dynamics
         // v(t+dt/2) = c1*v(t) + c2*F(t)/m + c3*ξ₁ + c4*ξ₂
-        let dt = dt;
 
         for i in 0..n_atoms {
             let coeff = self.coefficients[i];
-            let mass = topo.mass[i];
+            let _mass = topo.mass[i];
             let inv_mass = topo.inverse_mass[i];
 
             // Deterministic terms
@@ -739,7 +737,6 @@ impl ScaledLeapFrog {
 impl Integrator for ScaledLeapFrog {
     fn step(&mut self, dt: f64, topo: &Topology, conf: &mut Configuration) {
         let n_atoms = topo.num_atoms();
-        let dt = dt;
 
         // Ensure force_scales vector matches topology
         if self.force_scales.len() != n_atoms {
@@ -1042,7 +1039,7 @@ impl ConjugateGradient {
             for force in forces.iter_mut() {
                 let magnitude = force.length();
                 if magnitude > self.force_limit {
-                    *force *= (self.force_limit / magnitude);
+                    *force *= self.force_limit / magnitude;
                 }
             }
         }
@@ -1142,8 +1139,7 @@ impl Integrator for ConjugateGradient {
         loop {
             // Calculate positions at B
             for i in 0..n_atoms {
-                conf.current_mut().pos[i] =
-                    conf.old().pos[i] + self.search_directions[i] * (b);
+                conf.current_mut().pos[i] = conf.old().pos[i] + self.search_directions[i] * (b);
             }
 
             // Energy at B would need force calculation - for now we'll approximate
@@ -1457,7 +1453,7 @@ mod tests {
 
     fn create_test_system() -> (Topology, Configuration) {
         let mut topo = Topology::new();
-        
+
         // Add atoms to solute so num_atoms() returns the correct count
         for i in 0..10 {
             topo.moltypes[0].atoms.push(Atom {
@@ -1472,7 +1468,7 @@ mod tests {
                 is_coarse_grained: false,
             });
         }
-        
+
         topo.mass = vec![1.0; 10];
         topo.charge = vec![0.0; 10];
         topo.iac = vec![0; 10];
@@ -1491,7 +1487,7 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().vel[0] = Vec3::new(1.0, 0.0, 0.0);
         conf.current_mut().force[0] = Vec3::new(1.0, 0.0, 0.0);
-        
+
         // LeapFrog needs old state initialized
         conf.exchange_state();
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -1518,7 +1514,7 @@ mod tests {
         for (i, vel) in conf.current_mut().vel.iter_mut().enumerate() {
             *vel = Vec3::new((i as f64) * 0.1, 0.0, 0.0);
         }
-        
+
         // Prepare old state as well (LeapFrog uses both)
         conf.exchange_state();
         for (i, vel) in conf.current_mut().vel.iter_mut().enumerate() {

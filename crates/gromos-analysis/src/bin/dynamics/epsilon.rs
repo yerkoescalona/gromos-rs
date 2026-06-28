@@ -1,16 +1,21 @@
+// TODO: stub — CONV_FACTOR/EPSILON_0 used by dielectric formula not yet implemented (ref: GROMOS++ epsilon.cc).
+#![allow(dead_code)]
 //! epsilon - Dielectric constant calculation
 //!
 //! Usage: epsilon @topo <file> @traj <file> @temp <T>
 //!
 //! Calculates static dielectric constant from dipole fluctuations
 
+// TODO: stub — constants defined but the Kirkwood-Fröhlich formula that uses
+// them is not yet implemented. Remove this once the dielectric calculation body
+// is wired up (ref: GROMOS++ epsilon.cc, ~line 180).
+
+use gromos_core::math::Vec3;
+use gromos_core::units::kB;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
-use gromos_core::math::Vec3;
 use std::env;
 use std::process;
-
-const K_B: f64 = 0.00831446; // kJ/(mol·K)
 const EPSILON_0: f64 = 8.854187817e-12; // F/m (in SI units)
 const CONV_FACTOR: f64 = 1389.35459; // Conversion factor for GROMOS units
 
@@ -97,6 +102,6 @@ fn main() {
         avg_dipole,
         avg_dipole_sq,
         variance,
-        1.0 + variance / (3.0 * K_B * temperature)
+        1.0 + variance / (3.0 * kB * temperature)
     );
 }

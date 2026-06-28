@@ -1,7 +1,6 @@
 //! Bond force calculations: quartic, harmonic, and CG bonds.
 
 use gromos_core::configuration::Configuration;
-use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
 
 use super::ForceEnergy;

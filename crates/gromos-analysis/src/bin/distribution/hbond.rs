@@ -6,8 +6,8 @@
 //! - H-A distance < cutoff (default: 0.25 nm)
 //! - D-H-A angle > min_angle (default: 135°)
 
-use gromos_io::trajectory::TrajectoryReader;
 use gromos_core::math::Vec3;
+use gromos_io::trajectory::TrajectoryReader;
 use std::collections::HashMap;
 use std::env;
 use std::process;

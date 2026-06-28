@@ -41,10 +41,10 @@ fn main() {
     println!("  Converted from AMBER");
     println!("END");
     println!("PHYSICALCONSTANTS");
-    println!("    138.9354");
-    println!("    0.0635078");
-    println!("    299.7925");
-    println!("    0.00831441");
+    println!("    {:.7}", gromos_core::units::four_pi_eps_i);
+    println!("    {:.7}", gromos_core::units::hBar);
+    println!("    {:.3}", gromos_core::units::spd_l);
+    println!("    {:.8}", gromos_core::units::kB);
     println!("END");
     println!("TOPVERSION");
     println!("    2.0");

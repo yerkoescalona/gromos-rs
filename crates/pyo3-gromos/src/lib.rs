@@ -16,20 +16,20 @@
 //! gromos-* crates (pure Rust)
 //! ```
 
-use pyo3::prelude::*;
-use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use glam::Vec3A as Vec3;
+use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
+use pyo3::prelude::*;
 
-pub mod topology;
-pub mod py_conf;
-pub mod parameters;
-mod simulation;
 pub mod algorithm_sequence;
+pub mod parameters;
+pub mod py_conf;
+mod simulation;
+pub mod topology;
 
 // Re-export core types
-pub use gromos_core::{Configuration, Topology, Energy, State};
+pub use gromos_core::{Configuration, Energy, State, Topology};
 pub use gromos_forces::{ForceEnergy, LJParameters};
-pub use gromos_integrators::{LeapFrog, VelocityVerlet, StochasticDynamics};
+pub use gromos_integrators::{LeapFrog, StochasticDynamics, VelocityVerlet};
 pub use gromos_io::{EnergyFrame, EnergyWriter};
 
 /// Python-wrapped 3D vector
@@ -202,16 +202,26 @@ impl PyFrame {
 
     /// Get positions as numpy array (N x 3)
     pub fn positions_array<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
-        let n_atoms = self.positions.len();
-        let data: Vec<f32> = self.positions.iter()
+        let _n_atoms = self.positions.len();
+        let data: Vec<f32> = self
+            .positions
+            .iter()
             .flat_map(|v| [v.x, v.y, v.z])
             .collect();
-        
-        Ok(PyArray2::from_vec2_bound(py, &data.chunks(3).map(|c| c.to_vec()).collect::<Vec<_>>())?)
+
+        Ok(PyArray2::from_vec2_bound(
+            py,
+            &data.chunks(3).map(|c| c.to_vec()).collect::<Vec<_>>(),
+        )?)
     }
 
     pub fn __repr__(&self) -> String {
-        format!("Frame(time={:.3}, step={}, n_atoms={})", self.time, self.step, self.positions.len())
+        format!(
+            "Frame(time={:.3}, step={}, n_atoms={})",
+            self.time,
+            self.step,
+            self.positions.len()
+        )
     }
 }
 
@@ -223,23 +233,23 @@ pub fn rmsd<'py>(
 ) -> PyResult<f64> {
     let pos = positions.as_array();
     let ref_arr = reference.as_array();
-    
+
     if pos.shape() != ref_arr.shape() {
         return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "Position and reference arrays must have the same shape"
+            "Position and reference arrays must have the same shape",
         ));
     }
-    
+
     let n_atoms = pos.shape()[0];
     let mut sum_sq = 0.0f64;
-    
+
     for i in 0..n_atoms {
         let dx = (pos[[i, 0]] - ref_arr[[i, 0]]) as f64;
         let dy = (pos[[i, 1]] - ref_arr[[i, 1]]) as f64;
         let dz = (pos[[i, 2]] - ref_arr[[i, 2]]) as f64;
         sum_sq += dx * dx + dy * dy + dz * dz;
     }
-    
+
     Ok((sum_sq / n_atoms as f64).sqrt())
 }
 
@@ -255,9 +265,9 @@ pub fn rdf<'py>(
 ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
     let pos = positions.as_array();
     let dr = r_max / n_bins as f64;
-    
+
     let mut hist = vec![0u64; n_bins];
-    
+
     // Calculate distances
     for &i in &group1 {
         for &j in &group2 {
@@ -266,7 +276,7 @@ pub fn rdf<'py>(
                 let dy = (pos[[i, 1]] - pos[[j, 1]]) as f64;
                 let dz = (pos[[i, 2]] - pos[[j, 2]]) as f64;
                 let r = (dx * dx + dy * dy + dz * dz).sqrt();
-                
+
                 let bin = (r / dr) as usize;
                 if bin < n_bins {
                     hist[bin] += 1;
@@ -274,28 +284,28 @@ pub fn rdf<'py>(
             }
         }
     }
-    
+
     // Normalize to g(r)
     let n1 = group1.len() as f64;
     let n2 = group2.len() as f64;
     let volume = (4.0 / 3.0) * std::f64::consts::PI * r_max.powi(3);
     let rho = n2 / volume;
-    
+
     let mut r_values = Vec::with_capacity(n_bins);
     let mut g_values = Vec::with_capacity(n_bins);
-    
+
     for bin in 0..n_bins {
         let r_inner = bin as f64 * dr;
         let r_outer = (bin + 1) as f64 * dr;
         let shell_volume = (4.0 / 3.0) * std::f64::consts::PI * (r_outer.powi(3) - r_inner.powi(3));
-        
+
         let r = (r_inner + r_outer) / 2.0;
         let g = (hist[bin] as f64) / (n1 * rho * shell_volume);
-        
+
         r_values.push(r);
         g_values.push(g);
     }
-    
+
     Ok((
         PyArray1::from_vec_bound(py, r_values),
         PyArray1::from_vec_bound(py, g_values),

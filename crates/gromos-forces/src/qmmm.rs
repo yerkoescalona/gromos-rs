@@ -423,11 +423,7 @@ impl XTBEngine {
                 let fy: f64 = parts[1].parse().unwrap_or(0.0);
                 let fz: f64 = parts[2].parse().unwrap_or(0.0);
                 // Convert Hartree/Bohr to kJ/mol/nm
-                forces.push(Vec3::new(
-                    (fx * 49614.75),
-                    (fy * 49614.75),
-                    (fz * 49614.75),
-                ));
+                forces.push(Vec3::new(fx * 49614.75, fy * 49614.75, fz * 49614.75));
             }
         }
 

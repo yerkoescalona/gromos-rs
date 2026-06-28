@@ -37,14 +37,22 @@ fn parse_enertrj_etotal(path: &Path) -> Vec<f64> {
     let mut in_block = false;
     for line in content.lines() {
         let t = line.trim();
-        if t == "ENERTRJ" { in_block = true; continue; }
-        if t == "END" && in_block { break; }
+        if t == "ENERTRJ" {
+            in_block = true;
+            continue;
+        }
+        if t == "END" && in_block {
+            break;
+        }
         if in_block && !t.starts_with('#') && !t.is_empty() {
-            let vals: Vec<f64> = t.split_whitespace()
+            let vals: Vec<f64> = t
+                .split_whitespace()
                 .filter_map(|s| s.parse().ok())
                 .collect();
             // [0]=time [1]=Ekin [2]=Epot [3]=Etot
-            if vals.len() >= 4 { totals.push(vals[3]); }
+            if vals.len() >= 4 {
+                totals.push(vals[3]);
+            }
         }
     }
     totals
@@ -54,7 +62,11 @@ fn parse_enertrj_etotal(path: &Path) -> Vec<f64> {
 
 fn run_with_algorithm(system: &str, algorithm_keyword: &str) -> Vec<f64> {
     let sys_dir = ref_root().join(system);
-    assert!(sys_dir.exists(), "reference system not found: {}", sys_dir.display());
+    assert!(
+        sys_dir.exists(),
+        "reference system not found: {}",
+        sys_dir.display()
+    );
 
     let toml = fs::read_to_string(sys_dir.join("input.toml")).expect("input.toml missing");
 
@@ -64,20 +76,24 @@ fn run_with_algorithm(system: &str, algorithm_keyword: &str) -> Vec<f64> {
             let t = line.trim();
             if t.starts_with(&prefix) {
                 if let (Some(a), Some(b)) = (t.find('"'), t.rfind('"')) {
-                    if a < b { return t[a + 1..b].to_string(); }
+                    if a < b {
+                        return t[a + 1..b].to_string();
+                    }
                 }
             }
         }
         panic!("{key} not found in input.toml");
     }
 
-    let topo  = sys_dir.join(toml_str(&toml, "topology"));
-    let conf  = sys_dir.join(toml_str(&toml, "configuration"));
+    let topo = sys_dir.join(toml_str(&toml, "topology"));
+    let conf = sys_dir.join(toml_str(&toml, "configuration"));
     let params_path = sys_dir.join(toml_str(&toml, "parameters"));
 
     let out = std::env::temp_dir().join(format!(
         "gromos_margin_{}_{}_{}",
-        system, algorithm_keyword, std::process::id()
+        system,
+        algorithm_keyword,
+        std::process::id()
     ));
     let _ = fs::remove_dir_all(&out);
     fs::create_dir_all(&out).unwrap();
@@ -93,13 +109,20 @@ fn run_with_algorithm(system: &str, algorithm_keyword: &str) -> Vec<f64> {
     let tre = out.join("energies.tre");
 
     let result = Command::new(md_bin())
-        .arg("@topo").arg(&topo)
-        .arg("@conf").arg(&conf)
-        .arg("@input").arg(&patched_input)
-        .arg("@fin").arg(out.join("final.conf"))
-        .arg("@tre").arg(&tre)
-        .arg("@trf").arg(out.join("forces.trf"))
-        .arg("@trc").arg(out.join("trajectory.trc"))
+        .arg("@topo")
+        .arg(&topo)
+        .arg("@conf")
+        .arg(&conf)
+        .arg("@input")
+        .arg(&patched_input)
+        .arg("@fin")
+        .arg(out.join("final.conf"))
+        .arg("@tre")
+        .arg(&tre)
+        .arg("@trf")
+        .arg(out.join("forces.trf"))
+        .arg("@trc")
+        .arg(out.join("trajectory.trc"))
         .output()
         .expect("failed to execute md binary");
 
@@ -171,12 +194,15 @@ fn patch_pairlist_algorithm(input: &str, new_algorithm: &str) -> String {
 fn celllist_vs_standard_margin_water_216() {
     let system = "water_216_box";
 
-    let standard  = run_with_algorithm(system, "standard");
+    let standard = run_with_algorithm(system, "standard");
     let cell_list = run_with_algorithm(system, "grid_cell");
 
     assert_eq!(
-        standard.len(), cell_list.len(),
-        "step count mismatch: standard={} cell_list={}", standard.len(), cell_list.len()
+        standard.len(),
+        cell_list.len(),
+        "step count mismatch: standard={} cell_list={}",
+        standard.len(),
+        cell_list.len()
     );
     assert!(!standard.is_empty(), "no energy frames produced");
 
@@ -186,7 +212,11 @@ fn celllist_vs_standard_margin_water_216() {
 
     for (step, (e_std, e_cl)) in standard.iter().zip(&cell_list).enumerate() {
         let abs_diff = (e_cl - e_std).abs();
-        let rel = if e_std.abs() > 1e-30 { abs_diff / e_std.abs() } else { abs_diff };
+        let rel = if e_std.abs() > 1e-30 {
+            abs_diff / e_std.abs()
+        } else {
+            abs_diff
+        };
         if rel > max_rel {
             max_rel = rel;
             max_abs = abs_diff;
@@ -196,11 +226,18 @@ fn celllist_vs_standard_margin_water_216() {
 
     eprintln!(
         "\n9a-1 margin ({} steps): max |ΔE|/|E| = {:.3e}  (abs={:.3e} kJ/mol at step {})",
-        standard.len(), max_rel, max_abs, max_step
+        standard.len(),
+        max_rel,
+        max_abs,
+        max_step
     );
     eprintln!(
         "Reference tolerance: 1e-8 | Margin is {} the tolerance",
-        if max_rel < 1e-8 { "BELOW — CellList is safe" } else { "ABOVE — need canonical sort" }
+        if max_rel < 1e-8 {
+            "BELOW — CellList is safe"
+        } else {
+            "ABOVE — need canonical sort"
+        }
     );
 
     assert!(
@@ -208,6 +245,8 @@ fn celllist_vs_standard_margin_water_216() {
         "CellList/Standard margin {:.3e} exceeds 1e-8 at step {} \
          (ΔE_abs={:.3e} kJ/mol). \
          Apply canonical-order sort to CellList output per PLAN.md §9a-1.",
-        max_rel, max_step, max_abs
+        max_rel,
+        max_step,
+        max_abs
     );
 }

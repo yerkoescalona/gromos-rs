@@ -10,11 +10,11 @@
 //! All calculations use f64 for molecular dynamics precision.
 
 pub mod bonded;
-pub mod nonbonded;
-pub mod energy;
 pub mod electrostatics;
-pub mod restraints;
+pub mod energy;
+pub mod nonbonded;
 pub mod pme;
+pub mod restraints;
 
 // Advanced force modules
 pub mod local_elevation;
@@ -26,15 +26,12 @@ pub mod qmmm;
 pub mod gpu;
 
 // MPI-enabled PME (feature-gated)
-#[cfg(feature = "mpi")]
+#[cfg(feature = "use-mpi")]
 pub mod pme_mpi;
 
 // Re-export main types
 pub use bonded::{
-    ForceEnergy, ForceEnergyLambda, LambdaController,
-    calculate_bonded_forces, calculate_angle_forces, 
-    calculate_dihedral_forces, calculate_improper_dihedral_forces,
+    calculate_angle_forces, calculate_bonded_forces, calculate_dihedral_forces,
+    calculate_improper_dihedral_forces, ForceEnergy, ForceEnergyLambda, LambdaController,
 };
-pub use nonbonded::{
-    LJParameters, LJParamMatrix, CRFParameters, ForceStorage, lj_crf_interaction,
-};
+pub use nonbonded::{lj_crf_interaction, CRFParameters, ForceStorage, LJParamMatrix, LJParameters};

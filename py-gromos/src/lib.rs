@@ -15,10 +15,10 @@ use pyo3_gromos::register_bindings;
 fn gromos(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register all bindings from pyo3-gromos
     register_bindings(m)?;
-    
+
     // Add module metadata
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("__author__", "GROMOS Developers")?;
-    
+
     Ok(())
 }

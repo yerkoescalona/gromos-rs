@@ -2,10 +2,9 @@
 //!
 //! GROMOS96 format is a block-based format with keywords like TITLE, POSITION, VELOCITY, BOX
 
-use gromos_core::configuration::Configuration;
+use crate::coordinate::G96Atom;
 use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
-use crate::coordinate::G96Atom;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -50,7 +49,7 @@ impl G96Writer {
 
         for (i, pos) in positions.iter().enumerate() {
             let (resnum, resname, atomname) = if let Some(topo) = topology {
-                let n_solute = topo.num_solute_atoms();
+                let _n_solute = topo.num_solute_atoms();
                 if let Some(a) = topo.moltype_atom(i) {
                     (a.residue_nr + 1, a.residue_name.as_str(), a.name.as_str())
                 } else {
@@ -115,8 +114,13 @@ impl G96Writer {
             writeln!(
                 self.writer,
                 "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                atom.res_num, atom.res_name, atom.atom_name, i + 1,
-                atom.pos.x, atom.pos.y, atom.pos.z
+                atom.res_num,
+                atom.res_name,
+                atom.atom_name,
+                i + 1,
+                atom.pos.x,
+                atom.pos.y,
+                atom.pos.z
             )
             .map_err(|e| format!("Write error: {}", e))?;
         }
@@ -137,8 +141,13 @@ impl G96Writer {
             writeln!(
                 self.writer,
                 "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                atom.res_num, atom.res_name, atom.atom_name, i + 1,
-                atom.pos.x, atom.pos.y, atom.pos.z
+                atom.res_num,
+                atom.res_name,
+                atom.atom_name,
+                i + 1,
+                atom.pos.x,
+                atom.pos.y,
+                atom.pos.z
             )
             .map_err(|e| format!("Write error: {}", e))?;
         }
@@ -159,8 +168,13 @@ impl G96Writer {
             writeln!(
                 self.writer,
                 "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                atom.res_num, atom.res_name, atom.atom_name, i + 1,
-                atom.pos.x, atom.pos.y, atom.pos.z
+                atom.res_num,
+                atom.res_name,
+                atom.atom_name,
+                i + 1,
+                atom.pos.x,
+                atom.pos.y,
+                atom.pos.z
             )
             .map_err(|e| format!("Write error: {}", e))?;
         }
@@ -223,10 +237,7 @@ pub fn write_por<P: AsRef<Path>>(
 ///
 /// The .rpr file contains a REFPOSITION block with all atoms.
 /// The MD engine reads reference coordinates for restrained atoms from this file.
-pub fn write_rpr<P: AsRef<Path>>(
-    path: P,
-    atoms: &[G96Atom],
-) -> Result<(), String> {
+pub fn write_rpr<P: AsRef<Path>>(path: P, atoms: &[G96Atom]) -> Result<(), String> {
     let mut writer = G96Writer::new(path)?;
     writer.write_title("Reference positions for position restraints")?;
     writer.write_refposition(atoms)?;

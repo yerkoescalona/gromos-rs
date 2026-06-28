@@ -1,4 +1,6 @@
 use crate::constraints::{shake, ShakeParameters};
+use crate::fep::LambdaController;
+use crate::integrator::Integrator;
 use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
 /// Replica Exchange Molecular Dynamics - Individual Replica
 ///
@@ -6,16 +8,14 @@ use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
 /// in a replica exchange simulation. Each replica maintains its own configuration
 /// and simulation parameters (temperature, lambda, etc.).
 use gromos_core::configuration::Configuration;
-use crate::fep::LambdaController;
-use crate::integrator::Integrator;
+use gromos_core::math::Rectangular;
+use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
+use gromos_core::topology::Topology;
+use gromos_core::units::kB;
 use gromos_forces::bonded::calculate_bonded_forces;
 use gromos_forces::nonbonded::{
     lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage, LJParamMatrix,
 };
-use gromos_core::math::Rectangular;
-use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
-use gromos_core::topology::Topology;
-use std::sync::Arc;
 
 /// Unique identifier for a replica
 pub type ReplicaId = usize;
@@ -74,8 +74,7 @@ impl ReplicaInfo {
     /// Calculate inverse temperature (beta = 1/kT)
     /// Uses kB = 0.008314462618 kJ/(mol·K) (GROMOS unit)
     pub fn beta(&self) -> f64 {
-        const KB: f64 = 0.008314462618; // kJ/(mol·K)
-        1.0 / (KB * self.temperature)
+        1.0 / (kB * self.temperature)
     }
 }
 
@@ -196,7 +195,7 @@ impl Replica {
         let lj_params = LJParamMatrix::from_nested(&lj_params_nested);
 
         // Nonbonded forces (LJ + CRF)
-        let mut nonbonded_storage = if self.parallel_forces {
+        let nonbonded_storage = if self.parallel_forces {
             // Convert pairlist to (u32, u32) format
             let pairlist_short: Vec<(u32, u32)> = self
                 .pairlist
@@ -206,7 +205,6 @@ impl Replica {
                 .collect();
 
             // Convert charge from Vec<f64> to Vec<f32> for compatibility
-            
 
             // Convert iac from Vec<usize> to Vec<u32> for compatibility
             let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();
@@ -231,7 +229,6 @@ impl Replica {
                 .collect();
 
             // Convert charge from Vec<f64> to Vec<f32> for compatibility
-            
 
             // Convert iac from Vec<usize> to Vec<u32> for compatibility
             let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();

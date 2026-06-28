@@ -51,14 +51,13 @@ impl Algorithm for BerendsenBarostat {
         let pressure = conf.old().pressure_tensor;
 
         // Isotropic pressure: P = (P_xx + P_yy + P_zz) / 3
-        let total_pressure =
-            (pressure.x_axis.x + pressure.y_axis.y + pressure.z_axis.z) / 3.0;
+        let total_pressure = (pressure.x_axis.x + pressure.y_axis.y + pressure.z_axis.z) / 3.0;
 
         // Scaling factor: mu = (1 - comp * dt / tau * (P0 - P))^(1/3)
         let mu = (1.0
             - self.params.compressibility * sim.dt / self.params.tau
                 * (self.params.pressure0 - total_pressure))
-        .powf(1.0 / 3.0);
+            .powf(1.0 / 3.0);
 
         // Scale the box
         {

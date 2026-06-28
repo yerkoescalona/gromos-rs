@@ -4,7 +4,9 @@ use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
 
-use crate::constraints::{shake, shake_buffered, shake_positions, shake_velocities, ShakeBuffers, ShakeParameters};
+use crate::constraints::{
+    shake, shake_buffered, shake_positions, shake_velocities, ShakeBuffers, ShakeParameters,
+};
 
 /// SHAKE constraint algorithm for the MD sequence.
 ///
@@ -43,7 +45,11 @@ impl Algorithm for ShakeAlgorithm {
         sim: &SimulationState,
     ) -> Result<(), String> {
         // Precompute constraint lists and allocate reusable buffers
-        self.buffers = Some(ShakeBuffers::new(topo, self.params.ntc, self.include_solvent));
+        self.buffers = Some(ShakeBuffers::new(
+            topo,
+            self.params.ntc,
+            self.include_solvent,
+        ));
 
         if self.shake_initial_positions {
             log::info!("SHAKE: shaking initial positions");

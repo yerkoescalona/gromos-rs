@@ -1,10 +1,10 @@
 //! Perturbed (free-energy) LJ+CRF interactions with soft-core potentials
 
-use gromos_core::math::{BoundaryCondition, Vec3};
-use gromos_core::topology::PerturbedAtomPair;
-use super::{CRFParameters, ForceStorage, LJParamMatrix};
 use super::lj_crf_interaction;
 use super::params::FOUR_PI_EPS_I;
+use super::{CRFParameters, LJParamMatrix};
+use gromos_core::math::{BoundaryCondition, Vec3};
+use gromos_core::topology::PerturbedAtomPair;
 
 /// Lambda-dependent parameters for perturbed nonbonded interactions
 ///
@@ -135,8 +135,6 @@ pub fn perturbed_lj_crf_interaction(
     lambda_params: &PerturbedLambdaParams,
     crf: &CRFParameters,
 ) -> (f64, f64, f64, f64, f64) {
-    const FOUR_PI_EPS_I: f64 = 138.9354859; // kJ mol⁻¹ nm e⁻²
-
     let r2 = r.length_squared();
 
     // Early exit for zero distance
@@ -290,7 +288,12 @@ pub struct PertNBCorrection {
 
 impl PertNBCorrection {
     pub fn new(n_atoms: usize) -> Self {
-        Self { forces: vec![Vec3::ZERO; n_atoms], delta_e_lj: 0.0, delta_e_crf: 0.0, dhdl: 0.0 }
+        Self {
+            forces: vec![Vec3::ZERO; n_atoms],
+            delta_e_lj: 0.0,
+            delta_e_crf: 0.0,
+            dhdl: 0.0,
+        }
     }
 }
 
@@ -323,7 +326,9 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
         // GROMOS insert_pair only routes to perturbed pairlist when a1 (= i here,
         // since pairs are stored with i < j) is perturbed.  Pairs where only j is
         // perturbed stay in the regular pairlist and receive state-A treatment.
-        if pert[i].is_none() { continue; }
+        if pert[i].is_none() {
+            continue;
+        }
         let pi = pert[i].as_ref();
         let pj = pert[j].as_ref();
 
@@ -331,15 +336,15 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
         let a_iac_j = pj.map_or(iac[j] as usize, |p| p.a_iac);
         let b_iac_i = pi.map_or(iac[i] as usize, |p| p.b_iac);
         let b_iac_j = pj.map_or(iac[j] as usize, |p| p.b_iac);
-        let a_q_i   = pi.map_or(charges[i], |p| p.a_charge);
-        let a_q_j   = pj.map_or(charges[j], |p| p.a_charge);
-        let b_q_i   = pi.map_or(charges[i], |p| p.b_charge);
-        let b_q_j   = pj.map_or(charges[j], |p| p.b_charge);
+        let a_q_i = pi.map_or(charges[i], |p| p.a_charge);
+        let a_q_j = pj.map_or(charges[j], |p| p.a_charge);
+        let b_q_i = pi.map_or(charges[i], |p| p.b_charge);
+        let b_q_j = pj.map_or(charges[j], |p| p.b_charge);
 
         let lj_a = lj.get(a_iac_i, a_iac_j);
         let lj_b = lj.get(b_iac_i, b_iac_j);
-        let a_q  = a_q_i * a_q_j;
-        let b_q  = b_q_i * b_q_j;
+        let a_q = a_q_i * a_q_j;
+        let b_q = b_q_i * b_q_j;
 
         let (alpha_lj, alpha_crf) = match (pi, pj) {
             (Some(pi), Some(pj)) => (
@@ -352,18 +357,18 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
 
         let r = bc.nearest_image(pos[i], pos[j]);
         // lj_crf_interaction expects q_prod already scaled by FOUR_PI_EPS_I
-        let (f_a, e_lj_a, e_crf_a) = lj_crf_interaction(r, lj_a.c6, lj_a.c12, a_q * FOUR_PI_EPS_I, crf);
+        let (f_a, e_lj_a, e_crf_a) =
+            lj_crf_interaction(r, lj_a.c6, lj_a.c12, a_q * FOUR_PI_EPS_I, crf);
         let (f_p, e_lj_p, e_crf_p, de_lj, de_crf) = perturbed_lj_crf_interaction(
-            r, lj_a.c6, lj_a.c12, lj_b.c6, lj_b.c12,
-            a_q, b_q, alpha_lj, alpha_crf, lp, crf,
+            r, lj_a.c6, lj_a.c12, lj_b.c6, lj_b.c12, a_q, b_q, alpha_lj, alpha_crf, lp, crf,
         );
 
         let df = r * (f_p - f_a);
         out.forces[i] += df;
         out.forces[j] -= df;
-        out.delta_e_lj  += e_lj_p  - e_lj_a;
+        out.delta_e_lj += e_lj_p - e_lj_a;
         out.delta_e_crf += e_crf_p - e_crf_a;
-        out.dhdl        += de_lj + de_crf;
+        out.dhdl += de_lj + de_crf;
     }
     out
 }
@@ -381,7 +386,7 @@ pub fn perturbed_self_energy_correction(
     lp: &PerturbedLambdaParams,
 ) -> (f64, f64) {
     let mut delta_e = 0.0;
-    let mut dhdl    = 0.0;
+    let mut dhdl = 0.0;
     let n = lp.lambda_exp as f64;
 
     for pi in pert.iter().filter_map(|x| x.as_ref()) {
@@ -391,13 +396,16 @@ pub fn perturbed_self_energy_correction(
         // GROMOS rf_soft_interaction at r=0 with selfterm_correction=true:
         //   e_rf = [-(1-λ)^n*qa2 - λ^n*qb2 + qa2] * crf_cut * FPEPSI
         let e_rf = (-(lp.a_crf_lambda_n * qa2) - lp.b_crf_lambda_n * qb2 + qa2)
-            * crf.crf_cut * FOUR_PI_EPS_I;
+            * crf.crf_cut
+            * FOUR_PI_EPS_I;
         delta_e += 0.5 * e_rf;
 
         // de_rf from lines 756-759 with dist2=0 (soft terms vanish):
         //   de_rf = n*((1-λ)^(n-1)*qa2 - λ^(n-1)*qb2) * crf_cut * FPEPSI
-        let de_rf = n * (lp.a_crf_lambda_n_1 * qa2 - lp.b_crf_lambda_n_1 * qb2)
-            * crf.crf_cut * FOUR_PI_EPS_I;
+        let de_rf = n
+            * (lp.a_crf_lambda_n_1 * qa2 - lp.b_crf_lambda_n_1 * qb2)
+            * crf.crf_cut
+            * FOUR_PI_EPS_I;
         dhdl += 0.5 * de_rf;
     }
     (delta_e, dhdl)
@@ -421,9 +429,13 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
     for i in 0..n_solute {
         let pi = pert[i].as_ref();
         for &j in &exclusions[i] {
-            if j <= i { continue; }
+            if j <= i {
+                continue;
+            }
             let pj = pert[j].as_ref();
-            if pi.is_none() && pj.is_none() { continue; }
+            if pi.is_none() && pj.is_none() {
+                continue;
+            }
 
             let a_q_i = pi.map_or(charges[i], |p| p.a_charge);
             let b_q_i = pi.map_or(charges[i], |p| p.b_charge);
@@ -435,7 +447,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
                 _ => unreachable!(),
             };
 
-            let r  = bc.nearest_image(pos[i], pos[j]);
+            let r = bc.nearest_image(pos[i], pos[j]);
             let r2 = r.length_squared();
             let a_q = a_q_i * a_q_j;
             let b_q = b_q_i * b_q_j;
@@ -443,21 +455,21 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             // Soft cutoff (GROMOS rf_soft_interaction: only modifies the quadratic
             // crf_2cut3i term, NOT the crf_cut constant; uses actual cutoff², not crf_cut²)
             let cut2 = crf.cutoff_sq;
-            let a_cut2soft   = cut2 + alpha_crf * lp.b_crfs_lambda2;
-            let b_cut2soft   = cut2 + alpha_crf * lp.a_crfs_lambda2;
+            let a_cut2soft = cut2 + alpha_crf * lp.b_crfs_lambda2;
+            let b_cut2soft = cut2 + alpha_crf * lp.a_crfs_lambda2;
             let a_crf_2cut3i = crf.crf_2cut3i * (cut2 / a_cut2soft).powi(3).sqrt();
             let b_crf_2cut3i = crf.crf_2cut3i * (cut2 / b_cut2soft).powi(3).sqrt();
-            let a_crf_cut3i  = 2.0 * a_crf_2cut3i;
-            let b_crf_cut3i  = 2.0 * b_crf_2cut3i;
-            let a_crf_pert   = 3.0 * a_crf_2cut3i / a_cut2soft;
-            let b_crf_pert   = 3.0 * b_crf_2cut3i / b_cut2soft;
+            let a_crf_cut3i = 2.0 * a_crf_2cut3i;
+            let b_crf_cut3i = 2.0 * b_crf_2cut3i;
+            let a_crf_pert = 3.0 * a_crf_2cut3i / a_cut2soft;
+            let b_crf_pert = 3.0 * b_crf_2cut3i / b_cut2soft;
 
             // NO 1/r term for excluded pairs (GROMOS rf_soft_interaction lines 742-743)
             let a_e_crf = a_q * (-a_crf_2cut3i * r2 - crf.crf_cut);
             let b_e_crf = b_q * (-b_crf_2cut3i * r2 - crf.crf_cut);
 
-            let e_crf_p = (lp.a_crf_lambda_n * a_e_crf + lp.b_crf_lambda_n * b_e_crf)
-                * FOUR_PI_EPS_I;
+            let e_crf_p =
+                (lp.a_crf_lambda_n * a_e_crf + lp.b_crf_lambda_n * b_e_crf) * FOUR_PI_EPS_I;
             let f_p = (lp.a_crf_lambda_n * a_q * a_crf_cut3i
                 + lp.b_crf_lambda_n * b_q * b_crf_cut3i)
                 * FOUR_PI_EPS_I;
@@ -470,7 +482,8 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             let n_exp = lp.lambda_exp as f64;
             let de_crf = ((lp.a_crf_lambda_n * a_q * lp.b_crfs_lambda * a_crf_pert
                 - lp.b_crf_lambda_n * b_q * lp.a_crfs_lambda * b_crf_pert)
-                * r2 * alpha_crf
+                * r2
+                * alpha_crf
                 + n_exp * (lp.b_crf_lambda_n_1 * b_e_crf - lp.a_crf_lambda_n_1 * a_e_crf))
                 * FOUR_PI_EPS_I;
 
@@ -478,7 +491,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             out.forces[i] += df;
             out.forces[j] -= df;
             out.delta_e_crf += e_crf_p - e_crf_a;
-            out.dhdl        += de_crf;
+            out.dhdl += de_crf;
         }
     }
 }
@@ -499,27 +512,31 @@ pub fn perturbed_one_four_correction<BC: BoundaryCondition>(
     bc: &BC,
     out: &mut PertNBCorrection,
 ) {
-    let n_exp = lp.lambda_exp as f64;
+    let _n_exp = lp.lambda_exp as f64;
     for i in 0..one_four_pairs.len() {
         let pi = pert[i].as_ref();
         for &j in &one_four_pairs[i] {
-            if j <= i { continue; }
+            if j <= i {
+                continue;
+            }
             let pj = pert[j].as_ref();
-            if pi.is_none() && pj.is_none() { continue; }
+            if pi.is_none() && pj.is_none() {
+                continue;
+            }
 
             let a_iac_i = pi.map_or(iac[i] as usize, |p| p.a_iac);
             let b_iac_i = pi.map_or(iac[i] as usize, |p| p.b_iac);
             let a_iac_j = pj.map_or(iac[j] as usize, |p| p.a_iac);
             let b_iac_j = pj.map_or(iac[j] as usize, |p| p.b_iac);
-            let a_q_i   = pi.map_or(charges[i], |p| p.a_charge);
-            let b_q_i   = pi.map_or(charges[i], |p| p.b_charge);
-            let a_q_j   = pj.map_or(charges[j], |p| p.a_charge);
-            let b_q_j   = pj.map_or(charges[j], |p| p.b_charge);
+            let a_q_i = pi.map_or(charges[i], |p| p.a_charge);
+            let b_q_i = pi.map_or(charges[i], |p| p.b_charge);
+            let a_q_j = pj.map_or(charges[j], |p| p.a_charge);
+            let b_q_j = pj.map_or(charges[j], |p| p.b_charge);
 
             let lj_a = lj.get(a_iac_i, a_iac_j);
             let lj_b = lj.get(b_iac_i, b_iac_j);
-            let a_q  = a_q_i * a_q_j;
-            let b_q  = b_q_i * b_q_j;
+            let a_q = a_q_i * a_q_j;
+            let b_q = b_q_i * b_q_j;
 
             let (alpha_lj, alpha_crf) = match (pi, pj) {
                 (Some(pi), Some(pj)) => (
@@ -532,30 +549,31 @@ pub fn perturbed_one_four_correction<BC: BoundaryCondition>(
 
             let r = bc.nearest_image(pos[i], pos[j]);
             let r2 = r.length_squared();
-            if r2 < 1e-10 { continue; }
+            if r2 < 1e-10 {
+                continue;
+            }
             let inv_r2 = 1.0 / r2;
             let inv_r6 = inv_r2 * inv_r2 * inv_r2;
-            let inv_r  = inv_r2.sqrt();
+            let inv_r = inv_r2.sqrt();
 
             // State-A 1-4 what the regular one_four_interaction_loop computed (no soft-core)
-            let e_lj_a  = (lj_a.cs12 * inv_r6 - lj_a.cs6) * inv_r6;
-            let f_lj_a  = (12.0 * lj_a.cs12 * inv_r6 - 6.0 * lj_a.cs6) * inv_r6 * inv_r2;
+            let e_lj_a = (lj_a.cs12 * inv_r6 - lj_a.cs6) * inv_r6;
+            let f_lj_a = (12.0 * lj_a.cs12 * inv_r6 - 6.0 * lj_a.cs6) * inv_r6 * inv_r2;
             let e_crf_a = a_q * FOUR_PI_EPS_I * (inv_r - crf.crf_2cut3i * r2 - crf.crf_cut);
             let f_crf_a = a_q * FOUR_PI_EPS_I * (inv_r * inv_r2 + crf.crf_cut3i);
 
             // Perturbed 1-4: call full dual-topology kernel with cs6/cs12 (faithful to
             // GROMOS eds_pert_lj_crf_interaction which uses cs6/cs12 for 1-4 pairs)
             let (f_p, e_lj_p, e_crf_p, de_lj, de_crf) = perturbed_lj_crf_interaction(
-                r, lj_a.cs6, lj_a.cs12, lj_b.cs6, lj_b.cs12,
-                a_q, b_q, alpha_lj, alpha_crf, lp, crf,
+                r, lj_a.cs6, lj_a.cs12, lj_b.cs6, lj_b.cs12, a_q, b_q, alpha_lj, alpha_crf, lp, crf,
             );
 
             let df = r * (f_p - (f_lj_a + f_crf_a));
             out.forces[i] += df;
             out.forces[j] -= df;
-            out.delta_e_lj  += e_lj_p  - e_lj_a;
+            out.delta_e_lj += e_lj_p - e_lj_a;
             out.delta_e_crf += e_crf_p - e_crf_a;
-            out.dhdl        += de_lj + de_crf;
+            out.dhdl += de_lj + de_crf;
         }
     }
 }
@@ -597,14 +615,18 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
         // Only handle pairs that are in the regular 1-4 list (the typical case)
         let in_14 = one_four_pairs.get(i).map_or(false, |l| l.contains(&j))
             || one_four_pairs.get(j).map_or(false, |l| l.contains(&i));
-        if !in_14 { continue; }
+        if !in_14 {
+            continue;
+        }
 
-        let r  = bc.nearest_image(pos[i], pos[j]);
+        let r = bc.nearest_image(pos[i], pos[j]);
         let r2 = r.length_squared();
-        if r2 < 1e-10 { continue; }
+        if r2 < 1e-10 {
+            continue;
+        }
         let inv_r2 = 1.0 / r2;
         let inv_r6 = inv_r2 * inv_r2 * inv_r2;
-        let inv_r  = inv_r2.sqrt();
+        let inv_r = inv_r2.sqrt();
 
         let lj_ij = lj.get(iac[i] as usize, iac[j] as usize);
 
@@ -620,10 +642,14 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
         // 0 = full LJ (c6/c12), 1+ = 1-4 LJ (cs6/cs12)
         let lj_pair = |type_idx: usize| -> (f64, f64) {
             match type_idx {
-                0 => ((lj_ij.c12 * inv_r6 - lj_ij.c6) * inv_r6,
-                      (12.0 * lj_ij.c12 * inv_r6 - 6.0 * lj_ij.c6) * inv_r6 * inv_r2),
-                _ => ((lj_ij.cs12 * inv_r6 - lj_ij.cs6) * inv_r6,
-                      (12.0 * lj_ij.cs12 * inv_r6 - 6.0 * lj_ij.cs6) * inv_r6 * inv_r2),
+                0 => (
+                    (lj_ij.c12 * inv_r6 - lj_ij.c6) * inv_r6,
+                    (12.0 * lj_ij.c12 * inv_r6 - 6.0 * lj_ij.c6) * inv_r6 * inv_r2,
+                ),
+                _ => (
+                    (lj_ij.cs12 * inv_r6 - lj_ij.cs6) * inv_r6,
+                    (12.0 * lj_ij.cs12 * inv_r6 - 6.0 * lj_ij.cs6) * inv_r6 * inv_r2,
+                ),
             }
         };
         let (e_lj_a, f_lj_a) = lj_pair(ap.a_type);
@@ -636,29 +662,28 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
         let e_crf_b = ap.b_type.map_or(0.0, |_| e_crf_reg);
         let f_crf_b = ap.b_type.map_or(0.0, |_| f_crf_reg);
 
-        let e_lj_pert  = lp.a_lj_lambda_n  * e_lj_a  + lp.b_lj_lambda_n  * e_lj_b;
+        let e_lj_pert = lp.a_lj_lambda_n * e_lj_a + lp.b_lj_lambda_n * e_lj_b;
         let e_crf_pert = lp.a_crf_lambda_n * e_crf_a + lp.b_crf_lambda_n * e_crf_b;
-        let f_lj_pert  = lp.a_lj_lambda_n  * f_lj_a  + lp.b_lj_lambda_n  * f_lj_b;
+        let f_lj_pert = lp.a_lj_lambda_n * f_lj_a + lp.b_lj_lambda_n * f_lj_b;
         let f_crf_pert = lp.a_crf_lambda_n * f_crf_a + lp.b_crf_lambda_n * f_crf_b;
 
-        let de_lj  = n_exp * (lp.b_lj_lambda_n_1  * e_lj_b  - lp.a_lj_lambda_n_1  * e_lj_a);
+        let de_lj = n_exp * (lp.b_lj_lambda_n_1 * e_lj_b - lp.a_lj_lambda_n_1 * e_lj_a);
         let de_crf = n_exp * (lp.b_crf_lambda_n_1 * e_crf_b - lp.a_crf_lambda_n_1 * e_crf_a);
 
         let df = r * ((f_lj_pert - f_lj_reg) + (f_crf_pert - f_crf_reg));
         out.forces[i] += df;
         out.forces[j] -= df;
-        out.delta_e_lj  += e_lj_pert  - e_lj_reg;
+        out.delta_e_lj += e_lj_pert - e_lj_reg;
         out.delta_e_crf += e_crf_pert - e_crf_reg;
-        out.dhdl        += de_lj + de_crf;
+        out.dhdl += de_lj + de_crf;
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gromos_core::math::Vec3;
     use approx::assert_relative_eq;
+    use gromos_core::math::Vec3;
 
     #[test]
     fn test_perturbed_lambda_params() {
@@ -973,10 +998,10 @@ mod tests {
         // Use different A and B state parameters to see perturbation effect
         let a_c6 = 0.001;
         let a_c12 = 0.0001;
-        let b_c6 = 0.002;  // Different from A state
+        let b_c6 = 0.002; // Different from A state
         let b_c12 = 0.0002; // Different from A state
         let a_q = 0.1;
-        let b_q = -0.1;  // Different charge
+        let b_q = -0.1; // Different charge
 
         let alpha_lj = 0.5;
         let alpha_crf = 0.5;

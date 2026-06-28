@@ -45,15 +45,15 @@ fn parse_mk_args(argv: &[String]) -> Result<MkScriptArgs, String> {
             "--sys" => {
                 i += 1;
                 args.system = argv.get(i).cloned().ok_or("Missing @sys value")?;
-            }
+            },
             "--bin" => {
                 i += 1;
                 args.bin = argv.get(i).cloned().ok_or("Missing @bin value")?;
-            }
+            },
             "--dir" => {
                 i += 1;
                 args.dir = argv.get(i).cloned().ok_or("Missing @dir value")?;
-            }
+            },
             "--files" => {
                 // Read key-value pairs until we hit another --flag
                 i += 1;
@@ -68,19 +68,19 @@ fn parse_mk_args(argv: &[String]) -> Result<MkScriptArgs, String> {
                     i += 1;
                 }
                 continue; // Don't increment i again
-            }
+            },
             "--template" => {
                 i += 1;
                 args.template = argv.get(i).cloned().ok_or("Missing @template value")?;
-            }
+            },
             "--version" => {
                 i += 1;
                 args.version = argv.get(i).cloned().ok_or("Missing @version value")?;
-            }
+            },
             "--joblist" => {
                 i += 1;
                 args.joblist = argv.get(i).cloned();
-            }
+            },
             "--script" => {
                 i += 1;
                 let first: usize = argv
@@ -95,14 +95,14 @@ fn parse_mk_args(argv: &[String]) -> Result<MkScriptArgs, String> {
                     .parse()
                     .map_err(|_| "Invalid @script last")?;
                 args.script_range = Some((first, last));
-            }
+            },
             "-h" | "--help" => {
                 print_usage();
                 process::exit(0);
-            }
+            },
             other => {
                 return Err(format!("Unknown argument: {}", other));
-            }
+            },
         }
         i += 1;
     }
@@ -146,7 +146,7 @@ fn main() {
             eprintln!("Error: {}", e);
             print_usage();
             process::exit(1);
-        }
+        },
     };
 
     // Read template library
@@ -155,7 +155,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading template: {}", e);
             process::exit(1);
-        }
+        },
     };
 
     // Read base IMD
@@ -169,7 +169,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading IMD file '{}': {}", imd_path, e);
             process::exit(1);
-        }
+        },
     };
 
     let config = MkScriptConfig {
@@ -188,7 +188,7 @@ fn main() {
             Err(e) => {
                 eprintln!("Error reading joblist '{}': {}", joblist_path, e);
                 process::exit(1);
-            }
+            },
         };
 
         eprintln!(
@@ -260,8 +260,7 @@ fn main() {
                 process::exit(1);
             }
 
-            let script =
-                generate_run_script(&config, &template, &dummy_job, prev.as_ref());
+            let script = generate_run_script(&config, &template, &dummy_job, prev.as_ref());
             let script_name = template.expanded_filename("script", &mk_args.system, num);
             if let Err(e) = fs::write(&script_name, &script) {
                 eprintln!("Error writing script '{}': {}", script_name, e);

@@ -47,7 +47,6 @@
 
 use gromos_core::configuration::Configuration;
 use gromos_core::math::Vec3;
-use gromos_core::topology::Topology;
 use std::f64::consts::PI;
 
 /// Type of coordinate for local elevation
@@ -408,7 +407,7 @@ impl Umbrella {
             .gaussian_widths
             .iter()
             .zip(&self.grid_spacings)
-            .map(|(&sigma, &spacing)| ((3.0 * sigma / spacing).ceil() as usize))
+            .map(|(&sigma, &spacing)| (3.0 * sigma / spacing).ceil() as usize)
             .collect();
 
         // Copy necessary data to avoid borrowing issues
@@ -486,7 +485,7 @@ impl Umbrella {
         // For RMSD: Gradient involves all atoms
 
         // Placeholder: Apply force equally to all involved atoms
-        let force_per_atom = (coord.force / coord.atoms.len() as f64);
+        let force_per_atom = coord.force / coord.atoms.len() as f64;
         for &atom_idx in &coord.atoms {
             // This is a simplification - proper implementation needs chain rule
             conf.current_mut().force[atom_idx].x += force_per_atom;

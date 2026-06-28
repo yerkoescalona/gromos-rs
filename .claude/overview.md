@@ -57,3 +57,15 @@ See `crates/gromos-md/.claude/CONTEXT.md` for how to add a reference test.
 - **CLI arg parsing:** clap `#[derive(Parser)]` with `gromos_args()` pre-processor (`@key → --key`, `@f argfile` expansion). No custom arg parsers.
 - **Doc style:** Rust → KaTeX + `[^label]` footnotes; Python → NumPy docstrings + `.. math::`
 - **On commit:** update CHANGELOG.md and Cargo.toml version.
+
+## Before committing
+
+Always run these two checks before any `git commit`. If either fails, fix it first — do not commit broken format or type errors.
+
+```
+cargo fmt          # fix formatting in-place
+cargo check        # type check the full workspace
+```
+
+CI runs both but with `continue-on-error: true` (advisory only). The commit is the real gate.
+CI must never auto-modify code — only check and report.

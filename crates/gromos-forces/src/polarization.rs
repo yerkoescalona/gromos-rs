@@ -40,7 +40,7 @@
 //!   computer simulations." Rev. Comp. Chem. 18:89-146
 
 use gromos_core::configuration::Configuration;
-use gromos_core::math::{Mat3, Vec3};
+use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
 
 /// Polarization model type
@@ -323,7 +323,7 @@ impl PolarizationCalculator {
     }
 
     /// Calculate forces from polarization
-    fn calculate_polarization_forces(&self, topo: &Topology, conf: &mut Configuration) {
+    fn calculate_polarization_forces(&self, topo: &Topology, _conf: &mut Configuration) {
         // TODO: Implement force calculation
         // F_i = -∂E_pol/∂r_i
         // Includes:

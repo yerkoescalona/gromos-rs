@@ -7,6 +7,9 @@ license.workspace = true
 description = "GROMOS-RS system construction and preparation tools"
 autobins = false
 
+[features]
+use-mpi = []
+
 [dependencies]
 gromos = { workspace = true }
 gromos-core = { workspace = true }

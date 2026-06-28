@@ -1,9 +1,16 @@
+// TODO: stub — EdsFrame/StateStatistics parsed but ΔG pipeline not yet wired to main() (ref: GROMOS++ eds_ana.cc).
+#![allow(unused)]
 //! eds_ana - EDS Analysis Tool
 //!
 //! Analyzes EDS simulation data to compute free energy differences
 //! between states based on state visit statistics.
 //!
 //! Usage: eds_ana @stats eds_stats.dat @vr eds_vr.dat [@out free_energy.dat]
+
+// TODO: stub — EdsFrame / StateStatistics are parsed but the ΔG calculation
+// functions (calculate_state_statistics, calculate_free_energy_differences,
+// write_free_energy_output) are not yet called from main(). Wire them up once
+// the EDS file reader is stable (ref: GROMOS++ eds_ana.cc).
 
 use std::env;
 use std::fs::File;

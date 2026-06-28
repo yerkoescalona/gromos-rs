@@ -16,7 +16,11 @@ use gromos_io::{read_g96_labeled, write_por, write_rpr};
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "prep_posres", version, about = "Generate position restraint files (.por/.rpr)")]
+#[command(
+    name = "prep_posres",
+    version,
+    about = "Generate position restraint files (.por/.rpr)"
+)]
 struct Args {
     /// Molecular topology file
     #[arg(long)]
@@ -44,7 +48,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading topology: {}", e);
             process::exit(1);
-        }
+        },
     };
     let n_solute = topo.n_atoms;
 
@@ -54,7 +58,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading coordinates: {}", e);
             process::exit(1);
-        }
+        },
     };
 
     eprintln!("prep_posres:");

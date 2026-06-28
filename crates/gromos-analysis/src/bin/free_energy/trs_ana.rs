@@ -8,8 +8,8 @@
 //! - Box dimensions analysis
 //! - Trajectory quality metrics
 
-use gromos_io::trajectory::TrajectoryReader;
 use gromos_core::math::Vec3;
+use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
 

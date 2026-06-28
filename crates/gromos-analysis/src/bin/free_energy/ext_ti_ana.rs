@@ -14,7 +14,6 @@
 
 use gromos_core::stat::Stat;
 use gromos_io::read_free_energy_trajectory;
-use std::env;
 use std::process;
 
 fn print_usage() {
@@ -114,9 +113,15 @@ fn main() {
         }
 
         if verbose {
-            println!("# λ={lambda:.6}  file={path}  frames={} (skipped={n_skip})", frames.len());
+            println!(
+                "# λ={lambda:.6}  file={path}  frames={} (skipped={n_skip})",
+                frames.len()
+            );
             for (fi, frame) in frames[n_skip..].iter().enumerate() {
-                println!("  frame {:5}  t={:.4}ps  dH/dλ={:.6e}", fi, frame.time, frame.dhdl_total);
+                println!(
+                    "  frame {:5}  t={:.4}ps  dH/dλ={:.6e}",
+                    fi, frame.time, frame.dhdl_total
+                );
             }
         }
 
@@ -134,7 +139,10 @@ fn main() {
     // Print per-window summary
     println!("#");
     println!("# ext_ti_ana — Thermodynamic Integration");
-    println!("# {:>10}  {:>14}  {:>14}  {:>10}", "lambda", "<dH/dλ>", "ee(dH/dλ)", "N");
+    println!(
+        "# {:>10}  {:>14}  {:>14}  {:>10}",
+        "lambda", "<dH/dλ>", "ee(dH/dλ)", "N"
+    );
     println!("#");
 
     let mut lambdas: Vec<f64> = Vec::new();
@@ -148,10 +156,7 @@ fn main() {
         }
         let ave = w.stat.ave();
         let ee = if n >= 4 { w.stat.ee() } else { w.stat.rmsd() };
-        println!(
-            "  {:10.6}  {:14.6e}  {:14.6e}  {:10}",
-            w.lambda, ave, ee, n
-        );
+        println!("  {:10.6}  {:14.6e}  {:14.6e}  {:10}", w.lambda, ave, ee, n);
         lambdas.push(w.lambda);
         aves.push(ave);
     }
@@ -171,6 +176,10 @@ fn main() {
 
     println!("#");
     println!("# TI integration (trapezoidal):  ΔG = {delta_g:.6} kJ/mol");
-    println!("#   λ range: {:.4} – {:.4}  ({} windows)",
-        lambdas[0], lambdas[lambdas.len() - 1], lambdas.len());
+    println!(
+        "#   λ range: {:.4} – {:.4}  ({} windows)",
+        lambdas[0],
+        lambdas[lambdas.len() - 1],
+        lambdas.len()
+    );
 }

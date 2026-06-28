@@ -104,9 +104,7 @@ impl ForceWriter {
             writeln!(
                 self.writer,
                 "{:>w$.p$}{:>w$.p$}{:>w$.p$}",
-                force.x,
-                force.y,
-                force.z,
+                force.x, force.y, force.z,
             )?;
 
             // Comment every 10 atoms (GROMOS convention)
@@ -126,30 +124,26 @@ impl ForceWriter {
                         writeln!(
                             self.writer,
                             "{:>w$.p$}{:>w$.p$}{:>w$.p$}",
-                            force.x,
-                            force.y,
-                            force.z,
+                            force.x, force.y, force.z,
                         )?;
                         if (i + 1) % 10 == 0 {
                             writeln!(self.writer, "#{:>10}", i + 1)?;
                         }
                     }
-                }
+                },
                 None => {
                     // Write zeros for each atom
                     for i in 0..forces.len() {
                         writeln!(
                             self.writer,
                             "{:>w$.p$}{:>w$.p$}{:>w$.p$}",
-                            0.0f64,
-                            0.0f64,
-                            0.0f64,
+                            0.0f64, 0.0f64, 0.0f64,
                         )?;
                         if (i + 1) % 10 == 0 {
                             writeln!(self.writer, "#{:>10}", i + 1)?;
                         }
                     }
-                }
+                },
             }
             writeln!(self.writer, "END")?;
         }

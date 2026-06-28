@@ -4,13 +4,11 @@
 //!
 //! Calculates excess chemical potential using Widom insertion
 
+use gromos_core::units::{four_pi_eps_i, kB};
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
-
-const K_B: f64 = 0.00831446; // kJ/(mol·K)
-const COULOMB_CONST: f64 = 138.9354859; // kJ/(mol·nm·e²)
 
 fn calc_insertion_energy(
     insert_pos: (f64, f64, f64),
@@ -28,7 +26,7 @@ fn calc_insertion_energy(
 
         if dist > 0.01 {
             let q = charges.get(i).copied().unwrap_or(0.0);
-            energy += (COULOMB_CONST * insert_charge * q / dist);
+            energy += four_pi_eps_i * insert_charge * q / dist;
 
             // Simple LJ
             let sigma = 0.3f64;
@@ -36,7 +34,7 @@ fn calc_insertion_energy(
             let sr = sigma / dist;
             let sr6 = sr.powi(6);
             let sr12 = sr6 * sr6;
-            energy += (4.0 * epsilon * (sr12 - sr6));
+            energy += 4.0 * epsilon * (sr12 - sr6);
         }
     }
 
@@ -88,7 +86,7 @@ fn main() {
     eprintln!("# Insertions per frame: {}", n_insertions);
     eprintln!("# Temperature: {} K", temperature);
 
-    let beta = 1.0 / (K_B * temperature);
+    let beta = 1.0 / (kB * temperature);
     let mut total_exp_u = 0.0f64;
     let mut n_frames = 0;
 

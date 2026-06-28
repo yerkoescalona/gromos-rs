@@ -32,9 +32,7 @@
 use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
-
-/// Boltzmann constant in kJ/(mol·K)
-const K_BOLTZMANN: f64 = 0.00831441;
+use gromos_core::units::kB;
 
 /// Nosé-Hoover thermostat parameters for a single temperature bath.
 #[derive(Debug, Clone)]
@@ -145,7 +143,7 @@ impl Algorithm for NoseHooverThermostat {
 
             // T_free = 2·E_kin / (dof·k_B)
             let mut free_temp = if dof > 0.0 {
-                2.0 * ekin / (dof * K_BOLTZMANN)
+                2.0 * ekin / (dof * kB)
             } else {
                 0.0
             };
@@ -279,7 +277,7 @@ mod tests {
         const N: usize = 2;
 
         // ekin that gives free_temp = 2·T₀ = 600 K
-        let ekin = 2.0 * T0 * DOF * K_BOLTZMANN / 2.0; // = 600·3·k_B/2
+        let ekin = 2.0 * T0 * DOF * kB / 2.0; // = 600·3·k_B/2
 
         let (topo, mut conf) = make_conf(N, ekin);
         let sim = make_sim(DT);
@@ -318,7 +316,7 @@ mod tests {
         const N: usize = 2;
 
         // ekin gives free_temp = T₀/2 = 150 K (system is cold)
-        let ekin = (T0 / 2.0) * DOF * K_BOLTZMANN / 2.0;
+        let ekin = (T0 / 2.0) * DOF * kB / 2.0;
 
         let (topo, mut conf) = make_conf(N, ekin);
         let sim = make_sim(DT);
@@ -386,7 +384,7 @@ mod tests {
         const NHC: usize = 3;
         const N: usize = 2;
 
-        let ekin = 2.0 * T0 * DOF * K_BOLTZMANN / 2.0; // free_temp = 2·T₀
+        let ekin = 2.0 * T0 * DOF * kB / 2.0; // free_temp = 2·T₀
 
         let (topo, mut conf) = make_conf(N, ekin);
         let sim = make_sim(DT);
@@ -432,7 +430,7 @@ mod tests {
         const NHC: usize = 3;
         const N: usize = 2;
 
-        let ekin = 2.0 * T0 * DOF * K_BOLTZMANN / 2.0; // free_temp = 2·T₀
+        let ekin = 2.0 * T0 * DOF * kB / 2.0; // free_temp = 2·T₀
 
         let (topo, mut conf) = make_conf(N, ekin);
         // Keep ekin fixed for both steps (we're testing the chain, not the

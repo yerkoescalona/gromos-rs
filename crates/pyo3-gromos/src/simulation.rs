@@ -23,23 +23,22 @@
 //! print(sim.algorithm_names)  # inspect the MD sequence
 //! ```
 
-use pyo3::prelude::*;
 use numpy::PyArray2;
+use pyo3::prelude::*;
 
 use gromos_core::{
     algorithm::{AlgorithmSequence, SimulationState},
+    configuration::BoxType,
     configuration::{Box as SimBox, Configuration},
     math::{Periodicity, Rectangular, Vacuum, Vec3},
-    configuration::BoxType,
     pairlist::{PairlistAlgorithm, PairlistContainer},
     Topology,
 };
 use gromos_forces::nonbonded::CRFParameters;
 use gromos_integrators::algorithms::{
-    BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat,
-    EnergyCalculation, Forcefield, LeapFrogPosition, LeapFrogVelocity,
-    PressureCalculation, RemoveCOMMotion, ShakeAlgorithm, TemperatureCalculation,
-    VirialType,
+    BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, EnergyCalculation, Forcefield,
+    LeapFrogPosition, LeapFrogVelocity, PressureCalculation, RemoveCOMMotion, ShakeAlgorithm,
+    TemperatureCalculation, VirialType,
 };
 use gromos_integrators::constraints::{NtcMode, ShakeParameters};
 use gromos_io::{
@@ -48,11 +47,11 @@ use gromos_io::{
     topology::{build_topology, read_topology_file},
 };
 
-use super::PyEnergy;
-use super::topology::PyTopology;
-use super::py_conf::PyConfiguration;
+use super::algorithm_sequence::{resolve_algorithm_sequence, PyAlgorithmSequence};
 use super::parameters::PyInputParameters;
-use super::algorithm_sequence::{PyAlgorithmSequence, resolve_algorithm_sequence};
+use super::py_conf::PyConfiguration;
+use super::topology::PyTopology;
+use super::PyEnergy;
 
 // ============================================================================
 // Shared build logic — constructs a fully initialized simulation from parts
@@ -156,7 +155,11 @@ fn build_simulation(
 
     // 2. Forcefield (bonded + nonbonded)
     let mut forcefield = Forcefield::new(
-        lj_params, crf_params, periodicity, pairlist, pairlist_algorithm,
+        lj_params,
+        crf_params,
+        periodicity,
+        pairlist,
+        pairlist_algorithm,
     );
     forcefield.ntf_bond = ntf[0] != 0;
     forcefield.ntf_angle = ntf[1] != 0;
@@ -200,8 +203,7 @@ fn build_simulation(
         } else {
             0
         };
-        let total_dof =
-            (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64;
+        let total_dof = (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64;
         md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
             temperature,
             thermostat_tau,
@@ -277,10 +279,7 @@ fn build_simulation(
     md_sequence
         .run_step(&topo, &mut conf, &sim_state)
         .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Error at step 0: {}",
-                e
-            ))
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Error at step 0: {}", e))
         })?;
     sim_state.advance();
 
@@ -358,10 +357,7 @@ fn build_simulation_from_sequence(
     md_sequence
         .run_step(&topo, &mut conf, &sim_state)
         .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Error at step 0: {}",
-                e
-            ))
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Error at step 0: {}", e))
         })?;
     sim_state.advance();
 
@@ -526,11 +522,7 @@ impl PySimulation {
     #[getter]
     fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         let state = self.configuration.old();
-        let data: Vec<Vec<f64>> = state
-            .pos
-            .iter()
-            .map(|v| vec![v.x, v.y, v.z])
-            .collect();
+        let data: Vec<Vec<f64>> = state.pos.iter().map(|v| vec![v.x, v.y, v.z]).collect();
         Ok(PyArray2::from_vec2_bound(py, &data)?)
     }
 
@@ -538,11 +530,7 @@ impl PySimulation {
     #[getter]
     fn velocities<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         let state = self.configuration.old();
-        let data: Vec<Vec<f64>> = state
-            .vel
-            .iter()
-            .map(|v| vec![v.x, v.y, v.z])
-            .collect();
+        let data: Vec<Vec<f64>> = state.vel.iter().map(|v| vec![v.x, v.y, v.z]).collect();
         Ok(PyArray2::from_vec2_bound(py, &data)?)
     }
 
@@ -550,11 +538,7 @@ impl PySimulation {
     #[getter]
     fn forces<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         let state = self.configuration.old();
-        let data: Vec<Vec<f64>> = state
-            .force
-            .iter()
-            .map(|v| vec![v.x, v.y, v.z])
-            .collect();
+        let data: Vec<Vec<f64>> = state.force.iter().map(|v| vec![v.x, v.y, v.z]).collect();
         Ok(PyArray2::from_vec2_bound(py, &data)?)
     }
 

@@ -26,7 +26,10 @@
 //! - TEMPERATUREGROUPS: temperature coupling groups
 
 use crate::IoError;
-use gromos_core::topology::{Angle, AngleParameters, Bond, BondParameters, Dihedral, DihedralParameters, ImproperDihedralParameters, LJParameters, Topology};
+use gromos_core::topology::{
+    Angle, AngleParameters, Bond, BondParameters, Dihedral, DihedralParameters,
+    ImproperDihedralParameters, LJParameters, Topology,
+};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -62,7 +65,7 @@ pub struct ParsedTopology {
     pub iac: Vec<usize>,
     pub chargegroup_codes: Vec<usize>, // CGC values: 1 = end of chargegroup
     pub exclusions: Vec<Vec<usize>>,
-    pub one_four_pairs: Vec<Vec<usize>>,   // 1-4 pairs from INE14 (0-based)
+    pub one_four_pairs: Vec<Vec<usize>>, // 1-4 pairs from INE14 (0-based)
     pub bonds: Vec<(usize, usize, usize)>, // (i, j, type)
     pub bond_parameters: Vec<BondParameters>,
     pub angles: Vec<(usize, usize, usize, usize)>, // (i, j, k, type)
@@ -73,7 +76,7 @@ pub struct ParsedTopology {
     pub improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
     pub lj_parameters: HashMap<(usize, usize), LJParameters>,
     pub temperature_groups: Vec<usize>, // Last atom index of each group
-    pub pressure_groups: Vec<usize>,   // Last atom index of each pressure group (GROMOS: PRESSUREGROUPS)
+    pub pressure_groups: Vec<usize>, // Last atom index of each pressure group (GROMOS: PRESSUREGROUPS)
     pub solvent_atoms: Vec<ParsedSolventAtom>,
     pub solvent_constraints: Vec<ParsedSolventConstraint>,
     pub solute_molecules: Vec<usize>, // last atom index of each molecule
@@ -492,7 +495,8 @@ fn parse_angle_types<I: Iterator<Item = Result<String, std::io::Error>>>(
 
             angle_parameters.push(AngleParameters {
                 k_cosine,
-                k_harmonic: k_harmonic * 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI), // Convert from kJ/(mol·deg²) to kJ/(mol·rad²)
+                k_harmonic: k_harmonic * 180.0 * 180.0
+                    / (std::f64::consts::PI * std::f64::consts::PI), // Convert from kJ/(mol·deg²) to kJ/(mol·rad²)
                 theta0: theta0_deg.to_radians(),
             });
         }
@@ -547,7 +551,10 @@ fn parse_angles<I: Iterator<Item = Result<String, std::io::Error>>>(
             if i == j || i == k || j == k {
                 log::warn!(
                     "Skipping invalid angle with duplicate atoms: {}-{}-{} (type {})",
-                    i, j, k, angle_type
+                    i,
+                    j,
+                    k,
+                    angle_type
                 );
                 continue;
             }
@@ -568,22 +575,37 @@ fn parse_dihedrals<I: Iterator<Item = Result<String, std::io::Error>>>(
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
-        if trimmed == "END" { break; }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
 
         if n_dihedrals == 0 {
-            n_dihedrals = trimmed.parse()
+            n_dihedrals = trimmed
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid dihedral count: {}", trimmed)))?;
             continue;
         }
 
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if parts.len() >= 5 {
-            let i: usize = parts[0].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[0])))?;
-            let j: usize = parts[1].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[1])))?;
-            let k: usize = parts[2].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[2])))?;
-            let l: usize = parts[3].parse().map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[3])))?;
-            let dtype: usize = parts[4].parse().map_err(|_| IoError::ParseError(format!("Invalid type: {}", parts[4])))?;
+            let i: usize = parts[0]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[0])))?;
+            let j: usize = parts[1]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[1])))?;
+            let k: usize = parts[2]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[2])))?;
+            let l: usize = parts[3]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid atom: {}", parts[3])))?;
+            let dtype: usize = parts[4]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid type: {}", parts[4])))?;
             dihedrals.push((i - 1, j - 1, k - 1, l - 1, dtype - 1));
         }
     }
@@ -598,20 +620,31 @@ fn parse_dihedral_types<I: Iterator<Item = Result<String, std::io::Error>>>(
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
-        if trimmed == "END" { break; }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
 
         if n_types == 0 {
-            n_types = trimmed.parse()
-                .map_err(|_| IoError::ParseError(format!("Invalid dihedral type count: {}", trimmed)))?;
+            n_types = trimmed.parse().map_err(|_| {
+                IoError::ParseError(format!("Invalid dihedral type count: {}", trimmed))
+            })?;
             continue;
         }
 
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if parts.len() >= 3 {
-            let cp: f64 = parts[0].parse().map_err(|_| IoError::ParseError(format!("Invalid CP: {}", parts[0])))?;
-            let pd: f64 = parts[1].parse().map_err(|_| IoError::ParseError(format!("Invalid PD: {}", parts[1])))?;
-            let np: i32 = parts[2].parse().map_err(|_| IoError::ParseError(format!("Invalid NP: {}", parts[2])))?;
+            let cp: f64 = parts[0]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid CP: {}", parts[0])))?;
+            let pd: f64 = parts[1]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid PD: {}", parts[1])))?;
+            let np: i32 = parts[2]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid NP: {}", parts[2])))?;
             params.push(DihedralParameters {
                 k: cp,
                 pd: pd * std::f64::consts::PI / 180.0,
@@ -631,19 +664,28 @@ fn parse_improper_dihedral_types<I: Iterator<Item = Result<String, std::io::Erro
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
-        if trimmed == "END" { break; }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
 
         if n_types == 0 {
-            n_types = trimmed.parse()
-                .map_err(|_| IoError::ParseError(format!("Invalid improper type count: {}", trimmed)))?;
+            n_types = trimmed.parse().map_err(|_| {
+                IoError::ParseError(format!("Invalid improper type count: {}", trimmed))
+            })?;
             continue;
         }
 
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if parts.len() >= 2 {
-            let cq: f64 = parts[0].parse().map_err(|_| IoError::ParseError(format!("Invalid CQ: {}", parts[0])))?;
-            let q0: f64 = parts[1].parse().map_err(|_| IoError::ParseError(format!("Invalid Q0: {}", parts[1])))?;
+            let cq: f64 = parts[0]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid CQ: {}", parts[0])))?;
+            let q0: f64 = parts[1]
+                .parse()
+                .map_err(|_| IoError::ParseError(format!("Invalid Q0: {}", parts[1])))?;
             params.push(ImproperDihedralParameters {
                 q0: q0 * std::f64::consts::PI / 180.0, // Convert to radians
                 k: cq * 180.0 * 180.0 / (std::f64::consts::PI * std::f64::consts::PI), // Convert from kJ/(mol·deg²) to kJ/(mol·rad²)
@@ -809,13 +851,20 @@ fn parse_solventatom<I: Iterator<Item = Result<String, std::io::Error>>>(
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
-        if trimmed == "END" { break; }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
 
         if nram == 0 {
-            nram = trimmed.parse()
+            nram = trimmed
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid NRAM: {}", trimmed)))?;
-            if nram == 0 { break; }
+            if nram == 0 {
+                break;
+            }
             continue;
         }
 
@@ -823,13 +872,16 @@ fn parse_solventatom<I: Iterator<Item = Result<String, std::io::Error>>>(
         // IAC is 1-indexed in file; subtract 1 for 0-indexed convention.
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if parts.len() >= 5 {
-            let atom_iac: usize = parts[2].parse::<usize>()
+            let atom_iac: usize = parts[2]
+                .parse::<usize>()
                 .map_err(|_| IoError::ParseError(format!("Invalid solvent IAC: {}", parts[2])))?
                 .saturating_sub(1);
-            let mass: f64 = parts[3].parse()
+            let mass: f64 = parts[3]
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid solvent mass: {}", parts[3])))?;
-            let charge: f64 = parts[4].parse()
-                .map_err(|_| IoError::ParseError(format!("Invalid solvent charge: {}", parts[4])))?;
+            let charge: f64 = parts[4].parse().map_err(|_| {
+                IoError::ParseError(format!("Invalid solvent charge: {}", parts[4]))
+            })?;
             solvent_atoms.push(ParsedSolventAtom {
                 iac: atom_iac,
                 name: parts[1].to_string(),
@@ -849,24 +901,34 @@ fn parse_solventconstr<I: Iterator<Item = Result<String, std::io::Error>>>(
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
-        if trimmed == "END" { break; }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
 
         if ncons == 0 {
-            ncons = trimmed.parse()
+            ncons = trimmed
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid NCONS: {}", trimmed)))?;
-            if ncons == 0 { break; }
+            if ncons == 0 {
+                break;
+            }
             continue;
         }
 
         // Format: ICONS JCONS CONS
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if parts.len() >= 3 {
-            let i: usize = parts[0].parse()
+            let i: usize = parts[0]
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid ICONS: {}", parts[0])))?;
-            let j: usize = parts[1].parse()
+            let j: usize = parts[1]
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid JCONS: {}", parts[1])))?;
-            let length: f64 = parts[2].parse()
+            let length: f64 = parts[2]
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid CONS: {}", parts[2])))?;
             constraints.push(ParsedSolventConstraint {
                 i: i - 1, // 0-indexed within molecule
@@ -887,17 +949,24 @@ fn parse_solutemolecules<I: Iterator<Item = Result<String, std::io::Error>>>(
 
     while let Some(Ok(line)) = lines.next() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
-        if trimmed == "END" { break; }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            break;
+        }
 
         if nspm == 0 {
-            nspm = trimmed.parse()
+            nspm = trimmed
+                .parse()
                 .map_err(|_| IoError::ParseError(format!("Invalid NSPM: {}", trimmed)))?;
             continue;
         }
 
         // Each line has the last atom index of the molecule (1-based)
-        let last_atom: usize = trimmed.trim().parse()
+        let last_atom: usize = trimmed
+            .trim()
+            .parse()
             .map_err(|_| IoError::ParseError(format!("Invalid molecule end: {}", trimmed)))?;
         molecules.push(last_atom);
     }
@@ -910,7 +979,9 @@ fn parse_solutemolecules<I: Iterator<Item = Result<String, std::io::Error>>>(
 /// To expand solvent molecules, call `topo.solvate(nsm)` afterwards
 /// (GROMOS convention: NSM comes from the IMD SYSTEM block).
 pub fn build_topology(parsed: ParsedTopology) -> Topology {
-    use gromos_core::topology::{Atom, ChargeGroup, SolventAtomTemplate, SolventConstraintTemplate};
+    use gromos_core::topology::{
+        Atom, ChargeGroup, SolventAtomTemplate, SolventConstraintTemplate,
+    };
 
     let mut topo = Topology::new();
     let n_solute = parsed.n_atoms;
@@ -921,7 +992,10 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     topo.iac = parsed.iac.clone();
 
     for i in 0..n_solute {
-        let atom_name = parsed.atom_names.get(i).cloned()
+        let atom_name = parsed
+            .atom_names
+            .get(i)
+            .cloned()
             .unwrap_or_else(|| format!("ATOM{}", i + 1));
         let res_nr = parsed.residue_numbers.get(i).copied().unwrap_or(1);
         let res_name = if res_nr > 0 && res_nr <= parsed.residue_names.len() {
@@ -952,11 +1026,12 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         });
     }
     for sc in &parsed.solvent_constraints {
-        topo.solvent_constraint_template.push(SolventConstraintTemplate {
-            i: sc.i,
-            j: sc.j,
-            length: sc.length,
-        });
+        topo.solvent_constraint_template
+            .push(SolventConstraintTemplate {
+                i: sc.i,
+                j: sc.j,
+                length: sc.length,
+            });
     }
 
     topo.compute_inverse_masses();
@@ -973,12 +1048,16 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
                 1 // default: each atom is its own chargegroup
             };
             if cgc == 1 {
-                topo.chargegroups.push(ChargeGroup { atoms: current_cg_atoms.clone() });
+                topo.chargegroups.push(ChargeGroup {
+                    atoms: current_cg_atoms.clone(),
+                });
                 current_cg_atoms.clear();
             }
         }
         if !current_cg_atoms.is_empty() {
-            topo.chargegroups.push(ChargeGroup { atoms: current_cg_atoms });
+            topo.chargegroups.push(ChargeGroup {
+                atoms: current_cg_atoms,
+            });
         }
 
         // Build atom_to_chargegroup mapping (solute only at this point)
@@ -1041,7 +1120,10 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // Build angles
     for (i, j, k, angle_type) in parsed.angles {
         topo.moltypes[0].angles.push(Angle {
-            i, j, k, angle_type,
+            i,
+            j,
+            k,
+            angle_type,
         });
         topo.exclusions[i].push(k);
         topo.exclusions[k].push(i);
@@ -1052,7 +1134,11 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // Build proper dihedrals
     for (i, j, k, l, dihedral_type) in parsed.proper_dihedrals {
         topo.moltypes[0].proper_dihedrals.push(Dihedral {
-            i, j, k, l, dihedral_type,
+            i,
+            j,
+            k,
+            l,
+            dihedral_type,
         });
     }
     topo.dihedral_parameters = parsed.dihedral_parameters;
@@ -1060,7 +1146,11 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // Build improper dihedrals
     for (i, j, k, l, dihedral_type) in parsed.improper_dihedrals {
         topo.moltypes[0].improper_dihedrals.push(Dihedral {
-            i, j, k, l, dihedral_type,
+            i,
+            j,
+            k,
+            l,
+            dihedral_type,
         });
     }
     topo.improper_dihedral_parameters = parsed.improper_dihedral_parameters;
@@ -1075,7 +1165,9 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // that don't appear in the regular topology but ARE listed in the LJ table.
     // Using topo.iac.max() would give a matrix too small to index those types,
     // causing out-of-bounds memory access via the unsafe get_unchecked path.
-    let max_iac_table = parsed.lj_parameters.keys()
+    let max_iac_table = parsed
+        .lj_parameters
+        .keys()
         .flat_map(|&(i, j)| [i, j])
         .max()
         .unwrap_or(0);
@@ -1083,7 +1175,13 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // a full LJPARAMETERS block.
     let max_iac = max_iac_table
         .max(topo.iac.iter().copied().max().unwrap_or(0))
-        .max(topo.solvent_atom_template.iter().map(|sa| sa.iac).max().unwrap_or(0));
+        .max(
+            topo.solvent_atom_template
+                .iter()
+                .map(|sa| sa.iac)
+                .max()
+                .unwrap_or(0),
+        );
     let n_types = max_iac + 1;
     topo.lj_parameters = vec![vec![LJParameters::default(); n_types]; n_types];
 
@@ -1091,13 +1189,26 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         if iac < n_types && jac < n_types {
             topo.lj_parameters[iac][jac] = params;
             topo.lj_parameters[jac][iac] = params;
-            log::debug!("LJ params[{}][{}]: c6={:.6e}, c12={:.6e}, cs6={:.6e}, cs12={:.6e}", iac, jac, params.c6, params.c12, params.cs6, params.cs12);
+            log::debug!(
+                "LJ params[{}][{}]: c6={:.6e}, c12={:.6e}, cs6={:.6e}, cs12={:.6e}",
+                iac,
+                jac,
+                params.c6,
+                params.c12,
+                params.cs6,
+                params.cs12
+            );
         }
     }
 
-    log::debug!("Built topology: {} solute atoms, {} chargegroups, LJ {}x{}, solvent template: {} atoms",
-        n_solute, topo.chargegroups.len(), n_types, n_types,
-        topo.solvent_atom_template.len());
+    log::debug!(
+        "Built topology: {} solute atoms, {} chargegroups, LJ {}x{}, solvent template: {} atoms",
+        n_solute,
+        topo.chargegroups.len(),
+        n_types,
+        n_types,
+        topo.solvent_atom_template.len()
+    );
 
     // Dim 10: populate solute MoleculeType + MoleculeInstance now that solute.atoms
     // and the flat arrays are both fully built.
@@ -1114,7 +1225,10 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
             topo.pressure_groups.push(start..last_atom);
             start = last_atom;
         }
-        log::debug!("Parsed {} solute pressure groups from topology", topo.pressure_groups.len());
+        log::debug!(
+            "Parsed {} solute pressure groups from topology",
+            topo.pressure_groups.len()
+        );
     } else {
         // Default: all solute atoms as one pressure group (GROMOS fallback)
         if n_solute > 0 {
@@ -1156,7 +1270,8 @@ pub fn write_topology_file<P: AsRef<Path>>(
         "# FPEPSI: 1.0/(4.0*PI*EPS0) (EPS0 is the permittivity of vacuum)"
     )
     .map_err(|e| IoError::WriteError(e.to_string()))?;
-    writeln!(writer, "  138.9354").map_err(|e| IoError::WriteError(e.to_string()))?;
+    writeln!(writer, "  {:.7}", gromos_core::units::four_pi_eps_i)
+        .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "# HBAR: Planck's constant HBAR = H/(2* PI)")
         .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "  0.0635078").map_err(|e| IoError::WriteError(e.to_string()))?;
@@ -1165,7 +1280,8 @@ pub fn write_topology_file<P: AsRef<Path>>(
     writeln!(writer, "  299792.458").map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "# BOLTZ: Boltzmann's constant kB")
         .map_err(|e| IoError::WriteError(e.to_string()))?;
-    writeln!(writer, "  0.00831441").map_err(|e| IoError::WriteError(e.to_string()))?;
+    writeln!(writer, "  {:.8}", gromos_core::units::kB)
+        .map_err(|e| IoError::WriteError(e.to_string()))?;
     writeln!(writer, "END").map_err(|e| IoError::WriteError(e.to_string()))?;
 
     // TOPVERSION block

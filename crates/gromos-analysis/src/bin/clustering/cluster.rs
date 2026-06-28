@@ -4,9 +4,9 @@
 //!
 //! Performs RMSD-based clustering of trajectory frames
 
+use gromos_core::math::Vec3;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
-use gromos_core::math::Vec3;
 use std::env;
 use std::process;
 

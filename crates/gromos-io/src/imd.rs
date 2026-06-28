@@ -668,8 +668,8 @@ fn parse_block(
                     //   "grid_cell"/ 2 → Grid_Cell_Pairlist (Heinz & Hünenberger 2004)
                     params.algorithm = match v[0].as_str() {
                         "standard" => 0,
-                        "grid"     => 1,
-                        "grid_cell"=> 2,
+                        "grid" => 1,
+                        "grid_cell" => 2,
                         _ => parse_i32(&v[0]),
                     };
                 }
@@ -838,32 +838,62 @@ fn parse_block(
             //   NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE VDIR NTWDIR
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 { params.ntdir      = parse_i32(&v[0]); }
-                if v.len() >= 2 { params.ntdira     = parse_i32(&v[1]); }
-                if v.len() >= 3 { params.cdir       = parse_f64(&v[2]); }
-                if v.len() >= 4 { params.dir0       = parse_f64(&v[3]); }
-                if v.len() >= 5 { params.taudir     = parse_f64(&v[4]); }
-                if v.len() >= 6 { params.forcescale = parse_i32(&v[5]); }
-                if v.len() >= 7 { params.vdir       = parse_i32(&v[6]); }
-                if v.len() >= 8 { params.ntwdir     = parse_i32(&v[7]); }
+                if v.len() >= 1 {
+                    params.ntdir = parse_i32(&v[0]);
+                }
+                if v.len() >= 2 {
+                    params.ntdira = parse_i32(&v[1]);
+                }
+                if v.len() >= 3 {
+                    params.cdir = parse_f64(&v[2]);
+                }
+                if v.len() >= 4 {
+                    params.dir0 = parse_f64(&v[3]);
+                }
+                if v.len() >= 5 {
+                    params.taudir = parse_f64(&v[4]);
+                }
+                if v.len() >= 6 {
+                    params.forcescale = parse_i32(&v[5]);
+                }
+                if v.len() >= 7 {
+                    params.vdir = parse_i32(&v[6]);
+                }
+                if v.len() >= 8 {
+                    params.ntwdir = parse_i32(&v[7]);
+                }
             }
         },
         "PERTURBATION" => {
             // GROMOS format: 8 values, possibly split over multiple non-comment lines:
             //   NTG NRDGL RLAM DLAMT
             //   ALPHLJ ALPHC NLAM NSCALE
-            let combined: Vec<String> = data_lines.iter()
-                .flat_map(|l| parse_values(l))
-                .collect();
+            let combined: Vec<String> = data_lines.iter().flat_map(|l| parse_values(l)).collect();
             let v = &combined[..];
-            if v.len() >= 1 { params.ntg    = parse_i32(&v[0]); }
-            if v.len() >= 2 { params.nrdgl  = parse_i32(&v[1]); }
-            if v.len() >= 3 { params.rlam   = parse_f64(&v[2]); }
-            if v.len() >= 4 { params.dlamt  = parse_f64(&v[3]); }
-            if v.len() >= 5 { params.alphlj = parse_f64(&v[4]); }
-            if v.len() >= 6 { params.alphc  = parse_f64(&v[5]); }
-            if v.len() >= 7 { params.nlam   = parse_i32(&v[6]); }
-            if v.len() >= 8 { params.nscale = parse_i32(&v[7]); }
+            if v.len() >= 1 {
+                params.ntg = parse_i32(&v[0]);
+            }
+            if v.len() >= 2 {
+                params.nrdgl = parse_i32(&v[1]);
+            }
+            if v.len() >= 3 {
+                params.rlam = parse_f64(&v[2]);
+            }
+            if v.len() >= 4 {
+                params.dlamt = parse_f64(&v[3]);
+            }
+            if v.len() >= 5 {
+                params.alphlj = parse_f64(&v[4]);
+            }
+            if v.len() >= 6 {
+                params.alphc = parse_f64(&v[5]);
+            }
+            if v.len() >= 7 {
+                params.nlam = parse_i32(&v[6]);
+            }
+            if v.len() >= 8 {
+                params.nscale = parse_i32(&v[7]);
+            }
         },
         "ENERGYMIN" => {
             // GROMOS format:
@@ -1148,8 +1178,14 @@ END
         assert_eq!(p.nrdgl, 0, "NRDGL");
         assert!((p.rlam - 0.5).abs() < 1e-10, "RLAM");
         assert!((p.dlamt - 0.0).abs() < 1e-10, "DLAMT");
-        assert!((p.alphlj - 0.5).abs() < 1e-10, "ALPHLJ — was silently dropped before fix");
-        assert!((p.alphc  - 0.5).abs() < 1e-10, "ALPHC  — was silently dropped before fix");
+        assert!(
+            (p.alphlj - 0.5).abs() < 1e-10,
+            "ALPHLJ — was silently dropped before fix"
+        );
+        assert!(
+            (p.alphc - 0.5).abs() < 1e-10,
+            "ALPHC  — was silently dropped before fix"
+        );
         assert_eq!(p.nlam, 1, "NLAM");
         assert_eq!(p.nscale, 0, "NSCALE");
 
@@ -1173,9 +1209,9 @@ END
         let path = write_tmp(content, "perturbation_singleline");
         let p = read_imd_file(&path).expect("should parse single-line PERTURBATION");
         assert_eq!(p.ntg, 1);
-        assert!((p.rlam  - 0.125).abs() < 1e-10, "RLAM");
-        assert!((p.alphlj - 1.5 ).abs() < 1e-10, "ALPHLJ");
-        assert!((p.alphc  - 1.5 ).abs() < 1e-10, "ALPHC");
+        assert!((p.rlam - 0.125).abs() < 1e-10, "RLAM");
+        assert!((p.alphlj - 1.5).abs() < 1e-10, "ALPHLJ");
+        assert!((p.alphc - 1.5).abs() < 1e-10, "ALPHC");
         assert_eq!(p.nlam, 2, "NLAM");
         std::fs::remove_file(path).ok();
     }

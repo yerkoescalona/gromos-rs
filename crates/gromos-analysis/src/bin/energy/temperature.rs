@@ -4,6 +4,7 @@
 //!
 //! Calculates instantaneous temperature from velocity trajectory
 
+use gromos_core::units::kB;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
 use std::env;
@@ -45,8 +46,6 @@ fn main() {
     let topo = build_topology(topo_data);
     let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
 
-    const K_B: f64 = 0.00831446; // kJ/(mol·K)
-
     println!("# Time (ps)    Temperature (K)");
 
     loop {
@@ -58,7 +57,7 @@ fn main() {
                 if let Some(ref velocities) = frame.velocities {
                     for (i, vel) in velocities.iter().enumerate() {
                         if i < topo.mass.len() {
-                            let v_sq = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+                            let v_sq = vel.x * vel.x + vel.y * vel.y + vel.z * vel.z;
                             ke += 0.5 * topo.mass[i] * v_sq;
                         }
                     }
@@ -66,13 +65,13 @@ fn main() {
                     // Use positions as velocities (for position trajectories)
                     for (i, pos) in frame.positions.iter().enumerate() {
                         if i < topo.mass.len() {
-                            let v_sq = (pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+                            let v_sq = pos.x * pos.x + pos.y * pos.y + pos.z * pos.z;
                             ke += 0.5 * topo.mass[i] * v_sq;
                         }
                     }
                 }
 
-                let temp = 2.0 * ke / (K_B * dof as f64);
+                let temp = 2.0 * ke / (kB * dof as f64);
                 println!("{:12.4} {:12.4}", frame.time, temp);
             },
             Ok(None) => break,

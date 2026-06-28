@@ -1,4 +1,5 @@
 use crate::constraints::{shake, ShakeParameters};
+use crate::integrator::Integrator;
 use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
 /// Enveloping Distribution Sampling (EDS)
 ///
@@ -23,19 +24,16 @@ use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
 /// - Hansen & Hünenberger, J. Chem. Theory Comput. 2014, 10, 2632-2647
 /// - Christ & van Gunsteren, J. Chem. Phys. 2007, 126, 184110
 use gromos_core::configuration::Configuration;
-use crate::integrator::Integrator;
-use gromos_forces::bonded::calculate_bonded_forces;
-use gromos_forces::nonbonded::{
-    lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage,
-    LJParamMatrix, LJParameters as NBLJParams,
-};
 use gromos_core::math::Rectangular;
 use gromos_core::math::Vec3;
 use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
-
-/// Boltzmann constant in kJ/(mol·K)
-const KB: f64 = 0.008314462618;
+use gromos_core::units::kB;
+use gromos_forces::bonded::calculate_bonded_forces;
+use gromos_forces::nonbonded::{
+    lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage, LJParamMatrix,
+    LJParameters as NBLJParams,
+};
 
 /// EDS functional form
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,7 +191,7 @@ impl EDSParameters {
 
     /// Get beta = 1/(k_B * T)
     pub fn beta(&self) -> f64 {
-        1.0 / (KB * self.temperature)
+        1.0 / (kB * self.temperature)
     }
 
     /// Calculate reference energy using EDS Hamiltonian (single-s form)
@@ -210,7 +208,7 @@ impl EDSParameters {
         }
 
         // Calculate -β*s*(V_i - E_i^R) for each state
-        let mut prefactors: Vec<f64> = self
+        let prefactors: Vec<f64> = self
             .states
             .iter()
             .map(|state| -beta * s * (state.energy - state.offset))
@@ -272,7 +270,8 @@ impl EDSParameters {
         }
     }
 
-    /// Get smoothing parameter for a specific state pair (for multi-s/pair-s)
+    // TODO: wire up when multi-s EDS pair smoothing is implemented
+    #[allow(dead_code)]
     fn get_s_for_pair(&self, i: usize, j: usize) -> f64 {
         match self.form {
             EDSForm::SingleS => self.s_values[0],
@@ -364,21 +363,9 @@ impl EDSParameters {
 
         // Convert to Mat3 and assign (Mat3 is column-major)
         configuration.current_mut().virial_tensor = gromos_core::math::Mat3::from_cols(
-            Vec3::new(
-                virial_sum[0][0],
-                virial_sum[1][0],
-                virial_sum[2][0],
-            ),
-            Vec3::new(
-                virial_sum[0][1],
-                virial_sum[1][1],
-                virial_sum[2][1],
-            ),
-            Vec3::new(
-                virial_sum[0][2],
-                virial_sum[1][2],
-                virial_sum[2][2],
-            ),
+            Vec3::new(virial_sum[0][0], virial_sum[1][0], virial_sum[2][0]),
+            Vec3::new(virial_sum[0][1], virial_sum[1][1], virial_sum[2][1]),
+            Vec3::new(virial_sum[0][2], virial_sum[1][2], virial_sum[2][2]),
         );
     }
 
@@ -571,7 +558,7 @@ impl AEDSParameters {
 
         // Update offsets based on probability deviation
         for i in 0..self.eds.num_states {
-            let prob_error = probabilities[i] - target_prob;
+            let _prob_error = probabilities[i] - target_prob;
 
             // Adjust offset: if state is over-visited, increase offset to disfavor it
             // ΔE_i^R = -η * ln(p_i / p_target)
@@ -720,13 +707,13 @@ impl EDSRunner {
     /// Calculate forces for a specific EDS state
     fn calculate_state_forces(
         &self,
-        state_id: usize,
+        _state_id: usize,
         topology: &Topology,
         configuration: &Configuration,
     ) -> (f64, Vec<Vec3>, [[f64; 3]; 3]) {
         let n_atoms = topology.num_atoms();
         let mut forces = vec![Vec3::ZERO; n_atoms];
-        let mut virial = [[0.0; 3]; 3];
+        let virial = [[0.0; 3]; 3];
         let mut total_energy = 0.0;
 
         // Bonded forces
@@ -766,7 +753,7 @@ impl EDSRunner {
             .collect();
 
         // Convert charge and iac
-        
+
         let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();
 
         let nonbonded_storage = if self.parallel_forces {

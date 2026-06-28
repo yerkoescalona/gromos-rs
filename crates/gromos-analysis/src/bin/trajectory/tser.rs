@@ -66,7 +66,7 @@ fn main() {
                     },
                     _ => {
                         // volume
-                        (frame.box_dims.x * frame.box_dims.y * frame.box_dims.z)
+                        frame.box_dims.x * frame.box_dims.y * frame.box_dims.z
                     },
                 };
 

@@ -18,11 +18,10 @@ use gromos::{
     algorithm::constraints::ShakeParameters,
     algorithm::thermostats::BerendsenThermostatParameters,
     configuration::{Box as SimBox, Configuration},
-    eds::{AEDSParameters, EDSForm, EDSParameters, EDSRunner, EDSState},
+    eds::{AEDSParameters, EDSForm, EDSParameters, EDSRunner},
     integrator::LeapFrog,
     io::topology::{build_topology, read_topology_file},
     math::Vec3,
-    topology::Topology,
 };
 
 use std::env;

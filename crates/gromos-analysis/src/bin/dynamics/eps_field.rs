@@ -4,12 +4,11 @@
 //!
 //! Calculates electric field at specified atom
 
+use gromos_core::units::four_pi_eps_i;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
-
-const COULOMB_CONST: f64 = 138.9354859; // kJ/(mol·nm·e²)
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -81,7 +80,7 @@ fn main() {
 
                         if r > 0.01 {
                             let q_j = topo.charge[j];
-                            let factor = COULOMB_CONST * q_j / (r * r * r);
+                            let factor = four_pi_eps_i * q_j / (r * r * r);
 
                             ex += factor * dx;
                             ey += factor * dy;

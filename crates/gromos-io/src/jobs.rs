@@ -100,17 +100,17 @@ pub fn read_joblist<P: AsRef<Path>>(path: P) -> Result<JobList, IoError> {
             "TITLE" => {
                 section = Section::Title;
                 continue;
-            }
+            },
             "JOBSCRIPTS" => {
                 section = Section::JobScripts;
                 header_parsed = false;
                 continue;
-            }
+            },
             "END" => {
                 section = Section::None;
                 continue;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         match section {
@@ -119,7 +119,7 @@ pub fn read_joblist<P: AsRef<Path>>(path: P) -> Result<JobList, IoError> {
                     title.push('\n');
                 }
                 title.push_str(trimmed);
-            }
+            },
             Section::JobScripts => {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
@@ -136,9 +136,7 @@ pub fn read_joblist<P: AsRef<Path>>(path: P) -> Result<JobList, IoError> {
                             parts[0]
                         )));
                     }
-                    if parts[parts.len() - 1] != "run_after"
-                        || parts[parts.len() - 2] != "subdir"
-                    {
+                    if parts[parts.len() - 1] != "run_after" || parts[parts.len() - 2] != "subdir" {
                         return Err(IoError::ParseError(
                             "JOBSCRIPTS header must end with 'subdir run_after'".to_string(),
                         ));
@@ -159,9 +157,9 @@ pub fn read_joblist<P: AsRef<Path>>(path: P) -> Result<JobList, IoError> {
                     )));
                 }
 
-                let job_id: usize = parts[0].parse().map_err(|_| {
-                    IoError::ParseError(format!("Invalid job_id: {}", parts[0]))
-                })?;
+                let job_id: usize = parts[0]
+                    .parse()
+                    .map_err(|_| IoError::ParseError(format!("Invalid job_id: {}", parts[0])))?;
 
                 let mut params = HashMap::new();
                 for (i, header) in headers.iter().enumerate() {
@@ -170,10 +168,7 @@ pub fn read_joblist<P: AsRef<Path>>(path: P) -> Result<JobList, IoError> {
 
                 let subdir = parts[parts.len() - 2].to_string();
                 let run_after: usize = parts[parts.len() - 1].parse().map_err(|_| {
-                    IoError::ParseError(format!(
-                        "Invalid run_after: {}",
-                        parts[parts.len() - 1]
-                    ))
+                    IoError::ParseError(format!("Invalid run_after: {}", parts[parts.len() - 1]))
                 })?;
 
                 jobs.push(JobSpec {
@@ -182,8 +177,8 @@ pub fn read_joblist<P: AsRef<Path>>(path: P) -> Result<JobList, IoError> {
                     subdir,
                     run_after,
                 });
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 

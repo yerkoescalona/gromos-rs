@@ -134,7 +134,7 @@ impl BuildingBlocks {
 
     /// Find a building block by name. Returns (index, is_end_group).
     /// Searches end groups first, then solute blocks.
-    pub fn find_block(&self, name: &str) -> Option<BlockRef> {
+    pub fn find_block(&self, name: &str) -> Option<BlockRef<'_>> {
         if let Some(bb) = self.end_blocks.iter().find(|bb| bb.name == name) {
             return Some(BlockRef::End(bb));
         }
@@ -168,10 +168,10 @@ pub fn read_mtb_file<P: AsRef<Path>>(path: P) -> Result<BuildingBlocks, IoError>
 pub fn parse_mtb(content: &str) -> Result<BuildingBlocks, IoError> {
     let mut result = BuildingBlocks {
         force_field: String::new(),
-        fpepsi: 138.9354,
-        hbar: 0.0635078,
-        spdl: 299792.458,
-        boltz: 0.00831441,
+        fpepsi: gromos_core::units::four_pi_eps_i,
+        hbar: gromos_core::units::hBar,
+        spdl: gromos_core::units::spd_l,
+        boltz: gromos_core::units::kB,
         link_exclusions: 2,
         solute_blocks: Vec::new(),
         end_blocks: Vec::new(),
@@ -195,7 +195,7 @@ pub fn parse_mtb(content: &str) -> Result<BuildingBlocks, IoError> {
                     }
                     i += 1;
                 }
-            }
+            },
             "PHYSICALCONSTANTS" | "TOPPHYSCON" => {
                 i += 1;
                 let mut vals = Vec::new();
@@ -214,7 +214,7 @@ pub fn parse_mtb(content: &str) -> Result<BuildingBlocks, IoError> {
                     result.spdl = vals[2];
                     result.boltz = vals[3];
                 }
-            }
+            },
             "LINKEXCLUSIONS" => {
                 i += 1;
                 while i < lines.len() && lines[i].trim() != "END" {
@@ -226,20 +226,20 @@ pub fn parse_mtb(content: &str) -> Result<BuildingBlocks, IoError> {
                     }
                     i += 1;
                 }
-            }
+            },
             "MTBUILDBLSOLUTE" => {
                 let bb = parse_solute_block(&lines, &mut i)?;
                 result.solute_blocks.push(bb);
-            }
+            },
             "MTBUILDBLEND" => {
                 let bb = parse_end_block(&lines, &mut i)?;
                 result.end_blocks.push(bb);
-            }
+            },
             "MTBUILDBLSOLVENT" => {
                 let bb = parse_solvent_block(&lines, &mut i)?;
                 result.solvent_blocks.push(bb);
-            }
-            _ => {}
+            },
+            _ => {},
         }
         i += 1;
     }
@@ -301,8 +301,13 @@ fn parse_solute_block(lines: &[&str], i: &mut usize) -> Result<BbSolute, IoError
                     IoError::ParseError(format!("Invalid NLIN in {}: {}", name, tokens[1]))
                 })?,
             )
-        }
-        None => return Err(IoError::ParseError(format!("Expected NMAT NLIN in {}", name))),
+        },
+        None => {
+            return Err(IoError::ParseError(format!(
+                "Expected NMAT NLIN in {}",
+                name
+            )))
+        },
     };
 
     // Read preceding exclusions
@@ -433,8 +438,13 @@ fn parse_end_block(lines: &[&str], i: &mut usize) -> Result<BbEnd, IoError> {
                     IoError::ParseError(format!("Invalid NREP in {}: {}", name, tokens[1]))
                 })?,
             )
-        }
-        None => return Err(IoError::ParseError(format!("Expected NMAT NREP in {}", name))),
+        },
+        None => {
+            return Err(IoError::ParseError(format!(
+                "Expected NMAT NREP in {}",
+                name
+            )))
+        },
     };
 
     // Read atoms (all NMAT atoms, some are replacing)
@@ -517,7 +527,7 @@ fn parse_solvent_block(lines: &[&str], i: &mut usize) -> Result<BbSolvent, IoErr
                 "Expected natoms in solvent {}",
                 name
             )))
-        }
+        },
     };
 
     // Read atoms
@@ -580,14 +590,20 @@ fn parse_bb_atom(line: &str, block_name: &str) -> Result<BbAtom, IoError> {
     }
 
     let number: i32 = tokens[0].parse().map_err(|_| {
-        IoError::ParseError(format!("Invalid atom number in {}: {}", block_name, tokens[0]))
+        IoError::ParseError(format!(
+            "Invalid atom number in {}: {}",
+            block_name, tokens[0]
+        ))
     })?;
     let name = tokens[1].to_string();
     let iac: i32 = tokens[2].parse().map_err(|_| {
         IoError::ParseError(format!("Invalid IAC in {}: {}", block_name, tokens[2]))
     })?;
     let mass_code: usize = tokens[3].parse().map_err(|_| {
-        IoError::ParseError(format!("Invalid mass code in {}: {}", block_name, tokens[3]))
+        IoError::ParseError(format!(
+            "Invalid mass code in {}: {}",
+            block_name, tokens[3]
+        ))
     })?;
     let charge: f64 = tokens[4].parse().map_err(|_| {
         IoError::ParseError(format!("Invalid charge in {}: {}", block_name, tokens[4]))
@@ -624,12 +640,17 @@ fn parse_bb_atom(line: &str, block_name: &str) -> Result<BbAtom, IoError> {
     })
 }
 
-fn parse_bonds(lines: &[&str], i: &mut usize, name: &str) -> Result<Vec<(i32, i32, usize)>, IoError> {
+fn parse_bonds(
+    lines: &[&str],
+    i: &mut usize,
+    name: &str,
+) -> Result<Vec<(i32, i32, usize)>, IoError> {
     // Read NB (number of bonds)
     let nb = match next_data_line(lines, i) {
-        Some(l) => l.trim().parse::<usize>().map_err(|_| {
-            IoError::ParseError(format!("Invalid NB in {}: {}", name, l))
-        })?,
+        Some(l) => l
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| IoError::ParseError(format!("Invalid NB in {}: {}", name, l)))?,
         None => return Ok(Vec::new()),
     };
 
@@ -654,9 +675,10 @@ fn parse_angles(
     name: &str,
 ) -> Result<Vec<(i32, i32, i32, usize)>, IoError> {
     let na = match next_data_line(lines, i) {
-        Some(l) => l.trim().parse::<usize>().map_err(|_| {
-            IoError::ParseError(format!("Invalid NBA in {}: {}", name, l))
-        })?,
+        Some(l) => l
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| IoError::ParseError(format!("Invalid NBA in {}: {}", name, l)))?,
         None => return Ok(Vec::new()),
     };
 
@@ -682,9 +704,10 @@ fn parse_improper_dihedrals(
     name: &str,
 ) -> Result<Vec<(i32, i32, i32, i32, usize)>, IoError> {
     let n = match next_data_line(lines, i) {
-        Some(l) => l.trim().parse::<usize>().map_err(|_| {
-            IoError::ParseError(format!("Invalid NIDA in {}: {}", name, l))
-        })?,
+        Some(l) => l
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| IoError::ParseError(format!("Invalid NIDA in {}: {}", name, l)))?,
         None => return Ok(Vec::new()),
     };
 
@@ -711,9 +734,10 @@ fn parse_proper_dihedrals(
     name: &str,
 ) -> Result<Vec<(i32, i32, i32, i32, i32)>, IoError> {
     let n = match next_data_line(lines, i) {
-        Some(l) => l.trim().parse::<usize>().map_err(|_| {
-            IoError::ParseError(format!("Invalid NDA in {}: {}", name, l))
-        })?,
+        Some(l) => l
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| IoError::ParseError(format!("Invalid NDA in {}: {}", name, l)))?,
         None => return Ok(Vec::new()),
     };
 

@@ -56,22 +56,14 @@ impl PyConfiguration {
     /// Positions as an Nx3 numpy array (nm).
     #[getter]
     fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        let data: Vec<Vec<f64>> = self
-            .pos_data
-            .iter()
-            .map(|v| vec![v.x, v.y, v.z])
-            .collect();
+        let data: Vec<Vec<f64>> = self.pos_data.iter().map(|v| vec![v.x, v.y, v.z]).collect();
         Ok(PyArray2::from_vec2_bound(py, &data)?)
     }
 
     /// Velocities as an Nx3 numpy array (nm/ps).
     #[getter]
     fn velocities<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        let data: Vec<Vec<f64>> = self
-            .vel_data
-            .iter()
-            .map(|v| vec![v.x, v.y, v.z])
-            .collect();
+        let data: Vec<Vec<f64>> = self.vel_data.iter().map(|v| vec![v.x, v.y, v.z]).collect();
         Ok(PyArray2::from_vec2_bound(py, &data)?)
     }
 

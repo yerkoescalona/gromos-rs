@@ -9,18 +9,25 @@ use crate::math::{Mat3, Vec3};
 /// Simulation box representation
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BoxType {
+    /// No periodic boundary (gas-phase / vacuum simulations).
     Vacuum,
+    /// Orthorhombic (rectangular) periodic box.
     Rectangular,
+    /// General triclinic periodic box.
     Triclinic,
+    /// Truncated-octahedral box stored as a triclinic cell.
     TruncatedOctahedral,
 }
 
 /// Simulation box with periodic boundary conditions
 #[derive(Debug, Clone)]
 pub struct Box {
+    /// Periodicity type (vacuum, rectangular, triclinic, truncated-octahedral).
     pub box_type: BoxType,
-    pub vectors: Mat3,     // Three column vectors defining the box
-    pub inv_vectors: Mat3, // Inverse for wrapping
+    /// Box vectors as columns of a 3×3 matrix (nm).
+    pub vectors: Mat3,
+    /// Inverse of `vectors`; used for wrapping positions into the primary cell.
+    pub inv_vectors: Mat3,
 }
 
 impl Box {
@@ -96,49 +103,62 @@ impl Box {
 /// Stores both total energies and per-group energies for detailed accounting
 #[derive(Debug, Clone)]
 pub struct Energy {
-    // Total energies
+    /// Total kinetic energy (kJ mol⁻¹).
     pub kinetic_total: f64,
+    /// Total potential energy (kJ mol⁻¹).
     pub potential_total: f64,
 
-    // Bonded energies
+    /// Sum of all covalent bond stretch energies.
     pub bond_total: f64,
+    /// Sum of all bond-angle bending energies.
     pub angle_total: f64,
+    /// Sum of all proper dihedral torsion energies.
     pub dihedral_total: f64,
+    /// Sum of all improper dihedral (planarity / chirality) energies.
     pub improper_total: f64,
+    /// Sum of all cross-dihedral coupling energies (GROMOS CMAP-equivalent).
     pub cross_dihedral_total: f64,
 
-    // Nonbonded energies
+    /// Total Lennard-Jones (van der Waals) nonbonded energy.
     pub lj_total: f64,
-    pub crf_total: f64, // Coulomb reaction field
-    pub ls_total: f64,  // Lattice sum (Ewald, P3M, etc.)
+    /// Total Coulomb reaction-field electrostatic energy.
+    pub crf_total: f64,
+    /// Total lattice-sum (Ewald / P3M / PME) electrostatic energy.
+    pub ls_total: f64,
+    /// Real-space contribution to the lattice-sum energy.
     pub ls_realspace_total: f64,
+    /// k-space contribution to the lattice-sum energy.
     pub ls_kspace_total: f64,
 
-    // Special interactions
+    /// Sum of special interaction energies (position restraints, etc.).
     pub special_total: f64,
+    /// Sum of distance-restraint energies.
     pub distanceres_total: f64,
+    /// Solvent-accessible surface-area (SASA) solvation energy.
     pub sasa_total: f64,
+    /// Energy contribution from holonomic constraints (SHAKE/LINCS).
     pub constraint_total: f64,
 
-    // Free-energy / TI: accumulated dH/dλ across all perturbed terms this step
+    /// Accumulated dH/dλ across all perturbed terms this step (free-energy / TI).
     pub dhdl_total: f64,
 
-    // "New" kinetic energy from current velocities only (for thermostat scaling)
-    // GROMOS stores this in multibath.bath.ekin; we store it here
+    /// Kinetic energy from the current (new) velocities, used for thermostat scaling.
     pub kinetic_energy_new: f64,
 
-    // Per-group energies (for temperature/energy groups)
-    pub kinetic_energy: Vec<f64>, // One per temperature group
+    /// Per-temperature-group kinetic energies (length = number of temperature groups).
+    pub kinetic_energy: Vec<f64>,
 
-    // Per-group pair energies (energy_group x energy_group matrix)
+    /// Per-energy-group-pair LJ energies (energy_groups × energy_groups matrix).
     pub lj_energy: Vec<Vec<f64>>,
+    /// Per-energy-group-pair CRF energies (energy_groups × energy_groups matrix).
     pub crf_energy: Vec<Vec<f64>>,
 
-    // Virial and pressure
+    /// Scalar virial (trace of the virial tensor), used for pressure coupling.
     pub virial_total: f64,
 }
 
 impl Energy {
+    /// Create a zeroed energy accumulator for the given number of temperature and energy groups.
     pub fn new(num_temperature_groups: usize, num_energy_groups: usize) -> Self {
         Self {
             kinetic_total: 0.0,
@@ -231,18 +251,28 @@ impl Energy {
 /// Contains positions, velocities, forces, and all associated properties
 #[derive(Debug, Clone)]
 pub struct State {
-    pub pos: Vec<Vec3>,              // Positions
-    pub vel: Vec<Vec3>,              // Velocities
-    pub force: Vec<Vec3>,            // Forces
-    pub constraint_force: Vec<Vec3>, // Forces from constraints
-    pub box_config: Box,             // Simulation box
-    pub virial_tensor: Mat3,         // Virial tensor (for pressure calculation)
-    pub kinetic_energy_tensor: Mat3, // KE tensor (for pressure calculation)
-    pub pressure_tensor: Mat3,       // Pressure tensor (computed by PressureCalculation)
-    pub energies: Energy,            // Energy storage
+    /// Atomic positions (nm).
+    pub pos: Vec<Vec3>,
+    /// Atomic velocities (nm ps⁻¹).
+    pub vel: Vec<Vec3>,
+    /// Total forces on each atom (kJ mol⁻¹ nm⁻¹).
+    pub force: Vec<Vec3>,
+    /// Holonomic constraint forces (kJ mol⁻¹ nm⁻¹).
+    pub constraint_force: Vec<Vec3>,
+    /// Simulation box geometry.
+    pub box_config: Box,
+    /// Virial tensor (kJ mol⁻¹); used for pressure calculation.
+    pub virial_tensor: Mat3,
+    /// Kinetic-energy tensor (kJ mol⁻¹); used for pressure calculation.
+    pub kinetic_energy_tensor: Mat3,
+    /// Pressure tensor (bar); computed by `PressureCalculation`.
+    pub pressure_tensor: Mat3,
+    /// All energy components for this state.
+    pub energies: Energy,
 }
 
 impl State {
+    /// Create a zeroed state for `n_atoms` atoms with the given group counts.
     pub fn new(n_atoms: usize, num_temperature_groups: usize, num_energy_groups: usize) -> Self {
         Self {
             pos: vec![Vec3::ZERO; n_atoms],
@@ -307,8 +337,7 @@ impl State {
     /// T = 2 * KE / (k_B * N_dof)
     /// where N_dof = 3N - N_constraints
     pub fn temperature(&self, num_degrees_of_freedom: usize) -> f64 {
-        const BOLTZMANN: f64 = 0.00831446; // kJ/(mol·K)
-        2.0 * self.energies.kinetic_total / (BOLTZMANN * num_degrees_of_freedom as f64)
+        2.0 * self.energies.kinetic_total / (crate::units::kB * num_degrees_of_freedom as f64)
     }
 
     /// Calculate pressure from virial
@@ -316,9 +345,8 @@ impl State {
     /// P = (2*KE - Virial) / (3*V)
     pub fn pressure(&self) -> f64 {
         let volume = self.box_config.volume();
-        let virial_trace = self.virial_tensor.x_axis.x
-            + self.virial_tensor.y_axis.y
-            + self.virial_tensor.z_axis.z;
+        let virial_trace =
+            self.virial_tensor.x_axis.x + self.virial_tensor.y_axis.y + self.virial_tensor.z_axis.z;
 
         (2.0 * self.energies.kinetic_total - virial_trace) / (3.0 * volume)
     }
@@ -341,6 +369,7 @@ pub struct Configuration {
 }
 
 impl Configuration {
+    /// Create a new double-buffered configuration for `n_atoms` atoms.
     pub fn new(n_atoms: usize, num_temperature_groups: usize, num_energy_groups: usize) -> Self {
         Self {
             state1: State::new(n_atoms, num_temperature_groups, num_energy_groups),
@@ -411,11 +440,14 @@ impl Configuration {
 /// Stochastic dynamics additional variables
 #[derive(Debug, Clone)]
 pub struct StochasticVariables {
-    pub gamma: Vec<f64>,         // Friction coefficients per atom
-    pub random_force: Vec<Vec3>, // Random forces for Langevin dynamics
+    /// Per-atom friction coefficients γ (ps⁻¹) for Langevin dynamics.
+    pub gamma: Vec<f64>,
+    /// Per-atom random forces (kJ mol⁻¹ nm⁻¹) drawn each step.
+    pub random_force: Vec<Vec3>,
 }
 
 impl StochasticVariables {
+    /// Create zeroed stochastic variables for `n_atoms` atoms.
     pub fn new(n_atoms: usize) -> Self {
         Self {
             gamma: vec![0.0; n_atoms],

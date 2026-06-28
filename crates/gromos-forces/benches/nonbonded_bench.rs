@@ -31,7 +31,10 @@ fn bench_lj_crf_single(c: &mut Criterion) {
 
 fn bench_nonbonded_n_pairs(c: &mut Criterion) {
     let crf = crf_params();
-    let lj = LJParameters { c6: 0.001, c12: 0.0001 };
+    let lj = LJParameters {
+        c6: 0.001,
+        c12: 0.0001,
+    };
     let mut group = c.benchmark_group("nonbonded_n_pairs");
 
     for n in [100usize, 1_000, 10_000] {

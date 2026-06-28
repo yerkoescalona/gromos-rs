@@ -108,13 +108,11 @@ pub fn gsl_ran_gaussian(rng: &mut GslMt19937, sigma: f64) -> f64 {
 /// (`math/math.cc`), not the CODATA value used elsewhere in this codebase, so
 /// that the generated trajectory matches the reference bit-for-bit.
 pub fn generate_velocities(temperature: f64, seed: u32, masses: &[f64]) -> Vec<Vec3> {
-    const K_BOLTZMANN: f64 = 0.00831441;
-
     let mut rng = GslMt19937::new(seed);
     masses
         .iter()
         .map(|&mass| {
-            let sd = (K_BOLTZMANN * temperature / mass).sqrt();
+            let sd = (crate::units::kB * temperature / mass).sqrt();
             Vec3::new(
                 gsl_ran_gaussian(&mut rng, sd),
                 gsl_ran_gaussian(&mut rng, sd),

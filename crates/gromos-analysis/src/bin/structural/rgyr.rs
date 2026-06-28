@@ -18,10 +18,10 @@
 //! - M = total mass
 //! - mi = mass of atom i
 
-use gromos_io::topology::{build_topology, read_topology_file};
-use gromos_io::trajectory::TrajectoryReader;
 use gromos_core::math::Vec3;
 use gromos_core::selection::AtomSelection;
+use gromos_io::topology::{build_topology, read_topology_file};
+use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
 
@@ -190,7 +190,7 @@ fn main() {
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
-    let mut rgyr_args = match parse_args(args) {
+    let rgyr_args = match parse_args(args) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("Error: {}", e);

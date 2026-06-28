@@ -39,8 +39,12 @@ impl Algorithm for EnergyCalculation {
         // Finalize the potential total here.
         let state = conf.old_mut();
         state.energies.update_potential_total();
-        log::debug!("  E_pot={:.10e}  E_kin={:.10e}  E_tot={:.10e}",
-            state.energies.potential_total, state.energies.kinetic_total, state.energies.total());
+        log::debug!(
+            "  E_pot={:.10e}  E_kin={:.10e}  E_tot={:.10e}",
+            state.energies.potential_total,
+            state.energies.kinetic_total,
+            state.energies.total()
+        );
         Ok(())
     }
 

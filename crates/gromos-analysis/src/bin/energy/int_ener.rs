@@ -4,12 +4,11 @@
 //!
 //! Calculates interaction energies between two atom groups
 
+use gromos_core::units::four_pi_eps_i;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
-
-const COULOMB_CONST: f64 = 138.9354859; // kJ/(mol·nm·e²)
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -83,7 +82,7 @@ fn main() {
                             // Electrostatic
                             let qi = topo.charge[i];
                             let qj = topo.charge[j];
-                            e_elec += COULOMB_CONST * qi * qj / dist;
+                            e_elec += four_pi_eps_i * qi * qj / dist;
 
                             // VDW (simple LJ)
                             let sigma = 0.3f64;

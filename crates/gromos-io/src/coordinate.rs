@@ -25,8 +25,8 @@
 //! END
 //! ```
 
-use gromos_core::configuration::{Box as SimBox, Configuration};
 use crate::IoError;
+use gromos_core::configuration::{Box as SimBox, Configuration};
 use gromos_core::math::Vec3;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -61,7 +61,15 @@ pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoErr
     let mut box_type: i32 = -1; // unknown until parsed
 
     #[derive(PartialEq)]
-    enum Section { None, Position, PositionRed, Velocity, VelocityRed, Box, GenBox }
+    enum Section {
+        None,
+        Position,
+        PositionRed,
+        Velocity,
+        VelocityRed,
+        Box,
+        GenBox,
+    }
     let mut section = Section::None;
     let mut genbox_line_num: usize = 0;
 
@@ -70,14 +78,36 @@ pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoErr
         let trimmed = line.trim();
 
         match trimmed {
-            "POSITION" => { section = Section::Position; continue; }
-            "POSITIONRED" => { section = Section::PositionRed; continue; }
-            "VELOCITY" => { section = Section::Velocity; continue; }
-            "VELOCITYRED" => { section = Section::VelocityRed; continue; }
-            "BOX" => { section = Section::Box; continue; }
-            "GENBOX" => { section = Section::GenBox; genbox_line_num = 0; continue; }
-            "END" => { section = Section::None; continue; }
-            _ => {}
+            "POSITION" => {
+                section = Section::Position;
+                continue;
+            },
+            "POSITIONRED" => {
+                section = Section::PositionRed;
+                continue;
+            },
+            "VELOCITY" => {
+                section = Section::Velocity;
+                continue;
+            },
+            "VELOCITYRED" => {
+                section = Section::VelocityRed;
+                continue;
+            },
+            "BOX" => {
+                section = Section::Box;
+                continue;
+            },
+            "GENBOX" => {
+                section = Section::GenBox;
+                genbox_line_num = 0;
+                continue;
+            },
+            "END" => {
+                section = Section::None;
+                continue;
+            },
+            _ => {},
         }
 
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -87,36 +117,40 @@ pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoErr
         match section {
             Section::Position => {
                 // Full format: first 24 chars are residue/atom metadata, then x y z
-                if line.len() < 24 { continue; }
+                if line.len() < 24 {
+                    continue;
+                }
                 let coords = &line[24..];
                 let parts: Vec<&str> = coords.split_whitespace().collect();
                 if parts.len() >= 3 {
                     positions.push(parse_vec3(&parts[..3])?);
                 }
-            }
+            },
             Section::PositionRed => {
                 // Reduced format: just x y z (last 3 whitespace-separated values)
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 3 {
                     let len = parts.len();
-                    positions.push(parse_vec3(&parts[len-3..len])?);
+                    positions.push(parse_vec3(&parts[len - 3..len])?);
                 }
-            }
+            },
             Section::Velocity => {
-                if line.len() < 24 { continue; }
+                if line.len() < 24 {
+                    continue;
+                }
                 let coords = &line[24..];
                 let parts: Vec<&str> = coords.split_whitespace().collect();
                 if parts.len() >= 3 {
                     velocities.push(parse_vec3(&parts[..3])?);
                 }
-            }
+            },
             Section::VelocityRed => {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 3 {
                     let len = parts.len();
-                    velocities.push(parse_vec3(&parts[len-3..len])?);
+                    velocities.push(parse_vec3(&parts[len - 3..len])?);
                 }
-            }
+            },
             Section::Box => {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 3 {
@@ -125,7 +159,7 @@ pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoErr
                         box_type = if box_dims == Vec3::ZERO { 0 } else { 1 };
                     }
                 }
-            }
+            },
             Section::GenBox => {
                 // GENBOX format:
                 //   line 0: box_type (int)
@@ -139,22 +173,24 @@ pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoErr
                         box_type = parts[0].parse::<i32>().map_err(|_| {
                             IoError::ParseError(format!("Invalid GENBOX type: {}", parts[0]))
                         })?;
-                    }
+                    },
                     1 => {
                         if parts.len() >= 3 {
                             box_dims = parse_vec3(&parts[..3])?;
                         }
-                    }
-                    _ => {} // angles, origin lines - skip for now
+                    },
+                    _ => {}, // angles, origin lines - skip for now
                 }
                 genbox_line_num += 1;
-            }
-            Section::None => {}
+            },
+            Section::None => {},
         }
     }
 
     if positions.is_empty() {
-        return Err(IoError::FormatError("No positions found in coordinate file".to_string()));
+        return Err(IoError::FormatError(
+            "No positions found in coordinate file".to_string(),
+        ));
     }
 
     Ok(CoordinateData {
@@ -197,7 +233,13 @@ pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData
     let mut box_type: i32 = -1;
 
     #[derive(PartialEq)]
-    enum Section { None, Position, Box, GenBox, Skip }
+    enum Section {
+        None,
+        Position,
+        Box,
+        GenBox,
+        Skip,
+    }
     let mut section = Section::None;
     let mut genbox_line_num: usize = 0;
 
@@ -206,15 +248,29 @@ pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData
         let trimmed = line.trim();
 
         match trimmed {
-            "POSITION" | "POSITIONRED" => { section = Section::Position; continue; }
-            "BOX" => { section = Section::Box; continue; }
-            "GENBOX" => { section = Section::GenBox; genbox_line_num = 0; continue; }
-            "END" => { section = Section::None; continue; }
-            "TITLE" | "VELOCITY" | "VELOCITYRED" | "REFPOSITION" | "POSRESSPEC" | "LATTICESHIFTS" | "STOCHINT" => {
+            "POSITION" | "POSITIONRED" => {
+                section = Section::Position;
+                continue;
+            },
+            "BOX" => {
+                section = Section::Box;
+                continue;
+            },
+            "GENBOX" => {
+                section = Section::GenBox;
+                genbox_line_num = 0;
+                continue;
+            },
+            "END" => {
+                section = Section::None;
+                continue;
+            },
+            "TITLE" | "VELOCITY" | "VELOCITYRED" | "REFPOSITION" | "POSRESSPEC"
+            | "LATTICESHIFTS" | "STOCHINT" => {
                 section = Section::Skip;
                 continue;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -231,21 +287,24 @@ pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData
                     let res_name = parts[1].to_string();
                     let atom_name = parts[2].to_string();
                     let atom_num: usize = parts[3].parse().unwrap_or(0);
-                    let x: f64 = parts[n - 3].parse().map_err(|_| {
-                        IoError::ParseError(format!("Invalid x: {}", parts[n - 3]))
-                    })?;
-                    let y: f64 = parts[n - 2].parse().map_err(|_| {
-                        IoError::ParseError(format!("Invalid y: {}", parts[n - 2]))
-                    })?;
-                    let z: f64 = parts[n - 1].parse().map_err(|_| {
-                        IoError::ParseError(format!("Invalid z: {}", parts[n - 1]))
-                    })?;
+                    let x: f64 = parts[n - 3]
+                        .parse()
+                        .map_err(|_| IoError::ParseError(format!("Invalid x: {}", parts[n - 3])))?;
+                    let y: f64 = parts[n - 2]
+                        .parse()
+                        .map_err(|_| IoError::ParseError(format!("Invalid y: {}", parts[n - 2])))?;
+                    let z: f64 = parts[n - 1]
+                        .parse()
+                        .map_err(|_| IoError::ParseError(format!("Invalid z: {}", parts[n - 1])))?;
                     atoms.push(G96Atom {
-                        res_num, res_name, atom_name, atom_num,
+                        res_num,
+                        res_name,
+                        atom_name,
+                        atom_num,
                         pos: Vec3::new(x, y, z),
                     });
                 }
-            }
+            },
             Section::Box => {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 3 {
@@ -254,7 +313,7 @@ pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData
                         box_type = if box_dims == Vec3::ZERO { 0 } else { 1 };
                     }
                 }
-            }
+            },
             Section::GenBox => {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 match genbox_line_num {
@@ -262,37 +321,43 @@ pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData
                         box_type = parts[0].parse::<i32>().map_err(|_| {
                             IoError::ParseError(format!("Invalid GENBOX type: {}", parts[0]))
                         })?;
-                    }
+                    },
                     1 => {
                         if parts.len() >= 3 {
                             box_dims = parse_vec3(&parts[..3])?;
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
                 genbox_line_num += 1;
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
     if atoms.is_empty() {
-        return Err(IoError::FormatError("No positions found in coordinate file".to_string()));
+        return Err(IoError::FormatError(
+            "No positions found in coordinate file".to_string(),
+        ));
     }
 
-    Ok(LabeledCoordinateData { atoms, box_dims, box_type })
+    Ok(LabeledCoordinateData {
+        atoms,
+        box_dims,
+        box_type,
+    })
 }
 
 fn parse_vec3(parts: &[&str]) -> Result<Vec3, IoError> {
-    let x: f64 = parts[0].parse().map_err(|_| {
-        IoError::ParseError(format!("Invalid coordinate: {}", parts[0]))
-    })?;
-    let y: f64 = parts[1].parse().map_err(|_| {
-        IoError::ParseError(format!("Invalid coordinate: {}", parts[1]))
-    })?;
-    let z: f64 = parts[2].parse().map_err(|_| {
-        IoError::ParseError(format!("Invalid coordinate: {}", parts[2]))
-    })?;
+    let x: f64 = parts[0]
+        .parse()
+        .map_err(|_| IoError::ParseError(format!("Invalid coordinate: {}", parts[0])))?;
+    let y: f64 = parts[1]
+        .parse()
+        .map_err(|_| IoError::ParseError(format!("Invalid coordinate: {}", parts[1])))?;
+    let z: f64 = parts[2]
+        .parse()
+        .map_err(|_| IoError::ParseError(format!("Invalid coordinate: {}", parts[2])))?;
     Ok(Vec3::new(x, y, z))
 }
 
@@ -323,7 +388,8 @@ pub fn read_coordinate_file<P: AsRef<Path>>(
     }
 
     if data.box_dims != Vec3::ZERO {
-        conf.current_mut().box_config = SimBox::rectangular(data.box_dims.x, data.box_dims.y, data.box_dims.z);
+        conf.current_mut().box_config =
+            SimBox::rectangular(data.box_dims.x, data.box_dims.y, data.box_dims.z);
     }
 
     Ok(conf)

@@ -80,7 +80,10 @@ mod enabled {
             println!("╚═══════════════════════════════════════════════════════════════╝");
             println!();
             println!("  Replicas: {}", size);
-            println!("  Temperature range: {:.1} - {:.1} K", args.temp_min, args.temp_max);
+            println!(
+                "  Temperature range: {:.1} - {:.1} K",
+                args.temp_min, args.temp_max
+            );
             println!("  Steps per replica: {}", args.steps);
             println!();
             for (i, temp) in temperatures.iter().enumerate() {
@@ -117,7 +120,7 @@ mod enabled {
                     eprintln!("Unknown exchange scheme: {}", args.exchange_scheme);
                 }
                 return;
-            }
+            },
         };
 
         let mut controller = remd_mpi::RemdMpiController::new(
@@ -146,7 +149,12 @@ mod enabled {
 
             if rank == 0 && !args.quiet && (cycle + 1) % 10 == 0 {
                 let progress = ((cycle + 1) / num_exchanges) * 100.0;
-                println!("Progress: {:.1}% ({}/{} exchanges)", progress, cycle + 1, num_exchanges);
+                println!(
+                    "Progress: {:.1}% ({}/{} exchanges)",
+                    progress,
+                    cycle + 1,
+                    num_exchanges
+                );
             }
 
             if !args.quiet && exchanged {

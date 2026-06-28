@@ -175,10 +175,8 @@ pub fn apply_job_overrides(base_imd: &str, job: &JobSpec) -> String {
         // Check if this data line has overrides
         let key = (current_block.clone(), data_line_idx);
         if let Some(field_overrides) = overrides.get(&key) {
-            let mut parts: Vec<String> = trimmed
-                .split_whitespace()
-                .map(|s| s.to_string())
-                .collect();
+            let mut parts: Vec<String> =
+                trimmed.split_whitespace().map(|s| s.to_string()).collect();
             for (field_idx, value) in field_overrides {
                 if *field_idx < parts.len() {
                     parts[*field_idx] = value.clone();
@@ -258,10 +256,7 @@ pub fn generate_run_script(
     writeln!(script, "  @tre {} \\", tre_name).unwrap();
 
     // Position restraint files (check if NTPOR is set and > 0)
-    let has_posres = job
-        .get_i32("NTPOR")
-        .map(|v| v > 0)
-        .unwrap_or(false);
+    let has_posres = job.get_i32("NTPOR").map(|v| v > 0).unwrap_or(false);
     if has_posres {
         if let Some(por) = config.files.get("posresspec") {
             writeln!(script, "  @posresspec {} \\", por).unwrap();
