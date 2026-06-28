@@ -13,9 +13,7 @@
 //!   Level 3: water_216_box, water_216_nvt, water_216_npt
 //!   Level 4: aladip_solvated
 
-use gromos::forces::nonbonded::{
-    lj_crf_innerloop, lj_crf_interaction, CRFParameters, ForceStorage, LJParamMatrix,
-};
+use gromos::forces::nonbonded::{lj_crf_innerloop, CRFParameters, ForceStorage, LJParamMatrix};
 use gromos::io::coordinate::read_coordinate_file;
 use gromos::io::topology::{build_topology, read_topology_file};
 use gromos::math::Vec3;
@@ -99,6 +97,7 @@ fn parse_forces_trf(path: &Path, step: usize) -> Vec<Vec3> {
 
 /// Parse ENERGY03 block from energies.tre at a given step
 /// Returns (e_total, e_kinetic, e_potential, e_vdw, e_crf)
+#[allow(dead_code)] // TODO: wire up when energy validation against .tre is implemented
 fn parse_energies_tre(path: &Path, step: usize) -> EnergyValues {
     let content = std::fs::read_to_string(path).expect("Cannot read energies.tre");
     let mut current_step = None;
@@ -161,6 +160,7 @@ fn parse_energies_tre(path: &Path, step: usize) -> EnergyValues {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)] // TODO: used by parse_energies_tre above
 struct EnergyValues {
     e_total: f64,
     e_kinetic: f64,

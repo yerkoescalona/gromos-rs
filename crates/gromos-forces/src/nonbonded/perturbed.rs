@@ -748,7 +748,7 @@ mod tests {
             cutoff_sq: 1.4_f64.powi(2),
         };
 
-        let (force, e_lj, e_crf, de_lj, de_crf) = perturbed_lj_crf_interaction(
+        let (_force, e_lj, e_crf, de_lj, de_crf) = perturbed_lj_crf_interaction(
             r,
             a_c6,
             a_c12,
@@ -807,7 +807,7 @@ mod tests {
             cutoff_sq: 1.4_f64.powi(2),
         };
 
-        let (force, e_lj, e_crf, de_lj, de_crf) = perturbed_lj_crf_interaction(
+        let (_force, e_lj, e_crf, de_lj, de_crf) = perturbed_lj_crf_interaction(
             r,
             a_c6,
             a_c12,
@@ -1018,7 +1018,7 @@ mod tests {
             lambda, lambda, lambda, lambda, 1.0, 1.0, 1.0, 1.0, 1,
         );
 
-        let (_, e_lj_n1, e_crf_n1, de_lj_n1, de_crf_n1) = perturbed_lj_crf_interaction(
+        let (_, e_lj_n1, _e_crf_n1, de_lj_n1, _de_crf_n1) = perturbed_lj_crf_interaction(
             r, a_c6, a_c12, b_c6, b_c12, a_q, b_q, alpha_lj, alpha_crf, &params_n1, &crf,
         );
 
@@ -1027,7 +1027,7 @@ mod tests {
             lambda, lambda, lambda, lambda, 1.0, 1.0, 1.0, 1.0, 2,
         );
 
-        let (_, e_lj_n2, e_crf_n2, de_lj_n2, de_crf_n2) = perturbed_lj_crf_interaction(
+        let (_, e_lj_n2, _e_crf_n2, de_lj_n2, _de_crf_n2) = perturbed_lj_crf_interaction(
             r, a_c6, a_c12, b_c6, b_c12, a_q, b_q, alpha_lj, alpha_crf, &params_n2, &crf,
         );
 

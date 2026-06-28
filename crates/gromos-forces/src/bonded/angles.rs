@@ -178,9 +178,8 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gromos_core::configuration::Configuration;
     use gromos_core::math::Vec3;
-    use gromos_core::topology::{Angle, AngleParameters, Atom, Topology};
+    use gromos_core::topology::Topology;
     use gromos_io::coordinate::read_coordinate_file;
     use gromos_io::topology::{build_topology, read_topology_file};
 

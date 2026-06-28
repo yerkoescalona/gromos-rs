@@ -159,7 +159,6 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
 mod tests {
     use super::*;
     use gromos_core::math::Vec3;
-    use gromos_core::topology::{Atom, Bond, BondParameters};
     use gromos_io::coordinate::read_coordinate_file;
     use gromos_io::topology::{build_topology, read_topology_file};
 
@@ -207,7 +206,7 @@ mod tests {
 
         // Add 2 atoms
         for i in 0..2 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -223,7 +222,7 @@ mod tests {
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0];
 
         // Add one CG bond (negative k_harmonic as marker)
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,
@@ -273,7 +272,7 @@ mod tests {
 
         // Add 2 atoms
         for i in 0..2 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -288,7 +287,7 @@ mod tests {
         topo.mass = vec![12.0, 12.0];
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0];
 
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,
@@ -333,7 +332,7 @@ mod tests {
 
         // Add 2 atoms
         for i in 0..2 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -348,7 +347,7 @@ mod tests {
         topo.mass = vec![12.0, 12.0];
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0];
 
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,
@@ -430,7 +429,7 @@ mod tests {
 
         // Add 2 atoms
         for i in 0..2 {
-            topo.solute.atoms.push(Atom {
+            topo.moltypes[0].atoms.push(Atom {
                 name: format!("C{}", i),
                 residue_nr: 1,
                 residue_name: "TEST".to_string(),
@@ -445,7 +444,7 @@ mod tests {
         topo.mass = vec![12.0, 12.0];
         topo.inverse_mass = vec![1.0 / 12.0, 1.0 / 12.0];
 
-        topo.solute.bonds.push(Bond {
+        topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,
             bond_type: 0,

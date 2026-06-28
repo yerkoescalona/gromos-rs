@@ -224,9 +224,7 @@ mod tests {
     use super::*;
     use gromos_core::configuration::Configuration;
     use gromos_core::math::Vec3;
-    use gromos_core::topology::{
-        Atom, CrossDihedral, DihedralParameters, ImproperDihedralParameters, Topology,
-    };
+    use gromos_core::topology::{Atom, CrossDihedral, DihedralParameters, Topology};
 
     fn make_atom() -> Atom {
         Atom {
@@ -250,7 +248,7 @@ mod tests {
         }
         topo.mass = vec![12.0; 8];
         topo.inverse_mass = vec![1.0 / 12.0; 8];
-        topo.solute_cross_dihedrals().push(CrossDihedral {
+        topo.moltypes[0].cross_dihedrals.push(CrossDihedral {
             a: 0,
             b: 1,
             c: 2,
@@ -291,7 +289,7 @@ mod tests {
         }
         topo.mass = vec![12.0; 8];
         topo.inverse_mass = vec![1.0 / 12.0; 8];
-        topo.solute_cross_dihedrals().push(CrossDihedral {
+        topo.moltypes[0].cross_dihedrals.push(CrossDihedral {
             a: 0,
             b: 1,
             c: 2,
@@ -336,7 +334,7 @@ mod tests {
         }
         topo.mass = vec![12.0; 8];
         topo.inverse_mass = vec![1.0 / 12.0; 8];
-        topo.solute_cross_dihedrals().push(CrossDihedral {
+        topo.moltypes[0].cross_dihedrals.push(CrossDihedral {
             a: 0,
             b: 1,
             c: 2,

@@ -64,7 +64,7 @@ Always run these two checks before any `git commit`. If either fails, fix it fir
 
 ```
 cargo fmt          # fix formatting in-place
-cargo check        # type check the full workspace
+cargo check --tests  # type check workspace including test code (matches CI coverage)
 ```
 
 CI runs both but with `continue-on-error: true` (advisory only). The commit is the real gate.
