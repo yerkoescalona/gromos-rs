@@ -50,6 +50,7 @@ use gromos_io::{
 use super::algorithm_sequence::{resolve_algorithm_sequence, PyAlgorithmSequence};
 use super::parameters::PyInputParameters;
 use super::py_conf::PyConfiguration;
+use super::system::PySystem;
 use super::topology::PyTopology;
 use super::PyEnergy;
 
@@ -397,52 +398,75 @@ pub struct PySimulation {
 impl PySimulation {
     /// Create a new simulation.
     ///
-    /// Accepts either file paths (str) or pre-loaded objects:
+    /// Three-argument forms (backward-compatible):
+    ///   - `Simulation(topology, configuration, parameters)` — pre-loaded objects
+    ///   - `Simulation("system.topo", "initial.cnf", "run.imd")` — file paths
     ///
-    ///     // From objects (compositional)
-    ///     // sim = Simulation(topology, configuration, parameters)
-    ///
-    ///     // From file paths (convenience)
-    ///     // sim = Simulation("system.topo", "initial.cnf", "run.imd")
+    /// Two-argument form (new):
+    ///   - `Simulation(system, parameters)` — System object + InputParameters
     #[new]
+    #[pyo3(signature = (arg1, arg2, arg3=None))]
     fn new(
         arg1: &Bound<'_, PyAny>,
         arg2: &Bound<'_, PyAny>,
-        arg3: &Bound<'_, PyAny>,
+        arg3: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        // String path API
-        if let (Ok(topo_file), Ok(conf_file), Ok(input_file)) = (
-            arg1.extract::<String>(),
-            arg2.extract::<String>(),
-            arg3.extract::<String>(),
-        ) {
-            return Self::_from_files(&topo_file, &conf_file, &input_file);
+        match arg3 {
+            None => {
+                // Two-arg form: Simulation(system, params)
+                let system = arg1.extract::<PyRef<PySystem>>().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "With two arguments, first must be a System object",
+                    )
+                })?;
+                let params = arg2.extract::<PyRef<PyInputParameters>>().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "With two arguments, second must be an InputParameters object",
+                    )
+                })?;
+                build_simulation(
+                    system.topology.inner.clone(),
+                    system.configuration.pos_data.clone(),
+                    system.configuration.vel_data.clone(),
+                    system.configuration.box_dims,
+                    &params.inner,
+                )
+            }
+            Some(arg3) => {
+                // Three-arg forms: file paths or (Topology, Configuration, InputParameters)
+                if let (Ok(topo_file), Ok(conf_file), Ok(input_file)) = (
+                    arg1.extract::<String>(),
+                    arg2.extract::<String>(),
+                    arg3.extract::<String>(),
+                ) {
+                    return Self::_from_files(&topo_file, &conf_file, &input_file);
+                }
+
+                let topo = arg1.extract::<PyRef<PyTopology>>().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "First argument must be a file path (str) or Topology object",
+                    )
+                })?;
+                let conf = arg2.extract::<PyRef<PyConfiguration>>().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "Second argument must be a file path (str) or Configuration object",
+                    )
+                })?;
+                let params = arg3.extract::<PyRef<PyInputParameters>>().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "Third argument must be a file path (str) or InputParameters object",
+                    )
+                })?;
+
+                build_simulation(
+                    topo.inner.clone(),
+                    conf.pos_data.clone(),
+                    conf.vel_data.clone(),
+                    conf.box_dims,
+                    &params.inner,
+                )
+            }
         }
-
-        // Object API
-        let topo = arg1.extract::<PyRef<PyTopology>>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "First argument must be a file path (str) or Topology object",
-            )
-        })?;
-        let conf = arg2.extract::<PyRef<PyConfiguration>>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "Second argument must be a file path (str) or Configuration object",
-            )
-        })?;
-        let params = arg3.extract::<PyRef<PyInputParameters>>().map_err(|_| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "Third argument must be a file path (str) or InputParameters object",
-            )
-        })?;
-
-        build_simulation(
-            topo.inner.clone(),
-            conf.pos_data.clone(),
-            conf.vel_data.clone(),
-            conf.box_dims,
-            &params.inner,
-        )
     }
 
     /// Create a simulation from file paths (alternative to constructor).

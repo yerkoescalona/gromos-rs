@@ -1,739 +1,474 @@
-# GROMOS-RS Python API Reference
+# API Reference
 
-Complete API documentation for the GROMOS-RS Python bindings.
-
-## Table of Contents
-
-1. [Math Types](#math-types)
-   - [Vec3](#vec3)
-   - [Mat3](#mat3)
-2. [Core Structures](#core-structures)
-   - [Box](#box)
-   - [Energy](#energy)
-   - [State](#state)
-   - [Configuration](#configuration)
-   - [Topology](#topology)
-3. [Integrators](#integrators)
-   - [LeapFrog](#leapfrog)
-   - [VelocityVerlet](#velocityverlet)
-   - [StochasticDynamics](#stochasticdynamics)
-4. [Advanced Sampling](#advanced-sampling)
-   - [GaMD](#gamd)
-   - [EDS](#eds)
-   - [REMD](#remd)
+All classes and functions exported by `import gromos`.
 
 ---
 
-## Math Types
+## System
 
-### Vec3
-
-**SIMD-accelerated 3D vector**
-
-Zero-copy conversion to/from NumPy arrays. All operations use SIMD instructions for performance.
-
-#### Constructor
+Pairs a `Topology` with a `Configuration`. Validates that both describe the same
+number of atoms at construction time.
 
 ```python
-Vec3(x: float, y: float, z: float) -> Vec3
+from gromos import System
 ```
 
-Create a new 3D vector.
+### Constructors
 
-**Parameters:**
-- `x` (float): X component
-- `y` (float): Y component
-- `z` (float): Z component
-
-**Example:**
 ```python
-v = gromos.Vec3(1.0, 2.0, 3.0)
+System(topology: Topology, configuration: Configuration) -> System
 ```
+Raises `ValueError` if `topology.n_atoms != configuration.n_atoms`.
 
-#### Properties
-
-- `x: float` - X component (read/write)
-- `y: float` - Y component (read/write)
-- `z: float` - Z component (read/write)
-
-**Example:**
 ```python
-v = gromos.Vec3(1.0, 2.0, 3.0)
-print(v.x)  # 1.0
-v.x = 5.0
+System.from_files(topo_file: str, conf_file: str) -> System  # staticmethod
 ```
+Reads both files and validates in one call.
 
-#### Methods
-
-##### `length() -> float`
-
-Vector magnitude (L2 norm).
-
-**Example:**
+**Example**
 ```python
-v = gromos.Vec3(3.0, 4.0, 0.0)
-print(v.length())  # 5.0
+system = System.from_files("water_216.topo", "equilibrated.cnf")
+
+topo   = Topology("water_216.topo")
+conf   = Configuration("equilibrated.cnf")
+system = System(topo, conf)   # identical result
 ```
 
-##### `length_squared() -> float`
+### Properties
 
-Squared length (faster than `length()`).
+| Property | Type | Description |
+|----------|------|-------------|
+| `n_atoms` | `int` | Total atom count |
+| `charge` | `int` | Net integer charge (e) |
+| `positions` | `ndarray (N,3) f64` | Positions, nm |
+| `velocities` | `ndarray (N,3) f64` | Velocities, nm/ps |
+| `box` | `tuple[float,float,float]` | Box dimensions (Lx, Ly, Lz), nm |
+| `topology` | `Topology` | Underlying topology |
+| `configuration` | `Configuration` | Underlying configuration |
 
-**Example:**
-```python
-v = gromos.Vec3(3.0, 4.0, 0.0)
-print(v.length_squared())  # 25.0
-```
+### Methods
 
-##### `normalize() -> Vec3`
-
-Return normalized (unit length) vector.
-
-**Example:**
-```python
-v = gromos.Vec3(3.0, 4.0, 0.0)
-v_norm = v.normalize()
-print(v_norm.length())  # 1.0
-```
-
-##### `dot(other: Vec3) -> float`
-
-Dot product with another vector.
-
-**Example:**
-```python
-v1 = gromos.Vec3(1.0, 0.0, 0.0)
-v2 = gromos.Vec3(0.0, 1.0, 0.0)
-print(v1.dot(v2))  # 0.0
-```
-
-##### `cross(other: Vec3) -> Vec3`
-
-Cross product with another vector.
-
-**Example:**
-```python
-v1 = gromos.Vec3(1.0, 0.0, 0.0)
-v2 = gromos.Vec3(0.0, 1.0, 0.0)
-v3 = v1.cross(v2)  # Vec3(0.0, 0.0, 1.0)
-```
-
-##### `distance(other: Vec3) -> float`
-
-Euclidean distance to another vector.
-
-**Example:**
-```python
-v1 = gromos.Vec3(0.0, 0.0, 0.0)
-v2 = gromos.Vec3(3.0, 4.0, 0.0)
-print(v1.distance(v2))  # 5.0
-```
-
-##### `to_numpy() -> np.ndarray`
-
-Convert to NumPy array (shape: (3,), dtype: float32).
-
-**Example:**
-```python
-v = gromos.Vec3(1.0, 2.0, 3.0)
-arr = v.to_numpy()
-print(arr)  # [1. 2. 3.]
-```
-
-##### `from_numpy(arr: np.ndarray) -> Vec3` (static)
-
-Create from NumPy array.
-
-**Parameters:**
-- `arr` (np.ndarray): Array with 3 elements
-
-**Example:**
-```python
-arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-v = gromos.Vec3.from_numpy(arr)
-```
-
-#### Operators
-
-- `v1 + v2` - Vector addition
-- `v1 - v2` - Vector subtraction
-- `v * scalar` - Scalar multiplication
-
-**Example:**
-```python
-v1 = gromos.Vec3(1.0, 2.0, 3.0)
-v2 = gromos.Vec3(4.0, 5.0, 6.0)
-v3 = v1 + v2
-v4 = v1 * 2.0
-```
+**`write(path: str)`**  
+Write current coordinates to a GROMOS `.cnf` file.
 
 ---
 
-### Mat3
+## Topology
 
-**SIMD-accelerated 3×3 matrix**
+Reads a GROMOS topology file (`.topo`).
 
-#### Constructor
-
-##### `identity() -> Mat3` (static)
-
-Create identity matrix.
-
-**Example:**
 ```python
-mat = gromos.Mat3.identity()
+from gromos import Topology
+topo = Topology("system.topo")
 ```
 
-##### `from_cols(x: Vec3, y: Vec3, z: Vec3) -> Mat3` (static)
+### Properties
 
-Create matrix from column vectors.
+| Property | Type | Description |
+|----------|------|-------------|
+| `n_atoms` | `int` | Total atom count (solute + solvent) |
+| `n_solute_atoms` | `int` | Solute-only count |
+| `n_solvent_atoms` | `int` | Solvent-only count |
+| `masses` | `ndarray (N,) f64` | Atom masses, g/mol |
+| `charges` | `ndarray (N,) f64` | Partial charges, e |
 
-**Example:**
-```python
-v1 = gromos.Vec3(1.0, 0.0, 0.0)
-v2 = gromos.Vec3(0.0, 1.0, 0.0)
-v3 = gromos.Vec3(0.0, 0.0, 1.0)
-mat = gromos.Mat3.from_cols(v1, v2, v3)
-```
+### Methods
 
-#### Methods
-
-##### `determinant() -> float`
-
-Matrix determinant.
-
-##### `inverse() -> Mat3`
-
-Matrix inverse.
-
-##### `transpose() -> Mat3`
-
-Matrix transpose.
-
-##### `mul_vec3(v: Vec3) -> Vec3`
-
-Matrix-vector multiplication.
-
-**Example:**
-```python
-mat = gromos.Mat3.identity()
-v = gromos.Vec3(1.0, 2.0, 3.0)
-result = mat.mul_vec3(v)
-```
-
-##### `to_numpy() -> np.ndarray`
-
-Convert to NumPy array (shape: (3, 3), dtype: float32).
+**`solvate(nsm: int)`**  
+Append `nsm` copies of the solvent template to the topology in-place.
 
 ---
 
-## Core Structures
+## Configuration
 
-### Box
+Reads a GROMOS coordinate file (`.cnf` / `.g96`).
 
-**Simulation box with periodic boundaries**
-
-#### Constructors
-
-##### `vacuum() -> Box` (static)
-
-Create vacuum box (no periodicity).
-
-**Example:**
 ```python
-box = gromos.Box.vacuum()
+from gromos import Configuration
+conf = Configuration("initial.cnf")
 ```
 
-##### `rectangular(lx: float, ly: float, lz: float) -> Box` (static)
+### Properties
 
-Create rectangular box with dimensions in nm.
+| Property | Type | Description |
+|----------|------|-------------|
+| `n_atoms` | `int` | Atom count in this file |
+| `positions` | `ndarray (N,3) f64` | Positions, nm |
+| `velocities` | `ndarray (N,3) f64` | Velocities, nm/ps |
+| `box_dimensions` | `tuple[float,float,float]` | (Lx, Ly, Lz), nm |
 
-**Parameters:**
-- `lx` (float): Length along x-axis (nm)
-- `ly` (float): Length along y-axis (nm)
-- `lz` (float): Length along z-axis (nm)
+---
 
-**Example:**
+## InputParameters
+
+MD / minimisation control parameters. Two construction paths: load an existing
+`.imd` file, or use a factory that sets sensible defaults for the chosen ensemble.
+
 ```python
-box = gromos.Box.rectangular(3.0, 3.0, 3.0)  # 3×3×3 nm box
+from gromos import InputParameters
 ```
 
-##### `triclinic(mat: Mat3) -> Box` (static)
+### Constructors
 
-Create triclinic box from box vectors.
-
-**Parameters:**
-- `mat` (Mat3): Box vectors as columns
-
-**Example:**
 ```python
-# Create triclinic box
-v1 = gromos.Vec3(3.0, 0.0, 0.0)
-v2 = gromos.Vec3(0.5, 3.0, 0.0)
-v3 = gromos.Vec3(0.0, 0.0, 3.0)
-mat = gromos.Mat3.from_cols(v1, v2, v3)
-box = gromos.Box.triclinic(mat)
+InputParameters(input_file: str)             # load from file
+InputParameters.from_file(input_file: str)   # identical staticmethod alias
 ```
 
-#### Methods
+### Factory methods (staticmethod)
 
-##### `volume() -> float`
-
-Box volume in nm³.
-
-**Example:**
 ```python
-box = gromos.Box.rectangular(3.0, 3.0, 3.0)
-print(box.volume())  # 27.0
+InputParameters.nve(dt: float, steps: int) -> InputParameters
+```
+Microcanonical ensemble. Thermostat coupling time set to −1 (no coupling).
+
+```python
+InputParameters.nvt(dt: float, steps: int, temperature: float) -> InputParameters
+```
+Canonical ensemble. Berendsen thermostat, τ = 0.1 ps.
+
+```python
+InputParameters.npt(dt: float, steps: int, temperature: float, pressure: float) -> InputParameters
+```
+Isothermal-isobaric ensemble. Berendsen thermostat + barostat.  
+`pressure` in bar. Compressibility defaults to 4.575 × 10⁻⁴ nm² kJ⁻¹ mol (water).
+
+```python
+InputParameters.steepest_descent(steps: int) -> InputParameters
+```
+Steepest-descent energy minimisation (`ENERGYMIN` block, `ntem=1`).
+
+**Example**
+```python
+params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0)
+print(params.dt, params.nstlim, params.temperature)
 ```
 
-##### `dimensions() -> Vec3`
+### Properties (read-only)
 
-Box dimensions (for rectangular box).
+| Property | Type | Description |
+|----------|------|-------------|
+| `dt` | `float` | Timestep, ps |
+| `nstlim` | `int` | Number of steps |
+| `temperature` | `float` | First bath target temperature, K |
+| `cutoff` | `float` | Long-range cutoff (rcutl), nm |
+| `rcutp` | `float` | Short-range pairlist cutoff, nm |
+| `nsm` | `int` | Number of solvent molecules |
+| `ntc` | `int` | SHAKE mode (1=none, 2=H-bonds, 3=all) |
+| `ntb` | `int` | Boundary type (0=vacuum, 1=rectangular) |
+| `nsnb` | `int` | Pairlist update frequency |
+| `ntwx` | `int` | Trajectory write frequency |
+| `ntwe` | `int` | Energy write frequency |
 
-**Example:**
+---
+
+## Simulation
+
+Builds an algorithm sequence from the parameters and runs the MD loop.
+
 ```python
-box = gromos.Box.rectangular(3.0, 4.0, 5.0)
-dims = box.dimensions()
-print(dims.x, dims.y, dims.z)  # 3.0 4.0 5.0
+from gromos import Simulation
+```
+
+### Constructors
+
+```python
+# Recommended — two-argument form
+Simulation(system: System, params: InputParameters)
+
+# Three-argument forms (legacy, still supported)
+Simulation(topo: Topology, conf: Configuration, params: InputParameters)
+Simulation(topo_file: str, conf_file: str, input_file: str)
+
+# Explicit file-path staticmethod
+Simulation.from_files(topo_file: str, conf_file: str, input_file: str)
+
+# Custom algorithm sequence
+Simulation.from_sequence(topo: Topology, conf: Configuration,
+                         params: InputParameters, sequence: AlgorithmSequence)
+```
+
+### Running
+
+**`step(n_steps: int)`**  
+Advance the simulation by `n_steps` steps. All state properties are updated after
+this call.
+
+### State properties (read-only)
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `total_energy` | `float` | Total energy, kJ/mol |
+| `kinetic_energy` | `float` | Kinetic energy, kJ/mol |
+| `potential_energy` | `float` | Potential energy, kJ/mol |
+| `temperature` | `float` | Instantaneous temperature, K |
+| `positions` | `ndarray (N,3) f64` | Positions, nm |
+| `velocities` | `ndarray (N,3) f64` | Velocities, nm/ps |
+| `forces` | `ndarray (N,3) f64` | Forces, kJ/(mol·nm) |
+| `time` | `float` | Current time, ps |
+| `current_step` | `int` | Step counter |
+| `dt` | `float` | Timestep, ps |
+| `n_atoms` | `int` | Atom count |
+| `n_solute_atoms` | `int` | Solute atom count |
+| `n_solvent_atoms` | `int` | Solvent atom count |
+| `algorithm_names` | `list[str]` | Names of algorithms in the sequence |
+| `energies` | `Energy` | Full energy object |
+
+---
+
+## AlgorithmSequence
+
+The ordered list of algorithms executed each MD step. Allows inspection and
+modification of the pipeline before constructing a `Simulation`.
+
+```python
+from gromos import AlgorithmSequence
+```
+
+### Factory methods (staticmethod)
+
+```python
+AlgorithmSequence.nve(topo: Topology, params: InputParameters) -> AlgorithmSequence
+AlgorithmSequence.nvt(topo: Topology, params: InputParameters) -> AlgorithmSequence
+AlgorithmSequence.npt(topo: Topology, params: InputParameters) -> AlgorithmSequence
+AlgorithmSequence.from_parameters(topo: Topology, params: InputParameters) -> AlgorithmSequence
+```
+
+### Modification methods
+
+```python
+seq.add(algorithm)                          # append
+seq.insert_after(name: str, algorithm)      # insert after named step
+seq.insert_before(name: str, algorithm)     # insert before named step
+seq.remove(name: str)                       # remove by name
+seq.replace(name: str, algorithm)           # swap by name
+```
+
+### Inspection
+
+```python
+seq.names          # list[str] — ordered algorithm names
+len(seq)           # int
+"Forcefield" in seq  # bool
+```
+
+**Example**
+```python
+seq = AlgorithmSequence.nvt(topo, params)
+print(seq.names)
+# ['RemoveCOMMotion', 'Forcefield', 'LeapFrogVelocity', 'BerendsenThermostat',
+#  'LeapFrogPosition', 'TemperatureCalculation', 'EnergyCalculation']
+
+seq.remove("RemoveCOMMotion")
+sim = Simulation.from_sequence(topo, conf, params, seq)
 ```
 
 ---
 
-### Energy
+## Algorithm building blocks
 
-**Energy storage for molecular system**
+Individual algorithm objects that can be inserted into an `AlgorithmSequence`.
 
-All energies in kJ/mol.
+### `Forcefield`
 
-#### Constructor
-
-```python
-Energy(num_temperature_groups: int, num_energy_groups: int) -> Energy
-```
-
-Create energy object.
-
-**Parameters:**
-- `num_temperature_groups` (int): Number of temperature groups
-- `num_energy_groups` (int): Number of energy groups
-
-**Example:**
-```python
-energy = gromos.Energy(num_temperature_groups=1, num_energy_groups=1)
-```
-
-#### Properties (read-only)
-
-- `kinetic: float` - Total kinetic energy
-- `potential: float` - Total potential energy
-- `bond: float` - Bond stretch energy
-- `angle: float` - Angle bend energy
-- `dihedral: float` - Dihedral torsion energy
-- `lj: float` - Lennard-Jones energy
-- `coulomb: float` - Coulomb (electrostatic) energy
-
-#### Methods
-
-##### `total() -> float`
-
-Total energy (kinetic + potential).
-
-**Example:**
-```python
-print(energy.total())
-```
-
-##### `clear()`
-
-Clear all energies to zero.
-
-**Example:**
-```python
-energy.clear()
-```
-
-##### `to_dict() -> dict`
-
-Get all energies as dictionary.
-
-**Example:**
-```python
-d = energy.to_dict()
-print(d['kinetic'])
-print(d['potential'])
-```
-
----
-
-### State
-
-**System state (positions, velocities, forces)**
-
-Zero-copy data sharing with NumPy arrays.
-
-#### Constructor
+Nonbonded force calculation (pairlist + LJ + reaction-field electrostatics + bonded terms).
 
 ```python
-State(num_atoms: int, num_temp_groups: int, num_energy_groups: int) -> State
-```
-
-Create state for N atoms.
-
-**Parameters:**
-- `num_atoms` (int): Number of atoms
-- `num_temp_groups` (int): Number of temperature groups
-- `num_energy_groups` (int): Number of energy groups
-
-**Example:**
-```python
-state = gromos.State(
-    num_atoms=1000,
-    num_temp_groups=1,
-    num_energy_groups=1
+Forcefield(
+    cutoff: float | None = None,
+    rcutp: float | None = None,
+    epsilon_rf: float | None = None,
+    kappa: float | None = None,
+    pairlist_update: int | None = None,
+    virial: str | None = None,
+    ntf_bond: bool | None = None,
+    ntf_angle: bool | None = None,
+    ntf_improper: bool | None = None,
+    ntf_dihedral: bool | None = None,
 )
 ```
 
-#### Methods
+`None` values inherit from `InputParameters`.
 
-##### `num_atoms() -> int`
+### `LeapFrogVelocity` / `LeapFrogPosition`
 
-Number of atoms.
+Half-step velocity update and full-step position update (leap-frog integrator).
 
-##### `positions() -> np.ndarray`
-
-Get positions as NumPy array (N × 3, float32).
-
-**Returns:** Array of shape (N, 3) in nm
-
-**Example:**
 ```python
-pos = state.positions()
-print(pos.shape)  # (1000, 3)
+LeapFrogVelocity()
+LeapFrogPosition()
 ```
 
-##### `velocities() -> np.ndarray`
+### `BerendsenThermostat`
 
-Get velocities as NumPy array (N × 3, float32).
+Velocity rescaling thermostat.
 
-**Returns:** Array of shape (N, 3) in nm/ps
-
-##### `forces() -> np.ndarray`
-
-Get forces as NumPy array (N × 3, float32).
-
-**Returns:** Array of shape (N, 3) in kJ/(mol·nm)
-
-##### `set_positions(arr: np.ndarray)`
-
-Set positions from NumPy array.
-
-**Parameters:**
-- `arr` (np.ndarray): Array of shape (N, 3), dtype float32
-
-**Example:**
 ```python
-pos = np.random.rand(1000, 3).astype(np.float32)
-state.set_positions(pos)
+BerendsenThermostat(temperature: float = 300.0, tau: float = 0.1)
 ```
 
-##### `set_velocities(arr: np.ndarray)`
+### `BerendsenBarostat`
 
-Set velocities from NumPy array.
+Isotropic pressure coupling.
 
-**Parameters:**
-- `arr` (np.ndarray): Array of shape (N, 3), dtype float32
+```python
+BerendsenBarostat(pressure: float = 1.0, tau: float = 0.5,
+                  compressibility: float = 4.575e-4, virial: str | None = None)
+```
+
+### `ShakeConstraints`
+
+Bond-length constraints via SHAKE.
+
+```python
+ShakeConstraints(tolerance: float = 1e-4, max_iterations: int = 1000, mode: str = "solute")
+```
+
+### `TemperatureCalculation` / `PressureCalculation` / `EnergyCalculation`
+
+Accumulate kinetic/virial/potential energy into the `Energy` object each step.
+
+```python
+TemperatureCalculation()
+PressureCalculation(virial: str = "atomic")
+EnergyCalculation()
+```
+
+### `RemoveCOMMotion`
+
+Remove translational (and optionally rotational) centre-of-mass velocity.
+
+```python
+RemoveCOMMotion(initial: bool = True, nscm: int = 0)
+```
 
 ---
 
-### Configuration
+## Vec3
 
-**Complete system configuration**
-
-Combines state, energy, and topology.
-
-#### Constructor
+A 3D vector. Useful for single-atom inspection; use NumPy arrays from `Simulation`
+or `System` for bulk work.
 
 ```python
-Configuration(num_atoms: int, num_temp_groups: int, num_energy_groups: int) -> Configuration
+from gromos import Vec3
+v = Vec3(1.0, 2.0, 3.0)
 ```
 
-#### Methods
+### Properties
 
-##### `current_state() -> State`
+`x`, `y`, `z` — `float` (read-only)
 
-Get current state.
+### Methods
 
-##### `current_energy() -> Energy`
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `length()` | `float` | Euclidean norm |
+| `normalize()` | `Vec3` | Unit vector |
+| `dot(other: Vec3)` | `float` | Dot product |
+| `cross(other: Vec3)` | `Vec3` | Cross product |
 
-Get current energy.
+### Operators
+
+`+`, `-`, `* scalar` between `Vec3` objects.
 
 ---
 
-### Topology
+## Energy
 
-**Molecular topology (atoms, bonds, parameters)**
-
-#### Constructor
+Snapshot of energy components (kJ/mol).
 
 ```python
-Topology() -> Topology
+from gromos import Energy
+e = Energy()
 ```
 
-Create empty topology.
+### Properties
 
-**Example:**
-```python
-topo = gromos.Topology()
-```
-
-#### Methods
-
-##### `num_atoms() -> int`
-
-Number of atoms.
-
-##### `num_bonds() -> int`
-
-Number of bonds.
-
-##### `num_angles() -> int`
-
-Number of angles.
-
-##### `num_dihedrals() -> int`
-
-Number of dihedrals.
+`total`, `kinetic`, `potential` — `float`
 
 ---
 
-## Integrators
+## Frame
 
-### LeapFrog
-
-**Leap-Frog integrator (velocity Verlet variant)**
-
-Fast and stable. Velocities offset by dt/2 from positions.
-
-#### Constructor
+A trajectory frame (time + step metadata + optional positions).
 
 ```python
-LeapFrog(dt: float) -> LeapFrog
+from gromos import Frame
+f = Frame(time=1.5, step=100)
+print(f.time, f.step, f.n_atoms)
 ```
-
-**Parameters:**
-- `dt` (float): Timestep in ps
-
-**Example:**
-```python
-integrator = gromos.LeapFrog(dt=0.002)  # 2 fs
-```
-
-#### Methods
-
-##### `timestep() -> float`
-
-Get timestep in ps.
 
 ---
 
-### VelocityVerlet
+## Free functions
 
-**Velocity Verlet integrator**
+### `rmsd`
 
-Higher accuracy than Leap-Frog. Positions and velocities at same time.
-
-#### Constructor
+Root-mean-square deviation between two coordinate arrays, nm.
 
 ```python
-VelocityVerlet(dt: float) -> VelocityVerlet
-```
+from gromos import rmsd
+import numpy as np
 
-**Parameters:**
-- `dt` (float): Timestep in ps
-
-**Example:**
-```python
-integrator = gromos.VelocityVerlet(dt=0.001)  # 1 fs
-```
-
-#### Methods
-
-##### `timestep() -> float`
-
-Get timestep in ps.
-
----
-
-### StochasticDynamics
-
-**Stochastic Dynamics (Langevin) integrator**
-
-Implicit solvent with friction and random forces.
-
-#### Constructor
-
-```python
-StochasticDynamics(dt: float, gamma: float, temperature: float) -> StochasticDynamics
-```
-
-**Parameters:**
-- `dt` (float): Timestep in ps
-- `gamma` (float): Friction coefficient in ps⁻¹
-- `temperature` (float): Target temperature in K
-
-**Example:**
-```python
-integrator = gromos.StochasticDynamics(
-    dt=0.002,
-    gamma=0.1,
-    temperature=300.0
+r = rmsd(
+    positions.astype(np.float32),   # (N, 3) float32
+    reference.astype(np.float32),   # (N, 3) float32
 )
 ```
 
-#### Methods
+### `rdf`
 
-##### `timestep() -> float`
-
-Get timestep in ps.
-
----
-
-## Advanced Sampling
-
-### GaMD
-
-**Gaussian Accelerated Molecular Dynamics**
-
-Adds harmonic boost potential to smooth energy landscape.
-
-#### GamdParameters
+Radial distribution function between two atom index groups.
 
 ```python
-GamdParameters(sigma0: float, threshold_mode: str) -> GamdParameters
-```
+from gromos import rdf
 
-**Parameters:**
-- `sigma0` (float): Standard deviation of boost (kJ/mol)
-- `threshold_mode` (str): 'lower' or 'upper'
-
-**Example:**
-```python
-params = gromos.GamdParameters(sigma0=6.0, threshold_mode='lower')
-```
-
-#### GamdRunner
-
-```python
-GamdRunner(params: GamdParameters) -> GamdRunner
-```
-
-**Example:**
-```python
-runner = gromos.GamdRunner(params)
-```
-
----
-
-### EDS
-
-**Enveloping Distribution Sampling**
-
-Samples multiple end-states simultaneously with smoothed envelope.
-
-#### EDSParameters
-
-```python
-EDSParameters(num_states: int, smoothness: float) -> EDSParameters
-```
-
-**Parameters:**
-- `num_states` (int): Number of end-states
-- `smoothness` (float): Envelope smoothness (kJ/mol)
-
-**Example:**
-```python
-params = gromos.EDSParameters(num_states=4, smoothness=1.0)
-```
-
-#### EDSRunner
-
-```python
-EDSRunner(params: EDSParameters) -> EDSRunner
-```
-
-**Example:**
-```python
-runner = gromos.EDSRunner(params)
-```
-
----
-
-### REMD
-
-**Replica Exchange Molecular Dynamics**
-
-Manages multiple replicas with periodic exchange attempts.
-
-#### ReplicaController
-
-```python
-ReplicaController(num_replicas: int, exchange_interval: int) -> ReplicaController
-```
-
-**Parameters:**
-- `num_replicas` (int): Number of replicas
-- `exchange_interval` (int): Steps between exchange attempts
-
-**Example:**
-```python
-remd = gromos.ReplicaController(
-    num_replicas=8,
-    exchange_interval=1000
+r_vals, g_vals = rdf(
+    positions.astype(np.float32),  # (N, 3) float32
+    group_a=[0, 3, 6],             # list[int] — indices in group A
+    group_b=[1, 4, 7],             # list[int] — indices in group B
+    n_bins=100,
+    r_max=1.5,                     # nm
 )
+# r_vals: (n_bins,) float64 — bin centres, nm
+# g_vals: (n_bins,) float64 — g(r) values
 ```
-
-#### Methods
-
-##### `num_replicas() -> int`
-
-Get number of replicas.
 
 ---
 
-## Units
+## Planned API (not yet implemented)
 
-GROMOS-RS uses the following units:
+### P3.3 — Energy timeseries without files
 
-| Quantity | Unit |
-|----------|------|
-| Length | nm (nanometers) |
-| Time | ps (picoseconds) |
-| Energy | kJ/mol |
-| Force | kJ/(mol·nm) |
-| Velocity | nm/ps |
-| Temperature | K (Kelvin) |
-| Mass | g/mol (atomic mass units) |
+```python
+# Run n steps, collect energies every ene_freq steps into a NumPy array.
+# No .tre file written.
+energies = sim.run(steps=5000, ene_freq=100)   # returns EnergyTimeseries
+df       = energies.to_dataframe()
+energies.plot("kinetic", "potential")
+energies.block_average("total", block_size=50)
+```
 
-## Performance Tips
+### FUTURE — System builder algebra
 
-1. **Zero-copy NumPy**: Use `.positions()`, `.velocities()`, `.forces()` to get views
-2. **SIMD acceleration**: Vec3 operations automatically vectorized
-3. **Parallel execution**: Force calculations parallelized via Rayon
-4. **Batch operations**: Process multiple atoms at once when possible
+Design rationale in `FUTURE.md`. Nothing below is implemented.
 
-## Examples
+```python
+from gromos import ForceField
 
-See the `examples/` directory for complete examples:
+ff     = ForceField.load("54A7")
+system = molecule("ALA", ff) * 10 + solvent("SPC", n=2000)
+system.neutralize(ion="CL")
+system.write("prepared.topo", "prepared.cnf")
+```
 
-- `01_basic_vectors.py` - Vector and matrix operations
-- `02_system_setup.py` - System initialization
-- `03_integrators.py` - Integration algorithms
-- `04_advanced_sampling.py` - Enhanced sampling methods
-- `05_complete_workflow.py` - Full simulation workflow
+---
 
-## See Also
+## Legacy: `gromos.md_runners`
 
-- [README.md](README.md) - Installation and quick start
-- [GROMOS documentation](http://www.gromos.net)
-- [PyO3 documentation](https://pyo3.rs)
+The `md_runners` sub-module contains Python classes that shell out to the `md`
+binary (`MDSimulation`, `GaMDSimulation`, `EDSSimulation`, `REMDSimulation`,
+`TISimulation`). They write temporary `.imd` files and parse output files.
+
+Prefer `Simulation` for new code. The `md_runners` API will be deprecated once
+`sim.run()` (P3.3) covers the same use cases.

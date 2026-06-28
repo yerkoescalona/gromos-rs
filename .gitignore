@@ -81,3 +81,4 @@ md.trg
 docs/book
 .claude/worktrees/
 .gitignore
+py-gromos/site/

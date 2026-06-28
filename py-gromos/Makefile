@@ -77,6 +77,18 @@ notebooks: .venv build ## Run Jupyter notebooks
 	$(VENV_BIN)/pip install jupyter notebook
 	$(VENV_BIN)/jupyter notebook notebooks/
 
+##@ Documentation
+
+.PHONY: docs
+docs: .venv ## Build static documentation site into site/
+	$(VENV_BIN)/pip install --quiet mkdocs-material
+	$(VENV_BIN)/mkdocs build --strict
+
+.PHONY: docs-serve
+docs-serve: .venv ## Serve documentation locally with live-reload (http://localhost:8000)
+	$(VENV_BIN)/pip install --quiet mkdocs-material
+	$(VENV_BIN)/mkdocs serve
+
 ##@ Cleaning
 
 .PHONY: clean

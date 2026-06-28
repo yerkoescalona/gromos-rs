@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import overload
+
 import numpy as np
 import numpy.typing as npt
 
@@ -97,6 +99,16 @@ class Configuration:
 
 class InputParameters:
     def __init__(self, input_file: str) -> None: ...
+    @staticmethod
+    def from_file(input_file: str) -> InputParameters: ...
+    @staticmethod
+    def nve(dt: float, steps: int) -> InputParameters: ...
+    @staticmethod
+    def nvt(dt: float, steps: int, temperature: float) -> InputParameters: ...
+    @staticmethod
+    def npt(dt: float, steps: int, temperature: float, pressure: float) -> InputParameters: ...
+    @staticmethod
+    def steepest_descent(steps: int) -> InputParameters: ...
     @property
     def dt(self) -> float: ...
     @property
@@ -126,6 +138,9 @@ class InputParameters:
 # =============================================================================
 
 class Simulation:
+    @overload
+    def __init__(self, system: System, params: InputParameters) -> None: ...
+    @overload
     def __init__(
         self,
         arg1: str | Topology,
@@ -293,6 +308,31 @@ class AlgorithmSequence:
     def __repr__(self) -> str: ...
 
 # =============================================================================
+# =============================================================================
+# System
+# =============================================================================
+
+class System:
+    def __init__(self, topology: Topology, configuration: Configuration) -> None: ...
+    @staticmethod
+    def from_files(topo_file: str, conf_file: str) -> System: ...
+    @property
+    def n_atoms(self) -> int: ...
+    @property
+    def charge(self) -> int: ...
+    @property
+    def positions(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def velocities(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def box(self) -> tuple[float, float, float]: ...
+    @property
+    def topology(self) -> Topology: ...
+    @property
+    def configuration(self) -> Configuration: ...
+    def write(self, path: str) -> None: ...
+    def __repr__(self) -> str: ...
+
 # Free functions
 # =============================================================================
 

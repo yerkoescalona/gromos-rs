@@ -1,173 +1,74 @@
 """
-GROMOS-RS Python Bindings
-=========================
+gromos — Python bindings for the GROMOS-RS molecular dynamics engine.
 
-High-performance molecular dynamics simulations powered by Rust.
-
-Inspired by Polars' architecture:
-- Zero-copy data sharing with NumPy
-- Rust core with Python wrapper
-- SIMD acceleration and parallel execution
-- Memory-safe operations
-
-Quick Start
+Quick start
 -----------
-
->>> import gromos
->>> import numpy as np
+>>> from gromos import System, InputParameters, Simulation
 >>>
->>> # Create a simple system
->>> state = gromos.State(num_atoms=100, num_temp_groups=1, num_energy_groups=1)
->>> energy = gromos.Energy(num_temperature_groups=1, num_energy_groups=1)
->>>
->>> # Set up simulation box
->>> box = gromos.Box.rectangular(3.0, 3.0, 3.0)  # 3x3x3 nm box
->>>
->>> # Create integrator
->>> integrator = gromos.LeapFrog(dt=0.002)  # 2 fs timestep
->>>
->>> # Work with vectors
->>> v1 = gromos.Vec3(1.0, 0.0, 0.0)
->>> v2 = gromos.Vec3(0.0, 1.0, 0.0)
->>> v3 = v1.cross(v2)
->>> print(v3)  # Vec3(0.0, 0.0, 1.0)
+>>> system = System.from_files("water_216.topo", "equilibrated.cnf")
+>>> params = InputParameters.nvt(dt=0.002, steps=1000, temperature=300.0)
+>>> sim    = Simulation(system, params)
+>>> sim.step(1000)
+>>> print(sim.total_energy)   # kJ/mol
 
-Advanced Sampling
------------------
-
->>> # Gaussian Accelerated MD (GaMD)
->>> gamd_params = gromos.GamdParameters(sigma0=6.0, threshold_mode='lower')
->>> gamd = gromos.GamdRunner(gamd_params)
->>>
->>> # Enveloping Distribution Sampling (EDS)
->>> eds_params = gromos.EDSParameters(num_states=4, smoothness=1.0)
->>> eds = gromos.EDSRunner(eds_params)
->>>
->>> # Replica Exchange MD (REMD)
->>> remd = gromos.ReplicaController(num_replicas=8, exchange_interval=1000)
-
-Analysis Tools
---------------
-
-Complete suite of 104 GROMOS++ analysis programs:
-
->>> # Structural analysis
->>> clusters = gromos.analysis.cluster("md.trc", cutoff=0.15)
->>> sasa = gromos.analysis.sasa("md.trc", probe_radius=0.14)
->>>
->>> # Interaction analysis
->>> hbonds = gromos.analysis.hbond("md.trc", distance_cutoff=0.25)
->>> rdf_data = gromos.analysis.rdf("md.trc", "OW", "OW")
->>>
->>> # Energy & free energy
->>> energies = gromos.analysis.ene_ana("md.tre")
->>> delta_g = gromos.analysis.bar("forward.dat", "reverse.dat")
->>>
->>> # Dynamics
->>> diff_coeff = gromos.analysis.diffus("md.trc", atom_selection="OW")
->>> dipoles = gromos.analysis.dipole("md.trc")
-
-Features
---------
-
-- **Math Types**: Vec3, Mat3 with SIMD acceleration
-- **Core Structures**: State, Energy, Configuration, Topology, Box
-- **Integrators**: LeapFrog, VelocityVerlet, StochasticDynamics
-- **Advanced Sampling**: GaMD, EDS, REMD, Local Elevation, QM/MM
-- **Free Energy**: TI, FEP, BAR, EDS, Widom insertion
-- **NMR/X-ray**: J-value, RDC, NOE, structure factors
-- **Analysis**: 104 gromos++ analysis tools for structure, dynamics, energy
-- **NumPy Integration**: Zero-copy array conversion
-- **Parallel Execution**: Automatic multi-threading via Rayon
-
-Performance
------------
-
-GROMOS-RS achieves 2-3x speedup over the original C++ implementation through:
-
-- SIMD vectorization (glam + wide)
-- Fearless concurrency (Rayon)
-- Zero-cost abstractions
-- Memory safety without runtime overhead
-
-See Also
---------
-
-- Documentation: https://gromos.net
-- Source code: https://github.com/gromos/gromosXX
-- Original GROMOS: http://www.gromos.net
+All units follow the GROMOS convention: nm, ps, kJ/mol, K.
 """
 
-# Import available classes from the Rust extension module
-# Import analysis module
-from . import analysis
+# ── Rust extension (always available) ────────────────────────────────────────
 from .gromos import (
-    AlgorithmSequence,
-    BerendsenBarostat,
-    BerendsenThermostat,
-    Configuration,
-    Energy,
-    EnergyCalculation,
-    Forcefield,
-    Frame,
-    InputParameters,
-    LeapFrogIntegrator,
-    LeapFrogPosition,
-    LeapFrogVelocity,
-    PressureCalculation,
-    RemoveCOMMotion,
-    ShakeConstraints,
-    Simulation,
-    TemperatureCalculation,
-    Topology,
+    # Math / utility
     Vec3,
-    rdf,
+    Energy,
+    Frame,
     rmsd,
+    rdf,
+    # I/O objects
+    Topology,
+    Configuration,
+    InputParameters,
+    # Simulation objects
+    System,
+    Simulation,
+    # Algorithm-sequence building blocks
+    AlgorithmSequence,
+    Forcefield,
+    LeapFrogIntegrator,
+    LeapFrogVelocity,
+    LeapFrogPosition,
+    BerendsenThermostat,
+    BerendsenBarostat,
+    ShakeConstraints,
+    TemperatureCalculation,
+    PressureCalculation,
+    EnergyCalculation,
+    RemoveCOMMotion,
 )
 
-# Import MD simulation runners
-from .md_runners import (
-    EDSSimulation,
-    GaMDSimulation,
-    MDSimulation,
-    REMDSimulation,
-    TISimulation,
-    run_eds,
-    run_gamd,
-    run_remd,
-    run_standard_md,
-    run_ti,
-)
+# ── Legacy subprocess runners (depend on the `md` binary being in PATH) ──────
+# These wrap the GROMOS-RS command-line tool and write temporary files.
+# Prefer the Simulation class for new code.
+from . import md_runners
+
+# ── Analysis (subprocess wrappers, mostly stubs) ─────────────────────────────
+from . import analysis
 
 __version__ = "0.1.0"
 
-# PROTOTYPE — system builder algebra (P3 design sketch, not yet implemented)
-# Imported here so the names appear in `dir(gromos)` for inspection only.
-# Nothing below runs correctly; stubs raise NotImplementedError.
-from .system_builder import (
-    ForceField,
-    BuildingBlock,
-    MoleculeTopology,
-    SystemTopology,
-    SolvatedSystem,
-    Configuration as EnhancedConfiguration,
-    EnergyTimeseries,
-    MDResult,
-    build_system,
-)
-
 __all__ = [
-    # Rust bindings
+    # Math / utility
     "Vec3",
     "Energy",
     "Frame",
+    "rmsd",
+    "rdf",
+    # I/O
     "Topology",
     "Configuration",
     "InputParameters",
+    # Simulation
+    "System",
     "Simulation",
-    "rmsd",
-    "rdf",
-    # Algorithm sequence API
+    # Algorithm sequence
     "AlgorithmSequence",
     "Forcefield",
     "LeapFrogIntegrator",
@@ -180,30 +81,9 @@ __all__ = [
     "PressureCalculation",
     "EnergyCalculation",
     "RemoveCOMMotion",
-    # MD simulation classes
-    "MDSimulation",
-    "GaMDSimulation",
-    "EDSSimulation",
-    "REMDSimulation",
-    "TISimulation",
-    # MD simulation functions
-    "run_standard_md",
-    "run_gamd",
-    "run_eds",
-    "run_remd",
-    "run_ti",
-    # Analysis module
+    # Sub-modules
+    "md_runners",
     "analysis",
-    # System builder algebra (P3)
-    "ForceField",
-    "BuildingBlock",
-    "MoleculeTopology",
-    "SystemTopology",
-    "SolvatedSystem",
-    "EnhancedConfiguration",
-    "EnergyTimeseries",
-    "MDResult",
-    "build_system",
-    # Version
+    # Meta
     "__version__",
 ]

@@ -30,6 +30,12 @@ impl PyInputParameters {
     ///     input_file: Path to input file (.imd, .in)
     #[new]
     fn new(input_file: &str) -> PyResult<Self> {
+        Self::from_file(input_file)
+    }
+
+    /// Load parameters from a GROMOS input file (alias of constructor).
+    #[staticmethod]
+    fn from_file(input_file: &str) -> PyResult<Self> {
         let imd = read_imd_file(input_file).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                 "Failed to read input file '{}': {}",
@@ -37,6 +43,32 @@ impl PyInputParameters {
             ))
         })?;
         Ok(Self { inner: imd })
+    }
+
+    /// NVE (microcanonical) parameters: no thermostat or barostat.
+    #[staticmethod]
+    fn nve(dt: f64, steps: usize) -> Self {
+        Self { inner: ImdParameters::nve(dt, steps) }
+    }
+
+    /// NVT (canonical) parameters: Berendsen thermostat at `temperature` K.
+    #[staticmethod]
+    fn nvt(dt: f64, steps: usize, temperature: f64) -> Self {
+        Self { inner: ImdParameters::nvt(dt, steps, temperature) }
+    }
+
+    /// NPT (isothermal-isobaric) parameters: Berendsen thermostat + barostat.
+    ///
+    /// `pressure` in bar.
+    #[staticmethod]
+    fn npt(dt: f64, steps: usize, temperature: f64, pressure: f64) -> Self {
+        Self { inner: ImdParameters::npt(dt, steps, temperature, pressure) }
+    }
+
+    /// Steepest-descent energy minimization parameters.
+    #[staticmethod]
+    fn steepest_descent(steps: usize) -> Self {
+        Self { inner: ImdParameters::steepest_descent(steps) }
     }
 
     /// Time step in picoseconds.
