@@ -1,6 +1,4 @@
 use crate::constraints::ShakeParameters;
-use crate::thermostats::BerendsenThermostatParameters;
-use gromos_core::configuration::Configuration;
 use crate::integrator::Integrator;
 /// Replica Exchange Molecular Dynamics (REMD)
 ///
@@ -10,7 +8,8 @@ use crate::integrator::Integrator;
 ///
 /// Based on the Metropolis-Hastings criterion with Boltzmann-weighted
 /// energy differences.
-use crate::replica::{Replica, ReplicaId, ReplicaInfo};
+use crate::replica::{Replica, ReplicaId};
+use crate::thermostats::BerendsenThermostatParameters;
 use gromos_core::topology::Topology;
 use rand::Rng;
 use rayon::prelude::*;

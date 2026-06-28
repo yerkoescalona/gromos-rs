@@ -4,12 +4,11 @@
 //!
 //! Calculates energy distribution in box regions
 
+use gromos_core::units::four_pi_eps_i;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
-
-const COULOMB_CONST: f64 = 138.9354859;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -80,7 +79,7 @@ fn main() {
                         0.0
                     };
 
-                    let e_self = COULOMB_CONST * q * q / 0.1; // Self energy term
+                    let e_self = four_pi_eps_i * q * q / 0.1; // Self energy term
                     region_energies[region_idx] += e_self;
                 }
 

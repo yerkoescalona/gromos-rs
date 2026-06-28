@@ -1,9 +1,9 @@
 //! LJ+CRF inner loop kernels: serial, parallel, CG-grouped, and solvent variants
 
+use super::params::FOUR_PI_EPS_I;
+use super::{CGPairGroup, CRFParameters, ForceStorage, LJParamMatrix};
 use gromos_core::math::{BoundaryCondition, Vec3};
 use rayon::prelude::*;
-use super::{LJParamMatrix, CRFParameters, ForceStorage, CGPairGroup};
-use super::params::FOUR_PI_EPS_I;
 
 /// Core LJ + CRF interaction calculation (hot path!)
 ///
@@ -242,7 +242,10 @@ fn process_solvent_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
     let first_mol = pairs[0].0 as usize;
     let n = atoms_per_solvent;
     // Stack-allocated arrays for up to 4-site water models (covers SPC, SPC/E, TIP4P)
-    assert!(n <= 4, "solvent with >4 atoms not supported in optimized path");
+    assert!(
+        n <= 4,
+        "solvent with >4 atoms not supported in optimized path"
+    );
     let mut lj_c6 = [[0.0f64; 4]; 4];
     let mut lj_c12 = [[0.0f64; 4]; 4];
     let mut q_prod = [[0.0f64; 4]; 4];
@@ -287,8 +290,11 @@ fn process_solvent_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
                 let r = Vec3::new(x, y, z);
 
                 let (f_mag, e_lj, e_crf) = lj_crf_interaction(
-                    r, lj_c6[atom_i][atom_j], lj_c12[atom_i][atom_j],
-                    q_prod[atom_i][atom_j], crf,
+                    r,
+                    lj_c6[atom_i][atom_j],
+                    lj_c12[atom_i][atom_j],
+                    q_prod[atom_i][atom_j],
+                    crf,
                 );
 
                 let force = r * f_mag;
@@ -327,7 +333,16 @@ pub fn lj_crf_innerloop<BC: BoundaryCondition>(
     periodicity: &BC,
     storage: &mut ForceStorage,
 ) {
-    process_pairs::<BC, true>(pairlist, positions, charges, iac, lj_params, crf, periodicity, storage);
+    process_pairs::<BC, true>(
+        pairlist,
+        positions,
+        charges,
+        iac,
+        lj_params,
+        crf,
+        periodicity,
+        storage,
+    );
 }
 
 /// Inner loop without virial computation (for NVE/NVT without pressure coupling).
@@ -341,7 +356,16 @@ pub fn lj_crf_innerloop_novirial<BC: BoundaryCondition>(
     periodicity: &BC,
     storage: &mut ForceStorage,
 ) {
-    process_pairs::<BC, false>(pairlist, positions, charges, iac, lj_params, crf, periodicity, storage);
+    process_pairs::<BC, false>(
+        pairlist,
+        positions,
+        charges,
+        iac,
+        lj_params,
+        crf,
+        periodicity,
+        storage,
+    );
 }
 
 /// CG-grouped innerloop with virial (for NPT).
@@ -356,7 +380,17 @@ pub fn lj_crf_innerloop_cg_grouped<BC: BoundaryCondition>(
     periodicity: &BC,
     storage: &mut ForceStorage,
 ) {
-    process_pairs_cg_grouped::<BC, true>(pairlist, groups, positions, charges, iac, lj_params, crf, periodicity, storage);
+    process_pairs_cg_grouped::<BC, true>(
+        pairlist,
+        groups,
+        positions,
+        charges,
+        iac,
+        lj_params,
+        crf,
+        periodicity,
+        storage,
+    );
 }
 
 /// CG-grouped innerloop without virial (for NVE/NVT).
@@ -371,7 +405,17 @@ pub fn lj_crf_innerloop_cg_grouped_novirial<BC: BoundaryCondition>(
     periodicity: &BC,
     storage: &mut ForceStorage,
 ) {
-    process_pairs_cg_grouped::<BC, false>(pairlist, groups, positions, charges, iac, lj_params, crf, periodicity, storage);
+    process_pairs_cg_grouped::<BC, false>(
+        pairlist,
+        groups,
+        positions,
+        charges,
+        iac,
+        lj_params,
+        crf,
+        periodicity,
+        storage,
+    );
 }
 
 /// Parallel CG-grouped innerloop with virial.
@@ -386,7 +430,17 @@ pub fn lj_crf_innerloop_cg_grouped_parallel<BC: BoundaryCondition>(
     periodicity: &BC,
     n_atoms: usize,
 ) -> ForceStorage {
-    lj_crf_innerloop_cg_grouped_parallel_virial::<BC, true>(positions, charges, iac, pairlist, groups, lj_params, crf, periodicity, n_atoms)
+    lj_crf_innerloop_cg_grouped_parallel_virial::<BC, true>(
+        positions,
+        charges,
+        iac,
+        pairlist,
+        groups,
+        lj_params,
+        crf,
+        periodicity,
+        n_atoms,
+    )
 }
 
 /// Parallel CG-grouped innerloop without virial.
@@ -401,7 +455,17 @@ pub fn lj_crf_innerloop_cg_grouped_parallel_novirial<BC: BoundaryCondition>(
     periodicity: &BC,
     n_atoms: usize,
 ) -> ForceStorage {
-    lj_crf_innerloop_cg_grouped_parallel_virial::<BC, false>(positions, charges, iac, pairlist, groups, lj_params, crf, periodicity, n_atoms)
+    lj_crf_innerloop_cg_grouped_parallel_virial::<BC, false>(
+        positions,
+        charges,
+        iac,
+        pairlist,
+        groups,
+        lj_params,
+        crf,
+        periodicity,
+        n_atoms,
+    )
 }
 
 fn lj_crf_innerloop_cg_grouped_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
@@ -417,7 +481,17 @@ fn lj_crf_innerloop_cg_grouped_parallel_virial<BC: BoundaryCondition, const VIRI
 ) -> ForceStorage {
     let mut result = ForceStorage::new(n_atoms);
     if groups.len() < 64 {
-        process_pairs_cg_grouped::<BC, VIRIAL>(pairlist, groups, positions, charges, iac, lj_params, crf, periodicity, &mut result);
+        process_pairs_cg_grouped::<BC, VIRIAL>(
+            pairlist,
+            groups,
+            positions,
+            charges,
+            iac,
+            lj_params,
+            crf,
+            periodicity,
+            &mut result,
+        );
         return result;
     }
 
@@ -426,7 +500,17 @@ fn lj_crf_innerloop_cg_grouped_parallel_virial<BC: BoundaryCondition, const VIRI
         .fold(
             || ForceStorage::new(n_atoms),
             |mut local_storage, chunk| {
-                process_pairs_cg_grouped::<BC, VIRIAL>(pairlist, chunk, positions, charges, iac, lj_params, crf, periodicity, &mut local_storage);
+                process_pairs_cg_grouped::<BC, VIRIAL>(
+                    pairlist,
+                    chunk,
+                    positions,
+                    charges,
+                    iac,
+                    lj_params,
+                    crf,
+                    periodicity,
+                    &mut local_storage,
+                );
                 local_storage
             },
         )
@@ -457,7 +541,16 @@ pub fn lj_crf_innerloop_parallel<BC: BoundaryCondition>(
     periodicity: &BC,
     n_atoms: usize,
 ) -> ForceStorage {
-    lj_crf_innerloop_parallel_virial::<BC, true>(positions, charges, iac, pairlist, lj_params, crf, periodicity, n_atoms)
+    lj_crf_innerloop_parallel_virial::<BC, true>(
+        positions,
+        charges,
+        iac,
+        pairlist,
+        lj_params,
+        crf,
+        periodicity,
+        n_atoms,
+    )
 }
 
 /// Parallel nonbonded innerloop without virial (for NVE/NVT).
@@ -471,7 +564,16 @@ pub fn lj_crf_innerloop_parallel_novirial<BC: BoundaryCondition>(
     periodicity: &BC,
     n_atoms: usize,
 ) -> ForceStorage {
-    lj_crf_innerloop_parallel_virial::<BC, false>(positions, charges, iac, pairlist, lj_params, crf, periodicity, n_atoms)
+    lj_crf_innerloop_parallel_virial::<BC, false>(
+        positions,
+        charges,
+        iac,
+        pairlist,
+        lj_params,
+        crf,
+        periodicity,
+        n_atoms,
+    )
 }
 
 fn lj_crf_innerloop_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
@@ -486,7 +588,16 @@ fn lj_crf_innerloop_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
 ) -> ForceStorage {
     let mut result = ForceStorage::new(n_atoms);
     if pairlist.len() < PARALLEL_THRESHOLD {
-        process_pairs::<BC, VIRIAL>(pairlist, positions, charges, iac, lj_params, crf, periodicity, &mut result);
+        process_pairs::<BC, VIRIAL>(
+            pairlist,
+            positions,
+            charges,
+            iac,
+            lj_params,
+            crf,
+            periodicity,
+            &mut result,
+        );
         return result;
     }
 
@@ -495,13 +606,25 @@ fn lj_crf_innerloop_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
         .fold(
             || ForceStorage::new(n_atoms),
             |mut acc, chunk| {
-                process_pairs::<BC, VIRIAL>(chunk, positions, charges, iac, lj_params, crf, periodicity, &mut acc);
+                process_pairs::<BC, VIRIAL>(
+                    chunk,
+                    positions,
+                    charges,
+                    iac,
+                    lj_params,
+                    crf,
+                    periodicity,
+                    &mut acc,
+                );
                 acc
             },
         )
         .reduce(
             || ForceStorage::new(n_atoms),
-            |mut a, b| { a.merge(&b); a },
+            |mut a, b| {
+                a.merge(&b);
+                a
+            },
         );
     result
 }
@@ -524,7 +647,17 @@ pub fn solvent_innerloop<BC: BoundaryCondition>(
     atoms_per_solvent: usize,
     storage: &mut ForceStorage,
 ) {
-    process_solvent_pairs::<BC, true>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, storage);
+    process_solvent_pairs::<BC, true>(
+        pairlist,
+        positions,
+        charges,
+        iac,
+        lj_params,
+        crf,
+        periodicity,
+        atoms_per_solvent,
+        storage,
+    );
 }
 
 /// Solvent-solvent innerloop without virial computation (for NVE/NVT).
@@ -539,7 +672,17 @@ pub fn solvent_innerloop_novirial<BC: BoundaryCondition>(
     atoms_per_solvent: usize,
     storage: &mut ForceStorage,
 ) {
-    process_solvent_pairs::<BC, false>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, storage);
+    process_solvent_pairs::<BC, false>(
+        pairlist,
+        positions,
+        charges,
+        iac,
+        lj_params,
+        crf,
+        periodicity,
+        atoms_per_solvent,
+        storage,
+    );
 }
 
 /// Parallel solvent-solvent innerloop — same physics as `solvent_innerloop`.
@@ -559,7 +702,17 @@ pub fn solvent_innerloop_parallel<BC: BoundaryCondition>(
 ) -> ForceStorage {
     let mut result = ForceStorage::new(n_atoms);
     if pairlist.len() < PARALLEL_THRESHOLD {
-        process_solvent_pairs::<BC, true>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut result);
+        process_solvent_pairs::<BC, true>(
+            pairlist,
+            positions,
+            charges,
+            iac,
+            lj_params,
+            crf,
+            periodicity,
+            atoms_per_solvent,
+            &mut result,
+        );
         return result;
     }
 
@@ -568,13 +721,26 @@ pub fn solvent_innerloop_parallel<BC: BoundaryCondition>(
         .fold(
             || ForceStorage::new(n_atoms),
             |mut acc, chunk| {
-                process_solvent_pairs::<BC, true>(chunk, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut acc);
+                process_solvent_pairs::<BC, true>(
+                    chunk,
+                    positions,
+                    charges,
+                    iac,
+                    lj_params,
+                    crf,
+                    periodicity,
+                    atoms_per_solvent,
+                    &mut acc,
+                );
                 acc
             },
         )
         .reduce(
             || ForceStorage::new(n_atoms),
-            |mut a, b| { a.merge(&b); a },
+            |mut a, b| {
+                a.merge(&b);
+                a
+            },
         );
     result
 }
@@ -593,7 +759,17 @@ pub fn solvent_innerloop_parallel_novirial<BC: BoundaryCondition>(
 ) -> ForceStorage {
     let mut result = ForceStorage::new(n_atoms);
     if pairlist.len() < PARALLEL_THRESHOLD {
-        process_solvent_pairs::<BC, false>(pairlist, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut result);
+        process_solvent_pairs::<BC, false>(
+            pairlist,
+            positions,
+            charges,
+            iac,
+            lj_params,
+            crf,
+            periodicity,
+            atoms_per_solvent,
+            &mut result,
+        );
         return result;
     }
 
@@ -602,23 +778,36 @@ pub fn solvent_innerloop_parallel_novirial<BC: BoundaryCondition>(
         .fold(
             || ForceStorage::new(n_atoms),
             |mut acc, chunk| {
-                process_solvent_pairs::<BC, false>(chunk, positions, charges, iac, lj_params, crf, periodicity, atoms_per_solvent, &mut acc);
+                process_solvent_pairs::<BC, false>(
+                    chunk,
+                    positions,
+                    charges,
+                    iac,
+                    lj_params,
+                    crf,
+                    periodicity,
+                    atoms_per_solvent,
+                    &mut acc,
+                );
                 acc
             },
         )
         .reduce(
             || ForceStorage::new(n_atoms),
-            |mut a, b| { a.merge(&b); a },
+            |mut a, b| {
+                a.merge(&b);
+                a
+            },
         );
     result
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::params::LJParameters;
-    use gromos_core::math::{Rectangular, Vacuum};
+    use super::*;
     use approx::assert_relative_eq;
+    use gromos_core::math::{Rectangular, Vacuum};
 
     #[test]
     fn test_lj_interaction() {

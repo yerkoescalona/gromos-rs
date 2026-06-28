@@ -33,8 +33,6 @@ struct Args {
     param: Option<String>,
 }
 
-
-
 struct TopologyChecker {
     warnings: Vec<String>,
     errors: Vec<String>,

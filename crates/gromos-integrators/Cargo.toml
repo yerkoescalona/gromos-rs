@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 description = "Time integration algorithms for GROMOS-RS molecular dynamics"
 
+# Physics-convention variable names (kT, dH_dL, etc.) are intentional.
+[lints.rust]
+non_snake_case = "allow"
+
 [dependencies]
 gromos-core = { workspace = true }
 gromos-forces = { workspace = true }

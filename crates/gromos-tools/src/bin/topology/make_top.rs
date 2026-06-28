@@ -42,12 +42,14 @@ struct Args {
 struct TopAtom {
     name: String,
     residue_nr: usize,
+    // TODO: emit to RESNAME block once make_top writes full topology
+    #[allow(dead_code)]
     residue_name: String,
     iac: usize,
     mass: f64,
     charge: f64,
     chargegroup: usize,
-    exclusions: Vec<usize>,   // 0-based global indices
+    exclusions: Vec<usize>,     // 0-based global indices
     one_four_pairs: Vec<usize>, // 0-based global indices
 }
 
@@ -92,7 +94,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading MTB file '{}': {:?}", args.build, e);
             process::exit(1);
-        }
+        },
     };
 
     // Read force field parameters
@@ -101,7 +103,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading IFP file '{}': {:?}", args.param, e);
             process::exit(1);
-        }
+        },
     };
 
     eprintln!("Building topology for {} residues", args.seq.len());
@@ -122,24 +124,55 @@ fn main() {
             Some(BlockRef::End(end_bb)) => {
                 if end_bb.n_replace > 0 {
                     // N-terminal / beginning group
-                    add_begin(&mut atoms, &mut bonds, &mut angles, &mut impropers,
-                              &mut dihedrals, &mut residue_names, end_bb, &ffp, &bb);
+                    add_begin(
+                        &mut atoms,
+                        &mut bonds,
+                        &mut angles,
+                        &mut impropers,
+                        &mut dihedrals,
+                        &mut residue_names,
+                        end_bb,
+                        &ffp,
+                        &bb,
+                    );
                     rep = end_bb.n_replace;
                 } else {
                     // C-terminal / ending group
-                    add_end(&mut atoms, &mut bonds, &mut angles, &mut impropers,
-                            &mut dihedrals, end_bb, &ffp, &bb);
+                    add_end(
+                        &mut atoms,
+                        &mut bonds,
+                        &mut angles,
+                        &mut impropers,
+                        &mut dihedrals,
+                        end_bb,
+                        &ffp,
+                        &bb,
+                    );
                 }
-            }
+            },
             Some(BlockRef::Solute(sol_bb)) => {
-                add_solute(&mut atoms, &mut bonds, &mut angles, &mut impropers,
-                           &mut dihedrals, &mut residue_names, sol_bb, &ffp, &bb, rep);
+                add_solute(
+                    &mut atoms,
+                    &mut bonds,
+                    &mut angles,
+                    &mut impropers,
+                    &mut dihedrals,
+                    &mut residue_names,
+                    sol_bb,
+                    &ffp,
+                    &bb,
+                    rep,
+                );
                 rep = sol_bb.num_preceding_exclusions as i32;
-            }
+            },
             None => {
-                eprintln!("Error: Building block '{}' not found in MTB file (seq pos {})", res_name, seq_idx + 1);
+                eprintln!(
+                    "Error: Building block '{}' not found in MTB file (seq pos {})",
+                    res_name,
+                    seq_idx + 1
+                );
                 process::exit(1);
-            }
+            },
         }
     }
 
@@ -150,8 +183,17 @@ fn main() {
     build_14_pairs(&mut atoms, &bonds, &angles);
 
     // Write topology to stdout
-    write_topology(&atoms, &bonds, &angles, &impropers, &dihedrals,
-                   &residue_names, &bb, &ffp, solvent_name);
+    write_topology(
+        &atoms,
+        &bonds,
+        &angles,
+        &impropers,
+        &dihedrals,
+        &residue_names,
+        &bb,
+        &ffp,
+        solvent_name,
+    );
 }
 
 /// Add a beginning (N-terminal) end group. All atoms are added directly.
@@ -227,7 +269,11 @@ fn add_solute(
     for &(ai, aj, btype) in &sol_bb.bonds {
         let gi = resolve_bb_index(ai, offset);
         let gj = resolve_bb_index(aj, offset);
-        bonds.push(TopBond { i: gi, j: gj, type_code: btype });
+        bonds.push(TopBond {
+            i: gi,
+            j: gj,
+            type_code: btype,
+        });
     }
 
     for &(ai, aj, ak, atype) in &sol_bb.angles {
@@ -235,10 +281,20 @@ fn add_solute(
         let gj = resolve_bb_index(aj, offset);
         let gk = resolve_bb_index(ak, offset);
         if gi == gj || gi == gk || gj == gk {
-            eprintln!("Warning: skipping invalid angle with duplicate atoms: {}-{}-{}", gi+1, gj+1, gk+1);
+            eprintln!(
+                "Warning: skipping invalid angle with duplicate atoms: {}-{}-{}",
+                gi + 1,
+                gj + 1,
+                gk + 1
+            );
             continue;
         }
-        angles.push(TopAngle { i: gi, j: gj, k: gk, type_code: atype });
+        angles.push(TopAngle {
+            i: gi,
+            j: gj,
+            k: gk,
+            type_code: atype,
+        });
     }
 
     for &(ai, aj, ak, al, itype) in &sol_bb.improper_dihedrals {
@@ -246,7 +302,13 @@ fn add_solute(
         let gj = resolve_bb_index(aj, offset);
         let gk = resolve_bb_index(ak, offset);
         let gl = resolve_bb_index(al, offset);
-        impropers.push(TopImproper { i: gi, j: gj, k: gk, l: gl, type_code: itype });
+        impropers.push(TopImproper {
+            i: gi,
+            j: gj,
+            k: gk,
+            l: gl,
+            type_code: itype,
+        });
     }
 
     for &(ai, aj, ak, al, dtype) in &sol_bb.proper_dihedrals {
@@ -258,7 +320,13 @@ fn add_solute(
         let gj = resolve_bb_index(aj, offset);
         let gk = resolve_bb_index(ak, offset);
         let gl = resolve_bb_index(al, offset);
-        dihedrals.push(TopDihedral { i: gi, j: gj, k: gk, l: gl, type_code: dtype });
+        dihedrals.push(TopDihedral {
+            i: gi,
+            j: gj,
+            k: gk,
+            l: gl,
+            type_code: dtype,
+        });
     }
 }
 
@@ -325,7 +393,11 @@ fn add_bonded_from_end(
     for &(ai, aj, btype) in &end_bb.bonds {
         let gi = resolve_bb_index(ai, offset);
         let gj = resolve_bb_index(aj, offset);
-        bonds.push(TopBond { i: gi, j: gj, type_code: btype });
+        bonds.push(TopBond {
+            i: gi,
+            j: gj,
+            type_code: btype,
+        });
     }
 
     for &(ai, aj, ak, atype) in &end_bb.angles {
@@ -333,10 +405,20 @@ fn add_bonded_from_end(
         let gj = resolve_bb_index(aj, offset);
         let gk = resolve_bb_index(ak, offset);
         if gi == gj || gi == gk || gj == gk {
-            eprintln!("Warning: skipping invalid end-group angle with duplicate atoms: {}-{}-{}", gi+1, gj+1, gk+1);
+            eprintln!(
+                "Warning: skipping invalid end-group angle with duplicate atoms: {}-{}-{}",
+                gi + 1,
+                gj + 1,
+                gk + 1
+            );
             continue;
         }
-        angles.push(TopAngle { i: gi, j: gj, k: gk, type_code: atype });
+        angles.push(TopAngle {
+            i: gi,
+            j: gj,
+            k: gk,
+            type_code: atype,
+        });
     }
 
     for &(ai, aj, ak, al, itype) in &end_bb.improper_dihedrals {
@@ -344,7 +426,13 @@ fn add_bonded_from_end(
         let gj = resolve_bb_index(aj, offset);
         let gk = resolve_bb_index(ak, offset);
         let gl = resolve_bb_index(al, offset);
-        impropers.push(TopImproper { i: gi, j: gj, k: gk, l: gl, type_code: itype });
+        impropers.push(TopImproper {
+            i: gi,
+            j: gj,
+            k: gk,
+            l: gl,
+            type_code: itype,
+        });
     }
 
     for &(ai, aj, ak, al, dtype) in &end_bb.proper_dihedrals {
@@ -355,7 +443,13 @@ fn add_bonded_from_end(
         let gj = resolve_bb_index(aj, offset);
         let gk = resolve_bb_index(ak, offset);
         let gl = resolve_bb_index(al, offset);
-        dihedrals.push(TopDihedral { i: gi, j: gj, k: gk, l: gl, type_code: dtype });
+        dihedrals.push(TopDihedral {
+            i: gi,
+            j: gj,
+            k: gk,
+            l: gl,
+            type_code: dtype,
+        });
     }
 }
 
@@ -427,9 +521,13 @@ fn build_14_pairs(atoms: &mut Vec<TopAtom>, bonds: &[TopBond], _angles: &[TopAng
         // Walk 3 bonds from i
         for &j in &adj[i] {
             for &k in &adj[j] {
-                if k == i { continue; }
+                if k == i {
+                    continue;
+                }
                 for &l in &adj[k] {
-                    if l == j || l == i { continue; }
+                    if l == j || l == i {
+                        continue;
+                    }
                     if l > i && !atoms[i].exclusions.contains(&l) {
                         pairs_14.insert(l);
                     }
@@ -639,9 +737,8 @@ fn write_topology(
     println!("END");
 
     // Separate impropers into H / no-H
-    let (impdihedralh, impdihedral): (Vec<&TopImproper>, Vec<&TopImproper>) = impropers
-        .iter()
-        .partition(|d| {
+    let (impdihedralh, impdihedral): (Vec<&TopImproper>, Vec<&TopImproper>) =
+        impropers.iter().partition(|d| {
             atoms[d.i].mass < 2.0
                 || atoms[d.j].mass < 2.0
                 || atoms[d.k].mass < 2.0
@@ -655,7 +752,11 @@ fn write_topology(
     for d in &impdihedralh {
         println!(
             "{:5}{:5}{:5}{:5}{:5}",
-            d.i + 1, d.j + 1, d.k + 1, d.l + 1, d.type_code
+            d.i + 1,
+            d.j + 1,
+            d.k + 1,
+            d.l + 1,
+            d.type_code
         );
     }
     println!("END");
@@ -667,7 +768,11 @@ fn write_topology(
     for d in &impdihedral {
         println!(
             "{:5}{:5}{:5}{:5}{:5}",
-            d.i + 1, d.j + 1, d.k + 1, d.l + 1, d.type_code
+            d.i + 1,
+            d.j + 1,
+            d.k + 1,
+            d.l + 1,
+            d.type_code
         );
     }
     println!("END");
@@ -683,9 +788,8 @@ fn write_topology(
     println!("END");
 
     // Separate dihedrals into H / no-H
-    let (dihedralh, dihedral): (Vec<&TopDihedral>, Vec<&TopDihedral>) = dihedrals
-        .iter()
-        .partition(|d| {
+    let (dihedralh, dihedral): (Vec<&TopDihedral>, Vec<&TopDihedral>) =
+        dihedrals.iter().partition(|d| {
             atoms[d.i].mass < 2.0
                 || atoms[d.j].mass < 2.0
                 || atoms[d.k].mass < 2.0
@@ -699,7 +803,11 @@ fn write_topology(
     for d in &dihedralh {
         println!(
             "{:5}{:5}{:5}{:5}{:5}",
-            d.i + 1, d.j + 1, d.k + 1, d.l + 1, d.type_code
+            d.i + 1,
+            d.j + 1,
+            d.k + 1,
+            d.l + 1,
+            d.type_code
         );
     }
     println!("END");
@@ -711,7 +819,11 @@ fn write_topology(
     for d in &dihedral {
         println!(
             "{:5}{:5}{:5}{:5}{:5}",
-            d.i + 1, d.j + 1, d.k + 1, d.l + 1, d.type_code
+            d.i + 1,
+            d.j + 1,
+            d.k + 1,
+            d.l + 1,
+            d.type_code
         );
     }
     println!("END");

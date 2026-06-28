@@ -34,12 +34,12 @@
 //! writer.finish()?;
 //! ```
 
-use gromos_core::configuration::Configuration;
 use crate::IoError;
-use gromos_core::math::Vec3;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use gromos_core::configuration::Configuration;
+use gromos_core::math::Vec3;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// Trait for binary trajectory writers
@@ -203,7 +203,8 @@ impl DcdWriter {
         self.writer.write_i32::<LittleEndian>(0)?;
 
         // Timestep (single precision on disk)
-        self.writer.write_f32::<LittleEndian>(self.timestep as f32)?;
+        self.writer
+            .write_f32::<LittleEndian>(self.timestep as f32)?;
 
         // Unit cell flag (1 = present, we always include it)
         self.writer.write_i32::<LittleEndian>(1)?;
@@ -524,7 +525,13 @@ impl BinaryTrajectoryReader for DcdReader {
 
         // Convert to Vec3 (Angstrom to nm)
         let positions: Vec<Vec3> = (0..self.n_atoms)
-            .map(|i| Vec3::new(x_coords[i] as f64 / 10.0, y_coords[i] as f64 / 10.0, z_coords[i] as f64 / 10.0))
+            .map(|i| {
+                Vec3::new(
+                    x_coords[i] as f64 / 10.0,
+                    y_coords[i] as f64 / 10.0,
+                    z_coords[i] as f64 / 10.0,
+                )
+            })
             .collect();
 
         let time = self.frames_read as f64 * self.timestep;

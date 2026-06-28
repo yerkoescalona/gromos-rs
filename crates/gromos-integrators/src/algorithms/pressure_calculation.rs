@@ -49,7 +49,7 @@ impl PressureCalculation {
 impl Algorithm for PressureCalculation {
     fn apply(
         &mut self,
-        topo: &Topology,
+        _topo: &Topology,
         conf: &mut Configuration,
         _sim: &SimulationState,
     ) -> Result<(), String> {

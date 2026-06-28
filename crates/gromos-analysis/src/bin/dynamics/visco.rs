@@ -4,11 +4,12 @@
 //!
 //! Calculates shear viscosity using Green-Kubo relation
 
+// TODO: stub — Green-Kubo integrator not yet implemented (ref: GROMOS++ visco.cc).
+#![allow(dead_code)]
+
 use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
-
-const K_B: f64 = 0.00831446; // kJ/(mol·K)
 
 fn main() {
     let args: Vec<String> = env::args().collect();

@@ -122,7 +122,10 @@ pub struct ForceFieldParameters {
 impl ForceFieldParameters {
     /// Get mass for a mass code.
     pub fn get_mass(&self, code: usize) -> Option<f64> {
-        self.mass_types.iter().find(|m| m.code == code).map(|m| m.mass)
+        self.mass_types
+            .iter()
+            .find(|m| m.code == code)
+            .map(|m| m.mass)
     }
 
     /// Get bond stretch parameters by type code (1-based).
@@ -154,8 +157,7 @@ impl ForceFieldParameters {
     pub fn compute_c6(&self, iac_i: usize, iac_j: usize) -> f64 {
         // Check mixed pairs first
         for mp in &self.mixed_lj {
-            if (mp.iac_i == iac_i && mp.iac_j == iac_j)
-                || (mp.iac_i == iac_j && mp.iac_j == iac_i)
+            if (mp.iac_i == iac_i && mp.iac_j == iac_j) || (mp.iac_i == iac_j && mp.iac_j == iac_i)
             {
                 return mp.c6;
             }
@@ -172,8 +174,7 @@ impl ForceFieldParameters {
     pub fn compute_c12(&self, iac_i: usize, iac_j: usize) -> f64 {
         // Check mixed pairs first
         for mp in &self.mixed_lj {
-            if (mp.iac_i == iac_i && mp.iac_j == iac_j)
-                || (mp.iac_i == iac_j && mp.iac_j == iac_i)
+            if (mp.iac_i == iac_i && mp.iac_j == iac_j) || (mp.iac_i == iac_j && mp.iac_j == iac_i)
             {
                 return mp.c12;
             }
@@ -208,7 +209,7 @@ impl ForceFieldParameters {
                     _ => b.sqrt_c12_1,
                 };
                 c12_i * c12_j
-            }
+            },
             _ => 0.0,
         }
     }
@@ -216,8 +217,7 @@ impl ForceFieldParameters {
     /// Compute C6/C12 for 1-4 interactions.
     pub fn compute_c6_14(&self, iac_i: usize, iac_j: usize) -> f64 {
         for mp in &self.mixed_lj {
-            if (mp.iac_i == iac_i && mp.iac_j == iac_j)
-                || (mp.iac_i == iac_j && mp.iac_j == iac_i)
+            if (mp.iac_i == iac_i && mp.iac_j == iac_j) || (mp.iac_i == iac_j && mp.iac_j == iac_i)
             {
                 return mp.cs6;
             }
@@ -232,8 +232,7 @@ impl ForceFieldParameters {
 
     pub fn compute_c12_14(&self, iac_i: usize, iac_j: usize) -> f64 {
         for mp in &self.mixed_lj {
-            if (mp.iac_i == iac_i && mp.iac_j == iac_j)
-                || (mp.iac_i == iac_j && mp.iac_j == iac_i)
+            if (mp.iac_i == iac_i && mp.iac_j == iac_j) || (mp.iac_i == iac_j && mp.iac_j == iac_i)
             {
                 return mp.cs12;
             }
@@ -289,7 +288,7 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                     }
                     i += 1;
                 }
-            }
+            },
             "MASSATOMTYPECODE" => {
                 i += 1;
                 // Read NRMATY NMATY header
@@ -314,7 +313,7 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                         result.mass_types.push(MassAtomType { code, mass, name });
                     }
                 }
-            }
+            },
             "BONDSTRETCHTYPECODE" => {
                 i += 1;
                 let mut header_read = false;
@@ -342,7 +341,7 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                         });
                     }
                 }
-            }
+            },
             "BONDANGLEBENDTYPECODE" => {
                 i += 1;
                 let mut header_read = false;
@@ -370,7 +369,7 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                         });
                     }
                 }
-            }
+            },
             "IMPDIHEDRALTYPECODE" => {
                 i += 1;
                 let mut header_read = false;
@@ -394,7 +393,7 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                             .push(ImproperDihedralType { code, k, xi0 });
                     }
                 }
-            }
+            },
             "TORSDIHEDRALTYPECODE" => {
                 i += 1;
                 let mut header_read = false;
@@ -422,7 +421,7 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                         });
                     }
                 }
-            }
+            },
             "SINGLEATOMLJPAIR" => {
                 i += 1;
                 let mut num_types = 0usize;
@@ -522,7 +521,7 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                         });
                     }
                 }
-            }
+            },
             "MIXEDATOMLJPAIR" => {
                 i += 1;
                 while i < lines.len() && lines[i].trim() != "END" {
@@ -549,8 +548,8 @@ pub fn parse_ifp(content: &str) -> Result<ForceFieldParameters, IoError> {
                         });
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
         i += 1;
     }

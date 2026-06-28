@@ -4,11 +4,10 @@
 //!
 //! Estimates configurational entropy of solute
 
+use gromos_core::units::kB;
 use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
-
-const K_B: f64 = 0.00831446; // kJ/(mol·K)
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -101,7 +100,7 @@ fn main() {
     for &fluct in &fluctuations {
         if fluct > 1e-10 {
             // S = k_B * ln(fluct) + constant
-            let s_atom = K_B * (fluct * 2.0 * std::f64::consts::PI * std::f64::consts::E).ln();
+            let s_atom = kB * (fluct * 2.0 * std::f64::consts::PI * std::f64::consts::E).ln();
             total_entropy += s_atom;
         }
     }

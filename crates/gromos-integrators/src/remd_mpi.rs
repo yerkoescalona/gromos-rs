@@ -49,11 +49,12 @@ pub use mpi_impl::*;
 
 #[cfg(feature = "use-mpi")]
 mod mpi_impl {
-    use gromos_core::configuration::Configuration;
     use crate::integrator::Integrator;
     use crate::remd::{ExchangeScheme, ExchangeStatistics, ExchangeType};
     use crate::replica::{Replica, ReplicaId, ReplicaInfo};
+    use gromos_core::configuration::Configuration;
     use gromos_core::topology::Topology;
+    use gromos_core::units::kB;
     use mpi::traits::*;
     use rand::Rng;
 
@@ -419,8 +420,6 @@ mod mpi_impl {
             energy_i: f64,
             energy_j: f64,
         ) -> bool {
-            const KB: f64 = 0.008314462618; // kJ/(mol·K)
-
             // Get temperature and lambda for both replicas
             let temp_i = self.temperature_grid.get(rank_i).copied().unwrap_or(300.0);
             let temp_j = self.temperature_grid.get(rank_j).copied().unwrap_or(300.0);
@@ -430,15 +429,15 @@ mod mpi_impl {
             let prob = match self.exchange_type {
                 ExchangeType::Temperature => {
                     // Temperature exchange: different temps, same lambda
-                    let beta_i = 1.0 / (KB * temp_i);
-                    let beta_j = 1.0 / (KB * temp_j);
+                    let beta_i = 1.0 / (kB * temp_i);
+                    let beta_j = 1.0 / (kB * temp_j);
                     let delta_e = energy_i - energy_j;
                     let delta_beta = beta_i - beta_j;
                     (delta_beta * delta_e).exp()
                 },
                 ExchangeType::Lambda => {
                     // Lambda exchange: same temp, different lambdas
-                    let beta = 1.0 / (KB * temp_i); // Same temperature
+                    let beta = 1.0 / (kB * temp_i); // Same temperature
 
                     // Simplified: ΔH ≈ (λ_j - λ_i) * (E_i - E_j)
                     // In full implementation, need to evaluate energies at swapped lambdas
@@ -452,14 +451,14 @@ mod mpi_impl {
                     // 2D exchange: determine if this is T or λ exchange
                     if (temp_i - temp_j).abs() > 1e-6 {
                         // Temperature direction exchange
-                        let beta_i = 1.0 / (KB * temp_i);
-                        let beta_j = 1.0 / (KB * temp_j);
+                        let beta_i = 1.0 / (kB * temp_i);
+                        let beta_j = 1.0 / (kB * temp_j);
                         let delta_e = energy_i - energy_j;
                         let delta_beta = beta_i - beta_j;
                         (delta_beta * delta_e).exp()
                     } else {
                         // Lambda direction exchange
-                        let beta = 1.0 / (KB * temp_i);
+                        let beta = 1.0 / (kB * temp_i);
                         let delta_lambda = lambda_j - lambda_i;
                         let delta_e = energy_i - energy_j;
                         let delta_h = delta_lambda * delta_e;

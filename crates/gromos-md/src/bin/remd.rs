@@ -8,12 +8,11 @@
 use gromos::{
     algorithm::{constraints::ShakeParameters, thermostats::BerendsenThermostatParameters},
     configuration::{Box as SimBox, Configuration},
-    integrator::{Integrator, LeapFrog},
+    integrator::LeapFrog,
     io::topology::{build_topology, read_topology_file},
     math::Vec3,
     remd::{ExchangeScheme, ExchangeType, ReplicaController},
     replica::{Replica, ReplicaInfo},
-    topology::Topology,
 };
 use std::env;
 use std::process;
@@ -379,8 +378,7 @@ fn main() {
         1 => "info",
         _ => "debug",
     };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
-        .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter)).init();
 
     println!("=== GROMOS-RS Replica Exchange MD ===");
     println!("Topology: {}", args.topo_file);

@@ -8,6 +8,7 @@
 use gromos_core::configuration::Configuration;
 use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
+use gromos_core::units::kB;
 
 /// Berendsen thermostat parameters
 #[derive(Debug, Clone)]
@@ -59,9 +60,6 @@ impl Default for AndersenThermostatParameters {
     }
 }
 
-/// Boltzmann constant in kJ/(mol·K)
-const K_B: f64 = 0.008314462618;
-
 /// Apply Berendsen thermostat (weak coupling)
 ///
 /// The Berendsen thermostat (Berendsen et al., 1984) rescales velocities
@@ -100,7 +98,7 @@ pub fn berendsen_thermostat(
     // T = 2 * E_kin / (N_dof * k_B)
     // where N_dof = 3N - N_constraints (approximately 3N for large systems)
     let n_dof = (3 * num_atoms) as f64;
-    let current_temperature = 2.0 * kinetic_energy / (n_dof * K_B);
+    let current_temperature = 2.0 * kinetic_energy / (n_dof * kB);
 
     if current_temperature < 1e-6 {
         return; // Avoid division by zero
@@ -150,7 +148,7 @@ pub fn nose_hoover_thermostat(
     }
 
     let n_dof = (3 * num_atoms) as f64;
-    let current_temperature = 2.0 * kinetic_energy / (n_dof * K_B);
+    let current_temperature = 2.0 * kinetic_energy / (n_dof * kB);
 
     if current_temperature < 1e-6 {
         return;
@@ -204,13 +202,13 @@ pub fn andersen_thermostat(
         // A full implementation would use proper random number generation
 
         // For now, use a simple pseudo-random check based on time and atom index
-        let pseudo_random = ((i as f64 * 0.123456) % 1.0);
+        let pseudo_random = (i as f64 * 0.123456) % 1.0;
 
         if pseudo_random < collision_prob {
             // Draw new velocity from Maxwell-Boltzmann distribution
             // v ~ N(0, sqrt(k_B * T / m))
             let m = topo.mass[i];
-            let sigma = (K_B * params.target_temperature / m).sqrt();
+            let sigma = (kB * params.target_temperature / m).sqrt();
 
             // Simple Box-Muller transform for Gaussian random numbers
             // (In production, use a proper RNG library)
@@ -221,11 +219,7 @@ pub fn andersen_thermostat(
             let z1 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).sin();
             let z2 = (-2.0 * u2.ln()).sqrt() * (2.0 * std::f64::consts::PI * u1).cos();
 
-            conf.current_mut().vel[i] = Vec3::new(
-                (sigma * z0),
-                (sigma * z1),
-                (sigma * z2),
-            );
+            conf.current_mut().vel[i] = Vec3::new(sigma * z0, sigma * z1, sigma * z2);
         }
     }
 }

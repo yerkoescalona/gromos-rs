@@ -1,4 +1,5 @@
 use crate::constraints::{shake, ShakeParameters};
+use crate::integrator::Integrator;
 use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
 /// Gaussian Accelerated Molecular Dynamics (GaMD)
 ///
@@ -57,16 +58,15 @@ use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
 /// - Miao et al., J. Chem. Theory Comput. 2015, 11, 3584-3595
 /// - Pang et al., J. Chem. Theory Comput. 2017, 13, 9-19
 use gromos_core::configuration::Configuration;
-use crate::integrator::Integrator;
-use gromos_forces::bonded::calculate_bonded_forces;
-use gromos_forces::nonbonded::{
-    lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage,
-    LJParamMatrix, LJParameters as NBLJParams,
-};
 use gromos_core::math::Rectangular;
 use gromos_core::math::Vec3;
 use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
 use gromos_core::topology::Topology;
+use gromos_forces::bonded::calculate_bonded_forces;
+use gromos_forces::nonbonded::{
+    lj_crf_innerloop, lj_crf_innerloop_parallel, CRFParameters, ForceStorage, LJParamMatrix,
+    LJParameters as NBLJParams,
+};
 
 /// GaMD search mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -399,8 +399,7 @@ impl GamdParameters {
 
                     // Apply boost: F_boost = F_orig * k(E - V)
                     for i in 0..n_atoms {
-                        configuration.current_mut().force[i] +=
-                            dihedral_forces[i] * prefactor;
+                        configuration.current_mut().force[i] += dihedral_forces[i] * prefactor;
                     }
                 }
             },
@@ -429,8 +428,7 @@ impl GamdParameters {
                     self.boost_potential += 0.5 * prefactor_tot * v_e_tot;
 
                     for i in 0..n_atoms {
-                        configuration.current_mut().force[i] +=
-                            total_forces[i] * prefactor_tot;
+                        configuration.current_mut().force[i] += total_forces[i] * prefactor_tot;
                     }
                 }
 
@@ -441,8 +439,7 @@ impl GamdParameters {
                     self.boost_potential += 0.5 * prefactor_dih * v_e_dih;
 
                     for i in 0..n_atoms {
-                        configuration.current_mut().force[i] +=
-                            dihedral_forces[i] * prefactor_dih;
+                        configuration.current_mut().force[i] += dihedral_forces[i] * prefactor_dih;
                     }
                 }
             },
@@ -599,7 +596,7 @@ impl GamdRunner {
             .collect();
 
         // Convert charge and iac
-        
+
         let iac_u32: Vec<u32> = topology.iac.iter().map(|&i| i as u32).collect();
 
         let nonbonded_storage = if self.parallel_forces {

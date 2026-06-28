@@ -3,12 +3,10 @@
 //! Calculates the radial distribution function g(r) between atom groups.
 //! Essential for analyzing liquid structure, solvation shells, coordination.
 
+use gromos_core::selection::AtomSelection;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
-use gromos_core::math::Vec3;
-use gromos_core::selection::AtomSelection;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -16,9 +14,12 @@ use std::process;
 
 fn new_progress_bar(total: usize) -> ProgressBar {
     let pb = ProgressBar::new(total as u64);
-    pb.set_style(ProgressStyle::with_template(
-        "  [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta})"
-    ).unwrap());
+    pb.set_style(
+        ProgressStyle::with_template(
+            "  [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta})",
+        )
+        .unwrap(),
+    );
     pb
 }
 
@@ -359,9 +360,12 @@ fn main() {
     };
 
     // Set up logging
-    let filter = if rdf_args.verbose > 0 { "debug" } else { "info" };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter))
-        .init();
+    let filter = if rdf_args.verbose > 0 {
+        "debug"
+    } else {
+        "info"
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter)).init();
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║              RDF - Radial Distribution Function             ║");

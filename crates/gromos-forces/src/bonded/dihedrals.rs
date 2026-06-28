@@ -31,9 +31,9 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
         let r_kj = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.j];
         let r_kl = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.l];
 
-        // Cross products to get plane normals
-        let r_mj = r_ij.cross(r_kj); // normal to plane i-j-k
-        let r_nk = r_kj.cross(r_kl); // normal to plane j-k-l
+        // Cross products kept for reference (Chebyshev path uses projection instead)
+        let _r_mj = r_ij.cross(r_kj); // normal to plane i-j-k
+        let _r_nk = r_kj.cross(r_kl); // normal to plane j-k-l
 
         let d_kj2 = r_kj.dot(r_kj);
 
@@ -115,9 +115,8 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
         let fl_v = [f_l.x, f_l.y, f_l.z];
         for a in 0..3 {
             for bb in 0..3 {
-                result.virial[a][bb] += rij_v[a] * fi_v[bb]
-                    + rkj_v[a] * fk_v[bb]
-                    + rlj_v[a] * fl_v[bb];
+                result.virial[a][bb] +=
+                    rij_v[a] * fi_v[bb] + rkj_v[a] * fk_v[bb] + rlj_v[a] * fl_v[bb];
             }
         }
     }
@@ -228,9 +227,8 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         let fl_v = [f_l.x, f_l.y, f_l.z];
         for a in 0..3 {
             for bb in 0..3 {
-                result.virial[a][bb] += rij_v[a] * fi_v[bb]
-                    + rkj_v[a] * fk_v[bb]
-                    + rlj_v[a] * fl_v[bb];
+                result.virial[a][bb] +=
+                    rij_v[a] * fi_v[bb] + rkj_v[a] * fk_v[bb] + rlj_v[a] * fl_v[bb];
             }
         }
     }

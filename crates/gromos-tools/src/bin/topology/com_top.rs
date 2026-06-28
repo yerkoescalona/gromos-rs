@@ -8,9 +8,13 @@
 //! Parameters and solvent are taken from the topology indicated by @param/@solv.
 
 use clap::Parser;
+use gromos_core::topology::{
+    AngleParameters, BondParameters, DihedralParameters, ImproperDihedralParameters, LJParameters,
+};
 use gromos_io::gromos_args;
-use gromos_io::topology::{read_topology_file, ParsedTopology, ParsedSolventAtom, ParsedSolventConstraint};
-use gromos_core::topology::{BondParameters, AngleParameters, DihedralParameters, ImproperDihedralParameters, LJParameters};
+use gromos_io::topology::{
+    read_topology_file, ParsedSolventAtom, ParsedSolventConstraint, ParsedTopology,
+};
 use std::collections::HashMap;
 use std::process;
 /// Combine multiple GROMOS topology files.
@@ -79,10 +83,14 @@ fn main() {
                 Err(e) => {
                     eprintln!("Error reading '{}': {:?}", filename, e);
                     process::exit(1);
-                }
+                },
             };
-            eprintln!("  Read '{}': {} atoms, {} residues",
-                filename, parsed.n_atoms, parsed.residue_names.len());
+            eprintln!(
+                "  Read '{}': {} atoms, {} residues",
+                filename,
+                parsed.n_atoms,
+                parsed.residue_names.len()
+            );
             file_cache.insert(filename.clone(), parsed);
         }
     }
@@ -195,12 +203,16 @@ fn combine_topologies(
 
         for _ in 0..*repeat {
             // Merge residue names
-            combined.residue_names.extend(topo.residue_names.iter().cloned());
+            combined
+                .residue_names
+                .extend(topo.residue_names.iter().cloned());
 
             // Merge atoms
             for i in 0..topo.n_atoms {
                 combined.atom_names.push(topo.atom_names[i].clone());
-                combined.residue_numbers.push(topo.residue_numbers[i] + residue_offset);
+                combined
+                    .residue_numbers
+                    .push(topo.residue_numbers[i] + residue_offset);
                 combined.masses.push(topo.masses[i]);
                 combined.charges.push(topo.charges[i]);
                 combined.iac.push(topo.iac[i]);
@@ -208,11 +220,15 @@ fn combine_topologies(
 
                 // Renumber exclusions
                 let excl = topo.exclusions.get(i).cloned().unwrap_or_default();
-                combined.exclusions.push(excl.iter().map(|&e| e + atom_offset).collect());
+                combined
+                    .exclusions
+                    .push(excl.iter().map(|&e| e + atom_offset).collect());
 
                 // Renumber 1-4 pairs
                 let pairs = topo.one_four_pairs.get(i).cloned().unwrap_or_default();
-                combined.one_four_pairs.push(pairs.iter().map(|&p| p + atom_offset).collect());
+                combined
+                    .one_four_pairs
+                    .push(pairs.iter().map(|&p| p + atom_offset).collect());
             }
 
             // Merge bonds with renumbered atoms
@@ -222,22 +238,30 @@ fn combine_topologies(
 
             // Merge angles
             for &(i, j, k, t) in &topo.angles {
-                combined.angles.push((i + atom_offset, j + atom_offset, k + atom_offset, t));
+                combined
+                    .angles
+                    .push((i + atom_offset, j + atom_offset, k + atom_offset, t));
             }
 
             // Merge proper dihedrals
             for &(i, j, k, l, t) in &topo.proper_dihedrals {
                 combined.proper_dihedrals.push((
-                    i + atom_offset, j + atom_offset,
-                    k + atom_offset, l + atom_offset, t,
+                    i + atom_offset,
+                    j + atom_offset,
+                    k + atom_offset,
+                    l + atom_offset,
+                    t,
                 ));
             }
 
             // Merge improper dihedrals
             for &(i, j, k, l, t) in &topo.improper_dihedrals {
                 combined.improper_dihedrals.push((
-                    i + atom_offset, j + atom_offset,
-                    k + atom_offset, l + atom_offset, t,
+                    i + atom_offset,
+                    j + atom_offset,
+                    k + atom_offset,
+                    l + atom_offset,
+                    t,
                 ));
             }
 
@@ -259,8 +283,12 @@ fn combine_topologies(
         }
     }
 
-    eprintln!("Combined topology: {} atoms, {} residues, {} molecules",
-        combined.masses.len(), combined.residue_names.len(), combined.solute_molecules.len());
+    eprintln!(
+        "Combined topology: {} atoms, {} residues, {} molecules",
+        combined.masses.len(),
+        combined.residue_names.len(),
+        combined.solute_molecules.len()
+    );
 
     combined
 }
@@ -276,13 +304,13 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     // PHYSICALCONSTANTS
     println!("PHYSICALCONSTANTS");
     println!("# FPEPSI");
-    println!("{:15.4}", 138.9354);
+    println!("{:15.7}", gromos_core::units::four_pi_eps_i);
     println!("# HBAR");
-    println!("{:15.7}", 0.0635078);
+    println!("{:15.7}", gromos_core::units::hBar);
     println!("# SPDL");
-    println!("{:15.3}", 299792.458);
+    println!("{:15.3}", gromos_core::units::spd_l);
     println!("# BOLTZ");
-    println!("{:15.8}", 0.00831441);
+    println!("{:15.8}", gromos_core::units::kB);
     println!("END");
 
     // TOPVERSION
@@ -382,12 +410,17 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     println!("{:5}", topo.bond_parameters.len());
     println!("#  CB     HB     B0");
     for bp in &topo.bond_parameters {
-        println!("{:15.7e}{:15.7e}{:13.7e}", bp.k_quartic, bp.k_harmonic, bp.r0);
+        println!(
+            "{:15.7e}{:15.7e}{:13.7e}",
+            bp.k_quartic, bp.k_harmonic, bp.r0
+        );
     }
     println!("END");
 
     // Separate bonds into BONDH/BOND by H involvement
-    let (bondh, bond): (Vec<_>, Vec<_>) = topo.bonds.iter()
+    let (bondh, bond): (Vec<_>, Vec<_>) = topo
+        .bonds
+        .iter()
         .partition(|&&(i, j, _)| topo.masses[i] < 2.0 || topo.masses[j] < 2.0);
 
     println!("BONDH");
@@ -414,13 +447,17 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     println!("{:5}", topo.angle_parameters.len());
     println!("#   CT     CHT     T0");
     for ap in &topo.angle_parameters {
-        println!("{:15.7e}{:15.7e}{:13.7e}", ap.k_cosine, ap.k_harmonic, ap.theta0);
+        println!(
+            "{:15.7e}{:15.7e}{:13.7e}",
+            ap.k_cosine, ap.k_harmonic, ap.theta0
+        );
     }
     println!("END");
 
     // Separate angles
-    let (angleh, angle): (Vec<_>, Vec<_>) = topo.angles.iter()
-        .partition(|&&(i, j, k, _)| topo.masses[i] < 2.0 || topo.masses[j] < 2.0 || topo.masses[k] < 2.0);
+    let (angleh, angle): (Vec<_>, Vec<_>) = topo.angles.iter().partition(|&&(i, j, k, _)| {
+        topo.masses[i] < 2.0 || topo.masses[j] < 2.0 || topo.masses[k] < 2.0
+    });
 
     println!("BONDANGLEH");
     println!("# NTHEH: number of angles involving H atoms");
@@ -451,10 +488,15 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     println!("END");
 
     // Separate impropers
-    let (impdihedralh, impdihedral): (Vec<_>, Vec<_>) = topo.improper_dihedrals.iter()
-        .partition(|&&(i, j, k, l, _)| {
-            topo.masses[i] < 2.0 || topo.masses[j] < 2.0 || topo.masses[k] < 2.0 || topo.masses[l] < 2.0
-        });
+    let (impdihedralh, impdihedral): (Vec<_>, Vec<_>) =
+        topo.improper_dihedrals
+            .iter()
+            .partition(|&&(i, j, k, l, _)| {
+                topo.masses[i] < 2.0
+                    || topo.masses[j] < 2.0
+                    || topo.masses[k] < 2.0
+                    || topo.masses[l] < 2.0
+            });
 
     println!("IMPDIHEDRALH");
     println!("# NQHIH: number of improper dihedrals involving H");
@@ -485,9 +527,12 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     println!("END");
 
     // Separate dihedrals
-    let (dihedralh, dihedral): (Vec<_>, Vec<_>) = topo.proper_dihedrals.iter()
-        .partition(|&&(i, j, k, l, _)| {
-            topo.masses[i] < 2.0 || topo.masses[j] < 2.0 || topo.masses[k] < 2.0 || topo.masses[l] < 2.0
+    let (dihedralh, dihedral): (Vec<_>, Vec<_>) =
+        topo.proper_dihedrals.iter().partition(|&&(i, j, k, l, _)| {
+            topo.masses[i] < 2.0
+                || topo.masses[j] < 2.0
+                || topo.masses[k] < 2.0
+                || topo.masses[l] < 2.0
         });
 
     println!("DIHEDRALH");
@@ -518,11 +563,15 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
         println!("#  IAC  JAC    C12          C6           CS12         CS6");
         for i in 1..=n_types {
             for j in i..=n_types {
-                if let Some(lj) = topo.lj_parameters.get(&(i - 1, j - 1))
+                if let Some(lj) = topo
+                    .lj_parameters
+                    .get(&(i - 1, j - 1))
                     .or_else(|| topo.lj_parameters.get(&(j - 1, i - 1)))
                 {
-                    println!("{:5}{:5}{:15.7e}{:15.7e}{:15.7e}{:15.7e}",
-                        i, j, lj.c12, lj.c6, lj.cs12, lj.cs6);
+                    println!(
+                        "{:5}{:5}{:15.7e}{:15.7e}{:15.7e}{:15.7e}",
+                        i, j, lj.c12, lj.c6, lj.cs12, lj.cs6
+                    );
                 }
             }
         }
@@ -566,8 +615,14 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
         println!("{:5}", topo.solvent_atoms.len());
         println!("#     I  ANMS   IACS  MASS     CGS");
         for (idx, sa) in topo.solvent_atoms.iter().enumerate() {
-            println!("{:5} {:>5}{:5}{:10.5}{:12.5}",
-                idx + 1, sa.name, sa.iac, sa.mass, sa.charge);
+            println!(
+                "{:5} {:>5}{:5}{:10.5}{:12.5}",
+                idx + 1,
+                sa.name,
+                sa.iac,
+                sa.mass,
+                sa.charge
+            );
         }
         println!("END");
     }

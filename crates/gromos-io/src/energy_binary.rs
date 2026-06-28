@@ -50,6 +50,8 @@ const MAGIC: &[u8; 8] = b"GREBIN01";
 pub struct BinaryEnergyWriter {
     writer: BufWriter<File>,
     frame_count: usize,
+    // TODO: use to guard against double-writing the header
+    #[allow(dead_code)]
     header_written: bool,
 }
 

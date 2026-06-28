@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use gromos_core::math::{BoundaryCondition, Rectangular, Vec3, Vacuum};
+use gromos_core::math::{BoundaryCondition, Rectangular, Vacuum, Vec3};
 
 fn bench_nearest_image(c: &mut Criterion) {
     let mut group = c.benchmark_group("nearest_image");
@@ -35,21 +35,13 @@ fn bench_vec3_ops(c: &mut Criterion) {
     let a = Vec3::new(1.0, 2.0, 3.0);
     let b = Vec3::new(4.0, 5.0, 6.0);
 
-    group.bench_function("dot", |b_| {
-        b_.iter(|| black_box(a).dot(black_box(b)))
-    });
+    group.bench_function("dot", |b_| b_.iter(|| black_box(a).dot(black_box(b))));
 
-    group.bench_function("cross", |b_| {
-        b_.iter(|| black_box(a).cross(black_box(b)))
-    });
+    group.bench_function("cross", |b_| b_.iter(|| black_box(a).cross(black_box(b))));
 
-    group.bench_function("length", |b_| {
-        b_.iter(|| black_box(a).length())
-    });
+    group.bench_function("length", |b_| b_.iter(|| black_box(a).length()));
 
-    group.bench_function("normalize", |b_| {
-        b_.iter(|| black_box(a).normalize())
-    });
+    group.bench_function("normalize", |b_| b_.iter(|| black_box(a).normalize()));
 
     group.finish();
 }
@@ -62,7 +54,10 @@ fn bench_nearest_image_scaling(c: &mut Criterion) {
         let pairs: Vec<(Vec3, Vec3)> = (0..n)
             .map(|i| {
                 let t = i * 0.1;
-                (Vec3::new(t.sin(), t.cos(), t * 0.01), Vec3::new(t.cos(), t.sin(), t * 0.02))
+                (
+                    Vec3::new(t.sin(), t.cos(), t * 0.01),
+                    Vec3::new(t.cos(), t.sin(), t * 0.02),
+                )
             })
             .collect();
 

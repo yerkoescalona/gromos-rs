@@ -40,14 +40,21 @@ pub struct FreeEnergyFrame {
 
 impl FreeEnergyFrame {
     pub fn new(time: f64, lambda: f64, dhdl_total: f64) -> Self {
-        Self { time, lambda, dhdl_total, ..Default::default() }
+        Self {
+            time,
+            lambda,
+            dhdl_total,
+            ..Default::default()
+        }
     }
 }
 
 /// Read all FREEENERGY03 frames from a `.trg` file.
 ///
 /// Tolerates extra comment lines and blank lines.  Returns frames in order.
-pub fn read_free_energy_trajectory<P: AsRef<Path>>(path: P) -> Result<Vec<FreeEnergyFrame>, IoError> {
+pub fn read_free_energy_trajectory<P: AsRef<Path>>(
+    path: P,
+) -> Result<Vec<FreeEnergyFrame>, IoError> {
     let file = File::open(path.as_ref())
         .map_err(|e| IoError::FileNotFound(format!("{}: {e}", path.as_ref().display())))?;
     let reader = BufReader::new(file);
@@ -67,22 +74,23 @@ pub fn read_free_energy_trajectory<P: AsRef<Path>>(path: P) -> Result<Vec<FreeEn
             continue;
         }
         if in_block && !t.starts_with('#') && !t.is_empty() {
-            let vals: Vec<f64> = t.split_whitespace()
+            let vals: Vec<f64> = t
+                .split_whitespace()
                 .filter_map(|s| s.parse().ok())
                 .collect();
             // columns: time lambda dhdl_bond dhdl_angle dhdl_improper dhdl_dihedral dhdl_lj dhdl_crf dhdl_total
             if vals.len() >= 9 {
                 frames.push(FreeEnergyFrame {
-                    time:          vals[0],
-                    lambda:        vals[1],
-                    dhdl_bond:     vals[2],
-                    dhdl_angle:    vals[3],
+                    time: vals[0],
+                    lambda: vals[1],
+                    dhdl_bond: vals[2],
+                    dhdl_angle: vals[3],
                     dhdl_improper: vals[4],
                     dhdl_dihedral: vals[5],
-                    dhdl_lj:       vals[6],
-                    dhdl_crf:      vals[7],
-                    dhdl_special:  0.0,
-                    dhdl_total:    vals[8],
+                    dhdl_lj: vals[6],
+                    dhdl_crf: vals[7],
+                    dhdl_special: 0.0,
+                    dhdl_total: vals[8],
                 });
             }
         }

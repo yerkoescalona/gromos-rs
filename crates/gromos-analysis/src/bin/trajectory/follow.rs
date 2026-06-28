@@ -4,9 +4,9 @@
 //!
 //! Tracks molecules continuously across PBC jumps
 
+use gromos_core::math::Vec3;
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;
-use gromos_core::math::Vec3;
 use std::env;
 use std::process;
 
@@ -58,7 +58,7 @@ fn main() {
                 if !first_frame {
                     // Detect and correct PBC jumps
                     for i in 0..natoms.min(frame.positions.len()) {
-                        let mut pos = frame.positions[i];
+                        let pos = frame.positions[i];
                         let delta = pos - prev_positions[i];
 
                         // Check if jump occurred

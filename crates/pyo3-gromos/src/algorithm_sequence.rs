@@ -46,19 +46,18 @@
 use pyo3::prelude::*;
 
 use gromos_core::algorithm::AlgorithmSequence;
-use gromos_core::configuration::{Box as SimBox, Configuration};
-use gromos_core::math::{Periodicity, Rectangular, Vacuum, Vec3};
 use gromos_core::configuration::BoxType;
+use gromos_core::configuration::Configuration;
+use gromos_core::math::{Periodicity, Rectangular, Vacuum, Vec3};
 use gromos_core::pairlist::{PairlistAlgorithm, PairlistContainer};
 use gromos_core::topology::Topology;
 use gromos_forces::nonbonded::CRFParameters;
 use gromos_integrators::algorithms::{
-    self, BerendsenBarostat as RustBarostat, BerendsenBarostatParams,
+    BerendsenBarostat as RustBarostat, BerendsenBarostatParams,
     BerendsenThermostat as RustThermostat, EnergyCalculation as RustEnergy,
     Forcefield as RustForcefield, LeapFrogPosition, LeapFrogVelocity,
     PressureCalculation as RustPressure, RemoveCOMMotion as RustRemoveCOM,
-    ShakeAlgorithm as RustShake, TemperatureCalculation as RustTemperature,
-    VirialType,
+    ShakeAlgorithm as RustShake, TemperatureCalculation as RustTemperature, VirialType,
 };
 use gromos_integrators::constraints::{NtcMode, ShakeParameters};
 use gromos_io::imd::ImdParameters;
@@ -512,7 +511,10 @@ impl PyRemoveCOMMotion {
     }
 
     fn __repr__(&self) -> String {
-        format!("RemoveCOMMotion(initial={}, nscm={})", self.initial, self.nscm)
+        format!(
+            "RemoveCOMMotion(initial={}, nscm={})",
+            self.initial, self.nscm
+        )
     }
 }
 
@@ -770,18 +772,16 @@ impl PyAlgorithmSequence {
 
         // COM removal
         if imd.nticom >= 1 || imd.nscm != 0 {
-            seq.algorithms.push(AlgorithmDescriptor::RemoveCOMMotion(
-                PyRemoveCOMMotion {
+            seq.algorithms
+                .push(AlgorithmDescriptor::RemoveCOMMotion(PyRemoveCOMMotion {
                     initial: imd.nticom >= 1,
                     nscm: imd.nscm,
-                },
-            ));
+                }));
         }
 
         // Forcefield
-        seq.algorithms.push(AlgorithmDescriptor::Forcefield(
-            forcefield_from_imd(imd),
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::Forcefield(forcefield_from_imd(imd)));
 
         // Leap-Frog integrator
         seq.algorithms.push(AlgorithmDescriptor::LeapFrogIntegrator(
@@ -790,15 +790,15 @@ impl PyAlgorithmSequence {
 
         // SHAKE if needed
         if imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0) {
-            seq.algorithms.push(AlgorithmDescriptor::ShakeConstraints(
-                shake_from_imd(imd),
-            ));
+            seq.algorithms
+                .push(AlgorithmDescriptor::ShakeConstraints(shake_from_imd(imd)));
         }
 
         // Temperature + Energy calculation
-        seq.algorithms.push(AlgorithmDescriptor::TemperatureCalculation(
-            PyTemperatureCalculation {},
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::TemperatureCalculation(
+                PyTemperatureCalculation {},
+            ));
         seq.algorithms.push(AlgorithmDescriptor::EnergyCalculation(
             PyEnergyCalculation {},
         ));
@@ -821,23 +821,20 @@ impl PyAlgorithmSequence {
 
         // COM removal
         if imd.nticom >= 1 || imd.nscm != 0 {
-            seq.algorithms.push(AlgorithmDescriptor::RemoveCOMMotion(
-                PyRemoveCOMMotion {
+            seq.algorithms
+                .push(AlgorithmDescriptor::RemoveCOMMotion(PyRemoveCOMMotion {
                     initial: imd.nticom >= 1,
                     nscm: imd.nscm,
-                },
-            ));
+                }));
         }
 
         // Forcefield
-        seq.algorithms.push(AlgorithmDescriptor::Forcefield(
-            forcefield_from_imd(imd),
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::Forcefield(forcefield_from_imd(imd)));
 
         // Leap-Frog velocity
-        seq.algorithms.push(AlgorithmDescriptor::LeapFrogVelocity(
-            PyLeapFrogVelocity {},
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::LeapFrogVelocity(PyLeapFrogVelocity {}));
 
         // Berendsen thermostat (between velocity and position, GROMOS convention)
         let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
@@ -850,26 +847,26 @@ impl PyAlgorithmSequence {
         } else {
             0.1
         };
-        seq.algorithms.push(AlgorithmDescriptor::BerendsenThermostat(
-            PyBerendsenThermostat { temperature, tau },
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::BerendsenThermostat(
+                PyBerendsenThermostat { temperature, tau },
+            ));
 
         // Leap-Frog position
-        seq.algorithms.push(AlgorithmDescriptor::LeapFrogPosition(
-            PyLeapFrogPosition {},
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::LeapFrogPosition(PyLeapFrogPosition {}));
 
         // SHAKE if needed
         if imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0) {
-            seq.algorithms.push(AlgorithmDescriptor::ShakeConstraints(
-                shake_from_imd(imd),
-            ));
+            seq.algorithms
+                .push(AlgorithmDescriptor::ShakeConstraints(shake_from_imd(imd)));
         }
 
         // Temperature + Energy
-        seq.algorithms.push(AlgorithmDescriptor::TemperatureCalculation(
-            PyTemperatureCalculation {},
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::TemperatureCalculation(
+                PyTemperatureCalculation {},
+            ));
         seq.algorithms.push(AlgorithmDescriptor::EnergyCalculation(
             PyEnergyCalculation {},
         ));
@@ -894,12 +891,11 @@ impl PyAlgorithmSequence {
 
         // COM removal
         if imd.nticom >= 1 || imd.nscm != 0 {
-            seq.algorithms.push(AlgorithmDescriptor::RemoveCOMMotion(
-                PyRemoveCOMMotion {
+            seq.algorithms
+                .push(AlgorithmDescriptor::RemoveCOMMotion(PyRemoveCOMMotion {
                     initial: imd.nticom >= 1,
                     nscm: imd.nscm,
-                },
-            ));
+                }));
         }
 
         // Forcefield with virial
@@ -917,9 +913,8 @@ impl PyAlgorithmSequence {
         seq.algorithms.push(AlgorithmDescriptor::Forcefield(ff));
 
         // Leap-Frog velocity
-        seq.algorithms.push(AlgorithmDescriptor::LeapFrogVelocity(
-            PyLeapFrogVelocity {},
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::LeapFrogVelocity(PyLeapFrogVelocity {}));
 
         // Berendsen thermostat (between velocity and position)
         let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
@@ -932,33 +927,34 @@ impl PyAlgorithmSequence {
         } else {
             0.1
         };
-        seq.algorithms.push(AlgorithmDescriptor::BerendsenThermostat(
-            PyBerendsenThermostat { temperature, tau },
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::BerendsenThermostat(
+                PyBerendsenThermostat { temperature, tau },
+            ));
 
         // Leap-Frog position
-        seq.algorithms.push(AlgorithmDescriptor::LeapFrogPosition(
-            PyLeapFrogPosition {},
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::LeapFrogPosition(PyLeapFrogPosition {}));
 
         // SHAKE if needed
         if imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0) {
-            seq.algorithms.push(AlgorithmDescriptor::ShakeConstraints(
-                shake_from_imd(imd),
-            ));
+            seq.algorithms
+                .push(AlgorithmDescriptor::ShakeConstraints(shake_from_imd(imd)));
         }
 
         // Temperature + Pressure + Barostat + Energy
-        seq.algorithms.push(AlgorithmDescriptor::TemperatureCalculation(
-            PyTemperatureCalculation {},
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::TemperatureCalculation(
+                PyTemperatureCalculation {},
+            ));
 
         let pp = imd.pressure_parameters.as_ref();
-        seq.algorithms.push(AlgorithmDescriptor::PressureCalculation(
-            PyPressureCalculation {
-                virial: virial_str.to_string(),
-            },
-        ));
+        seq.algorithms
+            .push(AlgorithmDescriptor::PressureCalculation(
+                PyPressureCalculation {
+                    virial: virial_str.to_string(),
+                },
+            ));
         seq.algorithms.push(AlgorithmDescriptor::BerendsenBarostat(
             PyBerendsenBarostat {
                 pressure: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
@@ -1009,7 +1005,10 @@ impl PyAlgorithmSequence {
 // Private helpers
 impl PyAlgorithmSequence {
     fn algorithm_names(&self) -> Vec<String> {
-        self.algorithms.iter().map(|a| a.name().to_string()).collect()
+        self.algorithms
+            .iter()
+            .map(|a| a.name().to_string())
+            .collect()
     }
 }
 
@@ -1036,7 +1035,7 @@ pub(crate) fn resolve_algorithm_sequence(
             AlgorithmDescriptor::RemoveCOMMotion(d) => {
                 let nticom = if d.initial { 1 } else { 0 };
                 md_sequence.push(Box::new(RustRemoveCOM::new(nticom, d.nscm)));
-            }
+            },
 
             AlgorithmDescriptor::Forcefield(d) => {
                 let cutoff = d.cutoff.unwrap_or(imd.rcutl);
@@ -1071,7 +1070,11 @@ pub(crate) fn resolve_algorithm_sequence(
                 pairlist_algorithm.update(topo, conf, &mut pairlist, &periodicity);
 
                 let mut forcefield = RustForcefield::new(
-                    lj_params, crf_params, periodicity, pairlist, pairlist_algorithm,
+                    lj_params,
+                    crf_params,
+                    periodicity,
+                    pairlist,
+                    pairlist_algorithm,
                 );
                 forcefield.ntf_bond = d.ntf_bond.unwrap_or(imd.ntf[0] != 0);
                 forcefield.ntf_angle = d.ntf_angle.unwrap_or(imd.ntf[1] != 0);
@@ -1088,7 +1091,11 @@ pub(crate) fn resolve_algorithm_sequence(
                     Some("none") => VirialType::None,
                     _ => {
                         if imd.couple_pressure {
-                            match imd.pressure_parameters.as_ref().map(|p| p.virial).unwrap_or(0)
+                            match imd
+                                .pressure_parameters
+                                .as_ref()
+                                .map(|p| p.virial)
+                                .unwrap_or(0)
                             {
                                 2 => VirialType::Molecular,
                                 1 => VirialType::Atomic,
@@ -1097,25 +1104,25 @@ pub(crate) fn resolve_algorithm_sequence(
                         } else {
                             VirialType::None
                         }
-                    }
+                    },
                 };
                 forcefield.virial_type = virial_type;
 
                 md_sequence.push(Box::new(forcefield));
-            }
+            },
 
             AlgorithmDescriptor::LeapFrogIntegrator(_) => {
                 md_sequence.push(Box::new(LeapFrogVelocity::new()));
                 md_sequence.push(Box::new(LeapFrogPosition::new()));
-            }
+            },
 
             AlgorithmDescriptor::LeapFrogVelocity(_) => {
                 md_sequence.push(Box::new(LeapFrogVelocity::new()));
-            }
+            },
 
             AlgorithmDescriptor::LeapFrogPosition(_) => {
                 md_sequence.push(Box::new(LeapFrogPosition::new()));
-            }
+            },
 
             AlgorithmDescriptor::BerendsenThermostat(d) => {
                 let n_solute = topo.num_solute_atoms();
@@ -1135,8 +1142,7 @@ pub(crate) fn resolve_algorithm_sequence(
                 } else {
                     0
                 };
-                let total_dof =
-                    (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64;
+                let total_dof = (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64;
 
                 md_sequence.push(Box::new(RustThermostat::new_single_bath(
                     d.temperature,
@@ -1144,7 +1150,7 @@ pub(crate) fn resolve_algorithm_sequence(
                     total_dof,
                     n_atoms,
                 )));
-            }
+            },
 
             AlgorithmDescriptor::ShakeConstraints(d) => {
                 let ntc_mode = match d.mode.as_str() {
@@ -1164,11 +1170,11 @@ pub(crate) fn resolve_algorithm_sequence(
                     shake_alg.shake_initial_velocities = true;
                 }
                 md_sequence.push(Box::new(shake_alg));
-            }
+            },
 
             AlgorithmDescriptor::TemperatureCalculation(_) => {
                 md_sequence.push(Box::new(RustTemperature::new()));
-            }
+            },
 
             AlgorithmDescriptor::PressureCalculation(d) => {
                 let virial_type = match d.virial.as_str() {
@@ -1177,7 +1183,7 @@ pub(crate) fn resolve_algorithm_sequence(
                     _ => VirialType::None,
                 };
                 md_sequence.push(Box::new(RustPressure::new(virial_type)));
-            }
+            },
 
             AlgorithmDescriptor::BerendsenBarostat(d) => {
                 md_sequence.push(Box::new(RustBarostat::new(BerendsenBarostatParams {
@@ -1185,11 +1191,11 @@ pub(crate) fn resolve_algorithm_sequence(
                     compressibility: d.compressibility,
                     tau: d.tau,
                 })));
-            }
+            },
 
             AlgorithmDescriptor::EnergyCalculation(_) => {
                 md_sequence.push(Box::new(RustEnergy::new()));
-            }
+            },
         }
     }
 

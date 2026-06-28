@@ -40,7 +40,9 @@ use crate::math::Vec3;
 /// In Phase 1 this is set at `solvate()` time; Phase 2 adds `promote()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
+    /// Molecule is part of the solute (non-solvent) component.
     Solute,
+    /// Molecule is a solvent molecule.
     Solvent,
 }
 
@@ -51,14 +53,23 @@ pub enum Role {
 /// during the remaining migration.
 #[derive(Debug, Clone, Default)]
 pub struct MolTypeAtom {
+    /// Atom name (e.g. `"CA"`, `"OW"`).
     pub name: String,
+    /// 1-based residue number within the molecule type.
     pub residue_nr: usize,
+    /// Residue name (e.g. `"ALA"`, `"SOL"`).
     pub residue_name: String,
+    /// Integer atom code (0-based atom type index into the LJ matrix).
     pub iac: usize,
+    /// Atomic mass (u).
     pub mass: f64,
+    /// Partial charge (elementary charge units).
     pub charge: f64,
+    /// `true` if this atom appears in the PERTATOMPARAM block (FEP).
     pub is_perturbed: bool,
+    /// `true` if this atom uses the COS polarisation model.
     pub is_polarisable: bool,
+    /// `true` if this atom is a coarse-grained bead.
     pub is_coarse_grained: bool,
 }
 
@@ -80,16 +91,23 @@ pub struct MoleculeType {
     pub name: String,
     /// One entry per atom in the template, in order.
     pub atoms: Vec<MolTypeAtom>,
-    // Phase 2: bonded terms (local indices).
+    /// Covalent bonds within this molecule type (local atom indices).
     pub bonds: Vec<Bond>,
+    /// Bond-angle terms within this molecule type (local atom indices).
     pub angles: Vec<Angle>,
+    /// Proper dihedral terms within this molecule type (local atom indices).
     pub proper_dihedrals: Vec<Dihedral>,
+    /// Improper dihedral terms within this molecule type (local atom indices).
     pub improper_dihedrals: Vec<Dihedral>,
+    /// Cross-dihedral coupling terms within this molecule type (local atom indices).
     pub cross_dihedrals: Vec<CrossDihedral>,
 }
 
 impl MoleculeType {
-    pub fn num_atoms(&self) -> usize { self.atoms.len() }
+    /// Number of atoms in one copy of this molecule type.
+    pub fn num_atoms(&self) -> usize {
+        self.atoms.len()
+    }
 }
 
 /// One copy of a `MoleculeType` placed in the system.
@@ -106,41 +124,62 @@ pub struct MoleculeInstance {
 /// Two-body bonded term (bonds, harmonic constraints)
 #[derive(Debug, Clone, Copy)]
 pub struct Bond {
+    /// First atom index.
     pub i: usize,
+    /// Second atom index.
     pub j: usize,
+    /// Index into `Topology::bond_parameters`.
     pub bond_type: usize,
 }
 
 /// Three-body bonded term (angles)
 #[derive(Debug, Clone, Copy)]
 pub struct Angle {
+    /// First atom index.
     pub i: usize,
-    pub j: usize, // Central atom
+    /// Central atom index.
+    pub j: usize,
+    /// Third atom index.
     pub k: usize,
+    /// Index into `Topology::angle_parameters`.
     pub angle_type: usize,
 }
 
 /// Four-body bonded term (proper and improper dihedrals)
 #[derive(Debug, Clone, Copy)]
 pub struct Dihedral {
+    /// First atom index (i–j–k–l sequence).
     pub i: usize,
+    /// Second atom index.
     pub j: usize,
+    /// Third atom index.
     pub k: usize,
+    /// Fourth atom index.
     pub l: usize,
+    /// Index into `Topology::dihedral_parameters` or `improper_dihedral_parameters`.
     pub dihedral_type: usize,
 }
 
 /// Cross-dihedral term (8 atoms)
 #[derive(Debug, Clone, Copy)]
 pub struct CrossDihedral {
+    /// Atom a (first dihedral plane).
     pub a: usize,
+    /// Atom b.
     pub b: usize,
+    /// Atom c.
     pub c: usize,
+    /// Atom d (shared with second plane).
     pub d: usize,
+    /// Atom e.
     pub e: usize,
+    /// Atom f.
     pub f: usize,
+    /// Atom g.
     pub g: usize,
+    /// Atom h (second dihedral plane).
     pub h: usize,
+    /// Index into the cross-dihedral parameter table.
     pub cross_dihedral_type: usize,
 }
 
@@ -149,15 +188,24 @@ pub struct CrossDihedral {
 /// they are scaled by ALPHLJ/ALPHC from the imd PERTURBATION block at run time.
 #[derive(Debug, Clone)]
 pub struct PerturbedAtom {
-    pub seq: usize,      // 0-indexed atom number in topology
-    pub a_iac: usize,    // State A IAC (0-indexed)
+    /// 0-based atom index in the topology.
+    pub seq: usize,
+    /// State A integer atom code (0-indexed).
+    pub a_iac: usize,
+    /// State A atomic mass (u).
     pub a_mass: f64,
+    /// State A partial charge.
     pub a_charge: f64,
-    pub b_iac: usize,    // State B IAC (0-indexed)
+    /// State B integer atom code (0-indexed).
+    pub b_iac: usize,
+    /// State B atomic mass (u).
     pub b_mass: f64,
+    /// State B partial charge.
     pub b_charge: f64,
-    pub lj_soft: f64,    // per-atom alpha_LJ soft-core
-    pub crf_soft: f64,   // per-atom alpha_CRF soft-core
+    /// Per-atom soft-core α for LJ (scaled by global ALPHLJ at runtime).
+    pub lj_soft: f64,
+    /// Per-atom soft-core α for CRF (scaled by global ALPHC at runtime).
+    pub crf_soft: f64,
 }
 
 /// Perturbed atom pair — special LJ interaction between two perturbed atoms
@@ -177,81 +225,116 @@ pub struct PerturbedAtom {
 ///   `1` (file 2) → 1-4 LJ (cs6/cs12)
 #[derive(Debug, Clone, Copy)]
 pub struct PerturbedAtomPair {
-    pub i: usize,               // 0-indexed, i < j
+    /// First atom index (0-indexed, always i < j).
+    pub i: usize,
+    /// Second atom index (0-indexed).
     pub j: usize,
-    pub a_type: usize,          // State A interaction type (0-indexed)
-    pub b_type: Option<usize>,  // State B interaction type (0-indexed); None = absent in state B
+    /// State A interaction type (0-indexed; 0 = full LJ, 1 = 1-4 LJ).
+    pub a_type: usize,
+    /// State B interaction type (0-indexed); `None` means the pair disappears in state B.
+    pub b_type: Option<usize>,
 }
 
 /// Perturbed bond (for FEP calculations)
 #[derive(Debug, Clone, Copy)]
 pub struct PerturbedBond {
+    /// First atom index.
     pub i: usize,
+    /// Second atom index.
     pub j: usize,
-    pub a_type: usize, // State A bond type
-    pub b_type: usize, // State B bond type
+    /// State A bond type index.
+    pub a_type: usize,
+    /// State B bond type index.
+    pub b_type: usize,
 }
 
 /// Perturbed angle (for FEP calculations)
 #[derive(Debug, Clone, Copy)]
 pub struct PerturbedAngle {
+    /// First atom index.
     pub i: usize,
-    pub j: usize, // Central atom
+    /// Central atom index.
+    pub j: usize,
+    /// Third atom index.
     pub k: usize,
-    pub a_type: usize, // State A angle type
-    pub b_type: usize, // State B angle type
+    /// State A angle type index.
+    pub a_type: usize,
+    /// State B angle type index.
+    pub b_type: usize,
 }
 
 /// Perturbed dihedral (for FEP calculations)
 #[derive(Debug, Clone, Copy)]
 pub struct PerturbedDihedral {
+    /// First atom index.
     pub i: usize,
+    /// Second atom index.
     pub j: usize,
+    /// Third atom index.
     pub k: usize,
+    /// Fourth atom index.
     pub l: usize,
-    pub a_type: usize, // State A dihedral type
-    pub b_type: usize, // State B dihedral type
+    /// State A dihedral type index.
+    pub a_type: usize,
+    /// State B dihedral type index.
+    pub b_type: usize,
 }
 
 /// Bond force field parameters (GROMOS format)
 #[derive(Debug, Clone, Copy)]
 pub struct BondParameters {
-    pub k_quartic: f64,  // Quartic force constant
-    pub k_harmonic: f64, // Harmonic force constant
-    pub r0: f64,         // Equilibrium bond length
+    /// Quartic force constant (kJ mol⁻¹ nm⁻⁴).
+    pub k_quartic: f64,
+    /// Harmonic force constant (kJ mol⁻¹ nm⁻²).
+    pub k_harmonic: f64,
+    /// Equilibrium bond length (nm).
+    pub r0: f64,
 }
 
 /// Angle force field parameters (GROMOS format)
 #[derive(Debug, Clone, Copy)]
 pub struct AngleParameters {
-    pub k_cosine: f64,   // Force constant (harmonic in cosine)
-    pub k_harmonic: f64, // Force constant (harmonic in angle)
-    pub theta0: f64,     // Equilibrium angle in radians
+    /// Force constant for the cos-harmonic form (kJ mol⁻¹).
+    pub k_cosine: f64,
+    /// Force constant for the harmonic-in-angle form (kJ mol⁻¹ rad⁻²).
+    pub k_harmonic: f64,
+    /// Equilibrium bond angle (rad).
+    pub theta0: f64,
 }
 
 /// Dihedral force field parameters
 #[derive(Debug, Clone, Copy)]
 pub struct DihedralParameters {
-    pub k: f64,     // Force constant
-    pub pd: f64,    // Phase shift
-    pub cospd: f64, // Cos(phase)
-    pub m: i32,     // Multiplicity
+    /// Torsion force constant (kJ mol⁻¹).
+    pub k: f64,
+    /// Phase shift δ (rad); typically 0 or π.
+    pub pd: f64,
+    /// Precomputed cos(δ) for efficiency.
+    pub cospd: f64,
+    /// Torsion multiplicity n.
+    pub m: i32,
 }
 
 /// Improper dihedral force field parameters
 #[derive(Debug, Clone, Copy)]
 pub struct ImproperDihedralParameters {
-    pub k: f64,  // Force constant
-    pub q0: f64, // Equilibrium improper dihedral angle
+    /// Force constant (kJ mol⁻¹ rad⁻²).
+    pub k: f64,
+    /// Equilibrium improper dihedral angle (rad).
+    pub q0: f64,
 }
 
 /// Lennard-Jones parameters
 #[derive(Debug, Clone, Copy)]
 pub struct LJParameters {
-    pub c6: f64,   // C6 coefficient (attractive: -C6/r^6)
-    pub c12: f64,  // C12 coefficient (repulsive: C12/r^12)
-    pub cs6: f64,  // Softcore C6 (for free energy calculations)
-    pub cs12: f64, // Softcore C12
+    /// C6 attractive coefficient (kJ mol⁻¹ nm⁶); contributes −C6/r⁶.
+    pub c6: f64,
+    /// C12 repulsive coefficient (kJ mol⁻¹ nm¹²); contributes +C12/r¹².
+    pub c12: f64,
+    /// 1-4 (soft-core) C6 used in free energy calculations.
+    pub cs6: f64,
+    /// 1-4 (soft-core) C12 used in free energy calculations.
+    pub cs12: f64,
 }
 
 impl LJParameters {
@@ -316,6 +399,7 @@ pub type Exclusions = Vec<usize>;
 /// - All atoms in both groups included if distance < cutoff
 #[derive(Debug, Clone)]
 pub struct ChargeGroup {
+    /// 0-based global atom indices in this charge group.
     pub atoms: Vec<usize>,
 }
 
@@ -343,10 +427,15 @@ impl ChargeGroup {
 pub struct Solute;
 
 impl Solute {
-    pub fn new() -> Self { Self }
+    /// Create the empty solute placeholder.
+    pub fn new() -> Self {
+        Self
+    }
     /// Number of solute atoms — delegates to Topology::num_solute_atoms().
     /// Call `topo.num_solute_atoms()` directly instead.
-    pub fn num_atoms(&self) -> usize { 0 }
+    pub fn num_atoms(&self) -> usize {
+        0
+    }
 }
 
 /// Soft-core perturbed harmonic bond (PERTBONDSOFT).
@@ -354,10 +443,15 @@ impl Solute {
 /// `b_type = None` means the bond is absent in state B (K_B = 0, r0_B = r0_A).
 #[derive(Debug, Clone)]
 pub struct SoftBond {
+    /// First atom index.
     pub i: usize,
+    /// Second atom index.
     pub j: usize,
-    pub a_type: usize,          // index into bond_parameters (uses k_harmonic)
-    pub b_type: Option<usize>,  // None → K_B=0, r0_B=r0_A
+    /// State A bond type index (uses `k_harmonic`).
+    pub a_type: usize,
+    /// State B bond type index; `None` means K_B=0, r0_B=r0_A.
+    pub b_type: Option<usize>,
+    /// Soft-core coupling strength α.
     pub alpha: f64,
 }
 
@@ -365,11 +459,17 @@ pub struct SoftBond {
 /// `b_type = None` means the angle is absent in state B (K_B = 0, cos0_B = cos0_A).
 #[derive(Debug, Clone)]
 pub struct SoftAngle {
+    /// First atom index.
     pub i: usize,
+    /// Central atom index.
     pub j: usize,
+    /// Third atom index.
     pub k: usize,
+    /// State A angle type index.
     pub a_type: usize,
+    /// State B angle type index; `None` means K_B=0, cos0_B=cos0_A.
     pub b_type: Option<usize>,
+    /// Soft-core coupling strength α.
     pub alpha: f64,
 }
 
@@ -377,12 +477,19 @@ pub struct SoftAngle {
 /// `b_type = None` means the improper is absent in state B (K_B = 0, q0_B = q0_A).
 #[derive(Debug, Clone)]
 pub struct SoftImproper {
+    /// First atom index.
     pub i: usize,
+    /// Second atom index.
     pub j: usize,
+    /// Third atom index.
     pub k: usize,
+    /// Fourth atom index.
     pub l: usize,
+    /// State A improper dihedral type index.
     pub a_type: usize,
+    /// State B improper dihedral type index; `None` means K_B=0, q0_B=q0_A.
     pub b_type: Option<usize>,
+    /// Soft-core coupling strength α.
     pub alpha: f64,
 }
 
@@ -396,9 +503,13 @@ pub struct PerturbedSolute {
     pub atoms: Vec<PerturbedAtom>,
     /// Perturbed atom pairs (PERTATOMPAIR): special LJ between two perturbed atoms.
     pub atom_pairs: Vec<PerturbedAtomPair>,
+    /// Perturbed bond terms (PERTBOND block).
     pub bonds: Vec<PerturbedBond>,
+    /// Perturbed angle terms (PERTANGLE block).
     pub angles: Vec<PerturbedAngle>,
+    /// Perturbed proper dihedral terms (PERTPROPERDIH block).
     pub proper_dihedrals: Vec<PerturbedDihedral>,
+    /// Perturbed improper dihedral terms (PERTIMPROPERDIH block).
     pub improper_dihedrals: Vec<PerturbedDihedral>,
     /// Soft-core perturbed bonds (PERTBONDSOFT): bond absent in one state.
     pub soft_bonds: Vec<SoftBond>,
@@ -409,6 +520,7 @@ pub struct PerturbedSolute {
 }
 
 impl PerturbedSolute {
+    /// Create an empty perturbed-solute container.
     pub fn new() -> Self {
         Self {
             atoms: Vec::new(),
@@ -423,9 +535,12 @@ impl PerturbedSolute {
         }
     }
 
+    /// Returns `true` if no perturbed atoms or bonded terms have been added.
     pub fn is_empty(&self) -> bool {
-        self.atoms.is_empty() && self.bonds.is_empty()
-            && self.angles.is_empty() && self.proper_dihedrals.is_empty()
+        self.atoms.is_empty()
+            && self.bonds.is_empty()
+            && self.angles.is_empty()
+            && self.proper_dihedrals.is_empty()
             && self.improper_dihedrals.is_empty()
     }
 }
@@ -440,41 +555,62 @@ impl Default for PerturbedSolute {
 /// Solvent atom template (one molecule's worth of atom properties)
 #[derive(Debug, Clone)]
 pub struct SolventAtomTemplate {
+    /// Integer atom code (0-based atom type).
     pub iac: usize,
+    /// Atom name (e.g. `"OW"`, `"HW1"`).
     pub name: String,
+    /// Atomic mass (u).
     pub mass: f64,
+    /// Partial charge.
     pub charge: f64,
 }
 
 /// Solvent constraint template (within one molecule)
 #[derive(Debug, Clone)]
 pub struct SolventConstraintTemplate {
-    pub i: usize, // 0-indexed within solvent molecule
+    /// First atom index (0-based within the solvent molecule template).
+    pub i: usize,
+    /// Second atom index.
     pub j: usize,
+    /// Constraint distance (nm).
     pub length: f64,
 }
 
 /// Distance restraint specification (virtual atom type 0 only)
 #[derive(Debug, Clone)]
 pub struct DistanceRestraintSpec {
+    /// First restrained atom (0-based).
     pub atom1: usize,
+    /// Second restrained atom (0-based).
     pub atom2: usize,
+    /// Reference distance (nm).
     pub r0: f64,
+    /// Force constant / weight.
     pub w0: f64,
+    /// Restraint type flag (RAH).
     pub rah: i32,
 }
 
 /// Perturbed distance restraint specification (virtual atom type 0 only)
 #[derive(Debug, Clone)]
 pub struct PerturbedDistanceRestraintSpec {
+    /// First restrained atom (0-based).
     pub atom1: usize,
+    /// Second restrained atom (0-based).
     pub atom2: usize,
+    /// State A exponent n.
     pub n: i32,
+    /// State B exponent m.
     pub m: i32,
+    /// State A reference distance (nm).
     pub a_r0: f64,
+    /// State B reference distance (nm).
     pub b_r0: f64,
+    /// State A force constant / weight.
     pub a_w0: f64,
+    /// State B force constant / weight.
     pub b_w0: f64,
+    /// Restraint type flag (RAH).
     pub rah: i32,
 }
 
@@ -483,11 +619,12 @@ pub struct PerturbedDistanceRestraintSpec {
 pub struct Topology {
     // Dim 10: Solute is now a shell (atoms in moltypes[0]).
     // Phase 2e: Vec<Solvent> removed — solvent info lives in moltypes + instances.
+    /// Legacy solute placeholder (Phase 2e: will be removed; use `moltypes[0]` directly).
     pub solute: Solute,
-    pub perturbed_solute: PerturbedSolute, // FEP dual-topology terms
+    /// FEP dual-topology perturbed terms (atoms, bonds, angles, dihedrals).
+    pub perturbed_solute: PerturbedSolute,
 
     // Per-atom properties (flat arrays for all atoms)
-
     /// Integer atom codes (atom types).
     ///
     /// **INVARIANT: 0-indexed** (0..N\_types-1), matching LJ matrix rows/cols.
@@ -495,31 +632,46 @@ pub struct Topology {
     /// at the parse boundary.  `ptp.rs` does the same for `PerturbedAtom.a_iac`
     /// and `b_iac`.  Never store a raw 1-indexed file value here.
     pub iac: Vec<usize>,
-    pub mass: Vec<f64>,         // Atomic masses
-    pub inverse_mass: Vec<f64>, // Precomputed 1/mass for efficiency
-    pub charge: Vec<f64>,       // Atomic charges
+    /// Flat atomic masses array (u); indexed by global atom index.
+    pub mass: Vec<f64>,
+    /// Precomputed 1/mass for each atom; avoids division in integrators.
+    pub inverse_mass: Vec<f64>,
+    /// Flat atomic charges array; indexed by global atom index.
+    pub charge: Vec<f64>,
 
     // Exclusions (atoms that don't interact via nonbonded)
-    pub exclusions: Vec<Exclusions>, // exclusions[i] = set of atoms excluded from i
-    pub one_four_pairs: Vec<Vec<usize>>, // 1-4 pairs (special scaling)
+    /// Per-atom exclusion lists; `exclusions[i]` lists atoms that do not interact with i.
+    pub exclusions: Vec<Exclusions>,
+    /// 1-4 atom pairs (receive special LJ/CRF scaling).
+    pub one_four_pairs: Vec<Vec<usize>>,
 
     // Chargegroups
+    /// All charge groups in the system (solute first, then solvent).
     pub chargegroups: Vec<ChargeGroup>,
-    pub atom_to_chargegroup: Vec<usize>, // atom -> chargegroup index
-    pub num_solute_chargegroups: usize,  // boundary: CGs [0..n) are solute, [n..) are solvent
+    /// Maps each atom to its charge group index.
+    pub atom_to_chargegroup: Vec<usize>,
+    /// Number of solute charge groups; CGs `[0..n)` are solute, `[n..)` are solvent.
+    pub num_solute_chargegroups: usize,
 
     // Temperature and pressure coupling groups
-    pub temperature_groups: Vec<Vec<usize>>, // Atoms in each T-coupling group
-    pub pressure_groups: Vec<std::ops::Range<usize>>, // Pressure groups as atom ranges (GROMOS: PRESSUREGROUPS)
+    /// Atoms in each temperature coupling group (MULTIBATH/TCOUPLE).
+    pub temperature_groups: Vec<Vec<usize>>,
+    /// Pressure coupling groups as atom index ranges (GROMOS PRESSUREGROUPS block).
+    pub pressure_groups: Vec<std::ops::Range<usize>>,
+    /// Temperature coupling group index for each atom.
     pub atom_to_temperature_group: Vec<usize>,
+    /// Pressure coupling group index for each atom.
     pub atom_to_pressure_group: Vec<usize>,
 
     // Energy groups (for energy monitoring)
+    /// Atoms in each energy monitoring group.
     pub energy_groups: Vec<Vec<usize>>,
+    /// Energy group index for each atom.
     pub atom_to_energy_group: Vec<usize>,
 
     // Molecule boundaries (for molecule-based operations)
-    pub molecules: Vec<std::ops::Range<usize>>, // molecule_start..molecule_end
+    /// Per-molecule atom ranges; `molecules[m]` is `start..end` for molecule m.
+    pub molecules: Vec<std::ops::Range<usize>>,
 
     // ── Dim 10 instancing model ──────────────────────────────────────────────
     // Populated by init_solute_moltype() + solvate().
@@ -531,28 +683,36 @@ pub struct Topology {
     pub instances: Vec<MoleculeInstance>,
 
     // Force field parameters
+    /// Bond force field parameters indexed by bond type.
     pub bond_parameters: Vec<BondParameters>,
+    /// Angle force field parameters indexed by angle type.
     pub angle_parameters: Vec<AngleParameters>,
+    /// Proper and improper dihedral parameters indexed by dihedral type.
     pub dihedral_parameters: Vec<DihedralParameters>,
+    /// Improper dihedral parameters indexed by improper dihedral type.
     pub improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
-    pub lj_parameters: Vec<Vec<LJParameters>>, // [type_i][type_j] matrix
+    /// LJ parameter matrix indexed `[type_i][type_j]`.
+    pub lj_parameters: Vec<Vec<LJParameters>>,
 
-    // Solvent template (read from topology, expanded by solvate())
+    /// Atom parameters for one solvent molecule (from topology SOLUTEATOM/SOLVENTATOM).
     pub solvent_atom_template: Vec<SolventAtomTemplate>,
+    /// Constraint template within one solvent molecule.
     pub solvent_constraint_template: Vec<SolventConstraintTemplate>,
 
-    // Chargegroup codes (CGC) from topology for solute atoms
+    /// Charge-group codes (CGC) for solute atoms, from the topology CGSOLUTE block.
     pub chargegroup_codes: Vec<usize>,
 
-    // Distance restraints (loaded from .distres file)
+    /// Distance restraint specifications (loaded from the `.distres` file).
     pub distance_restraints: Vec<DistanceRestraintSpec>,
+    /// Perturbed distance restraint specifications (FEP/TI).
     pub perturbed_distance_restraints: Vec<PerturbedDistanceRestraintSpec>,
 
-    // FEP/TI: per-solute-atom flag, true if listed in PERTATOMPARAM
+    /// Per-solute-atom FEP flag; `true` if the atom appears in PERTATOMPARAM.
     pub is_perturbed: Vec<bool>,
 }
 
 impl Topology {
+    /// Create an empty topology.
     pub fn new() -> Self {
         Self {
             solute: Solute::new(),
@@ -567,7 +727,7 @@ impl Topology {
             atom_to_chargegroup: Vec::new(),
             num_solute_chargegroups: 0,
             temperature_groups: Vec::new(),
-            pressure_groups: Vec::new(),  // populated from PRESSUREGROUPS topology block
+            pressure_groups: Vec::new(), // populated from PRESSUREGROUPS topology block
             atom_to_temperature_group: Vec::new(),
             atom_to_pressure_group: Vec::new(),
             energy_groups: Vec::new(),
@@ -607,9 +767,14 @@ impl Topology {
     /// Total number of atoms in the system — derived from instances.
     pub fn num_atoms(&self) -> usize {
         if !self.instances.is_empty() {
-            self.instances.iter()
-                .map(|inst| self.moltypes.get(inst.moltype_id)
-                    .map(|mt| mt.num_atoms()).unwrap_or(0))
+            self.instances
+                .iter()
+                .map(|inst| {
+                    self.moltypes
+                        .get(inst.moltype_id)
+                        .map(|mt| mt.num_atoms())
+                        .unwrap_or(0)
+                })
                 .sum()
         } else {
             self.num_solute_atoms()
@@ -620,13 +785,17 @@ impl Topology {
 
     /// Number of solvent molecule instances.
     pub fn num_solvent_molecules(&self) -> usize {
-        self.instances.iter().filter(|i| i.role == Role::Solvent).count()
+        self.instances
+            .iter()
+            .filter(|i| i.role == Role::Solvent)
+            .count()
     }
 
     /// Number of atoms per solvent molecule (from the solvent MoleculeType).
     /// Falls back to `solvent_atom_template.len()` for pre-solvate topologies.
     pub fn atoms_per_solvent(&self) -> usize {
-        self.instances.iter()
+        self.instances
+            .iter()
             .find(|i| i.role == Role::Solvent)
             .and_then(|i| self.moltypes.get(i.moltype_id))
             .map(|mt| mt.num_atoms())
@@ -635,7 +804,8 @@ impl Topology {
 
     /// Name of the solvent molecule type.
     pub fn solvent_name(&self) -> Option<&str> {
-        self.instances.iter()
+        self.instances
+            .iter()
             .find(|i| i.role == Role::Solvent)
             .and_then(|i| self.moltypes.get(i.moltype_id))
             .map(|mt| mt.name.as_str())
@@ -644,10 +814,15 @@ impl Topology {
     /// Number of solute atoms — derived from instances when available.
     pub fn num_solute_atoms(&self) -> usize {
         if !self.instances.is_empty() {
-            self.instances.iter()
+            self.instances
+                .iter()
                 .filter(|inst| inst.role == Role::Solute)
-                .map(|inst| self.moltypes.get(inst.moltype_id)
-                    .map(|mt| mt.num_atoms()).unwrap_or(0))
+                .map(|inst| {
+                    self.moltypes
+                        .get(inst.moltype_id)
+                        .map(|mt| mt.num_atoms())
+                        .unwrap_or(0)
+                })
                 .sum()
         } else {
             self.num_solute_atoms()
@@ -676,7 +851,9 @@ impl Topology {
     /// Used for pairlist exclusion (GROMOS: all_exclusion).
     #[inline]
     pub fn is_excluded_or_14(&self, i: usize, j: usize) -> bool {
-        if self.exclusions[i].binary_search(&j).is_ok() || self.exclusions[j].binary_search(&i).is_ok() {
+        if self.exclusions[i].binary_search(&j).is_ok()
+            || self.exclusions[j].binary_search(&i).is_ok()
+        {
             return true;
         }
         if !self.one_four_pairs.is_empty() {
@@ -739,8 +916,14 @@ impl Topology {
     /// Phase 2 will add CG/exclusion renumbering; for now it's a label flip.
     pub fn promote(&mut self, mol_idx: usize) -> Result<(), String> {
         match self.instances.get_mut(mol_idx) {
-            Some(inst) => { inst.role = Role::Solute; Ok(()) }
-            None => Err(format!("molecule index {mol_idx} out of range (have {})", self.instances.len())),
+            Some(inst) => {
+                inst.role = Role::Solute;
+                Ok(())
+            },
+            None => Err(format!(
+                "molecule index {mol_idx} out of range (have {})",
+                self.instances.len()
+            )),
         }
     }
 
@@ -757,19 +940,24 @@ impl Topology {
     /// in `Topology::new()`) so no guard is needed.
     pub fn init_solute_moltype(&mut self) {
         let n_sol = self.moltypes[0].atoms.len();
-        if n_sol == 0 { return; }
+        if n_sol == 0 {
+            return;
+        }
 
         // Overwrite iac/mass/charge from the flat arrays (source of truth at load time).
-        let mt_atoms: Vec<MolTypeAtom> = self.moltypes[0].atoms.iter().enumerate()
+        let mt_atoms: Vec<MolTypeAtom> = self.moltypes[0]
+            .atoms
+            .iter()
+            .enumerate()
             .map(|(i, a)| MolTypeAtom {
-                name:             a.name.clone(),
-                residue_nr:       a.residue_nr,
-                residue_name:     a.residue_name.clone(),
-                iac:              self.iac.get(i).copied().unwrap_or(a.iac),
-                mass:             self.mass.get(i).copied().unwrap_or(a.mass),
-                charge:           self.charge.get(i).copied().unwrap_or(a.charge),
-                is_perturbed:     a.is_perturbed,
-                is_polarisable:   a.is_polarisable,
+                name: a.name.clone(),
+                residue_nr: a.residue_nr,
+                residue_name: a.residue_name.clone(),
+                iac: self.iac.get(i).copied().unwrap_or(a.iac),
+                mass: self.mass.get(i).copied().unwrap_or(a.mass),
+                charge: self.charge.get(i).copied().unwrap_or(a.charge),
+                is_perturbed: a.is_perturbed,
+                is_polarisable: a.is_polarisable,
                 is_coarse_grained: a.is_coarse_grained,
             })
             .collect();
@@ -789,10 +977,12 @@ impl Topology {
         self.moltype_atom(i).map(|a| a.name.as_str())
     }
 
+    /// 1-based residue number for atom `i`.
     pub fn residue_nr(&self, i: usize) -> Option<usize> {
         self.moltype_atom(i).map(|a| a.residue_nr)
     }
 
+    /// Residue name for atom `i` (e.g. `"ALA"`, `"SOL"`).
     pub fn residue_name(&self, i: usize) -> Option<&str> {
         self.moltype_atom(i).map(|a| a.residue_name.as_str())
     }
@@ -817,45 +1007,77 @@ impl Topology {
     // yields values with global i/j/k/l. This handles flexible solute, flexible
     // solvent, and any future repeated molecule type in one unified loop.
 
+    /// Iterate over all bond terms with global atom indices.
     pub fn all_bonds_global(&self) -> impl Iterator<Item = Bond> + '_ {
         self.instances.iter().flat_map(move |inst| {
             let mt = &self.moltypes[inst.moltype_id];
             let off = inst.atom_offset;
-            mt.bonds.iter().map(move |b| Bond { i: off + b.i, j: off + b.j, bond_type: b.bond_type })
+            mt.bonds.iter().map(move |b| Bond {
+                i: off + b.i,
+                j: off + b.j,
+                bond_type: b.bond_type,
+            })
         })
     }
 
+    /// Iterate over all angle terms with global atom indices.
     pub fn all_angles_global(&self) -> impl Iterator<Item = Angle> + '_ {
         self.instances.iter().flat_map(move |inst| {
             let mt = &self.moltypes[inst.moltype_id];
             let off = inst.atom_offset;
-            mt.angles.iter().map(move |a| Angle { i: off + a.i, j: off + a.j, k: off + a.k, angle_type: a.angle_type })
+            mt.angles.iter().map(move |a| Angle {
+                i: off + a.i,
+                j: off + a.j,
+                k: off + a.k,
+                angle_type: a.angle_type,
+            })
         })
     }
 
+    /// Iterate over all proper dihedral terms with global atom indices.
     pub fn all_proper_dihedrals_global(&self) -> impl Iterator<Item = Dihedral> + '_ {
         self.instances.iter().flat_map(move |inst| {
             let mt = &self.moltypes[inst.moltype_id];
             let off = inst.atom_offset;
-            mt.proper_dihedrals.iter().map(move |d| Dihedral { i: off + d.i, j: off + d.j, k: off + d.k, l: off + d.l, dihedral_type: d.dihedral_type })
+            mt.proper_dihedrals.iter().map(move |d| Dihedral {
+                i: off + d.i,
+                j: off + d.j,
+                k: off + d.k,
+                l: off + d.l,
+                dihedral_type: d.dihedral_type,
+            })
         })
     }
 
+    /// Iterate over all improper dihedral terms with global atom indices.
     pub fn all_improper_dihedrals_global(&self) -> impl Iterator<Item = Dihedral> + '_ {
         self.instances.iter().flat_map(move |inst| {
             let mt = &self.moltypes[inst.moltype_id];
             let off = inst.atom_offset;
-            mt.improper_dihedrals.iter().map(move |d| Dihedral { i: off + d.i, j: off + d.j, k: off + d.k, l: off + d.l, dihedral_type: d.dihedral_type })
+            mt.improper_dihedrals.iter().map(move |d| Dihedral {
+                i: off + d.i,
+                j: off + d.j,
+                k: off + d.k,
+                l: off + d.l,
+                dihedral_type: d.dihedral_type,
+            })
         })
     }
 
+    /// Iterate over all cross-dihedral coupling terms with global atom indices.
     pub fn all_cross_dihedrals_global(&self) -> impl Iterator<Item = CrossDihedral> + '_ {
         self.instances.iter().flat_map(move |inst| {
             let mt = &self.moltypes[inst.moltype_id];
             let off = inst.atom_offset;
             mt.cross_dihedrals.iter().map(move |c| CrossDihedral {
-                a: off + c.a, b: off + c.b, c: off + c.c, d: off + c.d,
-                e: off + c.e, f: off + c.f, g: off + c.g, h: off + c.h,
+                a: off + c.a,
+                b: off + c.b,
+                c: off + c.c,
+                d: off + c.d,
+                e: off + c.e,
+                f: off + c.f,
+                g: off + c.g,
+                h: off + c.h,
                 cross_dihedral_type: c.cross_dihedral_type,
             })
         })
@@ -873,8 +1095,8 @@ impl Topology {
 
         // Collect into locals first — moltypes and exclusions are different struct fields
         // so Rust allows simultaneous borrows, but collecting avoids lifetime complexity.
-        let bonds:     Vec<Bond>     = self.moltypes[0].bonds.clone();
-        let angles:    Vec<Angle>    = self.moltypes[0].angles.clone();
+        let bonds: Vec<Bond> = self.moltypes[0].bonds.clone();
+        let angles: Vec<Angle> = self.moltypes[0].angles.clone();
         let dihedrals: Vec<Dihedral> = self.moltypes[0].proper_dihedrals.clone();
 
         // Exclude bonded neighbors (1-2)
@@ -1046,17 +1268,20 @@ impl Topology {
 
             let sv_moltype = MoleculeType {
                 name: sv_name,
-                atoms: self.solvent_atom_template.iter().enumerate().map(|(idx, sa)| {
-                    MolTypeAtom {
-                        name:         sa.name.clone(),
-                        residue_nr:   idx + 1,
+                atoms: self
+                    .solvent_atom_template
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, sa)| MolTypeAtom {
+                        name: sa.name.clone(),
+                        residue_nr: idx + 1,
                         residue_name: "SOLV".to_string(),
-                        iac:   sa.iac,
-                        mass:  sa.mass,
+                        iac: sa.iac,
+                        mass: sa.mass,
                         charge: sa.charge,
                         ..MolTypeAtom::default()
-                    }
-                }).collect(),
+                    })
+                    .collect(),
                 // Solvent bonded terms live in solvent_constraint_template (constraints only).
                 // No proper bonds/angles/dihedrals for rigid SPC-like solvents.
                 bonds: Vec::new(),
@@ -1087,12 +1312,18 @@ impl Topology {
         let n_types = max_iac + 1;
         if n_types > self.lj_parameters.len() {
             let old_len = self.lj_parameters.len();
-            self.lj_parameters.resize(n_types, vec![LJParameters::default(); n_types]);
+            self.lj_parameters
+                .resize(n_types, vec![LJParameters::default(); n_types]);
             for row in self.lj_parameters.iter_mut() {
                 row.resize(n_types, LJParameters::default());
             }
-            log::debug!("LJ matrix expanded from {}x{} to {}x{} for solvent types",
-                old_len, old_len, n_types, n_types);
+            log::debug!(
+                "LJ matrix expanded from {}x{} to {}x{} for solvent types",
+                old_len,
+                old_len,
+                n_types,
+                n_types
+            );
         }
 
         log::debug!("Solvated: {} solute + {} solvent ({} molecules × {} atoms) = {} total, {} chargegroups",
@@ -1117,30 +1348,41 @@ mod tests {
         // c6 = 4 * epsilon * sigma^6 = 4 * 0.65 * 0.34^6 = 0.00398
         // c12 = 4 * epsilon * sigma^12 = 4 * 0.65 * 0.34^12 = 4.6e-7
         // Or simpler: sigma = (c12/c6)^(1/6), epsilon = c6^2/(4*c12)
-        
+
         // Use values that give known sigma/epsilon
         let sigma_expected: f64 = 0.34;
         let epsilon_expected: f64 = 0.65;
         let c6 = 4.0 * epsilon_expected * sigma_expected.powi(6);
         let c12 = 4.0 * epsilon_expected * sigma_expected.powi(12);
-        
+
         let lj = LJParameters::new(c6, c12);
 
         // Check sigma
         let sigma = lj.sigma();
-        assert!((sigma - sigma_expected).abs() < 0.01, "Sigma mismatch: got {}", sigma);
+        assert!(
+            (sigma - sigma_expected).abs() < 0.01,
+            "Sigma mismatch: got {}",
+            sigma
+        );
 
         // Check epsilon
         let epsilon = lj.epsilon();
-        assert!((epsilon - epsilon_expected).abs() < 0.01, "Epsilon mismatch: got {}", epsilon);
+        assert!(
+            (epsilon - epsilon_expected).abs() < 0.01,
+            "Epsilon mismatch: got {}",
+            epsilon
+        );
     }
 
     #[test]
     fn test_topology_creation() {
         let mut topo = Topology::new();
-        topo.solvent_atom_template = vec![
-            SolventAtomTemplate { iac: 0, name: "OW".into(), mass: 15.9994, charge: -0.82 },
-        ];
+        topo.solvent_atom_template = vec![SolventAtomTemplate {
+            iac: 0,
+            name: "OW".into(),
+            mass: 15.9994,
+            charge: -0.82,
+        }];
         topo.solvate(100);
         assert_eq!(topo.num_atoms(), 100);
     }
@@ -1148,7 +1390,7 @@ mod tests {
     #[test]
     fn test_exclusions() {
         let mut topo = Topology::new();
-        
+
         // Add 3 atoms first so num_atoms() returns 3
         for i in 0..3 {
             topo.moltypes[0].atoms.push(MolTypeAtom {
@@ -1163,7 +1405,7 @@ mod tests {
                 is_coarse_grained: false,
             });
         }
-        
+
         topo.moltypes[0].bonds.push(Bond {
             i: 0,
             j: 1,

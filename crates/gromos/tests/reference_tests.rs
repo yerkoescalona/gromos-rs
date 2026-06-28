@@ -13,7 +13,9 @@
 //!   Level 3: water_216_box, water_216_nvt, water_216_npt
 //!   Level 4: aladip_solvated
 
-use gromos::forces::nonbonded::{lj_crf_interaction, lj_crf_innerloop, CRFParameters, ForceStorage, LJParamMatrix};
+use gromos::forces::nonbonded::{
+    lj_crf_innerloop, lj_crf_interaction, CRFParameters, ForceStorage, LJParamMatrix,
+};
 use gromos::io::coordinate::read_coordinate_file;
 use gromos::io::topology::{build_topology, read_topology_file};
 use gromos::math::Vec3;
@@ -52,7 +54,11 @@ fn parse_forces_trf(path: &Path, step: usize) -> Vec<Vec3> {
             continue;
         }
 
-        if current_step.is_none() && trimmed != "END" && !trimmed.is_empty() && !trimmed.starts_with('#') {
+        if current_step.is_none()
+            && trimmed != "END"
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+        {
             // Parse step number (first field on the line)
             if let Some(step_str) = trimmed.split_whitespace().next() {
                 if let Ok(s) = step_str.parse::<usize>() {
@@ -107,8 +113,11 @@ fn parse_energies_tre(path: &Path, step: usize) -> EnergyValues {
             continue;
         }
 
-        if current_step.is_none() && trimmed != "END" && !trimmed.is_empty()
-            && !trimmed.starts_with('#') && !trimmed.starts_with("ENEVERSION")
+        if current_step.is_none()
+            && trimmed != "END"
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && !trimmed.starts_with("ENEVERSION")
             && !trimmed.starts_with("2023")
         {
             if let Some(step_str) = trimmed.split_whitespace().next() {
@@ -159,9 +168,7 @@ struct EnergyValues {
 }
 
 /// Convert topology LJ parameters to the nonbonded format
-fn convert_lj_params(
-    topo_lj: &[Vec<LJParameters>],
-) -> LJParamMatrix {
+fn convert_lj_params(topo_lj: &[Vec<LJParameters>]) -> LJParamMatrix {
     let nested: Vec<Vec<gromos::forces::nonbonded::LJParameters>> = topo_lj
         .iter()
         .map(|row| {
@@ -187,8 +194,12 @@ fn assert_vec3_approx(actual: Vec3, expected: Vec3, tol: f64, msg: &str) {
         dx < tol && dy < tol && dz < tol,
         "{}: expected ({:.9e}, {:.9e}, {:.9e}), got ({:.9e}, {:.9e}, {:.9e}), max_diff={:.2e}",
         msg,
-        expected.x, expected.y, expected.z,
-        actual.x, actual.y, actual.z,
+        expected.x,
+        expected.y,
+        expected.z,
+        actual.x,
+        actual.y,
+        actual.z,
         dx.max(dy).max(dz)
     );
 }
@@ -201,7 +212,10 @@ fn assert_f64_rel(actual: f64, expected: f64, tol: f64, msg: &str) {
     assert!(
         rel < tol,
         "{}: expected {:.10e}, got {:.10e}, rel_diff={:.2e}",
-        msg, expected, actual, rel
+        msg,
+        expected,
+        actual,
+        rel
     );
 }
 
@@ -245,7 +259,16 @@ fn test_pair_lj_forces_step0() {
     // Compute forces
     let bc = gromos::core::math::Vacuum;
     let mut storage = ForceStorage::new(n_atoms);
-    lj_crf_innerloop(positions, &charges, &iac, &pairlist, &lj_params, &crf, &bc, &mut storage);
+    lj_crf_innerloop(
+        positions,
+        &charges,
+        &iac,
+        &pairlist,
+        &lj_params,
+        &crf,
+        &bc,
+        &mut storage,
+    );
 
     // Load expected forces
     let expected_forces = parse_forces_trf(&base.join("expected/forces.trf"), 0);
@@ -286,7 +309,16 @@ fn test_pair_lj_energy_step0() {
 
     let bc = gromos::core::math::Vacuum;
     let mut storage = ForceStorage::new(positions.len());
-    lj_crf_innerloop(positions, &charges, &iac, &pairlist, &lj_params, &crf, &bc, &mut storage);
+    lj_crf_innerloop(
+        positions,
+        &charges,
+        &iac,
+        &pairlist,
+        &lj_params,
+        &crf,
+        &bc,
+        &mut storage,
+    );
 
     // Expected VdW energy from input.toml: E_Vdw = -4.9395e-01
     // More precise from energies.tre: -4.939549393e-01
@@ -329,7 +361,16 @@ fn test_nacl_pair_forces_step0() {
 
     let bc = gromos::core::math::Vacuum;
     let mut storage = ForceStorage::new(n_atoms);
-    lj_crf_innerloop(positions, &charges, &iac, &pairlist, &lj_params, &crf, &bc, &mut storage);
+    lj_crf_innerloop(
+        positions,
+        &charges,
+        &iac,
+        &pairlist,
+        &lj_params,
+        &crf,
+        &bc,
+        &mut storage,
+    );
 
     // Load expected forces
     let expected_forces = parse_forces_trf(&base.join("expected/forces.trf"), 0);
@@ -369,7 +410,16 @@ fn test_nacl_pair_energy_step0() {
 
     let bc = gromos::core::math::Vacuum;
     let mut storage = ForceStorage::new(positions.len());
-    lj_crf_innerloop(positions, &charges, &iac, &pairlist, &lj_params, &crf, &bc, &mut storage);
+    lj_crf_innerloop(
+        positions,
+        &charges,
+        &iac,
+        &pairlist,
+        &lj_params,
+        &crf,
+        &bc,
+        &mut storage,
+    );
 
     // Expected from input.toml: E_Vdw = 1.4529e+00 (repulsive LJ at short range)
     // E_Non_bonded = -4.6167e+02 (dominated by Coulomb attraction)
@@ -406,7 +456,16 @@ fn test_pair_lj_mixed_forces_step0() {
 
     let bc = gromos::core::math::Vacuum;
     let mut storage = ForceStorage::new(n_atoms);
-    lj_crf_innerloop(positions, &charges, &iac, &pairlist, &lj_params, &crf, &bc, &mut storage);
+    lj_crf_innerloop(
+        positions,
+        &charges,
+        &iac,
+        &pairlist,
+        &lj_params,
+        &crf,
+        &bc,
+        &mut storage,
+    );
 
     // Load expected forces
     let expected_forces = parse_forces_trf(&base.join("expected/forces.trf"), 0);
@@ -446,7 +505,16 @@ fn test_pair_lj_mixed_energy_step0() {
 
     let bc = gromos::core::math::Vacuum;
     let mut storage = ForceStorage::new(positions.len());
-    lj_crf_innerloop(positions, &charges, &iac, &pairlist, &lj_params, &crf, &bc, &mut storage);
+    lj_crf_innerloop(
+        positions,
+        &charges,
+        &iac,
+        &pairlist,
+        &lj_params,
+        &crf,
+        &bc,
+        &mut storage,
+    );
 
     // Expected from input.toml: E_Vdw = -1.1219e+00
     let expected_e_vdw = -1.1219e+00;

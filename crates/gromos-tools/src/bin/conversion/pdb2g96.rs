@@ -37,8 +37,8 @@ struct Args {
 
 /// Library mapping: PDB residue/atom names → topology names.
 struct Library {
-    residue_map: HashMap<String, String>,               // pdb_res → topo_res
-    atom_map: HashMap<String, HashMap<String, String>>,  // topo_res → {pdb_atom → topo_atom}
+    residue_map: HashMap<String, String>, // pdb_res → topo_res
+    atom_map: HashMap<String, HashMap<String, String>>, // topo_res → {pdb_atom → topo_atom}
 }
 
 impl Library {
@@ -80,9 +80,10 @@ impl Library {
                 "RESIDUES" => {
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
                     if parts.len() >= 2 {
-                        lib.residue_map.insert(parts[0].to_string(), parts[1].to_string());
+                        lib.residue_map
+                            .insert(parts[0].to_string(), parts[1].to_string());
                     }
-                }
+                },
                 "ATOMS" => {
                     // Format: topo_residue pdb_atom topo_atom
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
@@ -92,8 +93,8 @@ impl Library {
                             .or_default()
                             .insert(parts[1].to_string(), parts[2].to_string());
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         Ok(lib)
@@ -101,7 +102,10 @@ impl Library {
 
     /// Map a PDB residue name to topology residue name.
     fn map_residue<'a>(&'a self, pdb_name: &'a str) -> &'a str {
-        self.residue_map.get(pdb_name).map(|s| s.as_str()).unwrap_or(pdb_name)
+        self.residue_map
+            .get(pdb_name)
+            .map(|s| s.as_str())
+            .unwrap_or(pdb_name)
     }
 
     /// Map a PDB atom name to topology atom name for a given topology residue.
@@ -160,8 +164,10 @@ fn match_atoms(
         if !found {
             let is_hydrogen = masses[*global_idx] < 2.0;
             if !gch || !is_hydrogen {
-                eprintln!("Warning: Could not find atom '{}' in residue '{}' — set to (0,0,0)",
-                    topo_atom_name, topo_res_name);
+                eprintln!(
+                    "Warning: Could not find atom '{}' in residue '{}' — set to (0,0,0)",
+                    topo_atom_name, topo_res_name
+                );
             }
             missing += 1;
         }
@@ -178,11 +184,14 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading topology '{}': {:?}", args.topo, e);
             process::exit(1);
-        }
+        },
     };
 
-    eprintln!("Topology: {} atoms, {} residues",
-        parsed_topo.n_atoms, parsed_topo.residue_names.len());
+    eprintln!(
+        "Topology: {} atoms, {} residues",
+        parsed_topo.n_atoms,
+        parsed_topo.residue_names.len()
+    );
 
     // Read PDB
     let pdb = match PDBStructure::read_pdb(&args.pdb) {
@@ -190,7 +199,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading PDB '{}': {}", args.pdb, e);
             process::exit(1);
-        }
+        },
     };
 
     eprintln!("PDB: {} residues", pdb.residues.len());
@@ -202,7 +211,7 @@ fn main() {
             Err(e) => {
                 eprintln!("Error: {}", e);
                 process::exit(1);
-            }
+            },
         }
     } else {
         Library::new()
@@ -214,12 +223,16 @@ fn main() {
         let mapped_name = lib.map_residue(res.name.trim());
         pdb_residues.push(PdbResidue {
             name: mapped_name.to_string(),
-            atoms: res.atoms.iter().map(|a| PdbAtomEntry {
-                name: a.name.trim().to_string(),
-                x: a.coord.x,
-                y: a.coord.y,
-                z: a.coord.z,
-            }).collect(),
+            atoms: res
+                .atoms
+                .iter()
+                .map(|a| PdbAtomEntry {
+                    name: a.name.trim().to_string(),
+                    x: a.coord.x,
+                    y: a.coord.y,
+                    z: a.coord.z,
+                })
+                .collect(),
         });
     }
 
@@ -264,14 +277,28 @@ fn main() {
             if pdb_idx > 0 {
                 let prev_idx = pdb_idx - 1;
                 let pdb_res = &pdb_residues[prev_idx];
-                let used = used_map.entry(prev_idx).or_insert_with(|| vec![false; pdb_res.atoms.len()]);
+                let used = used_map
+                    .entry(prev_idx)
+                    .or_insert_with(|| vec![false; pdb_res.atoms.len()]);
                 eprintln!("Note: Topology residue '{}' — looking for atoms in previous PDB residue '{}' (C-terminal end-group)",
                     topo_res_name, pdb_res.name);
-                let (m, mi) = match_atoms(topo_atoms, topo_res_name, pdb_res, used, &lib, &mut coords, &parsed_topo.masses, args.gch);
+                let (m, mi) = match_atoms(
+                    topo_atoms,
+                    topo_res_name,
+                    pdb_res,
+                    used,
+                    &lib,
+                    &mut coords,
+                    &parsed_topo.masses,
+                    args.gch,
+                );
                 matched_count += m;
                 missing_count += mi;
             } else {
-                eprintln!("Warning: No more PDB residues for topology residue '{}'", topo_res_name);
+                eprintln!(
+                    "Warning: No more PDB residues for topology residue '{}'",
+                    topo_res_name
+                );
                 missing_count += topo_atoms.len();
             }
             continue;
@@ -288,12 +315,16 @@ fn main() {
         let advance_pdb = names_match;
 
         if !names_match {
-            eprintln!("Note: Topology residue '{}' — looking for atoms in PDB residue '{}' (end-group)",
-                topo_res_name, pdb_res.name);
+            eprintln!(
+                "Note: Topology residue '{}' — looking for atoms in PDB residue '{}' (end-group)",
+                topo_res_name, pdb_res.name
+            );
         }
 
         // Get or create the used-atoms tracker for this PDB residue
-        let used = used_map.entry(pdb_idx).or_insert_with(|| vec![false; pdb_res.atoms.len()]);
+        let used = used_map
+            .entry(pdb_idx)
+            .or_insert_with(|| vec![false; pdb_res.atoms.len()]);
 
         for (global_idx, topo_atom_name) in topo_atoms {
             let mut found = false;
@@ -316,8 +347,10 @@ fn main() {
             if !found {
                 let is_hydrogen = parsed_topo.masses[*global_idx] < 2.0;
                 if !args.gch || !is_hydrogen {
-                    eprintln!("Warning: Could not find atom '{}' in residue '{}' — set to (0,0,0)",
-                        topo_atom_name, topo_res_name);
+                    eprintln!(
+                        "Warning: Could not find atom '{}' in residue '{}' — set to (0,0,0)",
+                        topo_atom_name, topo_res_name
+                    );
                 }
                 missing_count += 1;
             }
@@ -328,15 +361,20 @@ fn main() {
             let used = used_map.get(&pdb_idx).unwrap();
             for (j, pdb_atom) in pdb_res.atoms.iter().enumerate() {
                 if !used[j] {
-                    eprintln!("Warning: Ignored PDB atom '{}' in residue '{}'",
-                        pdb_atom.name, pdb_res.name);
+                    eprintln!(
+                        "Warning: Ignored PDB atom '{}' in residue '{}'",
+                        pdb_atom.name, pdb_res.name
+                    );
                 }
             }
             pdb_idx += 1;
         }
     }
 
-    eprintln!("Matched {} atoms, {} missing (set to 0,0,0)", matched_count, missing_count);
+    eprintln!(
+        "Matched {} atoms, {} missing (set to 0,0,0)",
+        matched_count, missing_count
+    );
 
     // Write GROMOS96 POSITION block to stdout
     println!("TITLE");
@@ -362,7 +400,9 @@ fn main() {
             res_name,
             atom_name,
             i + 1,
-            x, y, z
+            x,
+            y,
+            z
         );
     }
     println!("END");

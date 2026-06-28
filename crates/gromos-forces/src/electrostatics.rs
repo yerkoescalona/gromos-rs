@@ -5,9 +5,7 @@
 //! - Particle Mesh Ewald (PME): FFT-based periodic electrostatics
 //! - P3M: Particle-Particle Particle-Mesh method
 
-use gromos_core::configuration::Configuration;
 use gromos_core::math::{Mat3, Vec3};
-use gromos_core::topology::Topology;
 
 use num_complex::Complex64;
 
@@ -106,7 +104,7 @@ impl ReactionFieldParameters {
     /// # Examples
     /// ```
     /// use gromos_forces::electrostatics::ReactionFieldParameters;
-    /// 
+    ///
     /// // GROMOS default: conducting boundary (epsilon_rf = infinity)
     /// let rf = ReactionFieldParameters::new(1.4, 1.0, 0.0, 0.0);
     ///
@@ -562,7 +560,7 @@ fn pme_influence_function(
     k_z: f64,
     alpha: f64,
     volume: f64,
-    spline_order: usize,
+    _spline_order: usize,
 ) -> f64 {
     let k2 = k_x * k_x + k_y * k_y + k_z * k_z;
 
@@ -826,7 +824,7 @@ pub fn pme_reciprocal_space(
     box_vectors: &Mat3,
     pme: &PMEParameters,
 ) -> (Vec<Vec3>, f64) {
-    let n_atoms = positions.len();
+    let _n_atoms = positions.len();
 
     // 1. Assign charges to grid using B-splines
     let charge_grid = assign_charges_to_grid(

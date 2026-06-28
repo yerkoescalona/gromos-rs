@@ -20,11 +20,11 @@ use gromos::{
     interaction::nonbonded::CRFParameters,
     io::{
         coordinate::read_coordinates,
+        distanceres::read_distanceres,
         energy::{EnergyFrame, EnergyWriter},
         force::ForceWriter,
         free_energy::{FreeEnergyFrame, FreeEnergyWriter},
         imd::read_imd_file,
-        distanceres::read_distanceres,
         posres::{build_posres_entries, read_posresspec, read_refpos},
         ptp::read_pttopo,
         topology::{build_topology, read_topology_file},
@@ -417,30 +417,63 @@ fn main() {
                     // are perturbed — GROMOS keeps them in disjoint sets.
                     {
                         use std::collections::HashSet;
-                        let pb: HashSet<(usize,usize)> = topo.perturbed_solute.bonds
-                            .iter().map(|b| (b.i.min(b.j), b.i.max(b.j)))
-                            .chain(topo.perturbed_solute.soft_bonds
-                                .iter().map(|b| (b.i.min(b.j), b.i.max(b.j))))
+                        let pb: HashSet<(usize, usize)> = topo
+                            .perturbed_solute
+                            .bonds
+                            .iter()
+                            .map(|b| (b.i.min(b.j), b.i.max(b.j)))
+                            .chain(
+                                topo.perturbed_solute
+                                    .soft_bonds
+                                    .iter()
+                                    .map(|b| (b.i.min(b.j), b.i.max(b.j))),
+                            )
                             .collect();
-                        topo.moltypes[0].bonds.retain(|b| !pb.contains(&(b.i.min(b.j), b.i.max(b.j))));
+                        topo.moltypes[0]
+                            .bonds
+                            .retain(|b| !pb.contains(&(b.i.min(b.j), b.i.max(b.j))));
 
-                        let pa: HashSet<(usize,usize,usize)> = topo.perturbed_solute.angles
-                            .iter().map(|a| (a.i, a.j, a.k))
-                            .chain(topo.perturbed_solute.soft_angles
-                                .iter().map(|a| (a.i, a.j, a.k)))
+                        let pa: HashSet<(usize, usize, usize)> = topo
+                            .perturbed_solute
+                            .angles
+                            .iter()
+                            .map(|a| (a.i, a.j, a.k))
+                            .chain(
+                                topo.perturbed_solute
+                                    .soft_angles
+                                    .iter()
+                                    .map(|a| (a.i, a.j, a.k)),
+                            )
                             .collect();
-                        topo.moltypes[0].angles.retain(|a| !pa.contains(&(a.i, a.j, a.k)));
+                        topo.moltypes[0]
+                            .angles
+                            .retain(|a| !pa.contains(&(a.i, a.j, a.k)));
 
-                        let pi: HashSet<(usize,usize,usize,usize)> = topo.perturbed_solute.improper_dihedrals
-                            .iter().map(|d| (d.i, d.j, d.k, d.l))
-                            .chain(topo.perturbed_solute.soft_impropers
-                                .iter().map(|d| (d.i, d.j, d.k, d.l)))
+                        let pi: HashSet<(usize, usize, usize, usize)> = topo
+                            .perturbed_solute
+                            .improper_dihedrals
+                            .iter()
+                            .map(|d| (d.i, d.j, d.k, d.l))
+                            .chain(
+                                topo.perturbed_solute
+                                    .soft_impropers
+                                    .iter()
+                                    .map(|d| (d.i, d.j, d.k, d.l)),
+                            )
                             .collect();
-                        topo.moltypes[0].improper_dihedrals.retain(|d| !pi.contains(&(d.i, d.j, d.k, d.l)));
+                        topo.moltypes[0]
+                            .improper_dihedrals
+                            .retain(|d| !pi.contains(&(d.i, d.j, d.k, d.l)));
 
-                        let pd: HashSet<(usize,usize,usize,usize)> = topo.perturbed_solute.proper_dihedrals
-                            .iter().map(|d| (d.i, d.j, d.k, d.l)).collect();
-                        topo.moltypes[0].proper_dihedrals.retain(|d| !pd.contains(&(d.i, d.j, d.k, d.l)));
+                        let pd: HashSet<(usize, usize, usize, usize)> = topo
+                            .perturbed_solute
+                            .proper_dihedrals
+                            .iter()
+                            .map(|d| (d.i, d.j, d.k, d.l))
+                            .collect();
+                        topo.moltypes[0]
+                            .proper_dihedrals
+                            .retain(|d| !pd.contains(&(d.i, d.j, d.k, d.l)));
                     }
 
                     println!(
@@ -455,11 +488,11 @@ fn main() {
                         topo.perturbed_solute.soft_angles.len(),
                         topo.perturbed_solute.soft_impropers.len(),
                     );
-                }
+                },
                 Err(e) => {
                     eprintln!("Error reading perturbation topology: {}", e);
                     process::exit(1);
-                }
+                },
             }
         } else {
             log::warn!("@pttopo provided but NTG=0 — perturbation topology ignored");
@@ -533,7 +566,9 @@ fn main() {
         let aps = topo.atoms_per_solvent();
         println!(
             "  Solvent: {} molecules × {} atoms = {} atoms",
-            nsm, aps, nsm * aps
+            nsm,
+            aps,
+            nsm * aps
         );
     }
     println!("  Total atoms: {}", topo.num_atoms());
@@ -882,8 +917,8 @@ fn main() {
     let distanceres_data = if imd.ntdir != 0 {
         if let Some(ref dr_file) = md_args.distrest_file {
             use gromos::interaction::restraints::{
-                DistanceRestraint, DistanceRestraints,
-                PerturbedDistanceRestraint, PerturbedDistanceRestraints,
+                DistanceRestraint, DistanceRestraints, PerturbedDistanceRestraint,
+                PerturbedDistanceRestraints,
             };
 
             let (unperturbed, perturbed) = read_distanceres(dr_file).unwrap_or_else(|e| {
@@ -909,9 +944,8 @@ fn main() {
             let mut pdr = PerturbedDistanceRestraints::new();
             for spec in &perturbed {
                 let r = PerturbedDistanceRestraint::new(
-                    spec.atom1, spec.atom2, spec.n, spec.m,
-                    spec.a_r0, spec.b_r0, spec.a_w0, spec.b_w0,
-                    spec.rah, k, r_linear, mode,
+                    spec.atom1, spec.atom2, spec.n, spec.m, spec.a_r0, spec.b_r0, spec.a_w0,
+                    spec.b_w0, spec.rah, k, r_linear, mode,
                 );
                 pdr.add(r);
             }
@@ -980,7 +1014,7 @@ fn main() {
             forcefield.lambda_and_derivative = imd.lambda_and_derivative();
             forcefield.lambda_exp = imd.nlam;
             forcefield.global_alphlj = imd.alphlj;
-            forcefield.global_alphc  = imd.alphc;
+            forcefield.global_alphc = imd.alphc;
         }
         md_sequence.push(Box::new(forcefield));
 
@@ -1091,7 +1125,7 @@ fn main() {
             forcefield.lambda_and_derivative = imd.lambda_and_derivative();
             forcefield.lambda_exp = imd.nlam;
             forcefield.global_alphlj = imd.alphlj;
-            forcefield.global_alphc  = imd.alphc;
+            forcefield.global_alphc = imd.alphc;
         }
         md_sequence.push(Box::new(forcefield));
 
@@ -1428,7 +1462,10 @@ fn main() {
 
     // Setup free-energy trajectory writer (@trg) — only when FEP is active (NTG != 0)
     let mut free_energy_writer: Option<FreeEnergyWriter> = if imd.ntg != 0 {
-        let trg_path = md_args.trg_file.clone().unwrap_or_else(|| "md.trg".to_string());
+        let trg_path = md_args
+            .trg_file
+            .clone()
+            .unwrap_or_else(|| "md.trg".to_string());
         match FreeEnergyWriter::new(&trg_path, "GROMOS-RS free energy trajectory") {
             Ok(w) => {
                 println!("  Free-energy output: {}", trg_path);
@@ -1790,12 +1827,9 @@ fn main() {
                     let rotated_forces: Vec<Vec3> = forces.iter().map(|f| rot * *f).collect();
                     let rotated_constraints: Option<Vec<Vec3>> =
                         constraint_forces.map(|cf| cf.iter().map(|f| rot * *f).collect());
-                    if let Err(e) = fw.write_frame(
-                        step,
-                        time,
-                        &rotated_forces,
-                        rotated_constraints.as_deref(),
-                    ) {
+                    if let Err(e) =
+                        fw.write_frame(step, time, &rotated_forces, rotated_constraints.as_deref())
+                    {
                         eprintln!("Error writing forces: {}", e);
                     }
                 } else if let Err(e) = fw.write_frame(step, time, forces, constraint_forces) {

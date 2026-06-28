@@ -18,7 +18,13 @@ use crate::IoError;
 /// 1-indexed (GROMOS) to 0-indexed (Rust).
 pub fn read_distanceres<P: AsRef<Path>>(
     path: P,
-) -> Result<(Vec<DistanceRestraintSpec>, Vec<PerturbedDistanceRestraintSpec>), IoError> {
+) -> Result<
+    (
+        Vec<DistanceRestraintSpec>,
+        Vec<PerturbedDistanceRestraintSpec>,
+    ),
+    IoError,
+> {
     let file = File::open(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
     let reader = BufReader::new(file);
@@ -27,7 +33,11 @@ pub fn read_distanceres<P: AsRef<Path>>(
     let mut perturbed = Vec::new();
 
     #[derive(PartialEq)]
-    enum Block { None, Dist, Pert }
+    enum Block {
+        None,
+        Dist,
+        Pert,
+    }
     let mut block = Block::None;
     let mut header_lines = 0usize; // skip DISH/DISC line
 
@@ -89,17 +99,23 @@ pub fn read_distanceres<P: AsRef<Path>>(
                     IoError::ParseError(format!("Invalid atom index: {}", tokens[5]))
                 })?;
                 let atom2 = atom2_1 - 1;
-                let r0: f64 = tokens[10].parse::<f64>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid r0: {}", tokens[10]))
-                })?;
-                let w0: f64 = tokens[11].parse::<f64>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid w0: {}", tokens[11]))
-                })?;
-                let rah: i32 = tokens[12].parse::<i32>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid rah: {}", tokens[12]))
-                })?;
-                unperturbed.push(DistanceRestraintSpec { atom1, atom2, r0, w0, rah });
-            }
+                let r0: f64 = tokens[10]
+                    .parse::<f64>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid r0: {}", tokens[10])))?;
+                let w0: f64 = tokens[11]
+                    .parse::<f64>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid w0: {}", tokens[11])))?;
+                let rah: i32 = tokens[12]
+                    .parse::<i32>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid rah: {}", tokens[12])))?;
+                unperturbed.push(DistanceRestraintSpec {
+                    atom1,
+                    atom2,
+                    r0,
+                    w0,
+                    rah,
+                });
+            },
             Block::Pert => {
                 // Format: i j k l type  i j k l type  n m  A_r0 A_w0 B_r0 B_w0 rah
                 //          0 1 2 3  4   5 6 7 8  9   10 11  12   13   14   15   16
@@ -124,32 +140,40 @@ pub fn read_distanceres<P: AsRef<Path>>(
                     IoError::ParseError(format!("Invalid atom index: {}", tokens[5]))
                 })?;
                 let atom2 = atom2_1 - 1;
-                let n: i32 = tokens[10].parse::<i32>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid n: {}", tokens[10]))
-                })?;
-                let m: i32 = tokens[11].parse::<i32>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid m: {}", tokens[11]))
-                })?;
-                let a_r0: f64 = tokens[12].parse::<f64>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid A_r0: {}", tokens[12]))
-                })?;
-                let a_w0: f64 = tokens[13].parse::<f64>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid A_w0: {}", tokens[13]))
-                })?;
-                let b_r0: f64 = tokens[14].parse::<f64>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid B_r0: {}", tokens[14]))
-                })?;
-                let b_w0: f64 = tokens[15].parse::<f64>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid B_w0: {}", tokens[15]))
-                })?;
-                let rah: i32 = tokens[16].parse::<i32>().map_err(|_| {
-                    IoError::ParseError(format!("Invalid rah: {}", tokens[16]))
-                })?;
+                let n: i32 = tokens[10]
+                    .parse::<i32>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid n: {}", tokens[10])))?;
+                let m: i32 = tokens[11]
+                    .parse::<i32>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid m: {}", tokens[11])))?;
+                let a_r0: f64 = tokens[12]
+                    .parse::<f64>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid A_r0: {}", tokens[12])))?;
+                let a_w0: f64 = tokens[13]
+                    .parse::<f64>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid A_w0: {}", tokens[13])))?;
+                let b_r0: f64 = tokens[14]
+                    .parse::<f64>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid B_r0: {}", tokens[14])))?;
+                let b_w0: f64 = tokens[15]
+                    .parse::<f64>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid B_w0: {}", tokens[15])))?;
+                let rah: i32 = tokens[16]
+                    .parse::<i32>()
+                    .map_err(|_| IoError::ParseError(format!("Invalid rah: {}", tokens[16])))?;
                 perturbed.push(PerturbedDistanceRestraintSpec {
-                    atom1, atom2, n, m, a_r0, b_r0, a_w0, b_w0, rah,
+                    atom1,
+                    atom2,
+                    n,
+                    m,
+                    a_r0,
+                    b_r0,
+                    a_w0,
+                    b_w0,
+                    rah,
                 });
-            }
-            Block::None => {}
+            },
+            Block::None => {},
         }
     }
 

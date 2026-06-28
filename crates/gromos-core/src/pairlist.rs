@@ -197,17 +197,34 @@ impl StandardPairlistAlgorithm {
             .map(|i| topo.chargegroups[i].center_of_geometry(&conf.current().pos))
             .collect();
 
-        log::debug!("Pairlist update: {} CGs total, {} solute CGs, cutoff_short²={:.6}, cutoff_long²={:.6}",
-            n_chargegroups, n_solute_cg, cutoff2_short, cutoff2_long);
+        log::debug!(
+            "Pairlist update: {} CGs total, {} solute CGs, cutoff_short²={:.6}, cutoff_long²={:.6}",
+            n_chargegroups,
+            n_solute_cg,
+            cutoff2_short,
+            cutoff2_long
+        );
         for i in 0..n_solute_cg {
-            log::debug!("  Solute CG {}: atoms={:?}, COG=({:.6},{:.6},{:.6})",
-                i, topo.chargegroups[i].atoms, cg_cog[i].x, cg_cog[i].y, cg_cog[i].z);
+            log::debug!(
+                "  Solute CG {}: atoms={:?}, COG=({:.6},{:.6},{:.6})",
+                i,
+                topo.chargegroups[i].atoms,
+                cg_cog[i].x,
+                cg_cog[i].y,
+                cg_cog[i].z
+            );
         }
         for i in n_solute_cg..n_chargegroups {
             let fa = topo.chargegroups[i].atoms[0];
-            log::debug!("  Solvent CG {}: first_atom={}, pos=({:.6},{:.6},{:.6}), atoms={:?}",
-                i, fa, conf.current().pos[fa].x, conf.current().pos[fa].y, conf.current().pos[fa].z,
-                topo.chargegroups[i].atoms);
+            log::debug!(
+                "  Solvent CG {}: first_atom={}, pos=({:.6},{:.6},{:.6}), atoms={:?}",
+                i,
+                fa,
+                conf.current().pos[fa].x,
+                conf.current().pos[fa].y,
+                conf.current().pos[fa].z,
+                topo.chargegroups[i].atoms
+            );
         }
 
         // === Solute CGs ===
@@ -237,15 +254,25 @@ impl StandardPairlistAlgorithm {
                 let dist2 = r.length_squared();
 
                 if dist2 > cutoff2_long {
-                    log::debug!("  Solute-Solute CG({},{}) SKIP dist={:.6} > long_cut={:.6}",
-                        cg1, cg2, dist2.sqrt(), cutoff2_long.sqrt());
+                    log::debug!(
+                        "  Solute-Solute CG({},{}) SKIP dist={:.6} > long_cut={:.6}",
+                        cg1,
+                        cg2,
+                        dist2.sqrt(),
+                        cutoff2_long.sqrt()
+                    );
                     n_solute_solute_skip += 1;
                     continue;
                 }
 
                 n_solute_solute_cg_pairs += 1;
                 if dist2 > cutoff2_short {
-                    log::debug!("  Solute-Solute CG({},{}) LONG dist={:.6}", cg1, cg2, dist2.sqrt());
+                    log::debug!(
+                        "  Solute-Solute CG({},{}) LONG dist={:.6}",
+                        cg1,
+                        cg2,
+                        dist2.sqrt()
+                    );
                     // Long-range (no exclusion check in GROMOS for long-range solute-solute)
                     for &a1 in &topo.chargegroups[cg1].atoms {
                         for &a2 in &topo.chargegroups[cg2].atoms {
@@ -255,7 +282,12 @@ impl StandardPairlistAlgorithm {
                     continue;
                 }
 
-                log::debug!("  Solute-Solute CG({},{}) SHORT dist={:.6}", cg1, cg2, dist2.sqrt());
+                log::debug!(
+                    "  Solute-Solute CG({},{}) SHORT dist={:.6}",
+                    cg1,
+                    cg2,
+                    dist2.sqrt()
+                );
                 // Short-range with exclusion check
                 for &a1 in &topo.chargegroups[cg1].atoms {
                     for &a2 in &topo.chargegroups[cg2].atoms {
@@ -271,19 +303,30 @@ impl StandardPairlistAlgorithm {
             // Solute-solvent pairs (solvent CG distance uses first-atom position)
             for cg2 in n_solute_cg..n_chargegroups {
                 let solvent_first_atom = topo.chargegroups[cg2].atoms[0];
-                let r = periodicity.nearest_image(cg_cog[cg1], conf.current().pos[solvent_first_atom]);
+                let r =
+                    periodicity.nearest_image(cg_cog[cg1], conf.current().pos[solvent_first_atom]);
                 let dist2 = r.length_squared();
 
                 if dist2 > cutoff2_long {
-                    log::debug!("  Solute({})-Solvent({}) SKIP dist={:.6} > long_cut={:.6}",
-                        cg1, cg2, dist2.sqrt(), cutoff2_long.sqrt());
+                    log::debug!(
+                        "  Solute({})-Solvent({}) SKIP dist={:.6} > long_cut={:.6}",
+                        cg1,
+                        cg2,
+                        dist2.sqrt(),
+                        cutoff2_long.sqrt()
+                    );
                     n_solute_solvent_skip += 1;
                     continue;
                 }
 
                 n_solute_solvent_cg_pairs += 1;
                 if dist2 > cutoff2_short {
-                    log::debug!("  Solute({})-Solvent({}) LONG dist={:.6}", cg1, cg2, dist2.sqrt());
+                    log::debug!(
+                        "  Solute({})-Solvent({}) LONG dist={:.6}",
+                        cg1,
+                        cg2,
+                        dist2.sqrt()
+                    );
                     for &a1 in &topo.chargegroups[cg1].atoms {
                         for &a2 in &topo.chargegroups[cg2].atoms {
                             pairlist.solute_long.push((a1, a2));
@@ -292,7 +335,12 @@ impl StandardPairlistAlgorithm {
                     continue;
                 }
 
-                log::debug!("  Solute({})-Solvent({}) SHORT dist={:.6}", cg1, cg2, dist2.sqrt());
+                log::debug!(
+                    "  Solute({})-Solvent({}) SHORT dist={:.6}",
+                    cg1,
+                    cg2,
+                    dist2.sqrt()
+                );
                 // Short-range: no exclusion check for solute-solvent (GROMOS convention)
                 for &a1 in &topo.chargegroups[cg1].atoms {
                     for &a2 in &topo.chargegroups[cg2].atoms {
@@ -320,16 +368,29 @@ impl StandardPairlistAlgorithm {
                 let dist2 = r.length_squared();
 
                 if dist2 > cutoff2_long {
-                    log::debug!("  Solvent({},a{})-Solvent({},a{}) SKIP dist={:.6} > long_cut={:.6}",
-                        cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt(), cutoff2_long.sqrt());
+                    log::debug!(
+                        "  Solvent({},a{})-Solvent({},a{}) SKIP dist={:.6} > long_cut={:.6}",
+                        cg1,
+                        first_atom_1,
+                        cg2,
+                        first_atom_2,
+                        dist2.sqrt(),
+                        cutoff2_long.sqrt()
+                    );
                     n_solvent_solvent_skip += 1;
                     continue;
                 }
 
                 n_solvent_solvent_cg_pairs += 1;
                 if dist2 > cutoff2_short {
-                    log::debug!("  Solvent({},a{})-Solvent({},a{}) LONG dist={:.6}",
-                        cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt());
+                    log::debug!(
+                        "  Solvent({},a{})-Solvent({},a{}) LONG dist={:.6}",
+                        cg1,
+                        first_atom_1,
+                        cg2,
+                        first_atom_2,
+                        dist2.sqrt()
+                    );
                     // Long-range: expand to all atom pairs (GROMOS standard
                     // mode uses per-atom nearest_image, not shared PBC shift)
                     for &a1 in &topo.chargegroups[cg1].atoms {
@@ -340,8 +401,14 @@ impl StandardPairlistAlgorithm {
                     continue;
                 }
 
-                log::debug!("  Solvent({},a{})-Solvent({},a{}) SHORT dist={:.6}",
-                    cg1, first_atom_1, cg2, first_atom_2, dist2.sqrt());
+                log::debug!(
+                    "  Solvent({},a{})-Solvent({},a{}) SHORT dist={:.6}",
+                    cg1,
+                    first_atom_1,
+                    cg2,
+                    first_atom_2,
+                    dist2.sqrt()
+                );
                 // Short-range solvent-solvent: store first-atom pair only
                 pairlist.solvent_short.push((first_atom_1, first_atom_2));
             }
@@ -349,13 +416,29 @@ impl StandardPairlistAlgorithm {
 
         log::debug!("CG pairlist summary:");
         log::debug!("  Solute intra-CG pairs: {}", n_intra_cg_pairs);
-        log::debug!("  Solute-Solute CG pairs: {} included, {} skipped", n_solute_solute_cg_pairs, n_solute_solute_skip);
-        log::debug!("  Solute-Solvent CG pairs: {} included, {} skipped", n_solute_solvent_cg_pairs, n_solute_solvent_skip);
-        log::debug!("  Solvent-Solvent CG pairs: {} included, {} skipped", n_solvent_solvent_cg_pairs, n_solvent_solvent_skip);
-        log::debug!("  solute_short={}, solute_long={}, solvent_short={}, solvent_long={}, cutoff={:.4}",
-            pairlist.solute_short.len(), pairlist.solute_long.len(),
-            pairlist.solvent_short.len(), pairlist.solvent_long.len(),
-            pairlist.short_range_cutoff);
+        log::debug!(
+            "  Solute-Solute CG pairs: {} included, {} skipped",
+            n_solute_solute_cg_pairs,
+            n_solute_solute_skip
+        );
+        log::debug!(
+            "  Solute-Solvent CG pairs: {} included, {} skipped",
+            n_solute_solvent_cg_pairs,
+            n_solute_solvent_skip
+        );
+        log::debug!(
+            "  Solvent-Solvent CG pairs: {} included, {} skipped",
+            n_solvent_solvent_cg_pairs,
+            n_solvent_solvent_skip
+        );
+        log::debug!(
+            "  solute_short={}, solute_long={}, solvent_short={}, solvent_long={}, cutoff={:.4}",
+            pairlist.solute_short.len(),
+            pairlist.solute_long.len(),
+            pairlist.solvent_short.len(),
+            pairlist.solvent_long.len(),
+            pairlist.short_range_cutoff
+        );
     }
 
     /// Atom-based pairlist generation (simpler, no chargegroups)
@@ -440,8 +523,12 @@ impl CellListPairlistAlgorithm {
         } else {
             // Axis-aligned cells aren't periodicity-safe for vacuum/triclinic
             // boxes; fall back to the always-correct O(N^2) path.
-            StandardPairlistAlgorithm::new(true)
-                .update_chargegroup_based(topo, conf, pairlist, periodicity);
+            StandardPairlistAlgorithm::new(true).update_chargegroup_based(
+                topo,
+                conf,
+                pairlist,
+                periodicity,
+            );
         }
 
         pairlist.reset_counter();
@@ -531,8 +618,16 @@ impl CellListPairlistAlgorithm {
                     for i in 0..members.len() {
                         for &cg2 in &members[i + 1..] {
                             process_cg_pair(
-                                members[i], cg2, topo, positions, periodicity, pairlist,
-                                n_solute_cg, &cg_cog, cutoff2_short, cutoff2_long,
+                                members[i],
+                                cg2,
+                                topo,
+                                positions,
+                                periodicity,
+                                pairlist,
+                                n_solute_cg,
+                                &cg_cog,
+                                cutoff2_short,
+                                cutoff2_long,
                             );
                         }
                     }
@@ -540,8 +635,16 @@ impl CellListPairlistAlgorithm {
                     for &cg1 in &cells[cell_a] {
                         for &cg2 in &cells[cell_b] {
                             process_cg_pair(
-                                cg1, cg2, topo, positions, periodicity, pairlist,
-                                n_solute_cg, &cg_cog, cutoff2_short, cutoff2_long,
+                                cg1,
+                                cg2,
+                                topo,
+                                positions,
+                                periodicity,
+                                pairlist,
+                                n_solute_cg,
+                                &cg_cog,
+                                cutoff2_short,
+                                cutoff2_long,
                             );
                         }
                     }
@@ -738,10 +841,13 @@ impl PairlistAlgorithm {
 
 /// Parallel pairlist generation using Rayon
 pub struct ParallelPairlistAlgorithm {
+    // TODO: rewire once the parallel update delegates to StandardPairlistAlgorithm
+    #[allow(dead_code)]
     base_algorithm: StandardPairlistAlgorithm,
 }
 
 impl ParallelPairlistAlgorithm {
+    /// Create a parallel pairlist algorithm instance.
     pub fn new(use_chargegroups: bool) -> Self {
         Self {
             base_algorithm: StandardPairlistAlgorithm::new(use_chargegroups),
@@ -824,41 +930,106 @@ mod tests {
     #[test]
     fn test_from_imd_explicit_standard() {
         // algorithm=0 "standard" → Standard always
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 6000, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 10, BoxType::Vacuum, false)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            0,
+            6000,
+            BoxType::Rectangular,
+            true
+        )));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            0,
+            10,
+            BoxType::Vacuum,
+            false
+        )));
     }
 
     #[test]
     fn test_from_imd_grid_falls_back_to_standard() {
         // algorithm=1 "grid" → ExtendedGrid not yet ported; must give Standard (safe fallback),
         // never CellList — preserving faithful gromosXX slot semantics.
-        assert!(is_standard(&PairlistAlgorithm::from_imd(1, 10, BoxType::Vacuum, false)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(1, 10, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(1, 6000, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            1,
+            10,
+            BoxType::Vacuum,
+            false
+        )));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            1,
+            10,
+            BoxType::Rectangular,
+            true
+        )));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            1,
+            6000,
+            BoxType::Rectangular,
+            true
+        )));
     }
 
     #[test]
     fn test_from_imd_grid_cell_gives_cell_list() {
         // algorithm=2 "grid_cell" → CellList (Heinz & Hünenberger 2004), regardless of size/box
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(2, 10, BoxType::Vacuum, false)));
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(2, 10, BoxType::Rectangular, true)));
-        assert!(is_cell_list(&PairlistAlgorithm::from_imd(2, 6000, BoxType::Rectangular, true)));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(
+            2,
+            10,
+            BoxType::Vacuum,
+            false
+        )));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(
+            2,
+            10,
+            BoxType::Rectangular,
+            true
+        )));
+        assert!(is_cell_list(&PairlistAlgorithm::from_imd(
+            2,
+            6000,
+            BoxType::Rectangular,
+            true
+        )));
     }
 
     #[test]
     fn test_from_imd_standard_is_always_standard() {
         // algorithm=0 "standard" forces Standard regardless of size or box type —
         // ALGORITHM standard means Standard, no auto-heuristic overrides it.
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 648, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 2998, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(0, 10000, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            0,
+            648,
+            BoxType::Rectangular,
+            true
+        )));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            0,
+            2998,
+            BoxType::Rectangular,
+            true
+        )));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            0,
+            10000,
+            BoxType::Rectangular,
+            true
+        )));
     }
 
     #[test]
     fn test_from_imd_unknown_algorithm_falls_back_to_standard() {
         // Unrecognised algorithm values → Standard (safe fallback, no auto-heuristic)
-        assert!(is_standard(&PairlistAlgorithm::from_imd(99, 10000, BoxType::Rectangular, true)));
-        assert!(is_standard(&PairlistAlgorithm::from_imd(-1, 648, BoxType::Rectangular, true)));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            99,
+            10000,
+            BoxType::Rectangular,
+            true
+        )));
+        assert!(is_standard(&PairlistAlgorithm::from_imd(
+            -1,
+            648,
+            BoxType::Rectangular,
+            true
+        )));
     }
 
     #[test]
@@ -891,7 +1062,7 @@ mod tests {
     #[test]
     fn test_standard_pairlist() {
         let mut topo = Topology::new();
-        
+
         // Set solute atoms FIRST - populate the atoms vector
         use crate::topology::Atom;
         for i in 0..4 {
@@ -907,16 +1078,27 @@ mod tests {
                 is_coarse_grained: false,
             });
         }
-        
+
         // Now resize arrays (uses num_atoms() which counts solute.atoms)
         topo.iac = vec![0; 4];
         topo.mass = vec![1.0; 4];
         topo.charge = vec![0.0; 4];
         topo.resize_atom_arrays();
         topo.compute_inverse_masses();
-        
+
         // Initialize LJ parameter matrix (needed for pairlist)
-        topo.lj_parameters = vec![vec![crate::topology::LJParameters { c6: 0.001, c12: 0.0001, cs6: 0.0005, cs12: 0.00005 }; 1]; 1];
+        topo.lj_parameters = vec![
+            vec![
+                crate::topology::LJParameters {
+                    c6: 0.001,
+                    c12: 0.0001,
+                    cs6: 0.0005,
+                    cs12: 0.00005
+                };
+                1
+            ];
+            1
+        ];
 
         let mut conf = Configuration::new(4, 1, 1);
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
@@ -985,7 +1167,8 @@ mod tests {
         topo.solvate(n_molecules);
 
         let mut conf = Configuration::new(n_molecules, 1, 1);
-        conf.current_mut().box_config = crate::configuration::Box::rectangular(box_len, box_len, box_len);
+        conf.current_mut().box_config =
+            crate::configuration::Box::rectangular(box_len, box_len, box_len);
         for (i, pos) in conf.current_mut().pos.iter_mut().enumerate() {
             let f = i as f64;
             *pos = Vec3::new(
@@ -1050,9 +1233,21 @@ mod tests {
         }
         // Bonds: (0,1) and (2,3) within chargegroups, (1,2) across them
         // (an excluded cross-CG pair, to exercise the exclusion check).
-        topo.moltypes[0].bonds.push(Bond { i: 0, j: 1, bond_type: 0 });
-        topo.moltypes[0].bonds.push(Bond { i: 2, j: 3, bond_type: 0 });
-        topo.moltypes[0].bonds.push(Bond { i: 1, j: 2, bond_type: 0 });
+        topo.moltypes[0].bonds.push(Bond {
+            i: 0,
+            j: 1,
+            bond_type: 0,
+        });
+        topo.moltypes[0].bonds.push(Bond {
+            i: 2,
+            j: 3,
+            bond_type: 0,
+        });
+        topo.moltypes[0].bonds.push(Bond {
+            i: 1,
+            j: 2,
+            bond_type: 0,
+        });
         topo.iac = vec![0; 4];
         topo.mass = vec![1.0; 4];
         topo.charge = vec![0.0; 4];

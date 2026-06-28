@@ -15,7 +15,7 @@ pub fn calculate_rmsd(positions: &[Vec3], reference: &[Vec3]) -> f64 {
             let dx = p.x - r.x;
             let dy = p.y - r.y;
             let dz = p.z - r.z;
-            (dx * dx + dy * dy + dz * dz)
+            dx * dx + dy * dy + dz * dz
         })
         .sum();
 

@@ -279,25 +279,46 @@ pub fn write_pdb_positions<P: AsRef<Path>>(
     writeln!(file, "REMARK {title}").map_err(|e| format!("{e}"))?;
     if let Some(b) = box_dims {
         if b.x > 0.0 {
-            writeln!(file,
+            writeln!(
+                file,
                 "CRYST1{:9.3}{:9.3}{:9.3}{:7.2}{:7.2}{:7.2} P 1",
-                b.x*10., b.y*10., b.z*10., 90., 90., 90.)
-                .map_err(|e| format!("{e}"))?;
+                b.x * 10.,
+                b.y * 10.,
+                b.z * 10.,
+                90.,
+                90.,
+                90.
+            )
+            .map_err(|e| format!("{e}"))?;
         }
     }
     for (i, pos) in positions.iter().enumerate() {
         let (aname, rname, rnum) = if let Some(t) = topology {
-            (t.atom_name(i).unwrap_or("X").to_string(),
-             t.residue_name(i).unwrap_or("UNK").to_string(),
-             t.residue_nr(i).unwrap_or(1) as i32)
+            (
+                t.atom_name(i).unwrap_or("X").to_string(),
+                t.residue_name(i).unwrap_or("UNK").to_string(),
+                t.residue_nr(i).unwrap_or(1) as i32,
+            )
         } else {
-            (format!("A{}", (i%100)+1), "MOL".into(), (i/100+1) as i32)
+            (
+                format!("A{}", (i % 100) + 1),
+                "MOL".into(),
+                (i / 100 + 1) as i32,
+            )
         };
-        writeln!(file,
+        writeln!(
+            file,
             "ATOM  {:5} {:<4} {:3} A{:4}    {:8.3}{:8.3}{:8.3}  1.00  0.00          {:>2}",
-            (i+1)%100000, aname, rname, rnum,
-            pos.x*10., pos.y*10., pos.z*10., &aname[..1.min(aname.len())])
-            .map_err(|e| format!("{e}"))?;
+            (i + 1) % 100000,
+            aname,
+            rname,
+            rnum,
+            pos.x * 10.,
+            pos.y * 10.,
+            pos.z * 10.,
+            &aname[..1.min(aname.len())]
+        )
+        .map_err(|e| format!("{e}"))?;
     }
     writeln!(file, "END").map_err(|e| format!("{e}"))?;
     Ok(())

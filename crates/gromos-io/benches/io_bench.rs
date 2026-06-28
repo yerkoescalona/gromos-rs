@@ -23,13 +23,14 @@ fn bench_trajectory_write(c: &mut Criterion) {
             b.iter_with_setup(
                 || {
                     let path = std::env::temp_dir().join(format!("bench_traj_{n}.trc"));
-                    let writer =
-                        TrajectoryWriter::new(&path, "bench", false, false).unwrap();
+                    let writer = TrajectoryWriter::new(&path, "bench", false, false).unwrap();
                     let conf = make_conf(n);
                     (writer, conf, path)
                 },
                 |(mut writer, conf, path)| {
-                    writer.write_frame(black_box(0), black_box(0.0), &conf).unwrap();
+                    writer
+                        .write_frame(black_box(0), black_box(0.0), &conf)
+                        .unwrap();
                     drop(writer);
                     std::fs::remove_file(path).ok();
                 },
@@ -63,9 +64,7 @@ fn bench_force_write(c: &mut Criterion) {
 
     for n in [10usize, 100, 1_000] {
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
-            let forces: Vec<Vec3> = (0..n)
-                .map(|i| Vec3::new(i, i * 0.5, i * 0.25))
-                .collect();
+            let forces: Vec<Vec3> = (0..n).map(|i| Vec3::new(i, i * 0.5, i * 0.25)).collect();
 
             b.iter_with_setup(
                 || {
@@ -74,7 +73,9 @@ fn bench_force_write(c: &mut Criterion) {
                     (writer, path)
                 },
                 |(mut writer, path)| {
-                    writer.write_frame(black_box(0), black_box(0.0), &forces, None).unwrap();
+                    writer
+                        .write_frame(black_box(0), black_box(0.0), &forces, None)
+                        .unwrap();
                     drop(writer);
                     std::fs::remove_file(path).ok();
                 },
@@ -85,5 +86,10 @@ fn bench_force_write(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_trajectory_write, bench_energy_write, bench_force_write);
+criterion_group!(
+    benches,
+    bench_trajectory_write,
+    bench_energy_write,
+    bench_force_write
+);
 criterion_main!(benches);

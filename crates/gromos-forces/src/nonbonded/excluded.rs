@@ -1,8 +1,8 @@
 //! RF excluded-pair corrections and 1-4 interaction loop
 
-use gromos_core::math::{BoundaryCondition, Vec3};
-use super::{LJParamMatrix, CRFParameters, ForceStorage};
 use super::params::FOUR_PI_EPS_I;
+use super::{CRFParameters, ForceStorage, LJParamMatrix};
+use gromos_core::math::{BoundaryCondition, Vec3};
 
 /// Calculate reaction-field self-energy and excluded-pair corrections.
 ///
@@ -103,9 +103,21 @@ pub fn rf_excluded_interactions<BC: BoundaryCondition>(
             }
         }
     }
-    log::debug!("  RF solute: self={:.10e}, excl={:.10e} ({} pairs)", e_self, e_excl_solute, n_solute_excl);
-    log::debug!("  RF solvent: excl={:.10e} ({} pairs)", e_excl_solvent, n_solvent_excl);
-    log::debug!("  RF total_corr={:.10e}", e_self + e_excl_solute + e_excl_solvent);
+    log::debug!(
+        "  RF solute: self={:.10e}, excl={:.10e} ({} pairs)",
+        e_self,
+        e_excl_solute,
+        n_solute_excl
+    );
+    log::debug!(
+        "  RF solvent: excl={:.10e} ({} pairs)",
+        e_excl_solvent,
+        n_solvent_excl
+    );
+    log::debug!(
+        "  RF total_corr={:.10e}",
+        e_self + e_excl_solute + e_excl_solvent
+    );
 }
 
 /// Calculate 1-4 nonbonded interactions (LJ with cs6/cs12 + CRF with coulomb scaling).
@@ -194,5 +206,10 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
 
     storage.e_lj += e_lj_14;
     storage.e_crf += e_crf_14;
-    log::debug!("  1-4 interactions: e_lj={:.10e}, e_crf={:.10e} ({} pairs)", e_lj_14, e_crf_14, n_pairs);
+    log::debug!(
+        "  1-4 interactions: e_lj={:.10e}, e_crf={:.10e} ({} pairs)",
+        e_lj_14,
+        e_crf_14,
+        n_pairs
+    );
 }

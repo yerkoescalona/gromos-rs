@@ -84,20 +84,20 @@ pub fn read_script_template<P: AsRef<Path>>(path: P) -> Result<ScriptTemplate, I
             "TITLE" | "LINKADDITION" => {
                 section = Section::Skip;
                 continue;
-            }
+            },
             "FILENAMES" => {
                 section = Section::Filenames;
                 continue;
-            }
+            },
             "MISCELLANEOUS" => {
                 section = Section::Miscellaneous;
                 continue;
-            }
+            },
             "END" => {
                 section = Section::None;
                 continue;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         match section {
@@ -106,14 +106,14 @@ pub fn read_script_template<P: AsRef<Path>>(path: P) -> Result<ScriptTemplate, I
                 if parts.len() == 2 {
                     filenames.insert(parts[0].to_string(), parts[1].trim().to_string());
                 }
-            }
+            },
             Section::Miscellaneous => {
                 let parts: Vec<&str> = trimmed.splitn(2, char::is_whitespace).collect();
                 if parts.len() == 2 {
                     misc.insert(parts[0].to_string(), parts[1].trim().to_string());
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 

@@ -32,8 +32,8 @@
 //! Note: For dedicated force trajectory output with FREEFORCERED/CONSFORCERED blocks,
 //! use the `ForceWriter` from `io::force` module instead.
 
-use gromos_core::configuration::Configuration;
 use crate::IoError;
+use gromos_core::configuration::Configuration;
 use gromos_core::math::Vec3;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
@@ -94,7 +94,11 @@ impl TrajectoryWriter {
         if self.write_forces {
             writeln!(self.writer, "FREEFORCERED")?;
             for force in &state.force {
-                writeln!(self.writer, "{:18.9}{:18.9}{:18.9}", force.x, force.y, force.z)?;
+                writeln!(
+                    self.writer,
+                    "{:18.9}{:18.9}{:18.9}",
+                    force.x, force.y, force.z
+                )?;
             }
             writeln!(self.writer, "END")?;
         }
@@ -383,13 +387,20 @@ impl TrajectoryReader {
             let parts: Vec<&str> = line.split_whitespace().collect();
             // Standard GROMOS POSITIONRED: 3 columns (x y z)
             // Legacy 7-column format: atom_num RES ATOM serial x y z
-            let (xi, yi, zi) = if parts.len() == 3 { (0, 1, 2) } else { (4, 5, 6) };
+            let (xi, yi, zi) = if parts.len() == 3 {
+                (0, 1, 2)
+            } else {
+                (4, 5, 6)
+            };
             if parts.len() >= zi + 1 {
-                let x = parts[xi].parse::<f64>()
+                let x = parts[xi]
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid x: {e}")))?;
-                let y = parts[yi].parse::<f64>()
+                let y = parts[yi]
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid y: {e}")))?;
-                let z = parts[zi].parse::<f64>()
+                let z = parts[zi]
+                    .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid z: {e}")))?;
                 positions.push(Vec3::new(x, y, z));
             }
@@ -536,6 +547,8 @@ impl TrajectoryReader {
         Ok(Some(shifts))
     }
 
+    // TODO: wire up when GENBOX block reading is needed for box reshaping
+    #[allow(dead_code)]
     fn read_genbox_block(
         reader: &mut BufReader<File>,
         buffer: &mut String,
@@ -583,7 +596,9 @@ impl TrajectoryReader {
     ) -> Result<Vec3, IoError> {
         let pos = reader.stream_position()?;
         buffer.clear();
-        if reader.read_line(buffer)? == 0 { return Ok(Vec3::ZERO); }
+        if reader.read_line(buffer)? == 0 {
+            return Ok(Vec3::ZERO);
+        }
         if !buffer.trim().starts_with("GENBOX") {
             // Not GENBOX — rewind and return zero box (vacuum)
             reader.seek(std::io::SeekFrom::Start(pos))?;
@@ -593,7 +608,9 @@ impl TrajectoryReader {
         buffer.clear();
         reader.read_line(buffer)?;
         let parts: Vec<&str> = buffer.trim().split_whitespace().collect();
-        if parts.len() < 3 { return Ok(Vec3::ZERO); }
+        if parts.len() < 3 {
+            return Ok(Vec3::ZERO);
+        }
         let lx = parts[0].parse::<f64>().unwrap_or(0.0);
         let ly = parts[1].parse::<f64>().unwrap_or(0.0);
         let lz = parts[2].parse::<f64>().unwrap_or(0.0);
@@ -607,9 +624,8 @@ impl TrajectoryReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use gromos_core::math::Vec3;
-    use std::io::Read;
-    use gromos_core::configuration::{Box as SimBox, Configuration};
 
     fn round_trip(positions: Vec<Vec3>, box_dims: Option<Vec3>) -> TrajectoryFrame {
         let tmp = std::env::temp_dir().join(format!("gromos_trc_test_{}.trc", std::process::id()));
@@ -629,18 +645,27 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("gromos_fmt_{}.trc", std::process::id()));
         {
             let mut w = TrajectoryWriter::new(&tmp, "fmt test", false, false).unwrap();
-            w.write_trc_frame(1, 0.002, &[Vec3::new(1.0, 2.0, 3.0)], None).unwrap();
+            w.write_trc_frame(1, 0.002, &[Vec3::new(1.0, 2.0, 3.0)], None)
+                .unwrap();
             w.flush().unwrap();
         }
         let content = std::fs::read_to_string(&tmp).unwrap();
         std::fs::remove_file(&tmp).ok();
 
         // POSITIONRED line must have exactly 3 floats (standard GROMOS format)
-        let pos_line = content.lines()
+        let pos_line = content
+            .lines()
             .skip_while(|l| !l.starts_with("POSITIONRED"))
-            .nth(1).unwrap().trim().to_string();
+            .nth(1)
+            .unwrap()
+            .trim()
+            .to_string();
         let cols: Vec<&str> = pos_line.split_whitespace().collect();
-        assert_eq!(cols.len(), 3, "POSITIONRED must have 3 columns, got: {pos_line}");
+        assert_eq!(
+            cols.len(),
+            3,
+            "POSITIONRED must have 3 columns, got: {pos_line}"
+        );
         assert!((cols[0].parse::<f64>().unwrap() - 1.0).abs() < 1e-9);
         assert!((cols[1].parse::<f64>().unwrap() - 2.0).abs() < 1e-9);
         assert!((cols[2].parse::<f64>().unwrap() - 3.0).abs() < 1e-9);
@@ -681,10 +706,13 @@ mod tests {
     fn reads_3column_gromos_format() {
         // Standard GROMOS .trc with 3-column POSITIONRED (as written by gromosXX)
         let tmp = std::env::temp_dir().join(format!("gromos_3col_{}.trc", std::process::id()));
-        std::fs::write(&tmp,
+        std::fs::write(
+            &tmp,
             "TITLE\n  test\nEND\nTIMESTEP\n              5    0.010000000\nEND\n\
              POSITIONRED\n    1.234567890    2.345678901    3.456789012\nEND\n\
-             GENBOX\n    4.000000000    4.000000000    4.000000000\nEND\n").unwrap();
+             GENBOX\n    4.000000000    4.000000000    4.000000000\nEND\n",
+        )
+        .unwrap();
         let mut r = TrajectoryReader::new(&tmp).unwrap();
         let frame = r.read_frame().unwrap().unwrap();
         std::fs::remove_file(&tmp).ok();
@@ -699,10 +727,13 @@ mod tests {
     fn reads_7column_legacy_format() {
         // Legacy 7-column format (written by older gromos-rs)
         let tmp = std::env::temp_dir().join(format!("gromos_7col_{}.trc", std::process::id()));
-        std::fs::write(&tmp,
+        std::fs::write(
+            &tmp,
             "TITLE\n  legacy\nEND\nTIMESTEP\n              1    0.002000000\nEND\n\
              POSITIONRED\n     1    RES   ATOM      1    1.100000    2.200000    3.300000\nEND\n\
-             GENBOX\n    3.000000000    3.000000000    3.000000000\nEND\n").unwrap();
+             GENBOX\n    3.000000000    3.000000000    3.000000000\nEND\n",
+        )
+        .unwrap();
         let mut r = TrajectoryReader::new(&tmp).unwrap();
         let frame = r.read_frame().unwrap().unwrap();
         std::fs::remove_file(&tmp).ok();
@@ -732,7 +763,10 @@ mod tests {
         assert_eq!(frames_out.len(), 3);
         for (i, ((_step, time, pos), frame)) in frames_in.iter().zip(&frames_out).enumerate() {
             assert!((frame.time - time).abs() < 1e-9, "frame {i} time mismatch");
-            assert!((frame.positions[0].x - pos[0].x).abs() < 1e-9, "frame {i} x mismatch");
+            assert!(
+                (frame.positions[0].x - pos[0].x).abs() < 1e-9,
+                "frame {i} x mismatch"
+            );
         }
     }
 }

@@ -23,6 +23,7 @@ pub struct Stat {
 }
 
 impl Stat {
+    /// Create an empty accumulator.
     pub fn new() -> Self {
         Self { vals: Vec::new() }
     }

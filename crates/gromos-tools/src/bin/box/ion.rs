@@ -9,8 +9,8 @@
 //! potential from solute charges.
 
 use clap::Parser;
-use gromos_io::{gromos_args, read_g96_labeled, G96Atom};
 use gromos_io::topology::read_topology_file;
+use gromos_io::{gromos_args, read_g96_labeled};
 use std::collections::HashSet;
 use std::process;
 
@@ -91,7 +91,7 @@ fn main() {
         None => {
             eprintln!("Error: @potential cutoff required");
             process::exit(1);
-        }
+        },
     };
 
     // Read topology for charges
@@ -100,7 +100,7 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading topology '{}': {:?}", args.topo, e);
             process::exit(1);
-        }
+        },
     };
 
     let n_solute = parsed_topo.n_atoms;
@@ -112,28 +112,39 @@ fn main() {
         Err(e) => {
             eprintln!("Error reading '{}': {}", args.pos, e);
             process::exit(1);
-        }
+        },
     };
     let atoms = data.atoms;
     let box_dim = [data.box_dims.x, data.box_dims.y, data.box_dims.z];
 
     let n_total = atoms.len();
     let n_solvent_atoms = n_total - n_solute;
-    eprintln!("Coordinates: {} total atoms ({} solute, {} solvent)",
-        n_total, n_solute, n_solvent_atoms);
-    eprintln!("Box: ({:.3}, {:.3}, {:.3}) nm", box_dim[0], box_dim[1], box_dim[2]);
+    eprintln!(
+        "Coordinates: {} total atoms ({} solute, {} solvent)",
+        n_total, n_solute, n_solvent_atoms
+    );
+    eprintln!(
+        "Box: ({:.3}, {:.3}, {:.3}) nm",
+        box_dim[0], box_dim[1], box_dim[2]
+    );
 
     // Identify solvent molecules (groups of 3 atoms for water)
     let atoms_per_solvent = 3; // SPC water
     if n_solvent_atoms % atoms_per_solvent != 0 {
-        eprintln!("Warning: solvent atoms ({}) not divisible by {}", n_solvent_atoms, atoms_per_solvent);
+        eprintln!(
+            "Warning: solvent atoms ({}) not divisible by {}",
+            n_solvent_atoms, atoms_per_solvent
+        );
     }
     let n_solvent_mols = n_solvent_atoms / atoms_per_solvent;
     eprintln!("Solvent molecules: {}", n_solvent_mols);
 
     if n_solvent_mols < n_positive + n_negative {
-        eprintln!("Error: not enough solvent molecules ({}) for {} ions",
-            n_solvent_mols, n_positive + n_negative);
+        eprintln!(
+            "Error: not enough solvent molecules ({}) for {} ions",
+            n_solvent_mols,
+            n_positive + n_negative
+        );
         process::exit(1);
     }
 
@@ -142,12 +153,16 @@ fn main() {
     let cutoff_sq = cutoff * cutoff;
     let mut potentials: Vec<f64> = Vec::with_capacity(n_solvent_mols);
 
-    // Coulomb constant: 1/(4*pi*eps0) in GROMOS units (kJ/mol * nm / e^2) = 138.9354
-    let coulomb_k = 138.9354;
+    // Coulomb constant: 1/(4*pi*eps0) in GROMOS units (kJ/mol * nm / e^2)
+    let coulomb_k = gromos_core::units::four_pi_eps_i;
 
     for mol_i in 0..n_solvent_mols {
         let ow_idx = n_solute + mol_i * atoms_per_solvent; // first atom (oxygen)
-        let ow_pos = (atoms[ow_idx].pos.x, atoms[ow_idx].pos.y, atoms[ow_idx].pos.z);
+        let ow_pos = (
+            atoms[ow_idx].pos.x,
+            atoms[ow_idx].pos.y,
+            atoms[ow_idx].pos.z,
+        );
 
         let mut phi = 0.0;
         for j in 0..n_solute {
@@ -241,14 +256,25 @@ fn main() {
     for (i, &mol_idx) in selected.iter().enumerate() {
         let ow = n_solute + mol_idx * atoms_per_solvent;
         let ion_type = if i < n_positive { &pos_name } else { &neg_name };
-        eprintln!("Ion {}: {} at solvent mol {} ({:.3}, {:.3}, {:.3}), potential = {:.3} kJ/(mol*e)",
-            i + 1, ion_type, mol_idx + 1,
-            atoms[ow].pos.x, atoms[ow].pos.y, atoms[ow].pos.z, potentials[mol_idx]);
+        eprintln!(
+            "Ion {}: {} at solvent mol {} ({:.3}, {:.3}, {:.3}), potential = {:.3} kJ/(mol*e)",
+            i + 1,
+            ion_type,
+            mol_idx + 1,
+            atoms[ow].pos.x,
+            atoms[ow].pos.y,
+            atoms[ow].pos.z,
+            potentials[mol_idx]
+        );
     }
 
     // Write output: TITLE + POSITION (solute + ions + remaining solvent) + BOX
     println!("TITLE");
-    println!("    ion: replaced {} solvent molecules in {}", n_positive + n_negative, args.pos);
+    println!(
+        "    ion: replaced {} solvent molecules in {}",
+        n_positive + n_negative,
+        args.pos
+    );
     if n_positive > 0 {
         println!("    {} positive ions ({})", n_positive, pos_name);
     }
@@ -263,24 +289,36 @@ fn main() {
     // Write solute atoms as-is
     for i in 0..n_solute {
         let a = &atoms[i];
-        println!("{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-            a.res_num, a.res_name, a.atom_name, atom_counter,
-            a.pos.x, a.pos.y, a.pos.z);
+        println!(
+            "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
+            a.res_num, a.res_name, a.atom_name, atom_counter, a.pos.x, a.pos.y, a.pos.z
+        );
         atom_counter += 1;
     }
 
     // Write ion atoms (at the oxygen position of replaced water molecules)
     // Positive ions first, then negative
-    let solute_res_max = if n_solute > 0 { atoms[n_solute - 1].res_num } else { 0 };
+    let solute_res_max = if n_solute > 0 {
+        atoms[n_solute - 1].res_num
+    } else {
+        0
+    };
     let mut ion_res = solute_res_max;
 
     for (i, &mol_idx) in selected.iter().enumerate() {
         let ow = n_solute + mol_idx * atoms_per_solvent;
         let ion_name = if i < n_positive { &pos_name } else { &neg_name };
         ion_res += 1;
-        println!("{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-            ion_res, ion_name, ion_name, atom_counter,
-            atoms[ow].pos.x, atoms[ow].pos.y, atoms[ow].pos.z);
+        println!(
+            "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
+            ion_res,
+            ion_name,
+            ion_name,
+            atom_counter,
+            atoms[ow].pos.x,
+            atoms[ow].pos.y,
+            atoms[ow].pos.z
+        );
         atom_counter += 1;
     }
 
@@ -291,9 +329,10 @@ fn main() {
         }
         for k in 0..atoms_per_solvent {
             let a = &atoms[n_solute + mol_i * atoms_per_solvent + k];
-            println!("{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                a.res_num, a.res_name, a.atom_name, atom_counter,
-                a.pos.x, a.pos.y, a.pos.z);
+            println!(
+                "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
+                a.res_num, a.res_name, a.atom_name, atom_counter, a.pos.x, a.pos.y, a.pos.z
+            );
             atom_counter += 1;
         }
     }
@@ -304,7 +343,11 @@ fn main() {
     println!("END");
 
     let final_solvent = n_solvent_mols - n_positive - n_negative;
-    eprintln!("Output: {} solute + {} ions + {} solvent molecules ({} atoms)",
-        n_solute, n_positive + n_negative, final_solvent,
-        n_solute + n_positive + n_negative + final_solvent * atoms_per_solvent);
+    eprintln!(
+        "Output: {} solute + {} ions + {} solvent molecules ({} atoms)",
+        n_solute,
+        n_positive + n_negative,
+        final_solvent,
+        n_solute + n_positive + n_negative + final_solvent * atoms_per_solvent
+    );
 }

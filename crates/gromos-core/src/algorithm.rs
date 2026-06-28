@@ -27,6 +27,7 @@ pub struct SimulationState {
 }
 
 impl SimulationState {
+    /// Create a new state with the given timestep (ps) and total number of steps.
     pub fn new(dt: f64, n_steps: usize) -> Self {
         Self {
             dt,
@@ -36,6 +37,7 @@ impl SimulationState {
         }
     }
 
+    /// Advance by one step, updating step counter and simulation time.
     pub fn advance(&mut self) {
         self.step += 1;
         self.time = self.step as f64 * self.dt;
@@ -81,6 +83,7 @@ pub struct AlgorithmSequence {
 }
 
 impl AlgorithmSequence {
+    /// Create an empty algorithm sequence.
     pub fn new() -> Self {
         Self {
             algorithms: Vec::new(),
@@ -128,6 +131,7 @@ impl AlgorithmSequence {
         self.algorithms.len()
     }
 
+    /// Returns `true` if no algorithms have been added.
     pub fn is_empty(&self) -> bool {
         self.algorithms.is_empty()
     }
@@ -181,10 +185,22 @@ mod tests {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
 
         let mut seq = AlgorithmSequence::new();
-        seq.push(Box::new(RecordingAlgorithm { label: "Forcefield", call_log: log.clone() }));
-        seq.push(Box::new(RecordingAlgorithm { label: "Velocity", call_log: log.clone() }));
-        seq.push(Box::new(RecordingAlgorithm { label: "Position", call_log: log.clone() }));
-        seq.push(Box::new(RecordingAlgorithm { label: "Energy", call_log: log.clone() }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "Forcefield",
+            call_log: log.clone(),
+        }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "Velocity",
+            call_log: log.clone(),
+        }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "Position",
+            call_log: log.clone(),
+        }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "Energy",
+            call_log: log.clone(),
+        }));
 
         let (topo, mut conf) = make_trivial_system();
         let sim = SimulationState::new(0.002, 10);
@@ -202,8 +218,14 @@ mod tests {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
 
         let mut seq = AlgorithmSequence::new();
-        seq.push(Box::new(RecordingAlgorithm { label: "A", call_log: log.clone() }));
-        seq.push(Box::new(RecordingAlgorithm { label: "B", call_log: log.clone() }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "A",
+            call_log: log.clone(),
+        }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "B",
+            call_log: log.clone(),
+        }));
 
         assert_eq!(seq.algorithm_names(), vec!["A", "B"]);
         assert_eq!(seq.len(), 2);
@@ -214,10 +236,17 @@ mod tests {
     fn test_sequence_propagates_errors() {
         struct FailAlgorithm;
         impl Algorithm for FailAlgorithm {
-            fn apply(&mut self, _: &Topology, _: &mut Configuration, _: &SimulationState) -> Result<(), String> {
+            fn apply(
+                &mut self,
+                _: &Topology,
+                _: &mut Configuration,
+                _: &SimulationState,
+            ) -> Result<(), String> {
                 Err("deliberate failure".into())
             }
-            fn name(&self) -> &str { "Fail" }
+            fn name(&self) -> &str {
+                "Fail"
+            }
         }
 
         let mut seq = AlgorithmSequence::new();
@@ -237,16 +266,29 @@ mod tests {
 
         struct FailAlgorithm;
         impl Algorithm for FailAlgorithm {
-            fn apply(&mut self, _: &Topology, _: &mut Configuration, _: &SimulationState) -> Result<(), String> {
+            fn apply(
+                &mut self,
+                _: &Topology,
+                _: &mut Configuration,
+                _: &SimulationState,
+            ) -> Result<(), String> {
                 Err("fail".into())
             }
-            fn name(&self) -> &str { "Fail" }
+            fn name(&self) -> &str {
+                "Fail"
+            }
         }
 
         let mut seq = AlgorithmSequence::new();
-        seq.push(Box::new(RecordingAlgorithm { label: "Before", call_log: log.clone() }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "Before",
+            call_log: log.clone(),
+        }));
         seq.push(Box::new(FailAlgorithm));
-        seq.push(Box::new(RecordingAlgorithm { label: "After", call_log: log.clone() }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "After",
+            call_log: log.clone(),
+        }));
 
         let (topo, mut conf) = make_trivial_system();
         let sim = SimulationState::new(0.002, 10);
@@ -287,8 +329,14 @@ mod tests {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
 
         let mut seq = AlgorithmSequence::new();
-        seq.push(Box::new(RecordingAlgorithm { label: "V", call_log: log.clone() }));
-        seq.push(Box::new(RecordingAlgorithm { label: "P", call_log: log.clone() }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "V",
+            call_log: log.clone(),
+        }));
+        seq.push(Box::new(RecordingAlgorithm {
+            label: "P",
+            call_log: log.clone(),
+        }));
 
         let (topo, mut conf) = make_trivial_system();
         let mut sim = SimulationState::new(0.002, 3);
@@ -298,10 +346,7 @@ mod tests {
             sim.advance();
         }
 
-        assert_eq!(
-            *log.borrow(),
-            vec!["V", "P", "V", "P", "V", "P"]
-        );
+        assert_eq!(*log.borrow(), vec!["V", "P", "V", "P", "V", "P"]);
         assert_eq!(sim.step, 3);
     }
 }

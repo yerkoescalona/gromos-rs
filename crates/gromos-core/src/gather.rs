@@ -31,14 +31,16 @@ pub fn gather_chain(
     periodicity: &Periodicity,
     reference: Vec3,
 ) {
-    if mol_atoms.is_empty() { return; }
+    if mol_atoms.is_empty() {
+        return;
+    }
 
     let p0 = positions[mol_atoms[0]];
     positions[mol_atoms[0]] = reference + periodicity.nearest_image(p0, reference);
 
     for w in mol_atoms.windows(2) {
         let anchor = positions[w[0]];
-        let pi    = positions[w[1]];
+        let pi = positions[w[1]];
         positions[w[1]] = anchor + periodicity.nearest_image(pi, anchor);
     }
 }
@@ -58,7 +60,9 @@ pub fn gather_bond(
     periodicity: &Periodicity,
     reference: Vec3,
 ) {
-    if mol_atoms.is_empty() { return; }
+    if mol_atoms.is_empty() {
+        return;
+    }
     let n = mol_atoms.len();
     let mut gathered = vec![false; n];
 
@@ -70,24 +74,28 @@ pub fn gather_bond(
     while remaining > 0 {
         let mut progress = false;
         for &(li, lj) in bonds {
-            if li >= n || lj >= n { continue; }
+            if li >= n || lj >= n {
+                continue;
+            }
             if gathered[li] && !gathered[lj] {
                 let anchor = positions[mol_atoms[li]];
-                let pi     = positions[mol_atoms[lj]];
+                let pi = positions[mol_atoms[lj]];
                 positions[mol_atoms[lj]] = anchor + periodicity.nearest_image(pi, anchor);
                 gathered[lj] = true;
                 remaining -= 1;
                 progress = true;
             } else if gathered[lj] && !gathered[li] {
                 let anchor = positions[mol_atoms[lj]];
-                let pi     = positions[mol_atoms[li]];
+                let pi = positions[mol_atoms[li]];
                 positions[mol_atoms[li]] = anchor + periodicity.nearest_image(pi, anchor);
                 gathered[li] = true;
                 remaining -= 1;
                 progress = true;
             }
         }
-        if !progress { break; }
+        if !progress {
+            break;
+        }
     }
 }
 
@@ -105,7 +113,9 @@ pub fn gather_molecules(
     periodicity: &Periodicity,
     reference: Vec3,
 ) {
-    if mol_ranges.is_empty() { return; }
+    if mol_ranges.is_empty() {
+        return;
+    }
     let mut ref_pt = reference;
     let mut total_gathered = 0usize;
     let mut cog = Vec3::ZERO;
@@ -127,18 +137,29 @@ pub fn gather_molecules(
 
 /// Centre of geometry of a set of atoms.
 pub fn centre_of_geometry(positions: &[Vec3], indices: &[usize]) -> Vec3 {
-    if indices.is_empty() { return Vec3::ZERO; }
-    indices.iter().map(|&i| positions[i]).fold(Vec3::ZERO, |a, b| a + b)
+    if indices.is_empty() {
+        return Vec3::ZERO;
+    }
+    indices
+        .iter()
+        .map(|&i| positions[i])
+        .fold(Vec3::ZERO, |a, b| a + b)
         / indices.len() as f64
 }
 
 /// Centre of mass of a set of atoms.
 pub fn centre_of_mass(positions: &[Vec3], masses: &[f64], indices: &[usize]) -> Vec3 {
-    if indices.is_empty() { return Vec3::ZERO; }
+    if indices.is_empty() {
+        return Vec3::ZERO;
+    }
     let (sum, total_mass) = indices.iter().fold((Vec3::ZERO, 0.0f64), |(s, m), &i| {
         (s + positions[i] * masses[i], m + masses[i])
     });
-    if total_mass > 0.0 { sum / total_mass } else { Vec3::ZERO }
+    if total_mass > 0.0 {
+        sum / total_mass
+    } else {
+        Vec3::ZERO
+    }
 }
 
 #[cfg(test)]
@@ -179,7 +200,11 @@ mod tests {
         let bonds = vec![(0, 1), (0, 2)];
         gather_bond(&mut pos, &[0, 1, 2], &bonds, &rect(1.0), Vec3::ZERO);
         // atom 2 nearest to atom 0 (0.4): 0.95 - 1.0 = -0.05
-        assert!((pos[2].x - (-0.05)).abs() < 1e-10, "pos[2].x = {}", pos[2].x);
+        assert!(
+            (pos[2].x - (-0.05)).abs() < 1e-10,
+            "pos[2].x = {}",
+            pos[2].x
+        );
         // atom 1 stays (0.5 is nearest to 0.4)
         assert!((pos[1].x - 0.5).abs() < 1e-10);
     }

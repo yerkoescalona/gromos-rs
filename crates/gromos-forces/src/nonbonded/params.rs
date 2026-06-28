@@ -6,15 +6,20 @@ use gromos_core::math::Vec3;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct LJParameters {
-    pub c6: f64,  // LJ C6 coefficient (attraction)
-    pub c12: f64, // LJ C12 coefficient (repulsion)
+    pub c6: f64,   // LJ C6 coefficient (attraction)
+    pub c12: f64,  // LJ C12 coefficient (repulsion)
     pub cs6: f64,  // 1-4 C6 coefficient
     pub cs12: f64, // 1-4 C12 coefficient
 }
 
 impl From<&gromos_core::topology::LJParameters> for LJParameters {
     fn from(p: &gromos_core::topology::LJParameters) -> Self {
-        Self { c6: p.c6, c12: p.c12, cs6: p.cs6, cs12: p.cs12 }
+        Self {
+            c6: p.c6,
+            c12: p.c12,
+            cs6: p.cs6,
+            cs12: p.cs12,
+        }
     }
 }
 
@@ -53,7 +58,7 @@ impl LJParamMatrix {
 }
 
 /// Coulomb constant: 1/(4*pi*eps0) in GROMOS units [kJ*nm/(mol*e^2)]
-pub const FOUR_PI_EPS_I: f64 = 138.9354;
+pub use gromos_core::units::four_pi_eps_i as FOUR_PI_EPS_I;
 
 /// Coulomb Reaction Field parameters
 #[repr(C)]
@@ -77,10 +82,8 @@ impl CRFParameters {
         let kappa_cut = rf_kappa * cutoff;
         let kappa_cut2 = kappa_cut * kappa_cut;
 
-        let crf = (2.0 * (epsilon - rf_epsilon) * (1.0 + kappa_cut)
-            - rf_epsilon * kappa_cut2)
-            / ((epsilon + 2.0 * rf_epsilon) * (1.0 + kappa_cut)
-                + rf_epsilon * kappa_cut2);
+        let crf = (2.0 * (epsilon - rf_epsilon) * (1.0 + kappa_cut) - rf_epsilon * kappa_cut2)
+            / ((epsilon + 2.0 * rf_epsilon) * (1.0 + kappa_cut) + rf_epsilon * kappa_cut2);
 
         let cut3i = 1.0 / (cutoff * cutoff * cutoff);
         let crf_cut3i = crf * cut3i;

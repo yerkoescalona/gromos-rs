@@ -1,9 +1,16 @@
+// TODO: stub — temp_i/temp_j/probability parsed but tunnel-rate analysis not yet implemented (ref: GROMOS++ rep_ana.cc).
+#![allow(dead_code)]
 //! rep_ana - Replica Exchange Analysis Tool
 //!
 //! Analyzes REMD simulation data to compute exchange statistics,
 //! acceptance rates, and replica diffusion.
 //!
 //! Usage: rep_ana @repdat replica.dat [@out exchange_stats.dat]
+
+// TODO: stub — ExchangeEvent fields temp_i/temp_j/probability are parsed from
+// the replica file but the temperature-diffusion and tunnel-rate analyses that
+// consume them are not yet implemented. Wire them up when REMD post-processing
+// is added (ref: GROMOS++ rep_ana.cc).
 
 use std::env;
 use std::fs::File;

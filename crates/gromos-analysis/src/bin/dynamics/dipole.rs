@@ -21,15 +21,15 @@
 //! - For molecules with net charge, dipole depends on the origin
 //! - Use @cog to center at center-of-geometry for consistent results
 
-use gromos_io::topology::{build_topology, read_topology_file};
-use gromos_io::trajectory::TrajectoryReader;
 use gromos_core::math::Vec3;
 use gromos_core::selection::AtomSelection;
+use gromos_io::topology::{build_topology, read_topology_file};
+use gromos_io::trajectory::TrajectoryReader;
 use std::env;
 use std::process;
 
 // Conversion factor: e·nm to Debye
-const ENM_TO_DEBYE: f64 = 48.0321;
+use gromos_core::units::ENM_TO_DEBYE;
 
 fn print_usage() {
     eprintln!("dipole - Dipole Moment calculation");
@@ -152,13 +152,11 @@ fn calc_dipole(
 
     // Calculate dipole moment: μ = Σ(qi * ri)
     let mut dipole = Vec3::ZERO;
-    let mut net_charge = 0.0;
 
     for &idx in atom_selection {
         let r = positions[idx] - origin;
         let q = charges[idx];
         dipole = dipole + r * q;
-        net_charge += charges[idx];
     }
 
     // Convert to f64 for magnitude calculation
@@ -183,7 +181,7 @@ fn main() {
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
-    let mut dipole_args = match parse_args(args) {
+    let dipole_args = match parse_args(args) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("Error: {}", e);

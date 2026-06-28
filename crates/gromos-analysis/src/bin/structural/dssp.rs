@@ -1,8 +1,14 @@
+// TODO: stub — calc_hbond_energy/assign_structure ported but DSSP main loop not yet implemented (ref: GROMOS++ dssp.cc).
+#![allow(dead_code)]
 //! dssp - Secondary structure assignment
 //!
 //! Usage: dssp @topo <file> @traj <file>
 //!
 //! Assigns secondary structure using simplified DSSP algorithm
+
+// TODO: stub — calc_hbond_energy and assign_structure are ported from GROMOS++
+// but the DSSP main loop that calls them is not yet implemented. Wire them up
+// when the full backbone H-bond detection is added (ref: GROMOS++ dssp.cc).
 
 use gromos_io::topology::{build_topology, read_topology_file};
 use gromos_io::trajectory::TrajectoryReader;

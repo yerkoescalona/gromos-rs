@@ -13,16 +13,16 @@ pub mod coordinate;
 pub mod distanceres;
 pub mod dlg;
 pub mod energy;
+pub mod energy_binary;
+pub mod force;
 pub mod free_energy;
+pub mod g96;
 pub mod ifp;
+pub mod imd;
+pub mod input;
 pub mod jobs;
 pub mod mk_script;
 pub mod mtb;
-pub mod energy_binary;
-pub mod force;
-pub mod g96;
-pub mod imd;
-pub mod input;
 pub mod output;
 pub mod pdb;
 pub mod posres;
@@ -33,18 +33,20 @@ pub mod trajectory;
 pub mod trajectory_binary;
 
 // Re-export commonly used types
-pub use coordinate::{CoordinateData, G96Atom, LabeledCoordinateData, read_coordinates, read_g96_labeled};
+pub use coordinate::{
+    read_coordinates, read_g96_labeled, CoordinateData, G96Atom, LabeledCoordinateData,
+};
 pub use dlg::{DlgWriter, LambdaDerivativeFrame};
-pub use free_energy::{FreeEnergyWriter, FreeEnergyFrame, read_free_energy_trajectory};
 pub use energy::{EnergyBlock, EnergyFrame, EnergyReader, EnergyWriter};
 pub use energy_binary::{BinaryEnergyReader, BinaryEnergyWriter};
 pub use force::ForceWriter;
+pub use free_energy::{read_free_energy_trajectory, FreeEnergyFrame, FreeEnergyWriter};
 pub use g96::{write_por, write_rpr};
 pub use imd::{ImdParameters, PressureParameters, TempBathParameters};
 pub use input::{EdsBlock, GamdBlock, ReplicaBlock};
 pub use output::{EdsStatsWriter, EdsVrWriter, GamdBoostWriter, GamdStatsWriter};
-pub use ptp::{PtpWriter, PerturbedTopology, read_pttopo};
 pub use pdb::write_pdb_positions;
+pub use ptp::{read_pttopo, PerturbedTopology, PtpWriter};
 pub use trajectory::TrajectoryWriter;
 pub use trajectory_binary::{
     BinaryFrame, BinaryTrajectoryReader, BinaryTrajectoryWriter, DcdReader, DcdWriter,
@@ -114,11 +116,11 @@ pub fn gromos_args() -> Vec<String> {
                             }
                         }
                     }
-                }
+                },
                 Err(e) => {
                     eprintln!("Error: cannot read argfile '{}': {}", raw[i], e);
                     std::process::exit(1);
-                }
+                },
             }
         } else if let Some(key) = raw[i].strip_prefix('@') {
             expanded.push(format!("--{}", key));

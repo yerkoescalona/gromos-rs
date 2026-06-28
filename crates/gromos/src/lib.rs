@@ -33,7 +33,7 @@ pub use gromos_io as io;
 // Also re-export with common names for compatibility with existing code
 pub mod math {
     pub use gromos_core::math::*;
-    pub use gromos_core::{Vec3, Mat3};
+    pub use gromos_core::{Mat3, Vec3};
 }
 
 pub mod topology {
@@ -43,7 +43,7 @@ pub mod topology {
 
 pub mod configuration {
     pub use gromos_core::configuration::*;
-    pub use gromos_core::{Configuration, State, Energy};
+    pub use gromos_core::{Configuration, Energy, State};
 }
 
 pub mod selection {
@@ -60,49 +60,54 @@ pub mod pairlist {
 
 // Compatibility aliases for old module names
 pub mod algorithm {
+    pub use gromos_core::algorithm::{Algorithm, AlgorithmSequence, SimulationState};
+    pub use gromos_integrators::algorithms;
+    pub use gromos_integrators::algorithms::*;
+    pub use gromos_integrators::barostats;
+    pub use gromos_integrators::barostats::*;
     pub use gromos_integrators::constraints;
     pub use gromos_integrators::constraints::*;
     pub use gromos_integrators::thermostats;
     pub use gromos_integrators::thermostats::*;
-    pub use gromos_integrators::barostats;
-    pub use gromos_integrators::barostats::*;
     pub use gromos_integrators::virtual_atoms;
     pub use gromos_integrators::virtual_atoms::*;
-    pub use gromos_integrators::algorithms;
-    pub use gromos_integrators::algorithms::*;
-    pub use gromos_core::algorithm::{Algorithm, AlgorithmSequence, SimulationState};
 }
 
 pub mod interaction {
+    // Both bonded::* and nonbonded::* expose a `perturbed` submodule; suppress
+    // the re-export ambiguity warning — callers use the namespaced paths.
     pub use gromos_forces::bonded;
+    #[allow(ambiguous_glob_reexports)]
     pub use gromos_forces::bonded::*;
-    pub use gromos_forces::nonbonded;
-    pub use gromos_forces::nonbonded::*;
     pub use gromos_forces::electrostatics;
-    pub use gromos_forces::restraints;
+    pub use gromos_forces::nonbonded;
+    #[allow(ambiguous_glob_reexports)]
+    pub use gromos_forces::nonbonded::*;
     pub use gromos_forces::pme;
+    pub use gromos_forces::restraints;
 }
 
 pub mod integrator {
     pub use gromos_integrators::integrator::*;
-    pub use gromos_integrators::{Integrator, LeapFrog, VelocityVerlet, StochasticDynamics, SteepestDescent};
+    pub use gromos_integrators::{
+        Integrator, LeapFrog, SteepestDescent, StochasticDynamics, VelocityVerlet,
+    };
 }
 
 // Enhanced sampling re-exports
 pub use gromos_integrators::eds;
+pub use gromos_integrators::fep;
 pub use gromos_integrators::gamd;
 pub use gromos_integrators::remd;
 pub use gromos_integrators::replica;
-pub use gromos_integrators::fep;
 
 // Validation
 pub use gromos_core::validation;
 
 // Re-export main types at crate root for convenience
 pub use gromos_core::{
-    Configuration, Energy, State,
-    Vec3, Mat3, BoundaryCondition, Periodicity,
-    Topology, LJParameters,
+    BoundaryCondition, Configuration, Energy, LJParameters, Mat3, Periodicity, State, Topology,
+    Vec3,
 };
 
 pub use gromos_integrators::{

@@ -37,13 +37,17 @@ fn print_usage() {
 /// Expected format: lines with  λ  ⟨dH/dλ⟩  [ee]  [N]  (skip comment lines).
 fn parse_dhdl_file(path: &str) -> Vec<(f64, f64)> {
     let file = File::open(path).unwrap_or_else(|e| {
-        eprintln!("Error opening '{path}': {e}"); process::exit(1);
+        eprintln!("Error opening '{path}': {e}");
+        process::exit(1);
     });
     let mut result = Vec::new();
     for line in BufReader::new(file).lines().filter_map(|l| l.ok()) {
         let t = line.trim();
-        if t.starts_with('#') || t.is_empty() { continue; }
-        let cols: Vec<f64> = t.split_whitespace()
+        if t.starts_with('#') || t.is_empty() {
+            continue;
+        }
+        let cols: Vec<f64> = t
+            .split_whitespace()
             .filter_map(|s| s.parse().ok())
             .collect();
         if cols.len() >= 2 {
@@ -68,9 +72,9 @@ fn main() {
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
-    let mut files:  Vec<String> = Vec::new();
-    let mut slam:   Vec<f64>    = Vec::new();
-    let mut plam:   Vec<f64>    = Vec::new();
+    let mut files: Vec<String> = Vec::new();
+    let mut slam: Vec<f64> = Vec::new();
+    let mut plam: Vec<f64> = Vec::new();
 
     let mut i = 1;
     while i < args.len() {
@@ -82,40 +86,54 @@ fn main() {
                     i += 1;
                 }
                 continue;
-            }
+            },
             "--slam" => {
                 i += 1;
                 while i < args.len() && !args[i].starts_with("--") {
-                    if let Ok(v) = args[i].parse::<f64>() { slam.push(v); } else { break; }
+                    if let Ok(v) = args[i].parse::<f64>() {
+                        slam.push(v);
+                    } else {
+                        break;
+                    }
                     i += 1;
                 }
                 continue;
-            }
+            },
             "--plam" => {
                 i += 1;
                 while i < args.len() && !args[i].starts_with("--") {
-                    if let Ok(v) = args[i].parse::<f64>() { plam.push(v); } else { break; }
+                    if let Ok(v) = args[i].parse::<f64>() {
+                        plam.push(v);
+                    } else {
+                        break;
+                    }
                     i += 1;
                 }
                 continue;
-            }
+            },
             other if other.starts_with("--") => {
-                eprintln!("Unknown argument: {other}"); process::exit(1);
-            }
-            _ => {}
+                eprintln!("Unknown argument: {other}");
+                process::exit(1);
+            },
+            _ => {},
         }
         i += 1;
     }
 
     if files.is_empty() {
-        eprintln!("Error: @files required"); process::exit(1);
+        eprintln!("Error: @files required");
+        process::exit(1);
     }
     if slam.is_empty() {
-        eprintln!("Error: @slam required"); process::exit(1);
+        eprintln!("Error: @slam required");
+        process::exit(1);
     }
     if files.len() != slam.len() {
-        eprintln!("Error: @files ({}) and @slam ({}) must have the same count",
-            files.len(), slam.len());
+        eprintln!(
+            "Error: @files ({}) and @slam ({}) must have the same count",
+            files.len(),
+            slam.len()
+        );
         process::exit(1);
     }
     if plam.is_empty() {
@@ -123,17 +141,19 @@ fn main() {
     }
 
     // Read all files: data[k] = list of (λ, ⟨dH/dλ⟩) for sampled λ slam[k]
-    let data: Vec<Vec<(f64, f64)>> = files.iter()
-        .map(|f| parse_dhdl_file(f))
-        .collect();
+    let data: Vec<Vec<(f64, f64)>> = files.iter().map(|f| parse_dhdl_file(f)).collect();
 
     // For each sampled λ, build a lookup: slam[k] -> dhdl (the value at that λ, from that file)
     let mut dhdl_at_slam: Vec<f64> = Vec::new();
     for (k, entries) in data.iter().enumerate() {
         // Find the entry in this file closest to slam[k]
         let target = slam[k];
-        let best = entries.iter()
-            .min_by(|a, b| (a.0 - target).abs().partial_cmp(&(b.0 - target).abs()).unwrap());
+        let best = entries.iter().min_by(|a, b| {
+            (a.0 - target)
+                .abs()
+                .partial_cmp(&(b.0 - target).abs())
+                .unwrap()
+        });
         let dhdl = best.map(|e| e.1).unwrap_or_else(|| {
             eprintln!("Warning: no data near λ={target} in {}", files[k]);
             0.0
@@ -153,9 +173,9 @@ fn main() {
             let (k1, k2) = if pos == 0 {
                 (0, 1)
             } else if pos >= slam.len() {
-                (slam.len()-2, slam.len()-1)
+                (slam.len() - 2, slam.len() - 1)
             } else {
-                (pos-1, pos)
+                (pos - 1, pos)
             };
             lerp(lp, slam[k1], dhdl_at_slam[k1], slam[k2], dhdl_at_slam[k2])
         };
@@ -174,10 +194,14 @@ fn main() {
 
     // Trapezoidal ΔG
     if pred.len() >= 2 {
-        let dg: f64 = pred.windows(2).map(|w| {
-            0.5 * (w[0].1 + w[1].1) * (w[1].0 - w[0].0)
-        }).sum();
+        let dg: f64 = pred
+            .windows(2)
+            .map(|w| 0.5 * (w[0].1 + w[1].1) * (w[1].0 - w[0].0))
+            .sum();
         println!("#");
-        println!("# ΔG (trapezoidal) = {dg:.6} kJ/mol  ({} points)", pred.len());
+        println!(
+            "# ΔG (trapezoidal) = {dg:.6} kJ/mol  ({} points)",
+            pred.len()
+        );
     }
 }

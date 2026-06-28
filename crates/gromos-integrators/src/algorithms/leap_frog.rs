@@ -67,8 +67,18 @@ impl Algorithm for LeapFrogVelocity {
             }
         }
 
-        let max_f = conf.old().force.iter().map(|f| f.length()).fold(0.0_f64, f64::max);
-        let max_v = conf.current().vel.iter().map(|v| v.length()).fold(0.0_f64, f64::max);
+        let max_f = conf
+            .old()
+            .force
+            .iter()
+            .map(|f| f.length())
+            .fold(0.0_f64, f64::max);
+        let max_v = conf
+            .current()
+            .vel
+            .iter()
+            .map(|v| v.length())
+            .fold(0.0_f64, f64::max);
         log::debug!("  max|f_old|={:.6e}  max|v_new|={:.6e}", max_f, max_v);
 
         Ok(())
@@ -125,8 +135,7 @@ impl Algorithm for LeapFrogPosition {
                 });
         } else {
             for i in 0..n_atoms {
-                conf.current_mut().pos[i] =
-                    conf.old().pos[i] + conf.current().vel[i] * dt;
+                conf.current_mut().pos[i] = conf.old().pos[i] + conf.current().vel[i] * dt;
             }
         }
 
@@ -160,11 +169,7 @@ mod tests {
     }
 
     /// Helper to create a configuration for 2 atoms
-    fn make_pair_configuration(
-        pos: [Vec3; 2],
-        vel: [Vec3; 2],
-        force: [Vec3; 2],
-    ) -> Configuration {
+    fn make_pair_configuration(pos: [Vec3; 2], vel: [Vec3; 2], force: [Vec3; 2]) -> Configuration {
         let mut conf = Configuration::new(2, 1, 1);
         // Set initial state in current
         conf.current_mut().pos = pos.to_vec();
@@ -204,10 +209,18 @@ mod tests {
         let v0 = conf.current().vel[0];
         let v1 = conf.current().vel[1];
 
-        assert!((v0.x - expected_vx).abs() < 1e-10,
-            "v0.x = {}, expected {}", v0.x, expected_vx);
-        assert!((v1.x - (-expected_vx)).abs() < 1e-10,
-            "v1.x = {}, expected {}", v1.x, -expected_vx);
+        assert!(
+            (v0.x - expected_vx).abs() < 1e-10,
+            "v0.x = {}, expected {}",
+            v0.x,
+            expected_vx
+        );
+        assert!(
+            (v1.x - (-expected_vx)).abs() < 1e-10,
+            "v1.x = {}, expected {}",
+            v1.x,
+            -expected_vx
+        );
         assert_eq!(v0.y, 0.0);
         assert_eq!(v0.z, 0.0);
     }
@@ -240,7 +253,7 @@ mod tests {
         //   current_idx was swapped, so old() = original state
         // We'll set the other state:
         conf.copy_current_to_old(); // wrong - we need old to have original pos
-        // Actually let's just use the full sequence
+                                    // Actually let's just use the full sequence
         let mut conf2 = make_pair_configuration(
             [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.35, 0.0, 0.0)],
             [Vec3::ZERO, Vec3::ZERO],
@@ -263,10 +276,18 @@ mod tests {
         let expected_r0x = 0.0 + vx * dt;
         let expected_r1x = 0.35 + (-vx) * dt;
 
-        assert!((r0.x - expected_r0x).abs() < 1e-12,
-            "r0.x = {}, expected {}", r0.x, expected_r0x);
-        assert!((r1.x - expected_r1x).abs() < 1e-12,
-            "r1.x = {}, expected {}", r1.x, expected_r1x);
+        assert!(
+            (r0.x - expected_r0x).abs() < 1e-12,
+            "r0.x = {}, expected {}",
+            r0.x,
+            expected_r0x
+        );
+        assert!(
+            (r1.x - expected_r1x).abs() < 1e-12,
+            "r1.x = {}, expected {}",
+            r1.x,
+            expected_r1x
+        );
     }
 
     #[test]
@@ -306,8 +327,12 @@ mod tests {
 
         let expected_ekin = 8.616742481e-05;
         let rel_error = (e_kin - expected_ekin).abs() / expected_ekin;
-        assert!(rel_error < 1e-6,
+        assert!(
+            rel_error < 1e-6,
             "E_kin = {:.10e}, expected {:.10e}, rel_error = {:.2e}",
-            e_kin, expected_ekin, rel_error);
+            e_kin,
+            expected_ekin,
+            rel_error
+        );
     }
 }

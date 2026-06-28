@@ -67,8 +67,10 @@ Desktop.ini
 coverage.xml
 test-results/
 
-# claude
+# claude — only docs are tracked; runtime/memory dirs are private
 .claude/settings.local.json
+.claude/projects/
+.claude/worktrees/
 
 # GROMOS
 gromosXX
@@ -77,3 +79,5 @@ gromosPlsPls
 md.trc
 md.trg
 docs/book
+.claude/worktrees/
+.gitignore

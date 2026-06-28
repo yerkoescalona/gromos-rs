@@ -124,16 +124,19 @@ impl Algorithm for SteepestDescentAlgorithm {
         // Uses sim.steps() (the global step counter), not an internal counter
         if sim.step > self.min_steps {
             // GROMOS uses potential_total + special_total for convergence
-            let ecur = conf.current().energies.potential_total
-                + conf.current().energies.special_total;
-            let eold = conf.old().energies.potential_total
-                + conf.old().energies.special_total;
+            let ecur =
+                conf.current().energies.potential_total + conf.current().energies.special_total;
+            let eold = conf.old().energies.potential_total + conf.old().energies.special_total;
 
             let energy_change = (ecur - eold).abs();
 
             log::debug!(
                 "SD step {}: E_pot={:.6e}, E_old={:.6e}, dE={:.6e}, dele={:.6e}",
-                sim.step, ecur, eold, energy_change, self.energy_tolerance
+                sim.step,
+                ecur,
+                eold,
+                energy_change,
+                self.energy_tolerance
             );
 
             if energy_change < self.energy_tolerance {

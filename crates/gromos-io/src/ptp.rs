@@ -20,8 +20,8 @@ use std::fs;
 use std::path::Path;
 
 use gromos_core::topology::{
-    PerturbedAtom, PerturbedAtomPair, PerturbedBond, PerturbedAngle,
-    PerturbedDihedral, PerturbedSolute, SoftBond, SoftAngle, SoftImproper,
+    PerturbedAngle, PerturbedAtom, PerturbedAtomPair, PerturbedBond, PerturbedDihedral,
+    PerturbedSolute, SoftAngle, SoftBond, SoftImproper,
 };
 
 use crate::IoError;
@@ -59,21 +59,35 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             let (count, data) = split_count(lines)?;
             for line in &data {
                 let v = tokenize(line);
-                if v.len() < 4 { continue; }
-                let i = parse_usize(&v[0])? - 1;  // 1-indexed in file → 0-indexed
+                if v.len() < 4 {
+                    continue;
+                }
+                let i = parse_usize(&v[0])? - 1; // 1-indexed in file → 0-indexed
                 let j = parse_usize(&v[1])? - 1;
                 // Interaction type: 1-indexed in file → 0-indexed (file 1→0: full LJ, file 2→1: 1-4 LJ)
                 let a_type = parse_usize(&v[2])? - 1;
                 // b_type=0 in file is a sentinel: "atom pair absent in state B" → None
                 let b_type = {
                     let raw = parse_usize(&v[3])?;
-                    if raw == 0 { None } else { Some(raw - 1) }
+                    if raw == 0 {
+                        None
+                    } else {
+                        Some(raw - 1)
+                    }
                 };
                 let (i, j) = if i <= j { (i, j) } else { (j, i) };
-                ps.atom_pairs.push(PerturbedAtomPair { i, j, a_type, b_type });
+                ps.atom_pairs.push(PerturbedAtomPair {
+                    i,
+                    j,
+                    a_type,
+                    b_type,
+                });
             }
             if ps.atom_pairs.len() != count {
-                log::warn!("PERTATOMPAIR: expected {count} pairs, got {}", ps.atom_pairs.len());
+                log::warn!(
+                    "PERTATOMPAIR: expected {count} pairs, got {}",
+                    ps.atom_pairs.len()
+                );
             }
             break;
         }
@@ -88,26 +102,37 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             let mut max_seq = 0usize;
             for line in &data {
                 let v = tokenize(line);
-                if v.len() < 11 { continue; }
-                let seq     = parse_usize(&v[0])? - 1;  // 0-indexed
-                // v[1] = residue, v[2] = name — skip
-                let a_iac   = parse_usize(&v[3])? - 1;  // 0-indexed
-                let a_mass  = parse_f64(&v[4])?;
-                let a_charge= parse_f64(&v[5])?;
-                let b_iac   = parse_usize(&v[6])? - 1;
-                let b_mass  = parse_f64(&v[7])?;
-                let b_charge= parse_f64(&v[8])?;
+                if v.len() < 11 {
+                    continue;
+                }
+                let seq = parse_usize(&v[0])? - 1; // 0-indexed
+                                                   // v[1] = residue, v[2] = name — skip
+                let a_iac = parse_usize(&v[3])? - 1; // 0-indexed
+                let a_mass = parse_f64(&v[4])?;
+                let a_charge = parse_f64(&v[5])?;
+                let b_iac = parse_usize(&v[6])? - 1;
+                let b_mass = parse_f64(&v[7])?;
+                let b_charge = parse_f64(&v[8])?;
                 let lj_soft = parse_f64(&v[9])?;
-                let crf_soft= parse_f64(&v[10])?;
+                let crf_soft = parse_f64(&v[10])?;
                 max_seq = max_seq.max(seq);
                 ps.atoms.push(PerturbedAtom {
-                    seq, a_iac, a_mass, a_charge,
-                    b_iac, b_mass, b_charge,
-                    lj_soft, crf_soft,
+                    seq,
+                    a_iac,
+                    a_mass,
+                    a_charge,
+                    b_iac,
+                    b_mass,
+                    b_charge,
+                    lj_soft,
+                    crf_soft,
                 });
             }
             if ps.atoms.len() != count {
-                log::warn!("PERTATOMPARAM: expected {count} atoms, got {}", ps.atoms.len());
+                log::warn!(
+                    "PERTATOMPARAM: expected {count} atoms, got {}",
+                    ps.atoms.len()
+                );
             }
             // Build is_perturbed: size = max_seq + 1 (will be resized by caller if needed)
             let n = max_seq + 1;
@@ -129,12 +154,19 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             let (count, data) = split_count(lines)?;
             for line in &data {
                 let v = tokenize(line);
-                if v.len() < 4 { continue; }
+                if v.len() < 4 {
+                    continue;
+                }
                 let i = parse_usize(&v[0])? - 1;
                 let j = parse_usize(&v[1])? - 1;
-                let a_type = parse_usize(&v[2])? - 1;  // file is 1-indexed
+                let a_type = parse_usize(&v[2])? - 1; // file is 1-indexed
                 let b_type = parse_usize(&v[3])? - 1;
-                ps.bonds.push(PerturbedBond { i, j, a_type, b_type });
+                ps.bonds.push(PerturbedBond {
+                    i,
+                    j,
+                    a_type,
+                    b_type,
+                });
             }
             if ps.bonds.len() != count {
                 log::warn!("{bname}: expected {count} bonds, got {}", ps.bonds.len());
@@ -149,13 +181,21 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             let (count, data) = split_count(lines)?;
             for line in &data {
                 let v = tokenize(line);
-                if v.len() < 5 { continue; }
+                if v.len() < 5 {
+                    continue;
+                }
                 let i = parse_usize(&v[0])? - 1;
                 let j = parse_usize(&v[1])? - 1;
                 let k = parse_usize(&v[2])? - 1;
                 let a_type = parse_usize(&v[3])? - 1;
                 let b_type = parse_usize(&v[4])? - 1;
-                ps.angles.push(PerturbedAngle { i, j, k, a_type, b_type });
+                ps.angles.push(PerturbedAngle {
+                    i,
+                    j,
+                    k,
+                    a_type,
+                    b_type,
+                });
             }
             if ps.angles.len() != count {
                 log::warn!("{bname}: expected {count} angles, got {}", ps.angles.len());
@@ -170,17 +210,29 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             let (count, data) = split_count(lines)?;
             for line in &data {
                 let v = tokenize(line);
-                if v.len() < 6 { continue; }
+                if v.len() < 6 {
+                    continue;
+                }
                 let i = parse_usize(&v[0])? - 1;
                 let j = parse_usize(&v[1])? - 1;
                 let k = parse_usize(&v[2])? - 1;
                 let l = parse_usize(&v[3])? - 1;
                 let a_type = parse_usize(&v[4])? - 1;
                 let b_type = parse_usize(&v[5])? - 1;
-                ps.improper_dihedrals.push(PerturbedDihedral { i, j, k, l, a_type, b_type });
+                ps.improper_dihedrals.push(PerturbedDihedral {
+                    i,
+                    j,
+                    k,
+                    l,
+                    a_type,
+                    b_type,
+                });
             }
             if ps.improper_dihedrals.len() != count {
-                log::warn!("{bname}: expected {count} impropers, got {}", ps.improper_dihedrals.len());
+                log::warn!(
+                    "{bname}: expected {count} impropers, got {}",
+                    ps.improper_dihedrals.len()
+                );
             }
         }
     }
@@ -192,17 +244,29 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             let (count, data) = split_count(lines)?;
             for line in &data {
                 let v = tokenize(line);
-                if v.len() < 6 { continue; }
+                if v.len() < 6 {
+                    continue;
+                }
                 let i = parse_usize(&v[0])? - 1;
                 let j = parse_usize(&v[1])? - 1;
                 let k = parse_usize(&v[2])? - 1;
                 let l = parse_usize(&v[3])? - 1;
                 let a_type = parse_usize(&v[4])? - 1;
                 let b_type = parse_usize(&v[5])? - 1;
-                ps.proper_dihedrals.push(PerturbedDihedral { i, j, k, l, a_type, b_type });
+                ps.proper_dihedrals.push(PerturbedDihedral {
+                    i,
+                    j,
+                    k,
+                    l,
+                    a_type,
+                    b_type,
+                });
             }
             if ps.proper_dihedrals.len() != count {
-                log::warn!("{bname}: expected {count} dihedrals, got {}", ps.proper_dihedrals.len());
+                log::warn!(
+                    "{bname}: expected {count} dihedrals, got {}",
+                    ps.proper_dihedrals.len()
+                );
             }
         }
     }
@@ -214,17 +278,28 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
         let (count, data) = split_count(lines)?;
         for line in &data {
             let v = tokenize(line);
-            if v.len() < 5 { continue; }
-            let i      = parse_usize(&v[0])? - 1;
-            let j      = parse_usize(&v[1])? - 1;
+            if v.len() < 5 {
+                continue;
+            }
+            let i = parse_usize(&v[0])? - 1;
+            let j = parse_usize(&v[1])? - 1;
             let a_type = parse_usize(&v[2])? - 1;
-            let b_raw  = parse_usize(&v[3])?;
+            let b_raw = parse_usize(&v[3])?;
             let b_type = if b_raw == 0 { None } else { Some(b_raw - 1) };
-            let alpha  = parse_f64(&v[4])?;
-            ps.soft_bonds.push(SoftBond { i, j, a_type, b_type, alpha });
+            let alpha = parse_f64(&v[4])?;
+            ps.soft_bonds.push(SoftBond {
+                i,
+                j,
+                a_type,
+                b_type,
+                alpha,
+            });
         }
         if ps.soft_bonds.len() != count {
-            log::warn!("PERTBONDSOFT: expected {count} bonds, got {}", ps.soft_bonds.len());
+            log::warn!(
+                "PERTBONDSOFT: expected {count} bonds, got {}",
+                ps.soft_bonds.len()
+            );
         }
     }
 
@@ -235,18 +310,30 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
         let (count, data) = split_count(lines)?;
         for line in &data {
             let v = tokenize(line);
-            if v.len() < 6 { continue; }
-            let i      = parse_usize(&v[0])? - 1;
-            let j      = parse_usize(&v[1])? - 1;
-            let k      = parse_usize(&v[2])? - 1;
+            if v.len() < 6 {
+                continue;
+            }
+            let i = parse_usize(&v[0])? - 1;
+            let j = parse_usize(&v[1])? - 1;
+            let k = parse_usize(&v[2])? - 1;
             let a_type = parse_usize(&v[3])? - 1;
-            let b_raw  = parse_usize(&v[4])?;
+            let b_raw = parse_usize(&v[4])?;
             let b_type = if b_raw == 0 { None } else { Some(b_raw - 1) };
-            let alpha  = parse_f64(&v[5])?;
-            ps.soft_angles.push(SoftAngle { i, j, k, a_type, b_type, alpha });
+            let alpha = parse_f64(&v[5])?;
+            ps.soft_angles.push(SoftAngle {
+                i,
+                j,
+                k,
+                a_type,
+                b_type,
+                alpha,
+            });
         }
         if ps.soft_angles.len() != count {
-            log::warn!("PERTANGLESOFT: expected {count} angles, got {}", ps.soft_angles.len());
+            log::warn!(
+                "PERTANGLESOFT: expected {count} angles, got {}",
+                ps.soft_angles.len()
+            );
         }
     }
 
@@ -256,19 +343,32 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
         let (count, data) = split_count(lines)?;
         for line in &data {
             let v = tokenize(line);
-            if v.len() < 7 { continue; }
-            let i      = parse_usize(&v[0])? - 1;
-            let j      = parse_usize(&v[1])? - 1;
-            let k      = parse_usize(&v[2])? - 1;
-            let l      = parse_usize(&v[3])? - 1;
+            if v.len() < 7 {
+                continue;
+            }
+            let i = parse_usize(&v[0])? - 1;
+            let j = parse_usize(&v[1])? - 1;
+            let k = parse_usize(&v[2])? - 1;
+            let l = parse_usize(&v[3])? - 1;
             let a_type = parse_usize(&v[4])? - 1;
-            let b_raw  = parse_usize(&v[5])?;
+            let b_raw = parse_usize(&v[5])?;
             let b_type = if b_raw == 0 { None } else { Some(b_raw - 1) };
-            let alpha  = parse_f64(&v[6])?;
-            ps.soft_impropers.push(SoftImproper { i, j, k, l, a_type, b_type, alpha });
+            let alpha = parse_f64(&v[6])?;
+            ps.soft_impropers.push(SoftImproper {
+                i,
+                j,
+                k,
+                l,
+                a_type,
+                b_type,
+                alpha,
+            });
         }
         if ps.soft_impropers.len() != count {
-            log::warn!("PERTIMPROPERDIHSOFT: expected {count} impropers, got {}", ps.soft_impropers.len());
+            log::warn!(
+                "PERTIMPROPERDIHSOFT: expected {count} impropers, got {}",
+                ps.soft_impropers.len()
+            );
         }
     }
 
@@ -284,15 +384,25 @@ fn parse_blocks(content: &str) -> HashMap<String, Vec<String>> {
 
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
-        if trimmed == "END" { current = None; continue; }
-        if trimmed == "TITLE" { current = Some("TITLE".to_string()); continue; }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "END" {
+            current = None;
+            continue;
+        }
+        if trimmed == "TITLE" {
+            current = Some("TITLE".to_string());
+            continue;
+        }
 
         // Block header: starts with uppercase letter, contains only alnum/underscore, no spaces.
         // This distinguishes "PERTATOMPARAM" (header) from "3" (count line, no uppercase start).
         let is_header = !trimmed.contains(' ')
             && trimmed.starts_with(|c: char| c.is_ascii_uppercase())
-            && trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+            && trimmed
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_');
         if is_header {
             current = Some(trimmed.to_string());
             blocks.entry(trimmed.to_string()).or_default();
@@ -301,7 +411,10 @@ fn parse_blocks(content: &str) -> HashMap<String, Vec<String>> {
 
         if let Some(ref name) = current {
             if name != "TITLE" {
-                blocks.entry(name.clone()).or_default().push(trimmed.to_string());
+                blocks
+                    .entry(name.clone())
+                    .or_default()
+                    .push(trimmed.to_string());
             }
         }
     }
@@ -313,9 +426,10 @@ fn split_count(lines: &[String]) -> Result<(usize, Vec<String>), IoError> {
     if lines.is_empty() {
         return Ok((0, Vec::new()));
     }
-    let count: usize = lines[0].trim().parse().map_err(|_| {
-        IoError::ParseError(format!("expected count, got: {}", lines[0]))
-    })?;
+    let count: usize = lines[0]
+        .trim()
+        .parse()
+        .map_err(|_| IoError::ParseError(format!("expected count, got: {}", lines[0])))?;
     Ok((count, lines[1..].to_vec()))
 }
 
@@ -324,11 +438,13 @@ fn tokenize(line: &str) -> Vec<&str> {
 }
 
 fn parse_usize(s: &str) -> Result<usize, IoError> {
-    s.parse::<usize>().map_err(|_| IoError::ParseError(format!("expected usize: {s}")))
+    s.parse::<usize>()
+        .map_err(|_| IoError::ParseError(format!("expected usize: {s}")))
 }
 
 fn parse_f64(s: &str) -> Result<f64, IoError> {
-    s.parse::<f64>().map_err(|_| IoError::ParseError(format!("expected f64: {s}")))
+    s.parse::<f64>()
+        .map_err(|_| IoError::ParseError(format!("expected f64: {s}")))
 }
 
 // ─── Legacy writer (kept for py-gromos tooling) ─────────────────────────────
@@ -347,7 +463,9 @@ pub struct PtpWriter {
 
 impl PtpWriter {
     pub fn new<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        Ok(Self { file: File::create(path)? })
+        Ok(Self {
+            file: File::create(path)?,
+        })
     }
 
     pub fn write(
@@ -359,7 +477,10 @@ impl PtpWriter {
         title: &str,
     ) -> io::Result<()> {
         if topology_a.num_atoms() != topology_b.num_atoms() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "atom count mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "atom count mismatch",
+            ));
         }
         writeln!(self.file, "TITLE\n{title}\nEND")?;
         self.write_perturbed_atoms(topology_a, topology_b, alpha_lj, alpha_crf)?;
@@ -376,15 +497,28 @@ impl PtpWriter {
         alpha_crf: f64,
     ) -> io::Result<()> {
         writeln!(self.file, "PERTURBEDATOM")?;
-        writeln!(self.file, "#  NR  IACNA  IACNB  MASNA  MASNB  CHARGA  CHARGB  ALPHLJ  ALPHCRF")?;
+        writeln!(
+            self.file,
+            "#  NR  IACNA  IACNB  MASNA  MASNB  CHARGA  CHARGB  ALPHLJ  ALPHCRF"
+        )?;
         for i in 0..a.num_atoms() {
             let (iac_a, iac_b) = (a.iac[i], b.iac[i]);
             let (ma, mb) = (a.mass[i], b.mass[i]);
             let (ca, cb) = (a.charge[i], b.charge[i]);
             if iac_a != iac_b || (ma - mb).abs() > 1e-6 || (ca - cb).abs() > 1e-6 {
-                writeln!(self.file,
+                writeln!(
+                    self.file,
                     "{:5} {:6} {:6} {:7.2} {:7.2} {:8.3} {:8.3} {:7.3} {:8.3}",
-                    i + 1, iac_a, iac_b, ma, mb, ca, cb, alpha_lj, alpha_crf)?;
+                    i + 1,
+                    iac_a,
+                    iac_b,
+                    ma,
+                    mb,
+                    ca,
+                    cb,
+                    alpha_lj,
+                    alpha_crf
+                )?;
             }
         }
         writeln!(self.file, "END")
@@ -398,7 +532,10 @@ mod tests {
 
     fn write_tmp(content: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join("gromos_ptp_test.tmp");
-        std::fs::File::create(&path).unwrap().write_all(content.as_bytes()).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
         path
     }
 
@@ -427,7 +564,7 @@ mod tests {
         // These are the per-atom scaling factors — multiplied by global ALPHLJ/ALPHC
         // in Forcefield::build_pert_info. If these are wrong the soft-core distances
         // will be wrong and the FEP energies will be off.
-        assert!((cm.lj_soft  - 0.5).abs() < 1e-6, "lj_soft = 0.5");
+        assert!((cm.lj_soft - 0.5).abs() < 1e-6, "lj_soft = 0.5");
         assert!((cm.crf_soft - 0.5).abs() < 1e-6, "crf_soft = 0.5");
     }
 
@@ -448,8 +585,14 @@ END
         let path = write_tmp(content);
         let pt = read_pttopo(&path).expect("read_pttopo");
         let a = &pt.perturbed_solute.atoms[0];
-        assert!((a.lj_soft  - 0.5).abs() < 1e-9, "lj_soft must be read from column 9 (ALJ)");
-        assert!((a.crf_soft - 0.5).abs() < 1e-9, "crf_soft must be read from column 10 (ACRF)");
+        assert!(
+            (a.lj_soft - 0.5).abs() < 1e-9,
+            "lj_soft must be read from column 9 (ALJ)"
+        );
+        assert!(
+            (a.crf_soft - 0.5).abs() < 1e-9,
+            "crf_soft must be read from column 10 (ACRF)"
+        );
         std::fs::remove_file(path).ok();
     }
 
@@ -471,14 +614,22 @@ END
         assert_eq!(ps.atom_pairs.len(), 1, "expected 1 perturbed pair");
         assert_eq!(ps.bonds.len(), 2, "expected 2 perturbed bonds");
         assert_eq!(ps.angles.len(), 2, "expected 2 perturbed angles");
-        assert_eq!(ps.improper_dihedrals.len(), 2, "expected 2 perturbed impropers");
-        assert_eq!(ps.proper_dihedrals.len(), 2, "expected 2 perturbed dihedrals");
+        assert_eq!(
+            ps.improper_dihedrals.len(),
+            2,
+            "expected 2 perturbed impropers"
+        );
+        assert_eq!(
+            ps.proper_dihedrals.len(),
+            2,
+            "expected 2 perturbed dihedrals"
+        );
 
         // Atom 0 (seq=0, 1-indexed seq=1 in file): CB, IAC 14→11 (0-indexed: 13→10)
         let a0 = &ps.atoms[0];
         assert_eq!(a0.seq, 0);
-        assert_eq!(a0.a_iac, 13);  // 14-1
-        assert_eq!(a0.b_iac, 10);  // 11-1
+        assert_eq!(a0.a_iac, 13); // 14-1
+        assert_eq!(a0.b_iac, 10); // 11-1
         assert!((a0.a_mass - 15.035).abs() < 0.01);
         assert!((a0.a_charge - 0.0).abs() < 1e-6);
         assert!((a0.b_charge - 1.0).abs() < 1e-6);

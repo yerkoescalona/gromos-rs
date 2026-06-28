@@ -87,11 +87,8 @@ fn main() {
     for ((i, j), distances) in &pair_distances {
         if !distances.is_empty() {
             let avg_r: f64 = distances.iter().sum::<f64>() / distances.len() as f64;
-            let avg_r_minus_6: f64 = distances
-                .iter()
-                .map(|&r| (1.0 / (r).powi(6)))
-                .sum::<f64>()
-                / distances.len() as f64;
+            let avg_r_minus_6: f64 =
+                distances.iter().map(|&r| 1.0 / (r).powi(6)).sum::<f64>() / distances.len() as f64;
 
             let noe_intensity = avg_r_minus_6.powf(-1.0 / 6.0);
 

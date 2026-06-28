@@ -27,19 +27,20 @@
 //! let converted = pos_f32.to_f64();
 //! ```
 
-pub mod float;
-pub mod vector;
-pub mod matrix;
-pub mod math;
-pub mod random;
-pub mod topology;
+pub mod algorithm;
 pub mod configuration;
+pub mod float;
+pub mod gather;
+pub mod math;
+pub mod matrix;
 pub mod pairlist;
+pub mod random;
 pub mod selection;
 pub mod stat;
-pub mod gather;
+pub mod topology;
+pub mod units;
 pub mod validation;
-pub mod algorithm;
+pub mod vector;
 
 // FFI for C bindings (feature-gated)
 #[cfg(feature = "ffi")]
@@ -49,8 +50,8 @@ pub mod ffi;
 pub use float::{Float, F32, F64};
 
 // Re-export generic vector and matrix types
-pub use vector::{Vector3, Vec3f, Vec3d, VEC3F_ZERO, VEC3D_ZERO};
-pub use matrix::{Matrix3, Mat3f, Mat3d};
+pub use matrix::{Mat3d, Mat3f, Matrix3};
+pub use vector::{Vec3d, Vec3f, Vector3, VEC3D_ZERO, VEC3F_ZERO};
 
 // Legacy compatibility - keep the old Vec3/Mat3 names pointing to the glam-based types
 // These will be phased out in favor of the generic types
@@ -61,15 +62,15 @@ pub use configuration::{Box, BoxType, Configuration, Energy, State, StochasticVa
 
 // Re-export topology types
 pub use topology::{
-    LJParameters, Topology,
-    PerturbedAtom, PerturbedAtomPair,
-    PerturbedBond, PerturbedAngle, PerturbedDihedral, PerturbedSolute,
-    SoftBond, SoftAngle, SoftImproper,
+    LJParameters, PerturbedAngle, PerturbedAtom, PerturbedAtomPair, PerturbedBond,
+    PerturbedDihedral, PerturbedSolute, SoftAngle, SoftBond, SoftImproper, Topology,
 };
 
 // Re-export pairlist types
-pub use pairlist::{CellListPairlistAlgorithm, Pairlist, PairlistAlgorithm, PairlistContainer, StandardPairlistAlgorithm};
+pub use pairlist::{
+    CellListPairlistAlgorithm, Pairlist, PairlistAlgorithm, PairlistContainer,
+    StandardPairlistAlgorithm,
+};
 
 // Re-export selection
 pub use selection::AtomSelection;
-

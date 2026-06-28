@@ -7,21 +7,30 @@ use crate::configuration::Configuration;
 use crate::math::Vec3;
 use crate::topology::Topology;
 
+/// A single validation finding with severity, location, and description.
 #[derive(Debug)]
 pub struct ValidationError {
+    /// Severity of the finding.
     pub level: ValidationLevel,
+    /// Human-readable description of the problem.
     pub message: String,
+    /// Source location string (e.g. `"topology"`, `"coordinates"`).
     pub location: String,
 }
 
+/// Severity level for a validation finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationLevel {
+    /// Non-critical issue; simulation may still proceed.
     Warning,
+    /// Serious issue that may produce wrong results.
     Error,
+    /// Unrecoverable issue; simulation cannot proceed.
     Fatal,
 }
 
 impl ValidationError {
+    /// Create a warning-level finding.
     pub fn warning(location: &str, message: String) -> Self {
         Self {
             level: ValidationLevel::Warning,
@@ -30,6 +39,7 @@ impl ValidationError {
         }
     }
 
+    /// Create an error-level finding.
     pub fn error(location: &str, message: String) -> Self {
         Self {
             level: ValidationLevel::Error,
@@ -38,6 +48,7 @@ impl ValidationError {
         }
     }
 
+    /// Create a fatal-level finding.
     pub fn fatal(location: &str, message: String) -> Self {
         Self {
             level: ValidationLevel::Fatal,
@@ -46,6 +57,7 @@ impl ValidationError {
         }
     }
 
+    /// Print this finding to stderr.
     pub fn print(&self) {
         let level_str = match self.level {
             ValidationLevel::Warning => "WARNING",
@@ -56,12 +68,16 @@ impl ValidationError {
     }
 }
 
+/// Collects all validation findings from a validation pass.
 pub struct ValidationReport {
+    /// Error- and fatal-level findings.
     pub errors: Vec<ValidationError>,
+    /// Warning-level findings.
     pub warnings: Vec<ValidationError>,
 }
 
 impl ValidationReport {
+    /// Create an empty report.
     pub fn new() -> Self {
         Self {
             errors: Vec::new(),
@@ -69,6 +85,7 @@ impl ValidationReport {
         }
     }
 
+    /// Add a finding, routing it to the appropriate list by severity.
     pub fn add(&mut self, error: ValidationError) {
         match error.level {
             ValidationLevel::Warning => self.warnings.push(error),
@@ -76,16 +93,19 @@ impl ValidationReport {
         }
     }
 
+    /// Returns `true` if any error- or fatal-level findings were recorded.
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
 
+    /// Returns `true` if any fatal-level findings were recorded.
     pub fn has_fatal(&self) -> bool {
         self.errors
             .iter()
             .any(|e| e.level == ValidationLevel::Fatal)
     }
 
+    /// Print all findings to stderr.
     pub fn print(&self) {
         for warning in &self.warnings {
             warning.print();
@@ -95,6 +115,7 @@ impl ValidationReport {
         }
     }
 
+    /// Print a one-line summary (counts of warnings and errors) to stderr.
     pub fn print_summary(&self) {
         if !self.warnings.is_empty() {
             eprintln!("\n{} warning(s) found", self.warnings.len());
@@ -240,13 +261,13 @@ pub fn validate_coordinates(positions: &[Vec3], box_dims: Option<Vec3>) -> Valid
 
     // Check distances between consecutive atoms (catch overlaps)
     let mut min_dist = f64::MAX;
-    let mut min_pair = (0, 0);
+    let mut _min_pair = (0, 0);
     for i in 0..positions.len() {
         for j in (i + 1)..positions.len().min(i + 100) {
             let dist = (positions[j] - positions[i]).length();
             if dist < min_dist {
                 min_dist = dist;
-                min_pair = (i, j);
+                _min_pair = (i, j);
             }
             if dist < 0.01 {
                 // Less than 0.01 nm = 0.1 Å

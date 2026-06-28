@@ -265,7 +265,11 @@ fn main() {
     eprintln!("Reading solute coordinates...");
     let (mut solute_atoms, solute_box) = match read_g96_labeled(&sb_args.pos) {
         Ok(data) => {
-            let box_opt = if data.box_dims == Vec3::ZERO { None } else { Some(data.box_dims) };
+            let box_opt = if data.box_dims == Vec3::ZERO {
+                None
+            } else {
+                Some(data.box_dims)
+            };
             (data.atoms, box_opt)
         },
         Err(e) => {
@@ -279,7 +283,11 @@ fn main() {
     eprintln!("Reading solvent coordinates...");
     let (solvent_atoms_orig, solvent_box_opt) = match read_g96_labeled(&sb_args.solvent) {
         Ok(data) => {
-            let box_opt = if data.box_dims == Vec3::ZERO { None } else { Some(data.box_dims) };
+            let box_opt = if data.box_dims == Vec3::ZERO {
+                None
+            } else {
+                Some(data.box_dims)
+            };
             (data.atoms, box_opt)
         },
         Err(e) => {
@@ -488,14 +496,22 @@ fn main() {
     for (i, atom) in final_atoms.iter().enumerate() {
         println!(
             "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-            atom.res_num, atom.res_name, atom.atom_name, i + 1,
-            atom.pos.x, atom.pos.y, atom.pos.z
+            atom.res_num,
+            atom.res_name,
+            atom.atom_name,
+            i + 1,
+            atom.pos.x,
+            atom.pos.y,
+            atom.pos.z
         );
     }
     println!("END");
 
     println!("BOX");
-    println!("{:15.9}{:15.9}{:15.9}", target_box.x, target_box.y, target_box.z);
+    println!(
+        "{:15.9}{:15.9}{:15.9}",
+        target_box.x, target_box.y, target_box.z
+    );
     println!("END");
 
     eprintln!("Done!");

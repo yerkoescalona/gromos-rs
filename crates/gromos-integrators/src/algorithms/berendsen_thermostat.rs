@@ -13,9 +13,7 @@
 use gromos_core::algorithm::{Algorithm, SimulationState};
 use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
-
-/// Boltzmann constant in kJ/(mol·K)
-const K_BOLTZMANN: f64 = 0.00831441;
+use gromos_core::units::kB;
 
 /// Berendsen thermostat parameters for a single temperature bath.
 #[derive(Debug, Clone)]
@@ -78,7 +76,7 @@ impl Algorithm for BerendsenThermostat {
 
             // Compute free temperature: T_free = 2·E_kin / (DOF · k_B)
             let mut free_temp = if params.dof > 0.0 {
-                2.0 * ekin / (params.dof * K_BOLTZMANN)
+                2.0 * ekin / (params.dof * kB)
             } else {
                 0.0
             };
@@ -101,7 +99,11 @@ impl Algorithm for BerendsenThermostat {
 
             log::debug!(
                 "  Berendsen bath {}: E_kin_new={:.6e}, T_free={:.2}, T0={:.2}, scale={:.10}",
-                bath_idx, ekin, free_temp, params.temperature, scale
+                bath_idx,
+                ekin,
+                free_temp,
+                params.temperature,
+                scale
             );
 
             if (scale - 1.0).abs() < 1e-15 {

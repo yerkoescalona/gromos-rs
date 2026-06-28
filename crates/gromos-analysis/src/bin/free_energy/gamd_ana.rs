@@ -1,9 +1,17 @@
-///! gamd_ana - GaMD Analysis Tool
-///!
-///! Analyzes GaMD simulation data to recover unbiased free energies
-///! via reweighting of the boost potential.
-///!
-///! Usage: gamd_ana @boost gamd_boost.dat @stats gamd_stats.dat [@pmf pmf.dat]
+// TODO: stub — delta_v_dih/delta_v_pot parsed but decomposition reweighting not yet implemented (ref: GROMOS++ gamd_ana.cc).
+#![allow(unused)]
+//! gamd_ana - GaMD Analysis Tool
+//!
+//! Analyzes GaMD simulation data to recover unbiased free energies
+//! via reweighting of the boost potential.
+//!
+//! Usage: gamd_ana @boost gamd_boost.dat @stats gamd_stats.dat [@pmf pmf.dat]
+
+// TODO: stub — delta_v_dih and delta_v_pot are parsed from the boost file but
+// the dihedral-only and potential-only reweighting branches are not yet
+// implemented. Wire them up when GaMD decomposition is added
+// (ref: GROMOS++ gamd_ana.cc).
+
 use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};

@@ -14,16 +14,14 @@ pub use bonds::*;
 pub use dihedrals::*;
 pub use improper::*;
 pub use perturbed::{
-    calculate_perturbed_angle_forces,
-    calculate_perturbed_bond_forces,
-    calculate_perturbed_bonded_forces,
-    calculate_perturbed_dihedral_forces,
+    calculate_perturbed_angle_forces, calculate_perturbed_bond_forces,
+    calculate_perturbed_bonded_forces, calculate_perturbed_dihedral_forces,
     calculate_perturbed_improper_dihedral_forces,
 };
 
+use gromos_core::configuration::Configuration;
 use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
-use gromos_core::configuration::Configuration;
 
 // ─── Shared result types ─────────────────────────────────────────────────────
 
@@ -46,7 +44,11 @@ pub struct ForceEnergyLambda {
 
 impl ForceEnergy {
     pub fn new(num_atoms: usize) -> Self {
-        Self { energy: 0.0, forces: vec![Vec3::ZERO; num_atoms], virial: [[0.0; 3]; 3] }
+        Self {
+            energy: 0.0,
+            forces: vec![Vec3::ZERO; num_atoms],
+            virial: [[0.0; 3]; 3],
+        }
     }
 
     pub fn add(&mut self, other: &ForceEnergy) {
@@ -55,14 +57,20 @@ impl ForceEnergy {
             self.forces[i] += other.forces[i];
         }
         for a in 0..3 {
-            for b in 0..3 { self.virial[a][b] += other.virial[a][b]; }
+            for b in 0..3 {
+                self.virial[a][b] += other.virial[a][b];
+            }
         }
     }
 }
 
 impl ForceEnergyLambda {
     pub fn new(num_atoms: usize) -> Self {
-        Self { energy: 0.0, forces: vec![Vec3::ZERO; num_atoms], lambda_derivative: 0.0 }
+        Self {
+            energy: 0.0,
+            forces: vec![Vec3::ZERO; num_atoms],
+            lambda_derivative: 0.0,
+        }
     }
 
     pub fn add(&mut self, other: &ForceEnergyLambda) {
@@ -78,8 +86,12 @@ impl ForceEnergyLambda {
 
 #[derive(Debug, Clone, Default)]
 pub struct InteractionLambdas {
-    pub bond: f64, pub angle: f64, pub dihedral: f64,
-    pub improper: f64, pub lj: f64, pub coulomb: f64,
+    pub bond: f64,
+    pub angle: f64,
+    pub dihedral: f64,
+    pub improper: f64,
+    pub lj: f64,
+    pub coulomb: f64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -89,19 +101,29 @@ pub struct LambdaController {
 }
 
 impl LambdaController {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn with_lambda(mut self, lambda: f64) -> Self {
         self.lambda = lambda;
         self.interaction_lambdas = InteractionLambdas {
-            bond: lambda, angle: lambda, dihedral: lambda,
-            improper: lambda, lj: lambda, coulomb: lambda,
+            bond: lambda,
+            angle: lambda,
+            dihedral: lambda,
+            improper: lambda,
+            lj: lambda,
+            coulomb: lambda,
         };
         self
     }
 
-    pub fn get_lambda(&self) -> f64 { self.lambda }
-    pub fn lambda_derivative(&self) -> f64 { 1.0 }
+    pub fn get_lambda(&self) -> f64 {
+        self.lambda
+    }
+    pub fn lambda_derivative(&self) -> f64 {
+        1.0
+    }
 }
 
 // ─── Top-level combiners ─────────────────────────────────────────────────────
@@ -152,9 +174,15 @@ pub fn calculate_bonded_forces_ntf(
         result.add(&imf);
     }
 
-    log::debug!("  bonded total={:.6e}  max|f|={:.6e}",
+    log::debug!(
+        "  bonded total={:.6e}  max|f|={:.6e}",
         result.energy,
-        result.forces.iter().map(|f| f.length()).fold(0.0_f64, f64::max));
+        result
+            .forces
+            .iter()
+            .map(|f| f.length())
+            .fold(0.0_f64, f64::max)
+    );
     result
 }
 

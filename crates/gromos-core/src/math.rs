@@ -36,12 +36,16 @@ impl BoundaryCondition for Vacuum {
 /// Rectangular periodic boundary conditions
 #[derive(Debug, Clone, Copy)]
 pub struct Rectangular {
+    /// Box edge lengths (nm).
     pub box_size: Vec3,
+    /// Precomputed half-box lengths used in the minimum-image test.
     pub half_box: Vec3,
+    /// Precomputed reciprocal box lengths (1/box_size).
     pub inv_box: Vec3,
 }
 
 impl Rectangular {
+    /// Create from box edge lengths; precomputes half-box and reciprocal lengths.
     pub fn new(box_size: Vec3) -> Self {
         Self {
             box_size,
@@ -72,11 +76,14 @@ impl BoundaryCondition for Rectangular {
 /// Triclinic periodic boundary conditions
 #[derive(Debug, Clone, Copy)]
 pub struct Triclinic {
-    pub box_matrix: Mat3,     // Box vectors as columns
-    pub inv_box_matrix: Mat3, // Inverse for wrapping
+    /// Box vectors as columns (lower-triangular GROMOS convention).
+    pub box_matrix: Mat3,
+    /// Inverse box matrix used for fractional-coordinate wrapping.
+    pub inv_box_matrix: Mat3,
 }
 
 impl Triclinic {
+    /// Create from a box matrix; precomputes the inverse.
     pub fn new(box_matrix: Mat3) -> Self {
         Self {
             box_matrix,
@@ -207,12 +214,16 @@ pub fn truncoct_triclinic(positions: &mut [Vec3], forward: bool) {
 /// Generic periodicity wrapper
 #[derive(Debug, Clone)]
 pub enum Periodicity {
+    /// No periodic boundary — suitable for vacuum / gas-phase systems.
     Vacuum(Vacuum),
+    /// Orthorhombic periodic box.
     Rectangular(Rectangular),
+    /// Triclinic periodic box (lower-triangular GROMOS convention).
     Triclinic(Triclinic),
 }
 
 impl Periodicity {
+    /// Apply the minimum-image convention and return the image vector `ri − rj`.
     #[inline]
     pub fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
         match self {
@@ -222,6 +233,7 @@ impl Periodicity {
         }
     }
 
+    /// Wrap a position back into the primary box.
     #[inline]
     pub fn put_into_box(&self, pos: Vec3) -> Vec3 {
         match self {

@@ -151,9 +151,8 @@ fn test_trajectory_writer_integration() {
     let path = tmp("integ_traj.trc");
     let config = make_conf(3);
 
-    let mut writer =
-        TrajectoryWriter::new(&path, "Integration test trajectory", true, false)
-            .expect("Failed to create trajectory writer");
+    let mut writer = TrajectoryWriter::new(&path, "Integration test trajectory", true, false)
+        .expect("Failed to create trajectory writer");
 
     for step in 0..5_usize {
         writer
@@ -208,7 +207,9 @@ fn test_energy_writer_integration() {
         frame.lj = -80.0;
         frame.coul_real = -40.0;
         frame.update_potential();
-        writer.write_frame(&frame).expect("Failed to write energy frame");
+        writer
+            .write_frame(&frame)
+            .expect("Failed to write energy frame");
     }
 
     writer.finalize().expect("Failed to finalize");
@@ -278,7 +279,9 @@ fn test_force_writer_with_constraints() {
     let constraints: Vec<Vec3> = (0..n).map(|i| Vec3::new(0.0, i as f64, 0.0)).collect();
 
     let mut writer = ForceWriter::new(&path, "constraint force test", true).unwrap();
-    writer.write_frame(0, 0.0, &forces, Some(&constraints)).unwrap();
+    writer
+        .write_frame(0, 0.0, &forces, Some(&constraints))
+        .unwrap();
     writer.flush().unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
@@ -468,7 +471,7 @@ END
     // 5. Verify
     assert!(Path::new(&trc_path).exists());
     assert!(Path::new(&tre_path).exists());
-    assert_eq!(traj.frame_count(), 20);   // 100 / 5
+    assert_eq!(traj.frame_count(), 20); // 100 / 5
     assert_eq!(energy.frame_count(), 20); // 100 / 5
 
     fs::remove_file(imd_path).ok();

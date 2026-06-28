@@ -45,8 +45,8 @@ pub use cuda_impl::*;
 
 #[cfg(feature = "use-cuda")]
 mod cuda_impl {
-    use gromos_core::math::Vec3;
     use cudarc::driver::*;
+    use gromos_core::math::Vec3;
     use std::sync::Arc;
 
     // Embedded PTX kernels (compiled at build time)
@@ -357,10 +357,9 @@ mod cuda_impl {
                 .pme_grid_dim
                 .ok_or_else(|| DriverError::LaunchFailed("PME not enabled".to_string()))?;
 
-            let charge_grid = self
-                .dev_charge_grid
-                .as_mut()
-                .ok_or_else(|| DriverError::LaunchFailed("Charge grid not allocated".to_string()))?;
+            let charge_grid = self.dev_charge_grid.as_mut().ok_or_else(|| {
+                DriverError::LaunchFailed("Charge grid not allocated".to_string())
+            })?;
 
             // Clear grid
             self.device.memset_zeros(charge_grid)?;
@@ -517,10 +516,9 @@ mod cuda_impl {
                 .as_mut()
                 .ok_or_else(|| DriverError::LaunchFailed("Cell list not allocated".to_string()))?;
 
-            let cell_counts = self
-                .dev_cell_counts
-                .as_mut()
-                .ok_or_else(|| DriverError::LaunchFailed("Cell counts not allocated".to_string()))?;
+            let cell_counts = self.dev_cell_counts.as_mut().ok_or_else(|| {
+                DriverError::LaunchFailed("Cell counts not allocated".to_string())
+            })?;
 
             // Clear cell counts
             self.device.memset_zeros(cell_counts)?;
