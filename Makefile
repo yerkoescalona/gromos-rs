@@ -1,6 +1,7 @@
-# gromos-rs — local CI equivalent
+# gromos-rs — local dev convenience wrapper (not used by GitHub CI, which
+# runs its own native steps per .github/workflows/*.yml)
 # Usage: make check        (fast, before commit)
-#        make ci           (full suite, matches GitHub CI)
+#        make ci           (full local suite: fmt/lint/test)
 #        make build-python (compile + install Python extension into .venv)
 #        make test-python  (run py-gromos test suite)
 
@@ -8,7 +9,7 @@ VENV := .venv
 VENV_BIN := $(VENV)/bin
 
 .PHONY: check ci fmt fmt-check lint-rust lint test \
-        .venv requirements build-python build-release test-python \
+        .venv build-python build-release test-python \
         docs docs-serve
 
 # ── Rust ─────────────────────────────────────────────────────────────────────
@@ -37,32 +38,28 @@ test:
 	cargo test --workspace
 
 # ── Python ───────────────────────────────────────────────────────────────────
+# Managed via `uv` — see py-gromos/pyproject.toml for pinned deps
+# (runtime deps + the `dev` dependency-group). Creates/uses py-gromos/.venv.
 
-# Create virtual environment and install Python dev dependencies
-.venv:
-	python3 -m venv $(VENV)
-	$(VENV_BIN)/pip install --quiet --upgrade pip
-	$(VENV_BIN)/pip install --quiet maturin
-	$(VENV_BIN)/pip install --quiet -e "py-gromos/[dev]" --no-build-isolation 2>/dev/null || true
-
-# Reinstall Python dependencies without rebuilding the extension
-requirements: .venv
-	$(VENV_BIN)/pip install --quiet maturin
-	$(VENV_BIN)/pip install --quiet "py-gromos/[dev]" --no-build-isolation 2>/dev/null || true
-
-# Compile the Rust extension and install it into .venv (dev/debug build)
-build-python: .venv
-	cd py-gromos && $(CURDIR)/$(VENV_BIN)/maturin develop --extras dev
+# Sync deps and compile the Rust extension (dev/debug build)
+build-python:
+	cd py-gromos && uv sync --all-groups
 
 # Compile with optimisations
-build-release: .venv
-	cd py-gromos && $(CURDIR)/$(VENV_BIN)/maturin develop --release --extras dev
+build-release: build-python
+	cd py-gromos && uv run maturin develop --release
 
 # Run the Python test suite (build first)
 test-python: build-python
-	$(VENV_BIN)/pytest py-gromos/tests/ -v
+	cd py-gromos && uv run pytest tests/ -v
 
 # ── Docs ─────────────────────────────────────────────────────────────────────
+
+# Create a root virtualenv for tooling that isn't part of the py-gromos
+# package itself (mkdocs is not a project dependency).
+.venv:
+	python3 -m venv $(VENV)
+	$(VENV_BIN)/pip install --quiet --upgrade pip
 
 # Build static documentation site into py-gromos/site/
 docs: .venv

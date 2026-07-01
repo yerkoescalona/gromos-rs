@@ -1,16 +1,6 @@
 .DEFAULT_GOAL := help
 
-PYTHONPATH=
 SHELL=bash
-ifeq ($(VENV),)
-VENV := ../.venv
-endif
-
-ifeq ($(OS),Windows_NT)
-	VENV_BIN=$(VENV)/Scripts
-else
-	VENV_BIN=$(VENV)/bin
-endif
 
 ##@ General
 
@@ -20,52 +10,56 @@ help: ## Display this help
 
 ##@ Setup
 
-.PHONY: .venv
-.venv: ## Set up virtual environment and install requirements
-	@$(MAKE) -s -C .. $@
-
-.PHONY: requirements
-requirements: .venv ## Install/refresh Python project requirements
-	@$(MAKE) -s -C .. $@
+.PHONY: sync
+sync: ## Sync deps and compile the Rust extension (dev/debug build) into .venv
+	uv sync --all-groups
 
 ##@ Building
 
 .PHONY: build
-build: .venv ## Compile and install Python extension for development
-	@$(MAKE) -s -C .. build-python
+build: sync ## Compile and install Python extension for development
 
 .PHONY: build-release
-build-release: .venv ## Compile and install with optimizations
-	@$(MAKE) -s -C .. build-release
+build-release: sync ## Compile and install with optimizations
+	uv run maturin develop --release
 
 ##@ Testing
 
 .PHONY: test
-test: .venv build ## Run Python tests
-	$(VENV_BIN)/pytest tests/ -v
+test: build ## Run Python tests
+	uv run pytest tests/ -v
 
 .PHONY: test-verbose
-test-verbose: .venv build ## Run tests with verbose output
-	$(VENV_BIN)/pytest tests/ -vv -s
+test-verbose: build ## Run tests with verbose output
+	uv run pytest tests/ -vv -s
 
 .PHONY: test-fast
 test-fast: ## Run tests without rebuilding
-	$(VENV_BIN)/pytest tests/ -v
+	uv run pytest tests/ -v
 
 .PHONY: test-coverage
-test-coverage: .venv build ## Run tests with coverage
-	$(VENV_BIN)/pytest tests/ --cov=gromos --cov-report=html --cov-report=term
+test-coverage: build ## Run tests with coverage
+	uv run pytest tests/ --cov=gromos --cov-report=html --cov-report=term
 
 ##@ Code Quality
 
 .PHONY: fmt
-fmt: .venv ## Format Python code
-	$(VENV_BIN)/ruff check --fix python/ tests/ examples/
-	$(VENV_BIN)/ruff format python/ tests/ examples/
+fmt: sync ## Format Python code
+	uv run ruff check --fix python/ tests/ examples/
+	uv run ruff format python/ tests/ examples/
+
+.PHONY: fmt-check
+fmt-check: sync ## Check Python formatting without modifying files
+	uv run ruff check python/ tests/ examples/
+	uv run ruff format --check python/ tests/ examples/
 
 .PHONY: lint
-lint: .venv ## Lint Python code
-	$(VENV_BIN)/ruff check python/ tests/ examples/
+lint: sync ## Lint Python code
+	uv run ruff check python/ tests/ examples/
+
+.PHONY: type-check
+type-check: sync ## Run type checking with mypy
+	uv run mypy python/ --ignore-missing-imports
 
 .PHONY: pre-commit
 pre-commit: fmt lint test ## Run pre-commit checks
@@ -73,21 +67,18 @@ pre-commit: fmt lint test ## Run pre-commit checks
 ##@ Notebooks
 
 .PHONY: notebooks
-notebooks: .venv build ## Run Jupyter notebooks
-	$(VENV_BIN)/pip install jupyter notebook
-	$(VENV_BIN)/jupyter notebook notebooks/
+notebooks: build ## Run Jupyter notebooks
+	uv run --with jupyter,notebook jupyter notebook notebooks/
 
 ##@ Documentation
 
 .PHONY: docs
-docs: .venv ## Build static documentation site into site/
-	$(VENV_BIN)/pip install --quiet mkdocs-material
-	$(VENV_BIN)/mkdocs build --strict
+docs: sync ## Build static documentation site into site/
+	uv run --with mkdocs-material mkdocs build --strict
 
 .PHONY: docs-serve
-docs-serve: .venv ## Serve documentation locally with live-reload (http://localhost:8000)
-	$(VENV_BIN)/pip install --quiet mkdocs-material
-	$(VENV_BIN)/mkdocs serve
+docs-serve: sync ## Serve documentation locally with live-reload (http://localhost:8000)
+	uv run --with mkdocs-material mkdocs serve
 
 ##@ Cleaning
 
@@ -111,23 +102,16 @@ clean-cache: ## Clean Python cache files only
 
 .PHONY: profile
 profile: build-release ## Profile Python code
-	$(VENV_BIN)/python -m cProfile -o profile.stats examples/basic_usage.py
-	$(VENV_BIN)/python -m pstats profile.stats
-
-.PHONY: type-check
-type-check: venv ## Run type checking with mypy
-	$(VENV_BIN)/pip install mypy
-	$(VENV_BIN)/mypy python/ --ignore-missing-imports
+	uv run python -m cProfile -o profile.stats examples/basic_usage.py
+	uv run python -m pstats profile.stats
 
 .PHONY: publish-test
-publish-test: build-wheel ## Publish to TestPyPI
-	$(VENV_BIN)/pip install twine
-	$(VENV_BIN)/twine upload --repository testpypi dist/*
+publish-test: ## Publish to TestPyPI
+	uv run --with twine twine upload --repository testpypi dist/*
 
 .PHONY: publish
-publish: build-wheel ## Publish to PyPI
-	$(VENV_BIN)/pip install twine
-	$(VENV_BIN)/twine upload dist/*
+publish: ## Publish to PyPI
+	uv run --with twine twine upload dist/*
 
 .PHONY: all
-all: fmt clippy test build-release ## Run formatter, linter, tests and build release
+all: fmt lint test build-release ## Run formatter, linter, tests and build release
