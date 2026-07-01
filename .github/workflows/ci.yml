@@ -308,8 +308,9 @@ jobs:
         run: uv run pytest tests/ --cov=gromos --cov-report=xml
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./lcov-rust.info,./py-gromos/coverage.xml
           flags: integration
           name: full-coverage
