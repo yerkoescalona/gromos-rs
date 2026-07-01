@@ -72,32 +72,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Cache Python packages
-        uses: actions/cache@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          enable-cache: true
 
-      - name: Install maturin
-        run: pip install maturin
-
-      - name: Build and install py-gromos
+      - name: Sync Python dependencies (builds extension via maturin)
         working-directory: py-gromos
-        run: maturin develop
-
-      - name: Install dev dependencies
-        working-directory: py-gromos
-        run: pip install -e .[dev]
+        run: uv sync --all-groups
 
       - name: Lint and format Python code (ruff)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         working-directory: py-gromos
         run: |
-          pip install ruff
-          ruff check python/ tests/ examples/
-          ruff format --check python/ tests/ examples/
+          uv run ruff check python/ tests/ examples/
+          uv run ruff format --check python/ tests/ examples/
         continue-on-error: true
 
       - name: Clippy (Rust bindings)
@@ -108,15 +97,13 @@ jobs:
 
       - name: Run Python tests
         working-directory: py-gromos
-        run: pytest tests/ -v
+        run: uv run pytest tests/ -v
         continue-on-error: true
 
       - name: Run Python tests with coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         working-directory: py-gromos
-        run: |
-          pip install pytest-cov
-          pytest tests/ --cov=gromos --cov-report=xml --cov-report=term
+        run: uv run pytest tests/ --cov=gromos --cov-report=xml --cov-report=term
         continue-on-error: true
 
       - name: Upload coverage to Codecov
@@ -162,15 +149,28 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-import-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Create virtualenv
+        run: |
+          python -m venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
+
+      # Deliberately just maturin + numpy (the runtime dep), not `uv sync
+      # --all-groups` — this job checks the extension imports on its own,
+      # without the dev tooling present.
       - name: Install maturin
-        run: pip install maturin numpy
+        run: uv pip install maturin numpy
 
       - name: Build and install py-gromos
         working-directory: py-gromos
         run: maturin develop --release
 
       - name: Test import
-        run: python -c "import gromos; print(f'gromos version: {gromos.__version__}')"
+        run: |
+          python -c "import gromos; print(f'gromos version: {gromos.__version__}')"
 
   benchmark:
     name: Benchmarks
@@ -193,16 +193,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfftw3-dev libopenmpi-dev
 
-      - name: Install dependencies
-        run: pip install maturin pytest pytest-benchmark
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
 
-      - name: Build py-gromos (release)
+      - name: Sync Python dependencies (builds extension via maturin)
         working-directory: py-gromos
-        run: maturin develop --release
+        run: uv sync --all-groups
 
       - name: Run benchmarks
         working-directory: py-gromos
-        run: pytest tests/ --benchmark-only || echo "No benchmarks available"
+        run: uv run pytest tests/ --benchmark-only || echo "No benchmarks available"
 
   examples:
     name: Run Examples
@@ -235,17 +235,17 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-examples-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install dependencies
-        run: pip install maturin numpy
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
 
-      - name: Build py-gromos
+      - name: Sync Python dependencies (builds extension via maturin)
         working-directory: py-gromos
-        run: maturin develop --release
+        run: uv sync --all-groups
 
       - name: Run examples
         working-directory: py-gromos
         run: |
           for example in examples/*.py; do
             echo "Running $example..."
-            python "$example" || exit 1
+            uv run python "$example" || exit 1
           done
