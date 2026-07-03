@@ -314,170 +314,70 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 > `Topology` (`.top`) and `Configuration` (`.cnf`) — and a `System = Topology + Configuration`
 > that pairs them. Users normally hold a `System`. Start with loading from files; nothing else.
 
-**3.1 — `System.from_files()` — load topology + coordinates as one object** ✓ done
-> The smallest useful step. Commits to none of the deferred decisions. Mostly wires
-> existing `PyTopology` / `PyConfiguration` together.
-> *Invariant:* `System(topo, conf)` raises `ValueError` if `topo.n_atoms != conf.n_atoms`
-> — earliest catch of the `.top`/`.cnf` mismatch that silently corrupted vsomm_modeler runs.
-- [x] `PyTopology.charge` `#[getter]` — `self.inner.charge.iter().sum::<f64>().round() as i32`.
-- [x] `Topology.from_file(path)` / `Configuration.from_file(path)` `#[staticmethod]`
-  (keep the existing `__new__(path)` working — just an alias).
-- [x] New `PySystem` in `pyo3-gromos/src/system.rs`:
-  - Holds `Topology + Configuration`; validates atom-count match at construction.
-  - Properties: `n_atoms`, `charge`, `positions`, `velocities`, `box`,
-    `topology`, `configuration`.
-  - `System.from_files(top, cnf)` `#[staticmethod]` — convenience loader.
-  - `write(path)` — write the configuration side to `.cnf`.
-- [x] Expose `System` in `__init__.py`; add to `.pyi` stub.
-- [x] **Unit test:** load a reference system (`water_216_box`), check `n_atoms`/`charge`;
-  mismatched topo/conf raises.
+**3.1 — `System.from_files()`** ✓ done — `System = Topology + Configuration`, atom-count
+validated at construction; `.from_files()`/`.write()`; exposed in `__init__.py`/`.pyi`.
 
-**3.2 — Run an existing `System` with native parameters** ✓ done
-> Make a loaded `System` runnable without writing `.imd` files. Reuses the existing
-> `PySimulation`; the new piece is parameter factories so Python need not author IMD text.
-- [x] `impl Default for ImdParameters` in `gromos-io/src/imd.rs` (sensible GROMOS defaults).
-- [x] Factory functions: `nve(dt, steps)`, `nvt(dt, steps, temperature)`,
-  `npt(dt, steps, temperature, pressure)`, `steepest_descent(steps)`.
-- [x] `PyInputParameters`: `from_file(path)` `#[staticmethod]` (alias of current `__new__`);
-  `#[staticmethod]` factory wrappers; `write(path)` to serialise back to `.imd`.
-- [x] `Simulation(system, params)` constructor accepting a `System` (in addition to the
-  current topo/conf/params form).
-- [x] **Unit test:** `nvt(...)` factory produces a runnable sim equivalent to loading the
-  matching `.imd`; energies match the reference for `water_216_box`.
+**3.2 — Run a `System` with native parameters** ✓ done — `ImdParameters::default()` +
+factories (`nve`/`nvt`/`npt`/`steepest_descent`); `PyInputParameters.from_file()`/`.write()`;
+`Simulation(system, params)` two-arg constructor.
 
-**3.3 — Energy out without files: reporters** ✓ done
-> Stream energies from a run into Python instead of parsing a `.tre` file.
-> *Trap:* reporter callbacks cross the GIL inside the Rust step loop — a panic in a callback
-> must surface as a Python exception, not a process abort. *Invariant:* with no reporters
-> attached, trajectories stay bit-identical to today (all reference tests pass).
-- [x] Wire missing energy components into `PyEnergy`: `angle`, `dihedral`, `improper`
-  (fields exist in the Rust `Energy` struct; zeroed today at `simulation.rs:572`).
-  Also fixed the same zeroing bug in the `md` binary's `.tre` writer via a shared
-  `EnergyFrame::from_energy()` conversion (`gromos-io/src/energy.rs`), now used by
-  both `md.rs` and `PySimulation::run()`. Left two pre-existing instances of the same
-  bug as documented `TODO(bug)` markers (REMD `replica.rs`, GaMD dihedral boost in
-  `md.rs`) — out of scope for P3, not silently fixed.
-- [x] `sim.run(steps, ene_freq=100)` — batch loop in Rust returning an
-  `(n_frames × k)` numpy energy array (no Python-side per-step loop).
-- [x] `EnergyTimeseries` (Python, `py-gromos/python/gromos/timeseries.py`): wraps that
-  array; `to_dataframe()` (polars→pandas→dict), `plot(*components)`,
-  `block_average(component, block_size)`.
-- [x] **Test:** frame count correct; `run()` energies match a `step(1)` loop
-  (`test_run_matches_step_loop`); `EnergyTimeseries` behavior (`test_energy_timeseries`).
+**3.3 — Reporters (energy out without files)** ✓ done — `angle`/`dihedral`/`improper` wired
+into `PyEnergy` (also fixed the same zeroing bug in the `md` binary's `.tre` writer via a
+shared `EnergyFrame::from_energy()`); `sim.run(steps, ene_freq)` batch loop → numpy array;
+`EnergyTimeseries` (`to_dataframe()`, `plot()`, `block_average()`).
+**Bug found+fixed along the way:** `calculate_bonded_forces_ntf` (`gromos-forces/bonded/mod.rs`)
+summed all four bonded terms into one scalar with no per-term breakdown — affected every
+`Simulation.step()`, not just Python (plus REMD/GaMD). Fixed by adding per-term energy fields,
+populated before combining. Total potential energy was always correct, so no reference test
+regressed; caught because `aladip_solvated` (unlike `water_216_box`) has angle/dihedral/improper
+terms to show zero.
 
-**3.4 — Notebooks: teach the `from_files` path** (after 3.3) ✓ done
-> Replaced the three existing notebooks (they reference phantom APIs like `gromos.State`)
-> — deleted `01_understanding_pyo3_bindings.ipynb`, `02_molecular_systems_and_energy.ipynb`,
-> `03_performance_deep_dive.ipynb`; none were referenced elsewhere (docs nav, CI-by-name,
-> READMEs — confirmed before deleting).
-- [x] `01_load_and_inspect.ipynb` — `System.from_files()`, topology/config inspection,
-  mass histogram, O-O RDF of bulk water (plotly), round-trip write/reload, the
-  atom-count `ValueError` guard, and manual `Topology.solvate()` + `System(topo, conf)`
-  composition (needed for `aladip_solvated`, which `from_files()` can't load directly).
-- [x] `02_short_md.ipynb` — native `InputParameters` factory vs `from_file()`, batch
-  `sim.run()` → `EnergyTimeseries`, per-component energy breakdown plot, block-average
-  convergence, `to_dataframe()`, NVE-vs-NVT temperature comparison (manual step loop,
-  contrasting batch vs per-step APIs).
-- [x] Deprecated `md_runners.py` (docstring notice, points at `Simulation`/`notebooks/02`).
-- [x] `pyproject.toml` `notebooks` dependency group: `jupyter`, `ipykernel`, `matplotlib`,
-  `plotly`, `polars`. CI (`ci.yml` test-notebooks job) and `Makefile` (`notebooks`,
-  new `notebooks-test` target) now rely on `uv sync --all-groups` instead of ephemeral
-  `--with` packages.
-- [x] `EnergyTimeseries.to_dataframe()`/`.plot()` take a `backend` argument
-  (`"polars"`/`"pandas"`/`"dict"`, `"plotly"`/`"matplotlib"`); defaults live on
-  `gromos.timeseries.config` (polars + plotly).
+**3.4 — Notebooks** ✓ done — replaced 3 stale notebooks referencing phantom APIs with
+`01_load_and_inspect.ipynb` and `02_short_md.ipynb`; deprecated `md_runners.py`.
+**Gap found, not fixed then (closed by 3.6):** factory params didn't expose SHAKE
+(`aladip_solvated` diverged to NaN) and `build_simulation` never dispatched to steepest-descent.
 
-**Bug found and fixed while building these notebooks:** the aladip energy-component
-plot in `02_short_md.ipynb` came out with `angle`/`dihedral`/`improper` flat at zero —
-3.3's fix only corrected the Python-binding *reporting* layer. The actual bug was one
-level deeper: `calculate_bonded_forces_ntf` (`gromos-forces/src/bonded/mod.rs`) summed
-all four bonded terms into a single `ForceEnergy.energy` scalar with no per-term
-breakdown, and every call site (`algorithms/forcefield.rs` — the main MD path used by
-every `Simulation.step()`, not just Python — plus `replica.rs`, `gamd.rs`) dumped that
-combined total entirely into `bond_total`. Fixed by adding `bond_energy`/`angle_energy`/
-`dihedral_energy`/`improper_energy` fields to `ForceEnergy`, populated at the point in
-`calculate_bonded_forces_ntf` where each term is still a separate local value, before
-combining. `water_216_box`'s existing 3.3 test didn't catch this because SPC water has
-no angle/dihedral/improper terms — verified now with `aladip_solvated`, which has all
-four. Total potential energy was always correct (it's the sum), so no reference test
-regressed; 37/37 `gromos-md` reference tests and all `py-gromos` tests still pass.
-Also fixed the matching GaMD dihedral-boost TODO in `md.rs` (now reads the real
-`dihedral_total` instead of a hardcoded `0.0`) since it was the same root cause.
+**3.5 — M1/M2/SD convenience-path fixes** ✓ done — a full composition-pattern redesign was
+audited down to its load-bearing core: only two things were actually broken.
+- **M1:** `constraints="none"|"hbonds"|"allbonds"` knob on the `nve`/`nvt`/`npt` factories
+  (→ `ntc=1|2|3`); verified empirically (`aladip_solvated` stays finite with `"hbonds"`, still
+  diverges with `"none"` as documented contrast).
+- **M2:** `temperature` getter's DOF calc was duplicated and could silently disagree with the
+  thermostat's; extracted to one shared `compute_total_dof()`.
+- **SD:** `build_simulation` now branches on `ntem > 0` to a steepest-descent sequence
+  (mirrors `md.rs`'s EM sequence exactly); new composable `SteepestDescent`/`AlgorithmSequence.minimize()`
+  building blocks agree with the direct path. Verified: `aladip_vacuum` EM converges and plateaus.
+- Also added `sim.volume`/`sim.pressure` getters (documented trap: NVE/NVT `pressure` returns a
+  real but not-physically-meaningful kinetic-only number, not zero).
 
-**Gap found, not fixed (out of scope here):** `InputParameters.nve()`/`.nvt()`/`.npt()`
-factories don't expose SHAKE constraint settings (`ntc` is read-only) — running a
-constrained system (anything with H-bonds, e.g. `aladip_solvated`) with factory-built
-parameters silently produces an unstable, unconstrained simulation (confirmed: NaN
-temperature within ~50-100 steps). `02_short_md.ipynb` documents this and uses
-`from_file()` for any system that actually needs constraints. Also: the Python
-bindings' `build_simulation()` never dispatches to a steepest-descent algorithm
-sequence regardless of `InputParameters.steepest_descent()`/`ntem` — EM is only
-reachable via the `md` binary today, not through `Simulation`. No `SteepestDescent`
-algorithm-sequence building block is exposed to Python at all.
-
-**3.5 — Minimal fix for the two convenience-path bugs** ✓ done (M1, M2, and SD)
-> A composition-pattern redesign (constraints-on-`System`, unify the two builders, consolidate
-> defaults, symmetric construction) was drafted and **audited down to its load-bearing core**. The
-> audit's finding: only two things are actually broken, and both close in ~20 lines. The rest is
-> pre-existing tech debt with no triggering need — deferred below, not scheduled. Ship these two
-> first, each with its own verification; do NOT bundle them with the refactor.
->
-> *Assumptions exposed by the audit (why the big refactor is not required here):*
-> (1) The builder's SHAKE guard fires on `imd.ntc > 1` **alone** (`simulation.rs:107`), so a single
-> constraint knob on the factories reaches SHAKE with **zero builder changes** — constraints-on-`System`
-> is an aesthetic (OpenMM-orthogonality) choice, not a correctness requirement.
-> (2) The temperature-DOF bug is independent of all of it and **unguarded by any test**.
-> (3) The 1e-8 Python reference suite exercises `build_simulation` via the 3-arg
-> `Simulation(topo, conf, params)` path (`_create_simulation`) — it does *not* A/B-compare the two
-> builders, so a "unify builders" rewrite is guarded only insofar as `resolve_algorithm_sequence`
-> still matches gromosXX on the 21 covered systems.
-
-- [x] **M1 — constraint knob on the factories.** `ntc_from_constraints()` (`gromos-io/imd.rs`) maps
-  `constraints="none"|"hbonds"|"allbonds"` → `ntc=1|2|3`; `ImdParameters::nve/nvt/npt` take it and
-  return `Result` (invalid string → error, surfaced as `ValueError` in `pyo3-gromos/parameters.rs`).
-  `InputParameters.nve/nvt/npt(..., constraints="none")` (Python default, backward compatible) plus a
-  readable `.constraints` getter (inverse of the arg). No builder change — the existing
-  `shake_enabled = imd.ntc > 1 || …` guard picks it up automatically.
-  **Verified empirically**, not just by construction: factory-built `nvt(..., constraints="hbonds")` on
-  `aladip_solvated` (solute H-bonds) stays finite and tracks the 300 K bath target over 300 steps at
-  `dt=0.002`; `constraints="none"` on the same system still diverges to >2000 K within 50 steps
-  (kept as the documented contrast, not a regression). Test: `test_constrained_system_stable_with_factory_params`
-  (`py-gromos/tests/test_gromosXX_references.py`).
-- [x] **M2 — fix the `temperature` getter DOF.** Extracted the duplicated DOF calc (was inline in both
-  `build_simulation` and `resolve_algorithm_sequence`'s thermostat arm) into one shared
-  `compute_total_dof(topo, imd)` (`pyo3-gromos/algorithm_sequence.rs`) — single source of truth,
-  called by both builders. `PySimulation` now stores `total_dof` at build time and the `temperature`
-  getter uses it instead of bare `n_atoms*3`, so it structurally cannot disagree with what the
-  thermostat is coupling to. 37/37 Rust reference tests unchanged (this only touches the getter, not
-  any energy path) — confirms the refactor didn't silently change physics.
-- [x] **Steepest-descent via `Simulation`.** `build_simulation()` (`pyo3-gromos/simulation.rs`) now
-  branches on `imd.ntem > 0`: pushes `Forcefield` → `SteepestDescentAlgorithm` (replacing leap-frog
-  velocity+position) → SHAKE (if `constraints=`/`.in` calls for it — GROMOS constrains bonds during EM
-  too) → `EnergyCalculation`, skipping COM removal/thermostat/barostat/`TemperatureCalculation`
-  (GROMOS convention: EM has no velocities, `E_total = E_pot`) — mirrors the `md` binary's own EM
-  sequence construction exactly. Extracted `shake_algorithm_from_imd()` as a shared helper so the EM
-  and standard-MD branches build SHAKE identically (can't silently drift apart).
-  New `SteepestDescent` algorithm-sequence building block exposed to Python
-  (`algorithm_sequence.rs`, mirrors `LeapFrogVelocity`/`ShakeConstraints`), plus a new
-  `AlgorithmSequence.minimize(topo, params)` preset and `from_parameters()` dispatching to it when
-  `ntem > 0` — the composable path and the direct `Simulation(system, params)` path now agree
-  (verified: both produce identical `algorithm_names`).
-  **Verified empirically:** `aladip_vacuum` under `InputParameters.steepest_descent(steps=50)` drops
-  from -13.5 to -47.98 kJ/mol then correctly plateaus once `dE < DELE` (GROMOS convergence, not a
-  bug — the algorithm becomes a documented no-op after convergence). 37/37 Rust reference tests
-  unchanged (EM was never reference-tested through Python before). Tests:
-  `test_steepest_descent_via_simulation`, `test_steepest_descent_via_algorithm_sequence`.
-
-- [x] **`sim.volume` / `sim.pressure` getters** (added while extending `02_short_md.ipynb`'s NVE/NVT
-  comparison to include NPT — there was no per-step way to read either, only via `sim.run()`'s array
-  columns). Mirrors the `temperature` getter's shape exactly. **Documented trap, not silently
-  papered over:** `pressure` is only physically meaningful under NPT — `P = (2*KE - virial)/(3*V)`,
-  and the virial term is only populated by `PressureCalculation`, which only NPT's algorithm sequence
-  includes. Under NVE/NVT it still returns a number (the kinetic-only term, ~2000+ bar for
-  `water_216_box`), not zero — verified this is genuinely misleading if untagged, so the getter's
-  docstring, the API reference, and the notebook (faded/labeled trace) all say so explicitly. Test:
-  `test_volume_and_pressure_getters` — cross-checks the getters against `run()`'s array columns, and
-  confirms NVE/NVT volume is exactly fixed while NPT's responds to the barostat.
+**3.6 — Rust↔Python reference-test parity gap** ✓ done (FEP deferred)
+> Auditing `py-gromos`'s `REFERENCE_SYSTEMS` (20) against the full Rust suite (37, via the `md`
+> CLI) found 18 systems missing — not skipped by choice, but because `build_simulation`
+> (`pyo3-gromos/simulation.rs`) never wired up features whose gromosXX-faithful implementation
+> already existed lower in the stack. Each was a real Python-API defect (silently wrong physics),
+> not a test-authoring gap. Closed, one fix each:
+> - **GENVEL** — `ntivel` was parsed but never read; added `initial_velocities()` (reuses the
+>   existing `generate_velocities`). Also explained `water_1000_spc_gridcell`'s 39% mismatch
+>   (same root cause, its `.imd` sets `NTIVEL=1`) — one fix, two systems.
+> - **SETTLE/LINCS** — already fully implemented in `gromos-integrators`, just never dispatched;
+>   added `ConstraintSelection::from_imd` mirroring `md.rs`'s NTCP/NTCS logic. **Regression
+>   caught along the way:** gating solvent constraints on `imd.nsm` (matching `md.rs`) broke a
+>   3.5 test, because the compositional path pre-solvates topologies without ever setting `nsm`.
+>   Fixed by gating on the topology's actual solvent-atom count instead.
+> - **Nosé-Hoover (+ chain)** — same story: implemented, not dispatched. Added `push_thermostat()`
+>   dispatching on the `.imd` bath algorithm.
+> - **Distance/position restraints** — added `distrest=`/`posresspec=`/`refpos=` optional kwargs
+>   on `Simulation(...)`, parsed via the existing `gromos-io` readers.
+> - **Triclinic/truncated-octahedron box** — added the `NTB=-1` cube→triclinic transform; also
+>   fixed `sim.forces` to rotate back to the cube frame like GROMOS's own `.trf` writer.
+>   **Found, not fixed (out of scope):** `gromos-rs`'s own `.trc` position output already
+>   disagreed with gromosXX here, pre-existing and Rust-side, never caught because the Rust
+>   suite doesn't compare positions for any system. Tracked via `POSITION_MISMATCH_SYSTEMS`.
+> - **Not done, deferred:** perturbation/FEP topology (`ch4_water_fep`, `aladip_vacuum_fep`) —
+>   explicit user direction. The composable `AlgorithmSequence`/`resolve_algorithm_sequence` path
+>   was untouched (still SHAKE/Berendsen-only) — only `build_simulation` was fixed.
+> - Verified throughout, not just at the end: Rust suite 37/37 unchanged after every change;
+>   Python suite grew 73→100 (99 passed + 1 documented skip).
 
 **Deferred — composition-pattern refactor** (tech debt; reappraise, do not schedule yet)
 > Full audit prepended to `~/.claude/plans/golden-baking-liskov.md`. These are real but elective, and

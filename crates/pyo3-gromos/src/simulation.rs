@@ -30,20 +30,31 @@ use gromos_core::{
     algorithm::{AlgorithmSequence, SimulationState},
     configuration::BoxType,
     configuration::{Box as SimBox, Configuration},
-    math::{Periodicity, Rectangular, Vacuum, Vec3},
+    math::{
+        truncoct_triclinic, truncoct_triclinic_box, truncoct_triclinic_rotmat, Mat3, Periodicity,
+        Rectangular, Triclinic, Vacuum, Vec3,
+    },
     pairlist::{PairlistAlgorithm, PairlistContainer},
+    random::generate_velocities,
     Topology,
 };
 use gromos_forces::nonbonded::CRFParameters;
+use gromos_forces::restraints::{
+    DistanceRestraint, DistanceRestraints, PerturbedDistanceRestraint,
+    PerturbedDistanceRestraints, PositionRestraint, PositionRestraints,
+};
 use gromos_integrators::algorithms::{
     BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, EnergyCalculation, Forcefield,
-    LeapFrogPosition, LeapFrogVelocity, PressureCalculation, RemoveCOMMotion, ShakeAlgorithm,
-    SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
+    LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm, NoseHooverThermostat, PressureCalculation,
+    RemoveCOMMotion, SettleAlgorithm, ShakeAlgorithm, SteepestDescentAlgorithm,
+    TemperatureCalculation, VirialType,
 };
 use gromos_integrators::constraints::{NtcMode, ShakeParameters};
 use gromos_io::{
     coordinate::read_coordinates,
+    distanceres::read_distanceres,
     imd::{read_imd_file, ImdParameters},
+    posres::{build_posres_entries, read_posresspec, read_refpos},
     topology::{build_topology, read_topology_file},
 };
 
@@ -63,17 +74,22 @@ use super::PyEnergy;
 /// Build a `ShakeAlgorithm` from IMD constraint settings — the single place
 /// both the standard-MD and steepest-descent branches of `build_simulation`
 /// construct SHAKE from, so they can't silently drift apart.
-fn shake_algorithm_from_imd(imd: &ImdParameters) -> ShakeAlgorithm {
-    let ntc_mode = match imd.ntc {
-        3 => NtcMode::AllBonds,
-        2 => NtcMode::HydrogenBonds,
-        _ => NtcMode::SolventOnly,
+fn shake_algorithm_from_imd(imd: &ImdParameters, solute_shake: bool, solvent_shake: bool) -> ShakeAlgorithm {
+    let ntc_mode = if solute_shake {
+        match imd.ntc {
+            3 => NtcMode::AllBonds,
+            2 => NtcMode::HydrogenBonds,
+            _ => NtcMode::SolventOnly,
+        }
+    } else {
+        NtcMode::SolventOnly
     };
     let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
         tolerance: imd.shake_tol,
         max_iterations: 1000,
         ntc: ntc_mode,
     });
+    shake_alg.include_solvent = solvent_shake;
     if imd.ntishk >= 1 {
         shake_alg.shake_initial_positions = true;
     }
@@ -83,6 +99,265 @@ fn shake_algorithm_from_imd(imd: &ImdParameters) -> ShakeAlgorithm {
     shake_alg
 }
 
+/// Which constraint algorithm(s) GROMOS dispatches to, mirroring `md.rs`
+/// exactly: the solute algorithm is chosen by NTCP (only relevant when
+/// NTC>1) and the solvent algorithm by NTCS (only relevant when solvent
+/// molecules exist) — independently of each other.
+struct ConstraintSelection {
+    solute_shake: bool,
+    solvent_shake: bool,
+    settle_enabled: bool,
+    lincs_enabled: bool,
+    solute_lincs: bool,
+    solvent_lincs: bool,
+}
+
+impl ConstraintSelection {
+    /// `has_solvent` should reflect the topology's *actual* solvent atoms
+    /// (`num_atoms() > num_solute_atoms()`) rather than `imd.nsm` — the
+    /// compositional Python path often solvates the topology directly via
+    /// `Topology.solvate()` with factory-built `InputParameters` that never
+    /// set `nsm`, so relying on `nsm` alone would silently disable solvent
+    /// constraints (e.g. rigid water flying apart) whenever the two diverge.
+    fn from_imd(imd: &ImdParameters, has_solvent: bool) -> Self {
+        let solute_constrained = imd.ntc > 1;
+        let solute_lincs = solute_constrained && imd.ntcp == 2;
+        let solute_shake = solute_constrained && !solute_lincs;
+
+        let solvent_constrained = imd.ntcs > 0 && has_solvent;
+        let solvent_settle = solvent_constrained && imd.ntcs == 3;
+        let solvent_lincs = solvent_constrained && imd.ntcs == 2;
+        let solvent_shake = solvent_constrained && !solvent_settle && !solvent_lincs;
+
+        ConstraintSelection {
+            solute_shake,
+            solvent_shake,
+            settle_enabled: solvent_settle,
+            lincs_enabled: solute_lincs || solvent_lincs,
+            solute_lincs,
+            solvent_lincs,
+        }
+    }
+
+    fn shake_enabled(&self) -> bool {
+        self.solute_shake || self.solvent_shake
+    }
+}
+
+/// Push whichever constraint algorithm(s) `ConstraintSelection` selected
+/// onto the sequence, in the same SHAKE→SETTLE→LINCS order `md.rs` uses.
+fn push_constraint_algorithms(
+    md_sequence: &mut AlgorithmSequence,
+    imd: &ImdParameters,
+    sel: &ConstraintSelection,
+) {
+    if sel.shake_enabled() {
+        md_sequence.push(Box::new(shake_algorithm_from_imd(
+            imd,
+            sel.solute_shake,
+            sel.solvent_shake,
+        )));
+    }
+    if sel.settle_enabled {
+        md_sequence.push(Box::new(SettleAlgorithm::new()));
+    }
+    if sel.lincs_enabled {
+        let ntc_mode = match imd.ntc {
+            3 => NtcMode::AllBonds,
+            2 => NtcMode::HydrogenBonds,
+            _ => NtcMode::SolventOnly,
+        };
+        md_sequence.push(Box::new(LincsAlgorithm::new(
+            ntc_mode,
+            imd.lincs_order_solute,
+            imd.lincs_order_solvent,
+            sel.solute_lincs,
+            sel.solvent_lincs,
+        )));
+    }
+}
+
+/// Build the thermostat algorithm GROMOS's MULTIBATH algorithm selector
+/// picks: 0 = Berendsen, 1 = single-bath Nose-Hoover, n>=2 = Nose-Hoover
+/// chain of length n (or `nhc_chain`, whichever is larger) — mirrors
+/// `md.rs`'s `thermostat_algorithm` dispatch.
+fn push_thermostat(
+    md_sequence: &mut AlgorithmSequence,
+    imd: &ImdParameters,
+    temperature: f64,
+    tau: f64,
+    total_dof: f64,
+    n_atoms: usize,
+) {
+    let algorithm = imd.temp_bath.first().map(|b| b.algorithm).unwrap_or(0);
+    let nhc_chain = imd.temp_bath.first().map(|b| b.nhc_chain).unwrap_or(0);
+    match algorithm {
+        0 => {
+            md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
+                temperature,
+                tau,
+                total_dof,
+                n_atoms,
+            )));
+        },
+        1 => {
+            md_sequence.push(Box::new(NoseHooverThermostat::new_single_bath(
+                temperature,
+                tau,
+                total_dof,
+                n_atoms,
+            )));
+        },
+        n => {
+            let chain = (n as usize).max(nhc_chain).max(2);
+            md_sequence.push(Box::new(NoseHooverThermostat::new_chain_bath(
+                temperature,
+                tau,
+                total_dof,
+                n_atoms,
+                chain,
+            )));
+        },
+    }
+}
+
+/// NTB=-1 (truncated octahedron): GROMOS stores the legacy "cube edge length
+/// L" in the coordinate file and converts it to the lower-triangular
+/// triclinic box vectors on read, rotating positions/velocities into that
+/// frame — mirrors `md.rs`'s identical `truncoct_triclinic_box`/
+/// `truncoct_triclinic` calls. Returns the triclinic box matrix (`None` for
+/// any other NTB, i.e. rectangular or vacuum) and mutates `positions`/
+/// `velocities` in place when it applies.
+fn apply_truncoct_box(
+    imd: &ImdParameters,
+    box_dims: Vec3,
+    positions: &mut [Vec3],
+    velocities: &mut [Vec3],
+) -> Option<Mat3> {
+    if imd.ntb == -1 {
+        let cubic = Mat3::from_diagonal(box_dims);
+        let triclinic_box = truncoct_triclinic_box(cubic, true);
+        truncoct_triclinic(positions, true);
+        truncoct_triclinic(velocities, true);
+        Some(triclinic_box)
+    } else {
+        None
+    }
+}
+
+/// Optional restraint-input file paths, threaded through from the Python
+/// `Simulation`/`System` constructors down to `build_simulation` — mirrors
+/// the `md` binary's `@distrest`/`@posresspec`/`@refpos` CLI flags.
+#[derive(Default, Clone)]
+pub(crate) struct RestraintFiles {
+    pub distrest: Option<String>,
+    pub posresspec: Option<String>,
+    pub refpos: Option<String>,
+}
+
+/// Load and apply position/distance restraints onto a `Forcefield`, mirroring
+/// `md.rs`'s `@posresspec`/`@refpos`/`@distrest` handling exactly (same file
+/// formats, same NTPOR/NTPORB/NTDIR dispatch) — the only gap being FEP's
+/// perturbed distance restraints' `lambda` still comes from `imd.rlam` same
+/// as `md.rs`.
+#[allow(clippy::too_many_arguments)]
+fn apply_restraints(
+    forcefield: &mut Forcefield,
+    imd: &ImdParameters,
+    positions: &[Vec3],
+    distrest_file: Option<&str>,
+    posresspec_file: Option<&str>,
+    refpos_file: Option<&str>,
+) -> PyResult<()> {
+    fn io_err(e: impl std::fmt::Display) -> PyErr {
+        PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string())
+    }
+
+    if imd.ntpor > 0 {
+        let por_file = posresspec_file.ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "NTPOR={} but no posresspec file was given",
+                imd.ntpor
+            ))
+        })?;
+        let restrained_atoms = read_posresspec(por_file).map_err(io_err)?;
+        let ref_positions = if imd.ntporb >= 1 {
+            let rpr_file = refpos_file.ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "NTPORB={} but no refpos file was given",
+                    imd.ntporb
+                ))
+            })?;
+            read_refpos(rpr_file).map_err(io_err)?
+        } else {
+            positions.to_vec()
+        };
+        let entries = build_posres_entries(&restrained_atoms, &ref_positions);
+        let mut pr = PositionRestraints::new();
+        for entry in &entries {
+            pr.add_restraint(PositionRestraint::new(
+                entry.atom,
+                entry.reference_pos,
+                imd.cpor,
+            ));
+        }
+        forcefield.position_restraints = pr;
+    }
+
+    if imd.ntdir != 0 {
+        let dr_file = distrest_file.ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "NTDIR={} but no distrest file was given",
+                imd.ntdir
+            ))
+        })?;
+        let (unperturbed, perturbed) = read_distanceres(dr_file).map_err(io_err)?;
+        let mode = imd.ntdir.abs();
+        let k = imd.cdir;
+        let r_linear = imd.dir0;
+
+        let mut dr = DistanceRestraints::new();
+        for spec in &unperturbed {
+            let mut r = DistanceRestraint::new(
+                spec.atom1, spec.atom2, spec.r0, spec.w0, spec.rah, k, r_linear, mode,
+            );
+            if imd.ntdir < 0 {
+                r = r.with_time_averaging(imd.taudir, imd.dt);
+            }
+            dr.add(r);
+        }
+
+        let mut pdr = PerturbedDistanceRestraints::new();
+        for spec in &perturbed {
+            let r = PerturbedDistanceRestraint::new(
+                spec.atom1, spec.atom2, spec.n, spec.m, spec.a_r0, spec.b_r0, spec.a_w0,
+                spec.b_w0, spec.rah, k, r_linear, mode,
+            );
+            pdr.add(r);
+        }
+
+        forcefield.distance_restraints = dr;
+        forcefield.perturbed_distance_restraints = pdr;
+        forcefield.lambda = imd.rlam;
+    }
+
+    Ok(())
+}
+
+/// Resolve initial velocities the same way `md.rs` does: generate a
+/// Maxwell-Boltzmann distribution at `imd.tempi` (seeded by `imd.ig`) when
+/// `NTIVEL=1`, otherwise use the coordinate-file velocities (or zero if
+/// absent/mismatched).
+fn initial_velocities(imd: &ImdParameters, velocities: &[Vec3], masses: &[f64]) -> Vec<Vec3> {
+    if imd.ntivel == 1 {
+        generate_velocities(imd.tempi, imd.ig as u32, masses)
+    } else if velocities.len() == masses.len() {
+        velocities.to_vec()
+    } else {
+        vec![Vec3::ZERO; masses.len()]
+    }
+}
+
 /// Build a simulation from raw components.
 ///
 /// This is the shared core used by both the file-path and object constructors.
@@ -90,10 +365,11 @@ fn shake_algorithm_from_imd(imd: &ImdParameters) -> ShakeAlgorithm {
 /// builds the Configuration + AlgorithmSequence, and runs step 0.
 fn build_simulation(
     mut topo: Topology,
-    positions: Vec<Vec3>,
-    velocities: Vec<Vec3>,
+    mut positions: Vec<Vec3>,
+    mut velocities: Vec<Vec3>,
     box_dims: Vec3,
     imd: &ImdParameters,
+    restraints: &RestraintFiles,
 ) -> PyResult<PySimulation> {
     // Solvate topology if not already solvated
     if topo.num_atoms() == topo.num_solute_atoms() && imd.nsm > 0 {
@@ -109,15 +385,17 @@ fn build_simulation(
         )));
     }
 
+    let truncoct_box_matrix =
+        apply_truncoct_box(imd, box_dims, &mut positions, &mut velocities);
+
     // Build Configuration (double-buffered state)
     let mut conf = Configuration::new(n_atoms, 1, 1);
     conf.current_mut().pos = positions;
-    conf.current_mut().vel = if velocities.len() == n_atoms {
-        velocities
-    } else {
-        vec![Vec3::ZERO; n_atoms]
+    conf.current_mut().vel = initial_velocities(imd, &velocities, &topo.mass);
+    conf.current_mut().box_config = match truncoct_box_matrix {
+        Some(triclinic_box) => SimBox::truncated_octahedral(triclinic_box),
+        None => SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z),
     };
-    conf.current_mut().box_config = SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z);
     conf.copy_current_to_old();
 
     // Extract parameters
@@ -129,7 +407,8 @@ fn build_simulation(
     let pairlist_update = imd.nsnb;
     let ntf = imd.ntf;
 
-    let shake_enabled = imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0);
+    let has_solvent = topo.num_atoms() > topo.num_solute_atoms();
+    let constraints = ConstraintSelection::from_imd(imd, has_solvent);
     let is_minimization = imd.ntem > 0;
 
     // Computed once, used both by the thermostat (if present) and stored on
@@ -156,7 +435,9 @@ fn build_simulation(
     let mut pairlist = PairlistContainer::new(imd.rcutp, cutoff, 0.0);
     pairlist.update_frequency = pairlist_update;
 
-    let periodicity = if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
+    let periodicity = if let Some(triclinic_box) = truncoct_box_matrix {
+        Periodicity::Triclinic(Triclinic::new(triclinic_box))
+    } else if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
         Periodicity::Vacuum(Vacuum)
     } else {
         Periodicity::Rectangular(Rectangular::new(box_dims))
@@ -214,6 +495,14 @@ fn build_simulation(
             _ => VirialType::None,
         };
     }
+    apply_restraints(
+        &mut forcefield,
+        imd,
+        &conf.current().pos,
+        restraints.distrest.as_deref(),
+        restraints.posresspec.as_deref(),
+        restraints.refpos.as_deref(),
+    )?;
     md_sequence.push(Box::new(forcefield));
 
     if is_minimization {
@@ -226,9 +515,7 @@ fn build_simulation(
         md_sequence.push(Box::new(sd));
 
         // GROMOS applies constraints even during minimization.
-        if shake_enabled {
-            md_sequence.push(Box::new(shake_algorithm_from_imd(imd)));
-        }
+        push_constraint_algorithms(&mut md_sequence, imd, &constraints);
 
         // No TemperatureCalculation — EM has no velocities/kinetic energy.
         md_sequence.push(Box::new(EnergyCalculation::new()));
@@ -236,23 +523,16 @@ fn build_simulation(
         // 3. Leap-Frog velocity
         md_sequence.push(Box::new(LeapFrogVelocity::new()));
 
-        // 3b. Berendsen thermostat
+        // 3b. Thermostat (Berendsen or Nose-Hoover/chain, per MULTIBATH algorithm)
         if thermostat_on {
-            md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
-                temperature,
-                thermostat_tau,
-                total_dof,
-                n_atoms,
-            )));
+            push_thermostat(&mut md_sequence, imd, temperature, thermostat_tau, total_dof, n_atoms);
         }
 
         // 4. Leap-Frog position
         md_sequence.push(Box::new(LeapFrogPosition::new()));
 
-        // 5. SHAKE constraints
-        if shake_enabled {
-            md_sequence.push(Box::new(shake_algorithm_from_imd(imd)));
-        }
+        // 5. Constraints (SHAKE / SETTLE / LINCS)
+        push_constraint_algorithms(&mut md_sequence, imd, &constraints);
 
         // 6. Temperature calculation
         md_sequence.push(Box::new(TemperatureCalculation::new()));
@@ -342,11 +622,7 @@ fn build_simulation_from_sequence(
     // Build Configuration (double-buffered state)
     let mut conf = Configuration::new(n_atoms, 1, 1);
     conf.current_mut().pos = positions;
-    conf.current_mut().vel = if velocities.len() == n_atoms {
-        velocities
-    } else {
-        vec![Vec3::ZERO; n_atoms]
-    };
+    conf.current_mut().vel = initial_velocities(imd, &velocities, &topo.mass);
     conf.current_mut().box_config = SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z);
     conf.copy_current_to_old();
 
@@ -429,13 +705,24 @@ impl PySimulation {
     ///
     /// Two-argument form (new):
     ///   - `Simulation(system, parameters)` — System object + InputParameters
+    ///
+    /// Optional restraint file paths (mirror the `md` binary's `@distrest`/
+    /// `@posresspec`/`@refpos` flags): `distrest`, `posresspec`, `refpos`.
     #[new]
-    #[pyo3(signature = (arg1, arg2, arg3=None))]
+    #[pyo3(signature = (arg1, arg2, arg3=None, *, distrest=None, posresspec=None, refpos=None))]
     fn new(
         arg1: &Bound<'_, PyAny>,
         arg2: &Bound<'_, PyAny>,
         arg3: Option<&Bound<'_, PyAny>>,
+        distrest: Option<String>,
+        posresspec: Option<String>,
+        refpos: Option<String>,
     ) -> PyResult<Self> {
+        let restraints = RestraintFiles {
+            distrest,
+            posresspec,
+            refpos,
+        };
         match arg3 {
             None => {
                 // Two-arg form: Simulation(system, params)
@@ -455,6 +742,7 @@ impl PySimulation {
                     system.configuration.vel_data.clone(),
                     system.configuration.box_dims,
                     &params.inner,
+                    &restraints,
                 )
             },
             Some(arg3) => {
@@ -464,7 +752,12 @@ impl PySimulation {
                     arg2.extract::<String>(),
                     arg3.extract::<String>(),
                 ) {
-                    return Self::_from_files(&topo_file, &conf_file, &input_file);
+                    return Self::_from_files_with_restraints(
+                        &topo_file,
+                        &conf_file,
+                        &input_file,
+                        &restraints,
+                    );
                 }
 
                 let topo = arg1.extract::<PyRef<PyTopology>>().map_err(|_| {
@@ -489,6 +782,7 @@ impl PySimulation {
                     conf.vel_data.clone(),
                     conf.box_dims,
                     &params.inner,
+                    &restraints,
                 )
             },
         }
@@ -621,10 +915,29 @@ impl PySimulation {
     }
 
     /// Current forces as an Nx3 numpy array (kJ/mol/nm).
+    ///
+    /// For a truncated-octahedron box, GROMOS rotates FREEFORCERED output
+    /// back into the original (cube) frame via
+    /// `truncoct_triclinic_rotmat(false)` — positions/velocities stay in the
+    /// triclinic frame, only forces are rotated back — mirrored here so this
+    /// getter agrees with the `md` binary's `.trf` output (no ROTTRANS block
+    /// support here, so `rmat(phi,theta,psi)` is identity, same as `md.rs`).
     #[getter]
     fn forces<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         let state = self.configuration.old();
-        let data: Vec<Vec<f64>> = state.force.iter().map(|v| vec![v.x, v.y, v.z]).collect();
+        let data: Vec<Vec<f64>> = if state.box_config.box_type == BoxType::TruncatedOctahedral {
+            let rot = truncoct_triclinic_rotmat(false);
+            state
+                .force
+                .iter()
+                .map(|f| {
+                    let r = rot * *f;
+                    vec![r.x, r.y, r.z]
+                })
+                .collect()
+        } else {
+            state.force.iter().map(|v| vec![v.x, v.y, v.z]).collect()
+        };
         Ok(PyArray2::from_vec2_bound(py, &data)?)
     }
 
@@ -790,6 +1103,20 @@ impl PySimulation {
     }
 
     fn _from_files(topo_file: &str, conf_file: &str, input_file: &str) -> PyResult<Self> {
+        Self::_from_files_with_restraints(
+            topo_file,
+            conf_file,
+            input_file,
+            &RestraintFiles::default(),
+        )
+    }
+
+    fn _from_files_with_restraints(
+        topo_file: &str,
+        conf_file: &str,
+        input_file: &str,
+        restraints: &RestraintFiles,
+    ) -> PyResult<Self> {
         let imd = read_imd_file(input_file).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                 "Failed to read input file '{}': {}",
@@ -818,6 +1145,7 @@ impl PySimulation {
             coord_data.velocities,
             coord_data.box_dims,
             &imd,
+            restraints,
         )
     }
 }
