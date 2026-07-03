@@ -172,7 +172,10 @@ impl Replica {
         for (i, &force) in bonded_result.forces.iter().enumerate() {
             self.configuration.current_mut().force[i] += force;
         }
-        self.configuration.current_mut().energies.bond_total = bonded_result.energy;
+        self.configuration.current_mut().energies.bond_total = bonded_result.bond_energy;
+        self.configuration.current_mut().energies.angle_total = bonded_result.angle_energy;
+        self.configuration.current_mut().energies.dihedral_total = bonded_result.dihedral_energy;
+        self.configuration.current_mut().energies.improper_total = bonded_result.improper_energy;
 
         // Create periodicity from box dimensions
         let box_dims = self.configuration.current().box_config.dimensions();

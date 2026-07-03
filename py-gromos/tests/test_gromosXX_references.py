@@ -19,7 +19,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gromos import Configuration, InputParameters, Simulation, System, Topology
+import gromos.timeseries
+from gromos import (
+    AlgorithmSequence,
+    Configuration,
+    EnergyTimeseries,
+    InputParameters,
+    Simulation,
+    System,
+    Topology,
+)
 
 # Paths
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -438,6 +447,150 @@ def test_factory_nvt_properties():
     assert p.temperature == pytest.approx(298.0)
 
 
+def test_factory_constraints_knob():
+    """PLAN.md P3.5 M1: nve/nvt/npt accept constraints="none"/"hbonds"/"allbonds".
+
+    Default stays "none" (NTC=1, GROMOS-faithful, backward compatible).
+    """
+    assert InputParameters.nve(0.001, 10).ntc == 1
+    assert InputParameters.nve(0.001, 10).constraints == "none"
+
+    assert InputParameters.nve(0.001, 10, constraints="hbonds").ntc == 2
+    assert InputParameters.nve(0.001, 10, constraints="hbonds").constraints == "hbonds"
+
+    assert InputParameters.nvt(0.001, 10, 300.0, constraints="allbonds").ntc == 3
+    assert (
+        InputParameters.npt(0.001, 10, 300.0, 1.0, constraints="hbonds").ntc == 2
+    )
+
+    with pytest.raises(ValueError):
+        InputParameters.nve(0.001, 10, constraints="bogus")
+
+
+def test_constrained_system_stable_with_factory_params():
+    """Regression test for the bug that motivated M1/M2.
+
+    `aladip_solvated` (solute has flexible H-bonds) diverges to NaN within
+    ~50-100 steps when run with factory-built params that don't SHAKE
+    (constraints="none", the old/default behavior — kept as a documented
+    contrast, not a design goal). `constraints="hbonds"` must keep it stable,
+    and the reported temperature (M2: constraint-aware DOF, not bare 3*n_atoms)
+    must stay in a physically sane range, not explode.
+    """
+
+    def load_aladip_solvated():
+        topo = Topology(str(REF_DIR / "shared" / "aladip.topo"))
+        topo.solvate(20)
+        conf = Configuration(str(REF_DIR / "shared" / "aladip.conf"))
+        return System(topo, conf)
+
+    params = InputParameters.nvt(dt=0.002, steps=100, temperature=300.0, constraints="hbonds")
+    sim = Simulation(load_aladip_solvated(), params)
+
+    temperatures = []
+    for _ in range(100):
+        sim.step(1)
+        temperatures.append(sim.temperature)
+
+    assert all(np.isfinite(t) for t in temperatures), "temperature diverged (NaN/inf)"
+    assert all(50.0 < t < 600.0 for t in temperatures), (
+        f"temperature outside sane range: min={min(temperatures)}, max={max(temperatures)}"
+    )
+    # Should track the 300 K bath target reasonably after equilibrating.
+    mean_late = sum(temperatures[-30:]) / 30
+    assert 250.0 < mean_late < 350.0, f"NVT not tracking 300 K target: {mean_late}"
+
+
+def test_steepest_descent_via_simulation():
+    """PLAN.md P3.5: steepest-descent EM must actually run through Simulation.
+
+    Previously `build_simulation` never checked `ntem`/`steepest_descent()` and
+    silently ran plain leap-frog with dt=0 (a no-op) instead of minimizing.
+    Uses `aladip_vacuum`'s own starting structure (not an `_em` reference,
+    which would already be minimized and produce a flat, uninformative trace).
+    """
+    system_dir = REF_DIR / "aladip_vacuum"
+    topo_path = str(system_dir / ".." / "shared" / "aladip.topo")
+    conf_path = str(system_dir / "aladip_vacuum.conf")
+
+    system = System.from_files(topo_path, conf_path)
+    params = InputParameters.steepest_descent(steps=50)
+    sim = Simulation(system, params)
+
+    assert any("Steepest" in name for name in sim.algorithm_names), sim.algorithm_names
+    assert "LeapFrogVelocity" not in sim.algorithm_names
+    assert "LeapFrogPosition" not in sim.algorithm_names
+
+    frames = sim.run(50, ene_freq=1)
+    potential = frames[:, 2]
+
+    assert np.all(np.isfinite(potential)), "EM potential energy diverged"
+    assert potential[-1] < potential[0], (
+        f"EM did not decrease potential energy: {potential[0]} -> {potential[-1]}"
+    )
+    # Once converged (dE < DELE), the algorithm is a documented no-op — the
+    # trace should plateau, not keep oscillating indefinitely.
+    assert np.allclose(potential[-5:], potential[-1]), "did not settle/converge"
+
+
+def test_steepest_descent_via_algorithm_sequence():
+    """The composable path (AlgorithmSequence.minimize / .from_parameters) must
+    agree with the direct Simulation(system, params) EM path."""
+    system_dir = REF_DIR / "aladip_vacuum"
+    topo_path = str(system_dir / ".." / "shared" / "aladip.topo")
+    conf_path = str(system_dir / "aladip_vacuum.conf")
+
+    system = System.from_files(topo_path, conf_path)
+    params = InputParameters.steepest_descent(steps=30)
+
+    seq_direct = AlgorithmSequence.minimize(system.topology, params)
+    seq_auto = AlgorithmSequence.from_parameters(system.topology, params)
+    assert seq_direct.names == seq_auto.names
+
+    sim = Simulation.from_sequence(system.topology, system.configuration, params, seq_auto)
+    frames = sim.run(30, ene_freq=1)
+    potential = frames[:, 2]
+    assert np.all(np.isfinite(potential))
+    assert potential[-1] < potential[0]
+
+
+def test_volume_and_pressure_getters():
+    """`sim.volume`/`sim.pressure` must match the equivalent `run()` array columns
+    (volume/pressure at indices 4/5), and NPT's volume must actually respond to
+    the barostat while NVE/NVT's stays exactly fixed (no PressureCalculation/
+    BerendsenBarostat in their sequence).
+    """
+    topo_path = str(REF_DIR / "water_216_box" / "water_216_box.topo")
+    conf_path = str(REF_DIR / "water_216_box" / "water_216_box.conf")
+
+    # sim.volume/sim.pressure agree with the run() array at the same frame.
+    system = System.from_files(topo_path, conf_path)
+    params = InputParameters.from_file(str(REF_DIR / "water_216_npt" / "water_216_npt.in"))
+    sim = Simulation(system, params)
+    frames = sim.run(5, ene_freq=1)
+    assert sim.volume == pytest.approx(frames[-1, 4])
+    assert sim.pressure == pytest.approx(frames[-1, 5])
+
+    # NVE/NVT: fixed box. NPT: box responds to the barostat.
+    def volume_trace(in_file, n_steps=100):
+        s = System.from_files(topo_path, conf_path)
+        p = InputParameters.from_file(str(in_file))
+        sim = Simulation(s, p)
+        volumes = []
+        for _ in range(n_steps):
+            sim.step(1)
+            volumes.append(sim.volume)
+        return volumes
+
+    nve_vol = volume_trace(REF_DIR / "water_216_box" / "water_216_box.in")
+    nvt_vol = volume_trace(REF_DIR / "water_216_nvt" / "water_216_nvt.in")
+    npt_vol = volume_trace(REF_DIR / "water_216_npt" / "water_216_npt.in")
+
+    assert max(nve_vol) - min(nve_vol) == 0.0
+    assert max(nvt_vol) - min(nvt_vol) == 0.0
+    assert max(npt_vol) - min(npt_vol) > 0.01
+
+
 def test_system_factory_workflow():
     """Full 3.2 workflow: System.from_files + InputParameters.nvt + Simulation + step.
 
@@ -470,3 +623,100 @@ def test_system_factory_workflow():
 
     assert np.isfinite(e0), f"step-0 energy not finite: {e0}"
     assert np.isfinite(e10), f"step-10 energy not finite: {e10}"
+
+
+def test_run_matches_step_loop():
+    """sim.run(steps, ene_freq) must match an equivalent sim.step(1) loop.
+
+    Columns mirror the .tre energy-block layout (gromos_io::energy::EnergyFrame):
+    [time, kinetic, potential, total, volume, pressure,
+     bond, angle, improper, dihedral, lj, coulomb].
+    Energy-only columns (indices 0,1,2,3,6,7,8,9,10,11) are checked exactly against
+    `sim.energies`; volume/pressure (4,5) aren't exposed on `Energy` so are only
+    checked for internal consistency between the two run paths.
+    """
+    system_dir = REF_DIR / "water_216_box"
+    topo_path = str(system_dir / "water_216_box.topo")
+    conf_path = str(system_dir / "water_216_box.conf")
+    input_path = str(system_dir / "water_216_box.in")
+
+    energy_cols = [0, 1, 2, 3, 6, 7, 8, 9, 10, 11]
+
+    sim_run = Simulation(topo_path, conf_path, input_path)
+    frames = sim_run.run(10, ene_freq=1)
+    assert frames.shape == (11, 12)
+
+    sim_step = Simulation(topo_path, conf_path, input_path)
+
+    def row(sim):
+        e = sim.energies
+        return [
+            sim.time,
+            e.kinetic,
+            e.potential,
+            e.total,
+            e.bond,
+            e.angle,
+            e.improper,
+            e.dihedral,
+            e.lj,
+            e.coulomb,
+        ]
+
+    manual = [row(sim_step)]
+    for _ in range(10):
+        sim_step.step(1)
+        manual.append(row(sim_step))
+    manual = np.array(manual)
+
+    assert np.allclose(frames[:, energy_cols], manual)
+
+
+def test_energy_timeseries():
+    """EnergyTimeseries wraps a run() array: column access, block averaging, to_dataframe()."""
+    system_dir = REF_DIR / "water_216_box"
+    topo_path = str(system_dir / "water_216_box.topo")
+    conf_path = str(system_dir / "water_216_box.conf")
+    input_path = str(system_dir / "water_216_box.in")
+
+    sim = Simulation(topo_path, conf_path, input_path)
+    frames = sim.run(10, ene_freq=2)
+    ts = EnergyTimeseries(frames)
+
+    assert len(ts) == frames.shape[0]
+    assert np.array_equal(ts.total, frames[:, 3])
+    assert np.array_equal(ts.time, frames[:, 0])
+
+    mean, error = ts.block_average("total", block_size=2)
+    assert np.isfinite(mean)
+    assert error >= 0.0
+
+    with pytest.raises(ValueError):
+        ts.block_average("not_a_component", block_size=2)
+
+    # Default dataframe backend is polars.
+    df = ts.to_dataframe()
+    assert df.columns == list(gromos.timeseries.COLUMNS)
+    assert df["total"].to_list() == list(frames[:, 3])
+
+    df_dict = ts.to_dataframe(backend="dict")
+    assert set(df_dict.keys()) >= {"time", "total", "kinetic", "potential"}
+
+    with pytest.raises(ValueError):
+        ts.to_dataframe(backend="not_a_backend")
+
+    # Default plot backend is plotly; both backends must return a renderable object.
+    fig = ts.plot("total", "bond")
+    assert fig.data[0].name == "total"
+
+    ax = ts.plot("total", backend="matplotlib")
+    assert ax.get_xlabel() == "time (ps)"
+
+    with pytest.raises(ValueError):
+        ts.plot("not_a_component")
+
+    with pytest.raises(ValueError):
+        ts.plot("total", backend="not_a_backend")
+
+    with pytest.raises(ValueError):
+        EnergyTimeseries(np.zeros((3, 5)))

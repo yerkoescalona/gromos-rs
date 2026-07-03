@@ -20,12 +20,20 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
 
 ## Status
 - Basic wrappers ✓; `maturin develop` builds ✓
+- P3.3 ✓ — `EnergyTimeseries` (`python/gromos/timeseries.py`): `sim.run()` → numpy array wrapper,
+  `block_average()`, `to_dataframe()` (polars/pandas/dict), `plot()` (plotly/matplotlib); backends
+  configurable via `gromos.timeseries.config` (default polars + plotly).
+- P3.4 ✓ — notebooks rewritten: `01_load_and_inspect.ipynb` (System/Topology/Config, RDF, mass hist,
+  atom-count guard, manual `solvate()`+`System()` composition), `02_short_md.ipynb` (native params,
+  `run()`→`EnergyTimeseries`, component breakdown, block-average, NVE-vs-NVT). Legacy notebooks deleted.
+  `md_runners.py` marked deprecated. `notebooks` dep group in `pyproject.toml`; CI/Makefile use it.
+- P3.5 ✓ (M1/M2/SD) — `02_short_md.ipynb` §2a demonstrates the constraint fix live:
+  `InputParameters.nvt(..., constraints="none")` on `aladip_solvated` diverges to ~95,000 K within 60
+  steps (baked-in output, kept as documented contrast); `constraints="hbonds"` stays stable and tracks
+  300 K. `SteepestDescent` + `AlgorithmSequence.minimize()` now importable from `gromos`; `.pyi` updated.
 - Remaining P3 items:
-  - [ ] `md_runners.py` simplify; `analysis.py` expose gromos-analysis to Python
-  - [ ] Method chaining: `sim.run(steps=1000).energies().plot()`
-  - [ ] Energy timeseries as DataFrame (Polars/pandas interop)
+  - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
-  - [ ] Rewrite `notebooks/`: 01 inspect + single-point energy; 02 short MD + energy conservation; 03 NVE/NVT/NPT comparison
   - [ ] Rewrite `examples/` (17 scripts) on the new API
   - [ ] Fix `test_basic.py`, `test_advanced_features.py`
 

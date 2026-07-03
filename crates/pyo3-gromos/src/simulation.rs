@@ -38,7 +38,7 @@ use gromos_forces::nonbonded::CRFParameters;
 use gromos_integrators::algorithms::{
     BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, EnergyCalculation, Forcefield,
     LeapFrogPosition, LeapFrogVelocity, PressureCalculation, RemoveCOMMotion, ShakeAlgorithm,
-    TemperatureCalculation, VirialType,
+    SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
 };
 use gromos_integrators::constraints::{NtcMode, ShakeParameters};
 use gromos_io::{
@@ -47,7 +47,9 @@ use gromos_io::{
     topology::{build_topology, read_topology_file},
 };
 
-use super::algorithm_sequence::{resolve_algorithm_sequence, PyAlgorithmSequence};
+use super::algorithm_sequence::{
+    compute_total_dof, resolve_algorithm_sequence, PyAlgorithmSequence,
+};
 use super::parameters::PyInputParameters;
 use super::py_conf::PyConfiguration;
 use super::system::PySystem;
@@ -57,6 +59,29 @@ use super::PyEnergy;
 // ============================================================================
 // Shared build logic — constructs a fully initialized simulation from parts
 // ============================================================================
+
+/// Build a `ShakeAlgorithm` from IMD constraint settings — the single place
+/// both the standard-MD and steepest-descent branches of `build_simulation`
+/// construct SHAKE from, so they can't silently drift apart.
+fn shake_algorithm_from_imd(imd: &ImdParameters) -> ShakeAlgorithm {
+    let ntc_mode = match imd.ntc {
+        3 => NtcMode::AllBonds,
+        2 => NtcMode::HydrogenBonds,
+        _ => NtcMode::SolventOnly,
+    };
+    let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
+        tolerance: imd.shake_tol,
+        max_iterations: 1000,
+        ntc: ntc_mode,
+    });
+    if imd.ntishk >= 1 {
+        shake_alg.shake_initial_positions = true;
+    }
+    if imd.ntishk >= 2 {
+        shake_alg.shake_initial_velocities = true;
+    }
+    shake_alg
+}
 
 /// Build a simulation from raw components.
 ///
@@ -105,7 +130,11 @@ fn build_simulation(
     let ntf = imd.ntf;
 
     let shake_enabled = imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0);
-    let shake_tolerance = imd.shake_tol;
+    let is_minimization = imd.ntem > 0;
+
+    // Computed once, used both by the thermostat (if present) and stored on
+    // PySimulation for the `temperature` getter — the two must agree.
+    let total_dof = compute_total_dof(&topo, imd);
 
     let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
         imd.temp_bath[0].temp0[0]
@@ -146,11 +175,15 @@ fn build_simulation(
 
     pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
 
-    // Build algorithm sequence (GROMOS Leap-Frog pattern)
+    // Build algorithm sequence — GROMOS Leap-Frog pattern, or Steepest-Descent
+    // energy minimization if NTEM > 0. EM replaces the leap-frog velocity+position
+    // steps and skips COM removal / thermostat / barostat / kinetic-energy
+    // calculation entirely (GROMOS convention: E_total = E_pot during EM),
+    // mirroring the `md` binary's own sequence construction.
     let mut md_sequence = AlgorithmSequence::new();
 
-    // 1. COM motion removal
-    if imd.nticom >= 1 || imd.nscm != 0 {
+    // 1. COM motion removal (not applicable during EM — no velocities)
+    if !is_minimization && (imd.nticom >= 1 || imd.nscm != 0) {
         md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
     }
 
@@ -183,87 +216,72 @@ fn build_simulation(
     }
     md_sequence.push(Box::new(forcefield));
 
-    // 3. Leap-Frog velocity
-    md_sequence.push(Box::new(LeapFrogVelocity::new()));
+    if is_minimization {
+        // Steepest-descent minimization: replaces LeapFrogVelocity + LeapFrogPosition.
+        let sd = SteepestDescentAlgorithm::new()
+            .with_tolerance(imd.dele)
+            .with_step_sizes(imd.dx0, imd.dxm)
+            .with_min_steps(imd.nmin)
+            .with_force_limit(imd.flim);
+        md_sequence.push(Box::new(sd));
 
-    // 3b. Berendsen thermostat
-    if thermostat_on {
-        let n_solute = topo.num_solute_atoms();
-        let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
-            topo.solvent_atom_template.len()
-        } else {
-            1
-        };
-        let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
-            (n_atoms - n_solute) / atoms_per_solvent
-        } else {
-            0
-        };
-        let solvent_constraint_dof = if shake_enabled {
-            n_solvent_molecules * topo.solvent_constraint_template.len()
-        } else {
-            0
-        };
-        let total_dof = (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64;
-        md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
-            temperature,
-            thermostat_tau,
-            total_dof,
-            n_atoms,
-        )));
-    }
-
-    // 4. Leap-Frog position
-    md_sequence.push(Box::new(LeapFrogPosition::new()));
-
-    // 5. SHAKE constraints
-    if shake_enabled {
-        let ntc_mode = match imd.ntc {
-            3 => NtcMode::AllBonds,
-            2 => NtcMode::HydrogenBonds,
-            _ => NtcMode::SolventOnly,
-        };
-        let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
-            tolerance: shake_tolerance,
-            max_iterations: 1000,
-            ntc: ntc_mode,
-        });
-        if imd.ntishk >= 1 {
-            shake_alg.shake_initial_positions = true;
+        // GROMOS applies constraints even during minimization.
+        if shake_enabled {
+            md_sequence.push(Box::new(shake_algorithm_from_imd(imd)));
         }
-        if imd.ntishk >= 2 {
-            shake_alg.shake_initial_velocities = true;
+
+        // No TemperatureCalculation — EM has no velocities/kinetic energy.
+        md_sequence.push(Box::new(EnergyCalculation::new()));
+    } else {
+        // 3. Leap-Frog velocity
+        md_sequence.push(Box::new(LeapFrogVelocity::new()));
+
+        // 3b. Berendsen thermostat
+        if thermostat_on {
+            md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
+                temperature,
+                thermostat_tau,
+                total_dof,
+                n_atoms,
+            )));
         }
-        md_sequence.push(Box::new(shake_alg));
+
+        // 4. Leap-Frog position
+        md_sequence.push(Box::new(LeapFrogPosition::new()));
+
+        // 5. SHAKE constraints
+        if shake_enabled {
+            md_sequence.push(Box::new(shake_algorithm_from_imd(imd)));
+        }
+
+        // 6. Temperature calculation
+        md_sequence.push(Box::new(TemperatureCalculation::new()));
+
+        // 7. Pressure calculation and barostat
+        if imd.couple_pressure {
+            let virial_type = match imd
+                .pressure_parameters
+                .as_ref()
+                .map(|p| p.virial)
+                .unwrap_or(0)
+            {
+                2 => VirialType::Molecular,
+                1 => VirialType::Atomic,
+                _ => VirialType::None,
+            };
+            md_sequence.push(Box::new(PressureCalculation::new(virial_type)));
+
+            let pp = imd.pressure_parameters.as_ref();
+            md_sequence.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
+                pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
+                compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
+                tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
+            })));
+        }
+
+        // 8. Energy calculation
+        md_sequence.push(Box::new(EnergyCalculation::new()));
     }
-
-    // 6. Temperature calculation
-    md_sequence.push(Box::new(TemperatureCalculation::new()));
-
-    // 7. Pressure calculation and barostat
-    if imd.couple_pressure {
-        let virial_type = match imd
-            .pressure_parameters
-            .as_ref()
-            .map(|p| p.virial)
-            .unwrap_or(0)
-        {
-            2 => VirialType::Molecular,
-            1 => VirialType::Atomic,
-            _ => VirialType::None,
-        };
-        md_sequence.push(Box::new(PressureCalculation::new(virial_type)));
-
-        let pp = imd.pressure_parameters.as_ref();
-        md_sequence.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
-            pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
-            compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
-            tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
-        })));
-    }
-
-    // 8. Energy calculation
-    md_sequence.push(Box::new(EnergyCalculation::new()));
 
     // Initialize sequence
     let mut sim_state = SimulationState::new(dt, n_steps);
@@ -291,6 +309,7 @@ fn build_simulation(
         sim_state,
         dt,
         n_atoms,
+        total_dof,
     })
 }
 
@@ -333,6 +352,7 @@ fn build_simulation_from_sequence(
 
     let dt = imd.dt;
     let n_steps = imd.nstlim;
+    let total_dof = compute_total_dof(&topo, imd);
 
     // Resolve descriptors into real algorithms
     let mut md_sequence = resolve_algorithm_sequence(sequence, &topo, &conf, imd, box_dims)
@@ -369,6 +389,7 @@ fn build_simulation_from_sequence(
         sim_state,
         dt,
         n_atoms,
+        total_dof,
     })
 }
 
@@ -392,6 +413,10 @@ pub struct PySimulation {
     sim_state: SimulationState,
     dt: f64,
     n_atoms: usize,
+    /// Kinetic degrees of freedom (constraint- and NDFMIN-aware), computed once
+    /// at build time and reused for `temperature` — must match what the
+    /// thermostat (if any) is coupling to. See `compute_total_dof`.
+    total_dof: f64,
 }
 
 #[pymethods]
@@ -431,7 +456,7 @@ impl PySimulation {
                     system.configuration.box_dims,
                     &params.inner,
                 )
-            }
+            },
             Some(arg3) => {
                 // Three-arg forms: file paths or (Topology, Configuration, InputParameters)
                 if let (Ok(topo_file), Ok(conf_file), Ok(input_file)) = (
@@ -465,7 +490,7 @@ impl PySimulation {
                     conf.box_dims,
                     &params.inner,
                 )
-            }
+            },
         }
     }
 
@@ -495,6 +520,43 @@ impl PySimulation {
             self.sim_state.advance();
         }
         Ok(())
+    }
+
+    /// Run `n_steps` MD steps, sampling energies every `ene_freq` steps.
+    ///
+    /// Returns an `(n_frames, 12)` numpy array with columns
+    /// `[time, kinetic, potential, total, volume, pressure, bond, angle, improper, dihedral, lj, coulomb]`
+    /// — the same component order as the `.tre` file written by the `md` binary
+    /// (see `gromos_io::energy::EnergyFrame`), so a `run()` array and a `.tre`
+    /// dump of the same trajectory line up column-for-column.
+    /// Frame 0 is the state before any of these steps ran; subsequent frames
+    /// are sampled after every `ene_freq`-th step.
+    ///
+    /// Example:
+    ///     energies = sim.run(1000, ene_freq=100)  # (11, 12) array
+    #[pyo3(signature = (n_steps, ene_freq=100))]
+    fn run<'py>(
+        &mut self,
+        py: Python<'py>,
+        n_steps: usize,
+        ene_freq: usize,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let mut rows: Vec<Vec<f64>> = vec![self.energy_row()];
+        for i in 0..n_steps {
+            self.md_sequence
+                .run_step(&self.topology, &mut self.configuration, &self.sim_state)
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Error at step {}: {}",
+                        self.sim_state.step, e
+                    ))
+                })?;
+            self.sim_state.advance();
+            if (i + 1) % ene_freq == 0 {
+                rows.push(self.energy_row());
+            }
+        }
+        Ok(PyArray2::from_vec2_bound(py, &rows)?)
     }
 
     // -- State getters -------------------------------------------------------
@@ -577,9 +639,9 @@ impl PySimulation {
             kinetic: e.kinetic_total,
             potential: e.potential_total,
             bond: e.bond_total,
-            angle: 0.0,
-            dihedral: 0.0,
-            improper: 0.0,
+            angle: e.angle_total,
+            dihedral: e.dihedral_total,
+            improper: e.improper_total,
             lj: e.lj_total,
             coulomb: e.crf_total,
         }
@@ -604,10 +666,34 @@ impl PySimulation {
     }
 
     /// Current temperature (K), computed from kinetic energy.
+    ///
+    /// Uses the same constraint- and NDFMIN-aware degrees-of-freedom count the
+    /// thermostat couples to (`total_dof`), not a bare `3*n_atoms` — a
+    /// constrained system's true DOF is lower, and using the unconstrained
+    /// count here used to silently disagree with what the thermostat targets.
     #[getter]
     fn temperature(&self) -> f64 {
-        let n_dof = self.n_atoms * 3;
+        let n_dof = self.total_dof.round() as usize;
         self.configuration.old().temperature(n_dof)
+    }
+
+    /// Current box volume (nm³).
+    #[getter]
+    fn volume(&self) -> f64 {
+        self.configuration.old().box_config.volume()
+    }
+
+    /// Current instantaneous pressure (bar): `P = (2*KE - virial) / (3*V)`.
+    ///
+    /// The virial term is only populated by `PressureCalculation` in the
+    /// algorithm sequence — automatic for NPT (`InputParameters.npt()`/
+    /// `AlgorithmSequence.npt()`), absent for NVE/NVT. Without it this returns
+    /// the *kinetic-only* term (`2*KE / (3*V)`, not zero) — a physically
+    /// incomplete, misleadingly large number, not "no pressure to report".
+    /// Only trust this getter under NPT.
+    #[getter]
+    fn pressure(&self) -> f64 {
+        self.configuration.old().pressure()
     }
 
     // -- Topology getters ----------------------------------------------------
@@ -670,6 +756,39 @@ impl PySimulation {
 
 // Private helpers
 impl PySimulation {
+    /// `[time, kinetic, potential, total, volume, pressure, bond, angle, improper, dihedral, lj, coulomb]`
+    /// for the current state — same layout as `EnergyFrame`, used by `run()` to
+    /// build the energy timeseries. Temperature is left at 0.0: unlike volume
+    /// and pressure it needs the degrees-of-freedom count, which `PySimulation`
+    /// does not currently track (see `BerendsenThermostat` construction in
+    /// `build_simulation` for that computation).
+    fn energy_row(&self) -> Vec<f64> {
+        let state = self.configuration.old();
+        let volume = state.box_config.volume();
+        let pressure = state.pressure();
+        let frame = gromos_io::energy::EnergyFrame::from_energy(
+            &state.energies,
+            self.sim_state.time,
+            0.0,
+            volume,
+            pressure,
+        );
+        vec![
+            frame.time,
+            frame.kinetic,
+            frame.potential,
+            frame.total,
+            frame.volume,
+            frame.pressure,
+            frame.bond,
+            frame.angle,
+            frame.improper,
+            frame.dihedral,
+            frame.lj,
+            frame.coul_real,
+        ]
+    }
+
     fn _from_files(topo_file: &str, conf_file: &str, input_file: &str) -> PyResult<Self> {
         let imd = read_imd_file(input_file).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(

@@ -488,6 +488,42 @@ because they carry real placement algorithms; the `System` path wraps them, and 
 re-implementations are a later, separate item. PLAN.md P3 deliberately starts with only the
 `System.from_files()` step — the rest of this dimension is figured out by walking it.
 
+### Addendum (2026-07): ensemble ⟂ constraints, and why the composition refactor is parked
+
+Walking the `System.from_files → nvt → run` path (P3.3/3.4) surfaced a concrete design pull: the
+`InputParameters.nve/nvt/npt` factories can't express constraints, so a factory-built run of any
+constrained system silently runs unconstrained and blows up. A full **composition-pattern redesign**
+was drafted — constraints as a first-class `System` attribute (OpenMM-style: constraints belong to
+the *model*, ensemble belongs to the *integrator*), unify the two `imd→sequence` builders
+(`build_simulation` vs `resolve_algorithm_sequence`), consolidate scattered defaults, and make
+`InputParameters` construction symmetric (kwargs ctor + setters + `write_imd_file`/`.save()`).
+
+**It was audited and parked — deliberately.** The audit (full text in
+`~/.claude/plans/golden-baking-liskov.md`) found the *bug* is ~20 lines (a constraint knob on the
+factories reaching the existing `imd.ntc > 1` SHAKE guard with **no builder change**, plus a
+constraint-aware DOF fix in the `temperature` getter), while the *redesign* is ~650 lines whose
+only justification is elegance, not a second concrete caller. The two decisions worth recording as
+divergence-on-purpose bets, to revisit when the spatial algebra above actually needs them:
+
+- **Ensemble ⟂ constraints (OpenMM's split).** Attractive and probably right long-term — constraints
+  are structural (which bonds are rigid), ensembles are dynamical (thermostat/barostat). But GROMOS
+  bundles both into the IMD block (`ntc`/`ntcs`/`ntf`), and the tightly-tested reference path loads
+  from that block. Splitting them means the convenience API and the file API disagree on where
+  constraints live — acceptable only once `System`-level constraints have a *second* caller (the lazy
+  `Assembly`/`.solvate()` path, which will want "this solvent is rigid" as a model property). Until
+  then it's a fork with one user.
+- **One builder, not two.** `build_simulation` (hard-coded) and `resolve_algorithm_sequence`
+  (composable) both translate IMD→`Vec<Box<dyn Algorithm>>`; only the latter is inspectable/editable
+  from Python. Collapsing to one is the right end state and connects to Dimension 2 (one kernel, many
+  backends) — *sequence-as-data* is the same lever. The trap the audit flagged: the reference suite
+  guards each builder against gromosXX but **never against each other**, so a unify-rewrite is only as
+  safe as the 21 systems' feature coverage. Do it behind an explicit A/B test (same system through
+  both builders, assert bit-identical), not on faith that "the resolver mirrors the hard-coded path."
+
+Net divergence bet: **keep GROMOS's bundled IMD semantics on the file path, grow the orthogonal
+model/integrator split only where the spatial algebra forces a second caller.** Don't refactor two
+agreeing builders into one until there's a test that can prove they agreed.
+
 ---
 
 ## Dimension 10 — Dissolve the solute/solvent split: separate *representation* from *role*

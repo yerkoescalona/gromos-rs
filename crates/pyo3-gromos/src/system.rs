@@ -34,7 +34,10 @@ impl PySystem {
     ///
     /// Raises ValueError if atom counts do not match.
     #[new]
-    fn new(topology: &Bound<'_, PyTopology>, configuration: &Bound<'_, PyConfiguration>) -> PyResult<Self> {
+    fn new(
+        topology: &Bound<'_, PyTopology>,
+        configuration: &Bound<'_, PyConfiguration>,
+    ) -> PyResult<Self> {
         let topo_ref = topology.borrow();
         let conf_ref = configuration.borrow();
         validate_atom_count_match(topo_ref.inner.num_atoms(), conf_ref.pos_data.len())
@@ -59,7 +62,10 @@ impl PySystem {
         let conf = PyConfiguration::from_file(conf_file)?;
         validate_atom_count_match(topo.inner.num_atoms(), conf.pos_data.len())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
-        Ok(Self { topology: topo, configuration: conf })
+        Ok(Self {
+            topology: topo,
+            configuration: conf,
+        })
     }
 
     // ── Properties ────────────────────────────────────────────────────────────
@@ -126,8 +132,15 @@ impl PySystem {
         };
         let box_opt = if box_v.x > 0.0 { Some(box_v) } else { None };
 
-        write_g96(path, "gromos-rs", pos, vels, box_opt, Some(&self.topology.inner))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))
+        write_g96(
+            path,
+            "gromos-rs",
+            pos,
+            vels,
+            box_opt,
+            Some(&self.topology.inner),
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))
     }
 
     fn __repr__(&self) -> String {

@@ -967,8 +967,14 @@ impl Algorithm for Forcefield {
                 state.force[i] = bonded_f + pert_f + self.nonbonded_storage.forces[i];
             }
 
+            // Perturbed (FEP) bonded terms don't carry a bond/angle/dihedral/improper
+            // breakdown (`ForceEnergyLambda` has only a combined `energy`), so their
+            // contribution is folded into bond_total same as before.
             state.energies.bond_total =
-                bonded_result.energy + perturbed_bonded.as_ref().map_or(0.0, |p| p.energy);
+                bonded_result.bond_energy + perturbed_bonded.as_ref().map_or(0.0, |p| p.energy);
+            state.energies.angle_total = bonded_result.angle_energy;
+            state.energies.dihedral_total = bonded_result.dihedral_energy;
+            state.energies.improper_total = bonded_result.improper_energy;
             state.energies.dhdl_total = perturbed_bonded
                 .as_ref()
                 .map_or(0.0, |p| p.lambda_derivative)

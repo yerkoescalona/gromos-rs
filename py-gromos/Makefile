@@ -68,7 +68,15 @@ pre-commit: fmt lint test ## Run pre-commit checks
 
 .PHONY: notebooks
 notebooks: build ## Run Jupyter notebooks
-	uv run --with jupyter,notebook jupyter notebook notebooks/
+	uv run jupyter notebook notebooks/
+
+.PHONY: notebooks-test
+notebooks-test: build ## Execute all notebooks headlessly (same as CI)
+	cd notebooks && for nb in *.ipynb; do \
+		echo "Testing $$nb..."; \
+		uv run jupyter nbconvert --to notebook --execute "$$nb" --output temp.ipynb || exit 1; \
+		rm temp.ipynb; \
+	done
 
 ##@ Documentation
 

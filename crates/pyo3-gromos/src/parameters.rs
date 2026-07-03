@@ -46,29 +46,53 @@ impl PyInputParameters {
     }
 
     /// NVE (microcanonical) parameters: no thermostat or barostat.
+    ///
+    /// `constraints`: `"none"` (default) | `"hbonds"` | `"allbonds"` — SHAKE-constrain
+    /// solute bonds. A constrained system (e.g. one with solute H-bonds) run with
+    /// `constraints="none"` will silently diverge; matching a constrained reference
+    /// `.in` file needs `"hbonds"`/`"allbonds"` here.
     #[staticmethod]
-    fn nve(dt: f64, steps: usize) -> Self {
-        Self { inner: ImdParameters::nve(dt, steps) }
+    #[pyo3(signature = (dt, steps, constraints="none"))]
+    fn nve(dt: f64, steps: usize, constraints: &str) -> PyResult<Self> {
+        let inner = ImdParameters::nve(dt, steps, constraints)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+        Ok(Self { inner })
     }
 
     /// NVT (canonical) parameters: Berendsen thermostat at `temperature` K.
+    ///
+    /// `constraints`: `"none"` (default) | `"hbonds"` | `"allbonds"` — see `nve`.
     #[staticmethod]
-    fn nvt(dt: f64, steps: usize, temperature: f64) -> Self {
-        Self { inner: ImdParameters::nvt(dt, steps, temperature) }
+    #[pyo3(signature = (dt, steps, temperature, constraints="none"))]
+    fn nvt(dt: f64, steps: usize, temperature: f64, constraints: &str) -> PyResult<Self> {
+        let inner = ImdParameters::nvt(dt, steps, temperature, constraints)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+        Ok(Self { inner })
     }
 
     /// NPT (isothermal-isobaric) parameters: Berendsen thermostat + barostat.
     ///
-    /// `pressure` in bar.
+    /// `pressure` in bar. `constraints`: `"none"` (default) | `"hbonds"` | `"allbonds"` — see `nve`.
     #[staticmethod]
-    fn npt(dt: f64, steps: usize, temperature: f64, pressure: f64) -> Self {
-        Self { inner: ImdParameters::npt(dt, steps, temperature, pressure) }
+    #[pyo3(signature = (dt, steps, temperature, pressure, constraints="none"))]
+    fn npt(
+        dt: f64,
+        steps: usize,
+        temperature: f64,
+        pressure: f64,
+        constraints: &str,
+    ) -> PyResult<Self> {
+        let inner = ImdParameters::npt(dt, steps, temperature, pressure, constraints)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+        Ok(Self { inner })
     }
 
     /// Steepest-descent energy minimization parameters.
     #[staticmethod]
     fn steepest_descent(steps: usize) -> Self {
-        Self { inner: ImdParameters::steepest_descent(steps) }
+        Self {
+            inner: ImdParameters::steepest_descent(steps),
+        }
     }
 
     /// Time step in picoseconds.
@@ -115,6 +139,18 @@ impl PyInputParameters {
     #[getter]
     fn ntc(&self) -> i32 {
         self.inner.ntc
+    }
+
+    /// SHAKE constraint mode as the `nve`/`nvt`/`npt` convenience string
+    /// (`"none"`/`"hbonds"`/`"allbonds"`) — the inverse of the `constraints=`
+    /// factory argument.
+    #[getter]
+    fn constraints(&self) -> &'static str {
+        match self.inner.ntc {
+            3 => "allbonds",
+            2 => "hbonds",
+            _ => "none",
+        }
     }
 
     /// Boundary condition type (0=vacuum, 1=rectangular).

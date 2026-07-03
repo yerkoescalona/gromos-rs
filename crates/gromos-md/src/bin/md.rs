@@ -1573,7 +1573,7 @@ fn main() {
 
         // Apply GAMD boost if enabled
         if let Some(ref mut gamd) = gamd_params {
-            let dihedral_energy = 0.0; // TODO: Separate dihedral energy from bonded
+            let dihedral_energy = conf.current().energies.dihedral_total;
             let total_potential = conf.current().energies.potential_total;
 
             // Update GAMD statistics
@@ -1781,28 +1781,8 @@ fn main() {
         if step % nstener == 0 {
             let volume = conf.old().box_config.volume();
             let pressure = conf.old().pressure();
-            let energies = conf.old().energies.clone();
-
-            let ene_frame = EnergyFrame {
-                time,
-                kinetic: energies.kinetic_total,
-                potential: energies.potential_total,
-                total: energies.total(),
-                temperature: temp,
-                volume,
-                pressure,
-                bond: energies.bond_total,
-                angle: 0.0,
-                improper: 0.0,
-                dihedral: 0.0,
-                lj: energies.lj_total,
-                coul_real: energies.crf_total, // CRF energy
-                coul_recip: 0.0,
-                coul_self: 0.0,
-                shake: 0.0,
-                restraint: 0.0,
-                extra: Vec::new(),
-            };
+            let ene_frame =
+                EnergyFrame::from_energy(&conf.old().energies, time, temp, volume, pressure);
 
             if let Err(e) = ene_writer.write_frame(&ene_frame) {
                 eprintln!("Error writing energy: {}", e);

@@ -57,7 +57,8 @@ use gromos_integrators::algorithms::{
     BerendsenThermostat as RustThermostat, EnergyCalculation as RustEnergy,
     Forcefield as RustForcefield, LeapFrogPosition, LeapFrogVelocity,
     PressureCalculation as RustPressure, RemoveCOMMotion as RustRemoveCOM,
-    ShakeAlgorithm as RustShake, TemperatureCalculation as RustTemperature, VirialType,
+    ShakeAlgorithm as RustShake, SteepestDescentAlgorithm as RustSteepestDescent,
+    TemperatureCalculation as RustTemperature, VirialType,
 };
 use gromos_integrators::constraints::{NtcMode, ShakeParameters};
 use gromos_io::imd::ImdParameters;
@@ -396,6 +397,71 @@ impl PyShakeConstraints {
     }
 }
 
+/// Steepest-descent energy minimization.
+///
+/// Replaces `LeapFrogVelocity` + `LeapFrogPosition` in the sequence: moves atoms
+/// along the force direction with an adaptive step size (grows ×1.2 while the
+/// energy is decreasing, shrinks ×0.5 otherwise), converging when the potential
+/// energy change between steps drops below `tolerance`. No velocities, no
+/// kinetic energy — `TemperatureCalculation` is meaningless during EM and should
+/// be omitted from an EM sequence (GROMOS convention: E_total = E_pot).
+///
+/// # Example (Python)
+///
+/// ```python
+/// seq = AlgorithmSequence()
+/// seq.add(Forcefield())
+/// seq.add(SteepestDescent(tolerance=0.1, initial_step=0.01, max_step=0.05))
+/// seq.add(EnergyCalculation())
+/// ```
+#[pyclass(name = "SteepestDescent")]
+#[derive(Clone, Debug)]
+pub struct PySteepestDescent {
+    /// Energy-change convergence tolerance (kJ/mol). GROMOS `DELE`.
+    #[pyo3(get, set)]
+    pub tolerance: f64,
+    /// Initial step size (nm). GROMOS `DX0`.
+    #[pyo3(get, set)]
+    pub initial_step: f64,
+    /// Maximum step size (nm). GROMOS `DXM`.
+    #[pyo3(get, set)]
+    pub max_step: f64,
+    /// Minimum steps before convergence is checked. GROMOS `NMIN`.
+    #[pyo3(get, set)]
+    pub min_steps: usize,
+    /// Per-atom force magnitude limit; 0.0 = unlimited. GROMOS `FLIM`.
+    #[pyo3(get, set)]
+    pub force_limit: f64,
+}
+
+#[pymethods]
+impl PySteepestDescent {
+    #[new]
+    #[pyo3(signature = (tolerance=0.1, initial_step=0.01, max_step=0.05, min_steps=1, force_limit=0.0))]
+    fn new(
+        tolerance: f64,
+        initial_step: f64,
+        max_step: f64,
+        min_steps: usize,
+        force_limit: f64,
+    ) -> Self {
+        Self {
+            tolerance,
+            initial_step,
+            max_step,
+            min_steps,
+            force_limit,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SteepestDescent(tolerance={:.3}, initial_step={:.3}, max_step={:.3})",
+            self.tolerance, self.initial_step, self.max_step
+        )
+    }
+}
+
 /// Temperature calculation (kinetic energy → temperature).
 ///
 /// Computes kinetic energy from velocities and stores temperature.
@@ -532,6 +598,7 @@ pub(crate) enum AlgorithmDescriptor {
     BerendsenThermostat(PyBerendsenThermostat),
     BerendsenBarostat(PyBerendsenBarostat),
     ShakeConstraints(PyShakeConstraints),
+    SteepestDescent(PySteepestDescent),
     TemperatureCalculation(PyTemperatureCalculation),
     PressureCalculation(PyPressureCalculation),
     EnergyCalculation(PyEnergyCalculation),
@@ -548,6 +615,7 @@ impl AlgorithmDescriptor {
             Self::BerendsenThermostat(_) => "BerendsenThermostat",
             Self::BerendsenBarostat(_) => "BerendsenBarostat",
             Self::ShakeConstraints(_) => "ShakeConstraints",
+            Self::SteepestDescent(_) => "SteepestDescent",
             Self::TemperatureCalculation(_) => "TemperatureCalculation",
             Self::PressureCalculation(_) => "PressureCalculation",
             Self::EnergyCalculation(_) => "EnergyCalculation",
@@ -806,6 +874,54 @@ impl PyAlgorithmSequence {
         Ok(seq)
     }
 
+    /// Create a steepest-descent energy-minimization algorithm sequence.
+    ///
+    /// Replaces the leap-frog integrator with `SteepestDescent`; skips COM
+    /// removal, thermostat, barostat, and `TemperatureCalculation` (GROMOS
+    /// convention: EM has no velocities, `E_total = E_pot`). SHAKE still
+    /// applies if the parameters call for it — GROMOS constrains bonds during
+    /// minimization too.
+    ///
+    /// Args:
+    ///     topo: Topology object
+    ///     params: InputParameters object (built via `InputParameters.steepest_descent(steps)`
+    ///         or any `.in` file with `NTEM > 0`)
+    ///
+    /// Example:
+    ///     seq = AlgorithmSequence.minimize(topo, params)
+    #[staticmethod]
+    fn minimize(_topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+        let imd = &params.inner;
+        let mut seq = Self::new();
+
+        // Forcefield
+        seq.algorithms
+            .push(AlgorithmDescriptor::Forcefield(forcefield_from_imd(imd)));
+
+        // Steepest descent (replaces LeapFrogIntegrator)
+        seq.algorithms
+            .push(AlgorithmDescriptor::SteepestDescent(PySteepestDescent {
+                tolerance: imd.dele,
+                initial_step: imd.dx0,
+                max_step: imd.dxm,
+                min_steps: imd.nmin,
+                force_limit: imd.flim,
+            }));
+
+        // SHAKE if needed (GROMOS applies constraints during minimization too)
+        if imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0) {
+            seq.algorithms
+                .push(AlgorithmDescriptor::ShakeConstraints(shake_from_imd(imd)));
+        }
+
+        // Energy calculation only — no TemperatureCalculation during EM.
+        seq.algorithms.push(AlgorithmDescriptor::EnergyCalculation(
+            PyEnergyCalculation {},
+        ));
+
+        Ok(seq)
+    }
+
     /// Create a standard NVT (canonical) algorithm sequence with Berendsen thermostat.
     ///
     /// Args:
@@ -985,7 +1101,9 @@ impl PyAlgorithmSequence {
     #[staticmethod]
     fn from_parameters(_topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
         let imd = &params.inner;
-        if imd.couple_pressure {
+        if imd.ntem > 0 {
+            Self::minimize(_topo, params)
+        } else if imd.couple_pressure {
             Self::npt(_topo, params)
         } else {
             let thermostat_on = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].tau.is_empty() {
@@ -1010,6 +1128,37 @@ impl PyAlgorithmSequence {
             .map(|a| a.name().to_string())
             .collect()
     }
+}
+
+// ============================================================================
+// Shared DOF calculation — single source of truth for both builders
+// ============================================================================
+
+/// Total kinetic degrees of freedom, accounting for solvent constraints and
+/// `NDFMIN`. Used both by the thermostat (to normalise T = 2*KE/(dof*kB)) and
+/// by `Simulation.temperature` — the two must agree, or the reported
+/// temperature and the temperature the thermostat is actually coupling to
+/// silently diverge.
+pub(crate) fn compute_total_dof(topo: &Topology, imd: &ImdParameters) -> f64 {
+    let n_atoms = topo.num_atoms();
+    let n_solute = topo.num_solute_atoms();
+    let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
+        topo.solvent_atom_template.len()
+    } else {
+        1
+    };
+    let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
+        (n_atoms - n_solute) / atoms_per_solvent
+    } else {
+        0
+    };
+    let shake_enabled = imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0);
+    let solvent_constraint_dof = if shake_enabled {
+        n_solvent_molecules * topo.solvent_constraint_template.len()
+    } else {
+        0
+    };
+    (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64
 }
 
 // ============================================================================
@@ -1125,24 +1274,7 @@ pub(crate) fn resolve_algorithm_sequence(
             },
 
             AlgorithmDescriptor::BerendsenThermostat(d) => {
-                let n_solute = topo.num_solute_atoms();
-                let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
-                    topo.solvent_atom_template.len()
-                } else {
-                    1
-                };
-                let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
-                    (n_atoms - n_solute) / atoms_per_solvent
-                } else {
-                    0
-                };
-                let shake_enabled = imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0);
-                let solvent_constraint_dof = if shake_enabled {
-                    n_solvent_molecules * topo.solvent_constraint_template.len()
-                } else {
-                    0
-                };
-                let total_dof = (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64;
+                let total_dof = compute_total_dof(topo, imd);
 
                 md_sequence.push(Box::new(RustThermostat::new_single_bath(
                     d.temperature,
@@ -1170,6 +1302,15 @@ pub(crate) fn resolve_algorithm_sequence(
                     shake_alg.shake_initial_velocities = true;
                 }
                 md_sequence.push(Box::new(shake_alg));
+            },
+
+            AlgorithmDescriptor::SteepestDescent(d) => {
+                let sd = RustSteepestDescent::new()
+                    .with_tolerance(d.tolerance)
+                    .with_step_sizes(d.initial_step, d.max_step)
+                    .with_min_steps(d.min_steps)
+                    .with_force_limit(d.force_limit);
+                md_sequence.push(Box::new(sd));
             },
 
             AlgorithmDescriptor::TemperatureCalculation(_) => {
@@ -1229,6 +1370,9 @@ fn extract_descriptor(obj: &Bound<'_, PyAny>) -> PyResult<AlgorithmDescriptor> {
     if let Ok(d) = obj.extract::<PyShakeConstraints>() {
         return Ok(AlgorithmDescriptor::ShakeConstraints(d));
     }
+    if let Ok(d) = obj.extract::<PySteepestDescent>() {
+        return Ok(AlgorithmDescriptor::SteepestDescent(d));
+    }
     if let Ok(d) = obj.extract::<PyTemperatureCalculation>() {
         return Ok(AlgorithmDescriptor::TemperatureCalculation(d));
     }
@@ -1245,7 +1389,7 @@ fn extract_descriptor(obj: &Bound<'_, PyAny>) -> PyResult<AlgorithmDescriptor> {
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
         "Expected an algorithm descriptor (Forcefield, LeapFrogIntegrator, \
          LeapFrogVelocity, LeapFrogPosition, BerendsenThermostat, \
-         BerendsenBarostat, ShakeConstraints, TemperatureCalculation, \
+         BerendsenBarostat, ShakeConstraints, SteepestDescent, TemperatureCalculation, \
          PressureCalculation, EnergyCalculation, RemoveCOMMotion), got: {}",
         obj.get_type().name().unwrap_or_default()
     )))
@@ -1291,6 +1435,7 @@ pub fn register_algorithm_sequence(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyBerendsenThermostat>()?;
     m.add_class::<PyBerendsenBarostat>()?;
     m.add_class::<PyShakeConstraints>()?;
+    m.add_class::<PySteepestDescent>()?;
     m.add_class::<PyTemperatureCalculation>()?;
     m.add_class::<PyPressureCalculation>()?;
     m.add_class::<PyEnergyCalculation>()?;

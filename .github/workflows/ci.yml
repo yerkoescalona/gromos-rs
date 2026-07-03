@@ -261,7 +261,7 @@ jobs:
           cd notebooks
           for notebook in *.ipynb; do
             echo "Testing $notebook..."
-            uv run --with jupyter,nbconvert jupyter nbconvert --to notebook --execute "$notebook" --output temp.ipynb || exit 1
+            uv run jupyter nbconvert --to notebook --execute "$notebook" --output temp.ipynb || exit 1
             rm temp.ipynb
           done
 

@@ -23,11 +23,12 @@ No `.imd` files to author. No temporary directories. All in memory.
 | Class / function | Description |
 |-----------------|-------------|
 | `System` | Paired topology + coordinates, atom-count validated |
-| `Topology` | Load `.topo` — atoms, masses, charges, bonds |
+| `Topology` | Load `.topo` — atoms, masses, charges, bonds; `.solvate(nsm)` |
 | `Configuration` | Load `.cnf` / `.g96` — positions, velocities, box |
-| `InputParameters` | Load `.imd` or build via `nve / nvt / npt / steepest_descent` factories |
-| `Simulation` | Algorithm sequence + `step(n)` + full energy/position/force access |
-| `AlgorithmSequence` | Inspect and modify the MD pipeline at the step level |
+| `InputParameters` | Load `.imd` or build via `nve / nvt / npt / steepest_descent` factories, with a `constraints=` knob for SHAKE |
+| `Simulation` | Algorithm sequence + `step(n)` / `run(steps, ene_freq)` + full energy/position/force access |
+| `AlgorithmSequence` | Inspect and modify the MD pipeline at the step level, incl. `SteepestDescent` for energy minimization |
+| `EnergyTimeseries` | Wraps `sim.run()`'s output — `block_average()`, `to_dataframe()` (polars/pandas/dict), `plot()` (plotly/matplotlib) |
 | `Vec3`, `Energy`, `Frame` | Utility types |
 | `rmsd`, `rdf` | Analysis functions |
 
@@ -39,8 +40,7 @@ across 21 reference systems.
 
 | Milestone | Description |
 |-----------|-------------|
-| **P3.3** | `sim.run(steps, ene_freq)` returns a NumPy energy array — no `.tre` file |
-| **P3.4** | Working Jupyter notebooks for the `from_files → nvt → run` path |
+| **P3 remaining** | ForceField single-point evaluation; rich `_repr_html_` for Jupyter |
 | **FUTURE** | System builder algebra: `molecule("ALA", ff) * 10 + solvent("SPC", n=2000)` |
 
 ## Architecture

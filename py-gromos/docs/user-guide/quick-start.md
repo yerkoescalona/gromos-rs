@@ -86,6 +86,25 @@ params = InputParameters("run.imd")   # identical
 print(params.dt, params.nstlim, params.temperature, params.cutoff)
 ```
 
+### Constraints (SHAKE)
+
+`nve`/`nvt`/`npt` take `constraints="none"|"hbonds"|"allbonds"` (default `"none"`,
+matching GROMOS's own `NTC=1` default). A system with flexible solute H-bonds (a
+peptide, for example) run with `constraints="none"` at a normal MD timestep will
+diverge — this is a real trap, not a hypothetical one:
+
+```python
+# Diverges within ~50-100 steps: solute H-bonds are unconstrained.
+params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0)
+
+# Stable: SHAKE constrains solute H-bonds.
+params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0, constraints="hbonds")
+```
+
+This only sets solute constraints (`NTC`). Solvent rigidity (SETTLE) isn't yet
+exposed on the factories — load a validated `.in` file via `from_file()` if you
+need it.
+
 ---
 
 ## Running a simulation
@@ -126,17 +145,47 @@ print(sim.temperature)   # K
 
 ### Collecting energies over a run
 
+`sim.run(steps, ene_freq)` streams energies as one `(n_frames, 12)` NumPy array —
+no Python-side per-step loop, no `.tre` file. Wrap it in `EnergyTimeseries` for
+named-column access, block-averaging, dataframes, and plots.
+
 ```python
-import numpy as np
+from gromos import EnergyTimeseries
 
-energies = []
-for _ in range(50):
-    sim.step(100)
-    energies.append(sim.total_energy)
+energies = sim.run(5000, ene_freq=100)   # (51, 12) array
+ts = EnergyTimeseries(energies)
 
-energies = np.array(energies)
-print(f"Mean: {energies.mean():.1f} ± {energies.std():.1f} kJ/mol")
+print(f"Mean: {ts.total.mean():.1f} kJ/mol")
+ts.plot("total", "kinetic", "potential")       # plotly figure (default backend)
+ts.plot("bond", "angle", backend="matplotlib")  # or matplotlib
+
+mean, err = ts.block_average("total", block_size=10)
+print(f"Block-averaged: {mean:.1f} ± {err:.1f} kJ/mol")
+
+df = ts.to_dataframe()   # polars.DataFrame by default
 ```
+
+Defaults (`"polars"` for dataframes, `"plotly"` for plots) are configurable
+globally via `gromos.timeseries.config`.
+
+### Energy minimization
+
+`InputParameters.steepest_descent(steps)` runs real minimization through
+`Simulation` — the sequence swaps in `SteepestDescent` for the leap-frog
+integrator and has no thermostat/barostat/kinetic energy (GROMOS convention:
+`total_energy == potential_energy` during EM).
+
+```python
+params = InputParameters.steepest_descent(steps=500)
+sim = Simulation(system, params)
+energies = sim.run(500, ene_freq=10)
+print(sim.algorithm_names)
+# ['Forcefield', 'Steepest-Descent', 'Energy_Calculation']
+```
+
+The minimizer converges once the energy change between steps drops below its
+tolerance and becomes a no-op after that — a flat tail at the end of the energy
+trace is expected, not a bug.
 
 ---
 

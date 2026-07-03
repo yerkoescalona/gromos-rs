@@ -26,12 +26,22 @@ use gromos_core::topology::Topology;
 // ─── Shared result types ─────────────────────────────────────────────────────
 
 /// Energy + per-atom forces + virial tensor from a bonded term.
+///
+/// `energy` is always the combined total. The `*_energy` fields are the
+/// per-term breakdown (bond/angle/dihedral/improper); they're only populated
+/// by combiners like [`calculate_bonded_forces_ntf`] that know which term is
+/// which — a single-term calculator (e.g. `calculate_bond_forces_quartic`)
+/// leaves them at 0 and relies on `energy` alone.
 #[derive(Debug, Clone)]
 pub struct ForceEnergy {
     pub energy: f64,
     pub forces: Vec<Vec3>,
     /// virial[a][b] = Σ r[b] * f[a]  (GROMOS convention)
     pub virial: [[f64; 3]; 3],
+    pub bond_energy: f64,
+    pub angle_energy: f64,
+    pub dihedral_energy: f64,
+    pub improper_energy: f64,
 }
 
 /// Energy + per-atom forces + dH/dλ from a perturbed (FEP/TI) bonded term.
@@ -48,6 +58,10 @@ impl ForceEnergy {
             energy: 0.0,
             forces: vec![Vec3::ZERO; num_atoms],
             virial: [[0.0; 3]; 3],
+            bond_energy: 0.0,
+            angle_energy: 0.0,
+            dihedral_energy: 0.0,
+            improper_energy: 0.0,
         }
     }
 
@@ -61,6 +75,10 @@ impl ForceEnergy {
                 self.virial[a][b] += other.virial[a][b];
             }
         }
+        self.bond_energy += other.bond_energy;
+        self.angle_energy += other.angle_energy;
+        self.dihedral_energy += other.dihedral_energy;
+        self.improper_energy += other.improper_energy;
     }
 }
 
@@ -150,27 +168,31 @@ pub fn calculate_bonded_forces_ntf(
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     if ntf_bond {
-        let bf = if use_quartic_bonds {
+        let mut bf = if use_quartic_bonds {
             calculate_bond_forces_quartic(topo, conf)
         } else {
             calculate_bond_forces_harmonic(topo, conf)
         };
         log::debug!("  bonded: bond={:.6e}", bf.energy);
+        bf.bond_energy = bf.energy;
         result.add(&bf);
     }
     if ntf_angle {
-        let af = calculate_angle_forces(topo, conf);
+        let mut af = calculate_angle_forces(topo, conf);
         log::debug!("  bonded: angle={:.6e}", af.energy);
+        af.angle_energy = af.energy;
         result.add(&af);
     }
     if ntf_dihedral {
-        let df = calculate_dihedral_forces(topo, conf);
+        let mut df = calculate_dihedral_forces(topo, conf);
         log::debug!("  bonded: dihe={:.6e}", df.energy);
+        df.dihedral_energy = df.energy;
         result.add(&df);
     }
     if ntf_improper {
-        let imf = calculate_improper_dihedral_forces(topo, conf);
+        let mut imf = calculate_improper_dihedral_forces(topo, conf);
         log::debug!("  bonded: impr={:.6e}", imf.energy);
+        imf.improper_energy = imf.energy;
         result.add(&imf);
     }
 

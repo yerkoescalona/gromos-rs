@@ -50,7 +50,7 @@ The Rust side lives in `crates/pyo3-gromos/src/`:
 ## Running the test suite
 
 ```bash
-make test-python           # build + full suite (82 pass, ~11 skip, 0 fail)
+make test-python           # build + full suite (89 pass, 11 skip, 0 fail)
 
 # Just the reference energy/force/position tests
 .venv/bin/pytest py-gromos/tests/test_gromosXX_references.py -v
@@ -66,16 +66,38 @@ The reference suite validates against double-precision gromosXX output for
 
 ## Roadmap
 
-### P3.3 — Energy reporters (next)
+### P3.3 — Energy reporters ✓ done
 
-Stream energies from `sim.run(steps, ene_freq)` into a NumPy array without
-writing a `.tre` file. This also requires wiring the missing energy components
-(`angle`, `dihedral`, `improper`) that are currently zeroed in `simulation.rs`.
+`sim.run(steps, ene_freq)` streams energies into a NumPy array without writing
+a `.tre` file; `EnergyTimeseries` (`gromos.timeseries`) wraps it with
+`block_average()`, `to_dataframe()` (polars/pandas/dict), and `plot()`
+(plotly/matplotlib). The `angle`/`dihedral`/`improper` energy components are
+wired end to end — including a fix in the underlying Rust bonded-force
+combiner (`gromos-forces/src/bonded/mod.rs`), which lumped all four bonded
+terms into `bond_total` even outside the Python bindings.
 
-### P3.4 — Working notebooks
+### P3.4 — Working notebooks ✓ done
 
-Replace the existing notebooks (which reference phantom APIs like `gromos.State`)
-with notebooks that use the real `from_files → nvt → run` path.
+`notebooks/01_load_and_inspect.ipynb` and `02_short_md.ipynb` use the real
+`from_files → nvt → run` path against reference systems, including the
+`Topology.solvate()` + `System(topo, conf)` path for systems `from_files()`
+can't load directly (unsolvated topology vs. solvated configuration).
+
+### P3.5 — Constraints and energy minimization ✓ done
+
+Two gaps found while writing the P3.4 notebooks, both closed:
+
+- **Constraints on the factories.** `InputParameters.nve/nvt/npt` take
+  `constraints="none"|"hbonds"|"allbonds"` (default `"none"`, matching GROMOS's
+  own `NTC=1` default). Previously factory-built params had no way to turn SHAKE
+  on, so a constrained system (e.g. one with solute H-bonds) would silently run
+  unconstrained and diverge. `02_short_md.ipynb` §2a demonstrates the failure
+  mode and the fix side by side, live.
+- **Energy minimization via `Simulation`.** `InputParameters.steepest_descent(steps)`
+  now actually minimizes when run through `Simulation` — previously it silently
+  fell back to plain leap-frog with `dt=0` (a no-op). Also available as
+  `AlgorithmSequence.minimize(topo, params)` / the `SteepestDescent` building
+  block for custom sequences.
 
 ### FUTURE — System builder algebra
 

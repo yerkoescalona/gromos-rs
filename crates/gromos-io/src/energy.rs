@@ -53,6 +53,7 @@
 //! - Block 19: Kinetic energy (internal)
 
 use crate::IoError;
+use gromos_core::configuration::Energy;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
@@ -176,6 +177,42 @@ impl EnergyFrame {
             + self.coul_self
             + self.shake
             + self.restraint;
+    }
+
+    /// Build a `.tre`-shaped frame from the runtime [`Energy`] accumulator.
+    ///
+    /// The single conversion point from `gromos-core`'s `Energy` to the GROMOS
+    /// `.tre` block layout — reused by the `md` binary's file writer and by the
+    /// `pyo3-gromos` in-memory `Simulation.run()` array, so the two never drift
+    /// apart on which component landed in which column (they used to: `angle`,
+    /// `dihedral`, and `improper` were separately hardcoded to `0.0` in each).
+    pub fn from_energy(
+        energy: &Energy,
+        time: f64,
+        temperature: f64,
+        volume: f64,
+        pressure: f64,
+    ) -> Self {
+        Self {
+            time,
+            kinetic: energy.kinetic_total,
+            potential: energy.potential_total,
+            total: energy.total(),
+            temperature,
+            volume,
+            pressure,
+            bond: energy.bond_total,
+            angle: energy.angle_total,
+            improper: energy.improper_total,
+            dihedral: energy.dihedral_total,
+            lj: energy.lj_total,
+            coul_real: energy.crf_total,
+            coul_recip: energy.ls_kspace_total,
+            coul_self: 0.0,
+            shake: energy.constraint_total,
+            restraint: energy.distanceres_total,
+            extra: Vec::new(),
+        }
     }
 }
 

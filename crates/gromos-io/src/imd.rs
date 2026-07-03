@@ -929,28 +929,58 @@ fn parse_block(
     Ok(())
 }
 
+/// Maps the `constraints` convenience string used by `ImdParameters::nve/nvt/npt`
+/// to the GROMOS NTC constraint mode.
+///
+/// - `"none"` → NTC=1 (no solute constraints — matches the pre-M1 default; a
+///   factory-built run of a constrained system, e.g. one with solute H-bonds,
+///   will diverge unless this is set to `"hbonds"`/`"allbonds"`)
+/// - `"hbonds"` → NTC=2 (SHAKE-constrain solute bonds involving hydrogen)
+/// - `"allbonds"` → NTC=3 (SHAKE-constrain all solute bonds)
+///
+/// This only sets NTC (solute constraints). Solvent rigidity (SETTLE, `NTCS`)
+/// is orthogonal and unaffected — see PLAN.md P3.5.
+pub fn ntc_from_constraints(constraints: &str) -> Result<i32, String> {
+    match constraints {
+        "none" => Ok(1),
+        "hbonds" => Ok(2),
+        "allbonds" => Ok(3),
+        other => Err(format!(
+            "unknown constraints mode {other:?}: expected \"none\", \"hbonds\", or \"allbonds\""
+        )),
+    }
+}
+
 impl ImdParameters {
     /// NVE ensemble: microcanonical, no thermostat or barostat.
-    pub fn nve(dt: f64, steps: usize) -> Self {
-        Self {
+    ///
+    /// `constraints`: `"none"` | `"hbonds"` | `"allbonds"` — see [`ntc_from_constraints`].
+    pub fn nve(dt: f64, steps: usize, constraints: &str) -> Result<Self, String> {
+        let ntc = ntc_from_constraints(constraints)?;
+        Ok(Self {
             title: String::from("NVE simulation"),
             nstlim: steps,
             dt,
+            ntc,
             num_temp_baths: 1,
             temp_bath: vec![TempBathParameters {
                 tau: vec![-1.0], // tau=-1 → no coupling (NVE)
                 ..TempBathParameters::default()
             }],
             ..Self::default()
-        }
+        })
     }
 
     /// NVT ensemble: canonical, Berendsen thermostat.
-    pub fn nvt(dt: f64, steps: usize, temperature: f64) -> Self {
-        Self {
+    ///
+    /// `constraints`: `"none"` | `"hbonds"` | `"allbonds"` — see [`ntc_from_constraints`].
+    pub fn nvt(dt: f64, steps: usize, temperature: f64, constraints: &str) -> Result<Self, String> {
+        let ntc = ntc_from_constraints(constraints)?;
+        Ok(Self {
             title: String::from("NVT simulation"),
             nstlim: steps,
             dt,
+            ntc,
             num_temp_baths: 1,
             temp_bath: vec![TempBathParameters {
                 algorithm: 0,
@@ -960,17 +990,27 @@ impl ImdParameters {
             }],
             tempi: temperature,
             ..Self::default()
-        }
+        })
     }
 
     /// NPT ensemble: isothermal-isobaric, Berendsen thermostat + barostat.
-    pub fn npt(dt: f64, steps: usize, temperature: f64, pressure: f64) -> Self {
+    ///
+    /// `constraints`: `"none"` | `"hbonds"` | `"allbonds"` — see [`ntc_from_constraints`].
+    pub fn npt(
+        dt: f64,
+        steps: usize,
+        temperature: f64,
+        pressure: f64,
+        constraints: &str,
+    ) -> Result<Self, String> {
+        let ntc = ntc_from_constraints(constraints)?;
         let p_tensor = [[pressure; 3]; 3];
         let comp_tensor = [[4.575e-4; 3]; 3]; // water compressibility (nm² kJ⁻¹ mol)
-        Self {
+        Ok(Self {
             title: String::from("NPT simulation"),
             nstlim: steps,
             dt,
+            ntc,
             num_temp_baths: 1,
             temp_bath: vec![TempBathParameters {
                 algorithm: 0,
@@ -988,7 +1028,7 @@ impl ImdParameters {
                 virial: 1,
             }),
             ..Self::default()
-        }
+        })
     }
 
     /// Steepest-descent energy minimization.
@@ -1331,25 +1371,30 @@ MULTIBATH\n    {algo_line}\n#   NBATHS\n    1\n#   TEMP0  TAU\n    300.0  0.1\n#
 
     #[test]
     fn test_factory_nve() {
-        let p = ImdParameters::nve(0.001, 500);
+        let p = ImdParameters::nve(0.001, 500, "none").unwrap();
         assert_eq!(p.nstlim, 500);
         assert!((p.dt - 0.001).abs() < 1e-15);
-        assert!((p.temp_bath[0].tau[0] - (-1.0)).abs() < 1e-15, "NVE needs tau=-1");
+        assert!(
+            (p.temp_bath[0].tau[0] - (-1.0)).abs() < 1e-15,
+            "NVE needs tau=-1"
+        );
+        assert_eq!(p.ntc, 1, "\"none\" -> NTC=1");
     }
 
     #[test]
     fn test_factory_nvt() {
-        let p = ImdParameters::nvt(0.002, 1000, 298.0);
+        let p = ImdParameters::nvt(0.002, 1000, 298.0, "none").unwrap();
         assert_eq!(p.nstlim, 1000);
         assert!((p.dt - 0.002).abs() < 1e-15);
         assert!((p.temp_bath[0].temp0[0] - 298.0).abs() < 1e-10);
         assert_eq!(p.temp_bath[0].algorithm, 0, "NVT uses Berendsen");
         assert!(!p.couple_pressure);
+        assert_eq!(p.ntc, 1);
     }
 
     #[test]
     fn test_factory_npt() {
-        let p = ImdParameters::npt(0.002, 1000, 300.0, 1.0);
+        let p = ImdParameters::npt(0.002, 1000, 300.0, 1.0, "none").unwrap();
         assert_eq!(p.nstlim, 1000);
         assert!((p.temp_bath[0].temp0[0] - 300.0).abs() < 1e-10);
         assert!(p.couple_pressure, "NPT must couple pressure");
@@ -1364,4 +1409,20 @@ MULTIBATH\n    {algo_line}\n#   NBATHS\n    1\n#   TEMP0  TAU\n    300.0  0.1\n#
         assert_eq!(p.ntem, 1);
     }
 
+    #[test]
+    fn test_factory_constraints_knob() {
+        assert_eq!(ImdParameters::nve(0.001, 10, "hbonds").unwrap().ntc, 2);
+        assert_eq!(ImdParameters::nve(0.001, 10, "allbonds").unwrap().ntc, 3);
+        assert_eq!(
+            ImdParameters::nvt(0.001, 10, 300.0, "hbonds").unwrap().ntc,
+            2
+        );
+        assert_eq!(
+            ImdParameters::npt(0.001, 10, 300.0, 1.0, "allbonds")
+                .unwrap()
+                .ntc,
+            3
+        );
+        assert!(ImdParameters::nve(0.001, 10, "bogus").is_err());
+    }
 }

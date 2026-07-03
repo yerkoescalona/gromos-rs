@@ -641,7 +641,10 @@ impl GamdRunner {
         }
 
         // Update configuration energies
-        configuration.current_mut().energies.bond_total = bonded_result.energy;
+        configuration.current_mut().energies.bond_total = bonded_result.bond_energy;
+        configuration.current_mut().energies.angle_total = bonded_result.angle_energy;
+        configuration.current_mut().energies.dihedral_total = bonded_result.dihedral_energy;
+        configuration.current_mut().energies.improper_total = bonded_result.improper_energy;
         configuration.current_mut().energies.lj_total = nonbonded_storage.e_lj;
         configuration.current_mut().energies.crf_total = nonbonded_storage.e_crf;
         configuration.current_mut().energies.potential_total =

@@ -154,6 +154,36 @@ impl PyEnergy {
         self.potential
     }
 
+    #[getter]
+    pub fn bond(&self) -> f64 {
+        self.bond
+    }
+
+    #[getter]
+    pub fn angle(&self) -> f64 {
+        self.angle
+    }
+
+    #[getter]
+    pub fn dihedral(&self) -> f64 {
+        self.dihedral
+    }
+
+    #[getter]
+    pub fn improper(&self) -> f64 {
+        self.improper
+    }
+
+    #[getter]
+    pub fn lj(&self) -> f64 {
+        self.lj
+    }
+
+    #[getter]
+    pub fn coulomb(&self) -> f64 {
+        self.coulomb
+    }
+
     pub fn __repr__(&self) -> String {
         format!(
             "Energy(total={:.4}, kinetic={:.4}, potential={:.4})",

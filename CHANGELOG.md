@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.24] (2026-07-02)
+
+### Features
+
+- **pyo3-gromos:** `sim.run(steps, ene_freq=100)` — batch MD loop in Rust returning an `(n_frames, 12)` numpy energy array (`[time, kinetic, potential, total, volume, pressure, bond, angle, improper, dihedral, lj, coulomb]`); no `.tre` file round-trip (P3.3)
+- **py-gromos:** `EnergyTimeseries` (`python/gromos/timeseries.py`) wraps the `run()` array: named-column access, `block_average()`, `to_dataframe()` (polars/pandas/dict), `plot()` (plotly/matplotlib); defaults configurable via `gromos.timeseries.config` (P3.3)
+- **pyo3-gromos:** `InputParameters.nve/nvt/npt` take `constraints="none"|"hbonds"|"allbonds"` (default `"none"`) mapping to GROMOS `NTC`, plus a readable `.constraints` getter — factory-built params can now SHAKE (P3.5 M1)
+- **pyo3-gromos:** `InputParameters.steepest_descent()` now actually minimizes when run through `Simulation` — previously silently fell through to leap-frog at `dt=0`. New `SteepestDescent` algorithm-sequence building block and `AlgorithmSequence.minimize()` preset; `from_parameters()` dispatches to it when `NTEM > 0` (P3.5 SD)
+- **pyo3-gromos:** `sim.volume` / `sim.pressure` getters, mirroring `sim.temperature`. `pressure` is only physically meaningful under NPT — the virial term is only populated by `PressureCalculation`, which only NPT's sequence includes; under NVE/NVT it returns the kinetic-only term, not zero, and is documented as such
+
+### Fixes
+
+- **gromos-forces:** `calculate_bonded_forces_ntf` summed bond/angle/dihedral/improper into a single scalar with no per-term breakdown; every call site (`algorithms/forcefield.rs` — the main path every `Simulation.step()` uses, plus `replica.rs`, `gamd.rs`) dumped the combined total entirely into `bond_total`, leaving `angle_total`/`dihedral_total`/`improper_total` at zero for every simulation, not just Python. Added `bond_energy`/`angle_energy`/`dihedral_energy`/`improper_energy` fields to `ForceEnergy`, populated where each term is still separate, before combining. Also fixes the GaMD dihedral-boost term in `md.rs`, which read the same always-zero field
+- **pyo3-gromos:** `temperature` getter used bare `n_atoms*3` instead of the constraint-aware degrees of freedom the thermostat actually couples to (`3*n_atoms - solvent_constraint_dof - ndfmin`) — the two could silently disagree. Extracted `compute_total_dof()` as the single source of truth for both builders and the getter (P3.5 M2)
+
+### Testing
+
+- **py-gromos:** `test_run_matches_step_loop`, `test_energy_timeseries` — `run()` matches an equivalent `step(1)` loop; `EnergyTimeseries` column access, `block_average`, `to_dataframe`/`plot` backends
+- **py-gromos:** `test_factory_constraints_knob`, `test_constrained_system_stable_with_factory_params` — factory `constraints=` sets `NTC` correctly; `aladip_solvated` (flexible solute H-bonds) stays stable under `constraints="hbonds"` and diverges under `"none"` (documented contrast)
+- **py-gromos:** `test_steepest_descent_via_simulation`, `test_steepest_descent_via_algorithm_sequence` — EM actually decreases potential energy and converges; the direct and composable EM paths agree
+- **py-gromos:** `test_volume_and_pressure_getters` — `sim.volume`/`sim.pressure` match `run()`'s array columns; NVE/NVT volume is exactly fixed, NPT's responds to the barostat
+- **gromos-io:** `test_factory_constraints_knob` — `ntc_from_constraints()` mapping and error case
+
+### Documentation
+
+- **py-gromos/notebooks:** replaced `01_understanding_pyo3_bindings.ipynb`, `02_molecular_systems_and_energy.ipynb`, `03_performance_deep_dive.ipynb` (referenced the nonexistent `gromos.State`) with `01_load_and_inspect.ipynb` and `02_short_md.ipynb` against real reference systems — topology/config inspection, RDF, manual `Topology.solvate()` + `System(topo, conf)` composition, native-parameter MD, energy-component breakdown, block-averaging, NVE/NVT/NPT ensemble comparison (temperature/volume/pressure), and energy minimization, all executed with real baked-in plotly/matplotlib output
+- **py-gromos:** `pyproject.toml` `notebooks` dependency group (`jupyter`, `ipykernel`, `matplotlib`, `plotly`, `polars`); CI and Makefile use `uv sync --all-groups` instead of ephemeral `--with` packages
+- **py-gromos/docs:** `api/reference.md`, `index.md`, `quick-start.md`, `learning-guide.md` updated for `constraints=`, `sim.run()`/`EnergyTimeseries`, `SteepestDescent`/EM, `sim.volume`/`sim.pressure`; removed the stale "planned, not yet implemented" P3.3 section
+- **py-gromos:** `md_runners.py` marked deprecated (docstring notice, points at `Simulation`)
+- **PLAN.md / FUTURE.md:** P3.1–3.5 marked done with verification notes; audited and parked a composition-pattern redesign (constraints-on-`System`, unified builders) as tech debt with no triggering need yet — recorded as a deliberate divergence bet in `FUTURE.md`, not scheduled
+
 ## [0.0.23] (2026-06-29)
 
 ### Features

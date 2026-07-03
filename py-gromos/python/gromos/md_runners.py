@@ -3,6 +3,11 @@ High-level MD simulation runners for Python
 
 This module provides Python interfaces to run molecular dynamics simulations
 using different methods: standard MD, GaMD, EDS, and REMD.
+
+Deprecated: these runners shell out to the `md` binary and write temporary
+`.imd`/`.tre` files. Prefer `System` + `InputParameters` + `Simulation` (see
+`notebooks/02_short_md.ipynb`), which runs natively without a subprocess or
+file round-trip. Kept for back-compat until callers migrate.
 """
 
 import subprocess

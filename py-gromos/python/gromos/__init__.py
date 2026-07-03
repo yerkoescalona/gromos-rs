@@ -38,11 +38,15 @@ from .gromos import (
     BerendsenThermostat,
     BerendsenBarostat,
     ShakeConstraints,
+    SteepestDescent,
     TemperatureCalculation,
     PressureCalculation,
     EnergyCalculation,
     RemoveCOMMotion,
 )
+
+# ── Energy timeseries wrapper for Simulation.run() ────────────────────────────
+from .timeseries import EnergyTimeseries
 
 # ── Legacy subprocess runners (depend on the `md` binary being in PATH) ──────
 # These wrap the GROMOS-RS command-line tool and write temporary files.
@@ -77,10 +81,13 @@ __all__ = [
     "BerendsenThermostat",
     "BerendsenBarostat",
     "ShakeConstraints",
+    "SteepestDescent",
     "TemperatureCalculation",
     "PressureCalculation",
     "EnergyCalculation",
     "RemoveCOMMotion",
+    # Timeseries
+    "EnergyTimeseries",
     # Sub-modules
     "md_runners",
     "analysis",

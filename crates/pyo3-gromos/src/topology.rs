@@ -50,7 +50,10 @@ impl PyTopology {
         })?;
         let physical_constants = parsed.physical_constants;
         let topo = build_topology(parsed);
-        Ok(Self { inner: topo, physical_constants })
+        Ok(Self {
+            inner: topo,
+            physical_constants,
+        })
     }
 
     /// Total number of atoms (solute + solvent).

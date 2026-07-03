@@ -36,6 +36,14 @@ dev = [
     "mypy>=1.0",
     "pre-commit>=3.0",
 ]
+notebooks = [
+    "jupyter>=1.0",
+    "ipykernel>=6.29",
+    "matplotlib>=3.8",
+    "plotly>=5.24",
+    "polars>=1.0",
+    "nbstripout>=0.7",
+]
 
 [project.urls]
 Homepage = "https://github.com/gromos/gromosXX"
