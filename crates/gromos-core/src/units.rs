@@ -90,6 +90,16 @@ pub const PS_TO_FS: f64 = 1000.0;
 /// fs → ps.
 pub const FS_TO_PS: f64 = 0.001;
 
+/// Hartree → kJ mol⁻¹.
+///
+/// CODATA 2018: 1 Hartree = 2625.4996 kJ mol⁻¹. Used to convert QM engine (e.g. `xtb`) output.
+pub const HARTREE_TO_KJMOL: f64 = 2625.4996;
+
+/// Bohr → nm.
+///
+/// CODATA 2018 Bohr radius: 0.0529177210903 nm. Used to convert QM engine (e.g. `xtb`) output.
+pub const BOHR_TO_NM: f64 = 0.0529177210903;
+
 // ── Physical constants struct ─────────────────────────────────────────────────
 
 /// Bundle of physical constants for explicit dependency injection.

@@ -6,8 +6,10 @@ pub mod innerloops;
 pub mod interaction;
 pub mod params;
 pub mod perturbed;
+mod qm_subprocess;
 #[cfg(feature = "ml")]
 pub mod schnet;
+pub mod xtb;
 
 pub use embedding::ElectrostaticEmbedding;
 pub use excluded::*;
@@ -17,6 +19,7 @@ pub use params::*;
 pub use perturbed::*;
 #[cfg(feature = "ml")]
 pub use schnet::SchNetInteraction;
+pub use xtb::XtbInteraction;
 
 /// MPI-parallel nonbonded force calculation
 ///
