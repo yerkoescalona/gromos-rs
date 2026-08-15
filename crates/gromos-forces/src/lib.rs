@@ -14,6 +14,7 @@ pub mod electrostatics;
 pub mod energy;
 pub mod nonbonded;
 pub mod orchestrator;
+pub mod orchestrator_algorithm;
 pub mod pme;
 pub mod provider;
 pub mod restraints;
