@@ -6,6 +6,8 @@ pub mod innerloops;
 pub mod interaction;
 pub mod params;
 pub mod perturbed;
+#[cfg(feature = "ml")]
+pub mod schnet;
 
 pub use embedding::ElectrostaticEmbedding;
 pub use excluded::*;
@@ -13,6 +15,8 @@ pub use innerloops::*;
 pub use interaction::LjCrfInteraction;
 pub use params::*;
 pub use perturbed::*;
+#[cfg(feature = "ml")]
+pub use schnet::SchNetInteraction;
 
 /// MPI-parallel nonbonded force calculation
 ///

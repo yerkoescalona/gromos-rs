@@ -37,6 +37,7 @@ cudarc = { workspace = true, optional = true }
 default = []
 use-mpi = ["mpi", "gromos-forces/use-mpi"]
 use-cuda = ["cudarc"]
+ml = ["gromos-forces/ml"]
 
 [dev-dependencies]
 criterion = { workspace = true }
