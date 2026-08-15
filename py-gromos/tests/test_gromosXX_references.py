@@ -243,6 +243,7 @@ REFERENCE_SYSTEMS = [
     # Level 3: Bulk
     "water_216_box",
     "water_216_box_com",
+    "water_216_box_com_rot",
     "water_216_nvt",
     "water_216_nvt_nosehoover",
     "water_216_nvt_nhc_chain",
@@ -252,6 +253,13 @@ REFERENCE_SYSTEMS = [
     "aladip_trunc_oct",
     # Restraints
     "nacl_1water_distres",
+    # Steepest-descent energy minimization
+    "aladip_vacuum_em",
+    "aladip_vacuum_em_shake",
+    "aladip_solvated_em_noshake",
+    "aladip_solvated_em_shake",
+    "aladip_solvated_em_posres",
+    "aladip_solvated_em",
 ]
 
 # Systems with a known, pre-existing position-output mismatch that is not a
@@ -262,7 +270,14 @@ REFERENCE_SYSTEMS = [
 # Rust reference suite (`test_gromosXX_references.rs`) never compares
 # positions at all, so this was never caught there either. Tracked as
 # follow-up, not a Python-API defect — excluded only from the position test.
-POSITION_MISMATCH_SYSTEMS = {"aladip_trunc_oct"}
+#
+# `aladip_vacuum_em` has the same EM energy/trajectory frame-count off-by-one
+# vs gromosXX that `test_gromosXX_references.rs` marks `ignore:` for (PLAN.md).
+# Energies and forces still validate correctly through the Python API — only
+# the position frame at the point of the shift (frame 6) misaligns — so it's
+# kept here (giving Python strictly more coverage than the ignored Rust test)
+# rather than dropped from REFERENCE_SYSTEMS entirely.
+POSITION_MISMATCH_SYSTEMS = {"aladip_trunc_oct", "aladip_vacuum_em"}
 
 
 # ============================================================================
