@@ -825,55 +825,118 @@ audited down to its load-bearing core: only two things were actually broken.
 > `POSITION_MISMATCH_SYSTEMS` rather than dropped). Python suite: 100→121 (118 passed, 2 documented
 > position-mismatch skips). Remaining gap vs Rust is exactly the 2 deferred FEP systems.
 
-**3.7 — ML potential binding for `py-gromos`: name zones, don't count atoms** — not started;
-P2.8-6 (its blocking prerequisite) is now done, so this is unblocked but not yet begun
+**3.7 — ML potential binding for `py-gromos`: name zones, don't count atoms** ✓ done
 
 > Grew out of a design conversation about `SchNetInteraction` (2.6/2.7) and `py-gromos`
-> (`crates/pyo3-gromos`): both already exist, but nothing connects a Python user's model to a
-> `Simulation`'s zone definition, and today's `ZonePartition::new(n_atoms, inner, buffer)`
-> (`gromos-forces/src/zones.rs`) takes raw `&[usize]` — exactly the "renumber the ligand every time
+> (`crates/pyo3-gromos`): both already existed, but nothing connected a Python user's model to a
+> `Simulation`'s zone definition, and `ZonePartition::new(n_atoms, inner, buffer)`
+> (`gromos-forces/src/zones.rs`) took raw `&[usize]` — exactly the "renumber the ligand every time
 > the topology changes" ergonomics `AtomSelection::from_string` (`gromos-core/src/selection.rs`,
 > 2.1) already solved for atom selection generally. This section is that fix applied to zones, plus
 > the binding that makes it reachable from Python.
 
-- [ ] **`ZonePartition::from_selections`** — `(topo: &Topology, inner: &str, buffer: &str) ->
-  Result<Self, SelectionError>`, building on the existing `AtomSelection::from_string` grammar
-  (`1:res(LIG:a)`, `1:res(45-52:a)`, name lists, `not()`/`minus()`) instead of hand-counted index
-  lists. Thin wrapper — `from_string` already resolves to a sorted `Vec<usize>`; this just feeds
-  `.indices()` into the existing `ZonePartition::new`. **Exit:** unit test building the same
-  `t_06`-shaped inner/buffer split `zone_partition_reference.rs` already exercises, but from residue
-  specifiers instead of a hard-coded index range, asserting the resulting `ZonePartition` is
-  identical to the hand-built one.
-- [ ] **`PySchNetPotential` binding** (`crates/pyo3-gromos/src/`, new module) — wraps
-  `SchNetInteraction::load(path, cutoff, elements)`. `elements` (per-atom atomic number) is derived
-  from `Topology` on the Rust side, not hand-supplied from Python — avoids a second place the
-  atomic-number-indexed convention (`schnet.rs`'s `Embedding(100, 256, padding_idx=0)` note) can
-  drift from the topology.
-- [ ] **`Simulation.add_ml_potential(potential, region: str, buffer: str | None = None)`** — parses
-  `region`/`buffer` via `ZonePartition::from_selections`, constructs a `ProviderOrchestrator` entry
-  (classical `LjCrfInteraction` + the ML provider, zone-partitioned per 2.7/P2.8-1/P2.8-4), and folds
-  it into whatever P2.8-6 lands as the orchestrator-aware step path. No new physics — this item is
-  pure plumbing over 2.6/2.7/2.8's already-validated pieces.
-- [ ] **Exit criterion, matching this plan's standard:** a Python-side test building the real `t_06`
-  zone split by residue name (`sim.add_ml_potential(pot, region="1:res(...)", buffer="1:res(...)")`)
-  and comparing its `ZonePartition` (indices, not just "it ran") against the Rust-side
-  `zone_partition_reference.rs` fixture's hand-built one — the Python binding must produce the exact
-  same zone assignment as the already-validated Rust path, not just "it didn't crash."
+**Two real corrections found while implementing, not just style — the original sketch above (now
+struck through in spirit, kept for history) would have shipped a subtle bug or an impossible
+requirement:**
 
-**Known blockers, named so they're not silently assumed away:**
-- ~~P2.8-6 must land first~~ — done: `ProviderOrchestratorAlgorithm`
-  (`gromos-forces/src/orchestrator_algorithm.rs`) is an orchestrator-aware step in the real
-  `AlgorithmSequence`. `pyo3-gromos`'s own `build_simulation()` still doesn't construct or push one
-  — that wiring is this section's own remaining job, not a separate blocker anymore.
-- ~~No libtorch in this environment~~ — done: `libtorch` 2.11.0 CPU + `schnetpack` 2.2.0 installed
-  into `/tmp/torch_venv` (see `schnet.rs` module docs for the recipe). `--features ml` builds and
-  `SchNetInteraction::load()` runs for real here now — `nonbonded::schnet::tests` and
-  `schnet_burnn_reference.rs` both pass against the real toy-architecture model, not skipped.
-- **Still no trained, scriptable model** — `scripts/export_toy_schnet.py`'s SchNetPack 2 model is
-  real architecture but randomly initialized; the real trained BuRNN tutorial model fails
-  `torch.jit.script` outright (SchNetPack v1 issue, documented in `schnet.rs`). Training a real
-  model (on real QM/MM-generated data, not the untrained toy) is exactly the QM/MM→ML/MM training
-  pipeline now being built — see the new P2.9 section below.
+1. **`Simulation(..., ml_potential=, ml_region=, ml_buffer=)` kwargs, not a post-hoc
+   `add_ml_potential()` method.** Read `build_simulation`'s actual internals: it eagerly calls
+   `md_sequence.init()` and runs a full `run_step()` for step 0 before ever returning to the
+   caller. A post-construction method would either miss step 0's contribution (already primed
+   without it) or need to re-run `init()`/step 0 after insertion — fragile (`AlgorithmSequence`'s
+   `push()` only appends, can't insert at the required position right after `Forcefield` anyway,
+   and re-`init()`-ing already-initialized algorithms isn't obviously safe). The existing
+   `distrest=`/`posresspec=`/`refpos=` kwargs already solve exactly this shape of problem — this
+   follows that precedent instead.
+2. **The orchestrator's ML term is additive on top of `Forcefield`, not a zone-partitioned
+   *replacement* of its classical treatment.** Checked before wiring anything: `Forcefield` (the
+   real classical algorithm in every `Simulation`'s `AlgorithmSequence`) has **no**
+   `ZonePartition` field at all — unlike the provider-pattern `LjCrfInteraction`, it computes
+   classical LJ+CRF for the whole system unconditionally. The original sketch's "constructs a
+   `ProviderOrchestrator` entry (classical `LjCrfInteraction` + the ML provider, zone-partitioned)"
+   would have registered a *second* classical term through the orchestrator on top of
+   `Forcefield`'s already-unconditional one — double-counting every inner-zone pair, silently,
+   exactly the failure mode `zones.rs` (assumption A5) exists to prevent. Caught by checking
+   `Forcefield`'s struct definition directly rather than assuming the sketch's premise. Fixed by
+   registering *only* the ML potential through the orchestrator — an honest, documented **additive
+   ML correction term**, not (yet) a rigorous "replace classical with ML for the inner zone"
+   scheme. Giving `Forcefield` itself zone-partition awareness is real, separate follow-up work (a
+   change to the production classical algorithm), not attempted here — see
+   `ml_potential.rs::build_ml_orchestrator_algorithm`'s own doc comment for the full reasoning.
+3. **`elements` is caller-supplied, not derived from `Topology`.** The original sketch assumed a
+   `Topology` → atomic-number derivation that doesn't exist: `Topology` has only `iac` (a
+   force-field type index) and `mass`, no element field. Every real QM/ML provider this session
+   got atomic numbers from an external source, never from `Topology` — building that inference is
+   real, separate, speculative work. `SchNetPotential(model_path, cutoff, elements: list[int])`
+   takes them explicitly.
+
+**What landed:**
+- `ZonePartition::from_selections(topo, inner, buffer: Option<&str>)` (`zones.rs`) — thin wrapper
+  over `AtomSelection::from_string`, 3 unit tests (name match, with-buffer, bad-selector error).
+- `SchNetPotential` (`crates/pyo3-gromos/src/ml_potential.rs`, `#[cfg(feature = "ml")]`) — a
+  *recipe* (model_path/cutoff/elements), not eagerly loaded (no topology available yet at Python
+  construction time to validate against).
+- `resolve_zone_partition(topology, inner, buffer=None) -> (inner, buffer, outer)` — standalone
+  pyfunction, always available (doesn't need `ml`), used both by the exit-criterion test and
+  internally by `Simulation`'s own construction path (one code path, no duplication).
+- `Simulation`'s three new kwargs, threaded through `build_simulation` via a plain
+  `MlPotentialSpec` struct (not itself a pyo3 type, so the function signature doesn't change
+  across `ml`/non-`ml` builds — only the code that *acts* on `Some` is feature-gated). Pushed
+  immediately after `Forcefield` in both the minimization and standard-MD branches, before step 0
+  runs.
+- `pyo3-gromos`/`py-gromos` both gained `ml = ["...//ml"]` feature forwarding.
+  `__init__.py` imports the two new names inside `try/except ImportError` (first time this
+  workspace's Python layer needed to handle an optional compiled member); confirmed for real —
+  built both with and without `--features ml`, non-`ml` build imports cleanly with `SchNetPotential`
+  simply absent (`AttributeError`, not a crash), matching test suite (3 tests) shows 2 skipped, 1
+  passed (the kwarg-pairing validation, which works regardless of `ml`).
+- **Exit criterion, met on the real `t_06` fixture:** `test_ml_potential.py`'s
+  `resolve_zone_partition(topo, "m:a", None)` on the real BuRNN tutorial topology reproduces the
+  exact inner zone `zone_partition_reference.rs` already validates (indices 0-5, the 6-atom
+  methanol solute — `t_06`'s entire solute *is* the QM zone, so `"m:a"`, "all solute atoms",
+  resolves to it exactly). That fixture's *buffer* zone is computed geometrically each step (atoms
+  within a radius), not by a static selector string, so it's out of scope for `from_selections`
+  and not compared — documented in the test, not silently skipped. A second test builds a real
+  `Simulation` (`water_single`, the Rust suite's own Level-1 reference system) with
+  `ml_potential=`/`ml_region="1:res(SOL:a)"` and confirms it constructs and steps — the untrained
+  toy model from `export_toy_schnet.py`, same honesty tier as every other `ml` test here.
+- ~~No libtorch in this environment~~ — done: `libtorch` 2.11.0 CPU + `schnetpack` 2.2.0 in
+  `/tmp/torch_venv` (see `schnet.rs` module docs for the recipe).
+- **Still open, unrelated to this section's own scope:** a real trained (not toy) model — that's
+  exactly what P2.9's QM/MM→ML/MM pipeline produces, usable with this binding once trained on a
+  real QM/MM zone rather than a bare vacuum molecule (P2.9's own stated next step).
+
+**Follow-up — `XtbPotential` + `.evaluate()`: a real QM reference from Python, not just Rust.**
+`qm_vs_ml_comparison.rs` (P2.9) already runs real `XtbInteraction` vs a trained `SchNetInteraction`
+and checks RMSE — but only in Rust. `SchNetPotential` above could be attached to a `Simulation`,
+yet there was no way to get a real QM value from Python at all to compare it against. Closed by:
+- `PyXtbPotential` (`crates/pyo3-gromos/src/qm_potential.rs`, new module, **not** feature-gated —
+  `XtbInteraction` is a subprocess wrapper around the real `xtb` binary, no `libtorch` needed).
+  `XtbPotential(work_dir, elements, gfn=2, charge=0, multiplicity=1)`, `.evaluate(positions)` — same
+  `Embedding::None` isolated-cluster scope `qm_vs_ml_comparison.rs` itself uses.
+- `SchNetPotential.evaluate(positions) -> (energy, forces)` — a standalone, direct call (not wired
+  into a `Simulation`'s step loop), so both potentials can be called on the same positions array
+  for comparison. Both `.evaluate()` methods build a throwaway `Configuration`/`Topology`/
+  `AtomSelection::all`/`Vacuum` `ConfigurationSpatialIndex` internally and call the shared
+  `PotentialProvider::contribute` trait method directly — this is a reference/comparison utility,
+  not production QM/MM.
+- `py-gromos/tests/test_qm_vs_ml_comparison.py` (new) — real `xtb` vs the real trained model from
+  P2.9's pipeline (`/tmp/trained_water_schnet.pt`, reused if present) on a held-out water geometry
+  distinct from any training trajectory frame; falls back to a fresh untrained toy model (weaker
+  claim: finite, right-shaped output only) if no trained model is on disk. **Real result, from
+  Python, matching the Rust-side pipeline's own honesty tier:** energy |diff| = 23.8 kJ/mol, force
+  RMSE = 1146.6 kJ/mol/nm (both well inside the same generous tolerances `qm_vs_ml_comparison.rs`
+  uses — 200 kJ/mol / 5000 kJ/mol/nm — this is a pipeline-correctness check, not a chemical-accuracy
+  claim).
+- Verified both ways: `maturin develop --features ml` (4/4 relevant tests pass, real RMSE above) and
+  plain `maturin develop` (non-`ml` build: `XtbPotential` present and importable, `SchNetPotential`
+  correctly absent, `_HAS_ML` is `False`, the 3 `ml`-only tests skip cleanly with a clear reason
+  rather than erroring). Full `cargo test -p gromos-forces -p gromos-md -p gromos-core -p
+  pyo3-gromos --features ml` and `pytest py-gromos/tests/` both green (one unrelated pre-existing
+  failure: `test_energy_timeseries` needs `polars`, not installed in this venv — untouched by this
+  work). `cargo clippy -p pyo3-gromos --features ml` clean for both new files (`qm_potential.rs`,
+  the `evaluate()` addition to `ml_potential.rs`) — the large pre-existing warning set elsewhere in
+  the workspace (loop-index idioms, `.map_or`, etc.) predates this session and isn't reintroduced.
 
 **Stretch, not scheduled — proximity-based zone definition.** `AtomSelection`'s grammar
 (`selection.rs`) has no distance operator; the common way people actually define an ML/QM inner

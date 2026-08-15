@@ -21,8 +21,11 @@ use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
 
 pub mod algorithm_sequence;
+#[cfg(feature = "ml")]
+pub mod ml_potential;
 pub mod parameters;
 pub mod py_conf;
+pub mod qm_potential;
 mod simulation;
 pub mod system;
 pub mod topology;
@@ -360,6 +363,11 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     system::register_system(m)?;
     // Algorithm sequence API
     algorithm_sequence::register_algorithm_sequence(m)?;
+    // ML potential API (feature-gated)
+    #[cfg(feature = "ml")]
+    ml_potential::register_ml_potential(m)?;
+    // QM potential API (real xtb, no feature gate needed)
+    qm_potential::register_qm_potential(m)?;
     Ok(())
 }
 

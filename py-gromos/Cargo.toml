@@ -27,5 +27,9 @@ glam = { workspace = true }
 # Parallelism
 rayon = { workspace = true }
 
+[features]
+default = []
+ml = ["pyo3-gromos/ml"]
+
 [build-dependencies]
 pyo3-build-config = "0.21"

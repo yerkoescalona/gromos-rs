@@ -39,6 +39,8 @@ use gromos_core::{
     Topology,
 };
 use gromos_forces::nonbonded::CRFParameters;
+#[cfg(feature = "ml")]
+use gromos_forces::zones::ZonePartition;
 use gromos_forces::restraints::{
     DistanceRestraint, DistanceRestraints, PerturbedDistanceRestraint,
     PerturbedDistanceRestraints, PositionRestraint, PositionRestraints,
@@ -255,6 +257,65 @@ pub(crate) struct RestraintFiles {
     pub refpos: Option<String>,
 }
 
+/// Plain data extracted from a Python `SchNetPotential` + region/buffer selector strings,
+/// threaded from `Simulation::new` down to `build_simulation` — mirrors `RestraintFiles`'s own
+/// shape. Deliberately *not* itself a pyo3 type (no lifetime, always compiles) so
+/// `build_simulation`'s signature doesn't need to change based on the `ml` feature; only the
+/// code that actually *acts* on a `Some` value is feature-gated (see `build_simulation`).
+#[derive(Clone)]
+#[cfg_attr(not(feature = "ml"), allow(dead_code))]
+pub(crate) struct MlPotentialSpec {
+    pub model_path: String,
+    pub cutoff: f64,
+    pub elements: Vec<i64>,
+    pub region: String,
+    pub buffer: Option<String>,
+}
+
+/// Extract a `MlPotentialSpec` from `Simulation.__init__`'s `ml_potential=`/`ml_region=`/
+/// `ml_buffer=` kwargs. `ml_potential` is a `SchNetPotential` (a `#[cfg(feature = "ml")]`
+/// pyclass) — takes `&Bound<'_, PyAny>` rather than that concrete type so this function's own
+/// signature doesn't need to change across builds; the actual downcast is feature-gated inside.
+fn resolve_ml_spec(
+    ml_potential: Option<&Bound<'_, PyAny>>,
+    ml_region: Option<String>,
+    ml_buffer: Option<String>,
+) -> PyResult<Option<MlPotentialSpec>> {
+    match (ml_potential, ml_region) {
+        (None, None) => Ok(None),
+        (Some(_), None) | (None, Some(_)) => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "ml_potential and ml_region must be given together",
+        )),
+        (Some(potential), Some(region)) => {
+            #[cfg(feature = "ml")]
+            {
+                let potential = potential
+                    .extract::<PyRef<crate::ml_potential::PySchNetPotential>>()
+                    .map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "ml_potential must be a SchNetPotential",
+                        )
+                    })?;
+                Ok(Some(MlPotentialSpec {
+                    model_path: potential.model_path.clone(),
+                    cutoff: potential.cutoff,
+                    elements: potential.elements.clone(),
+                    region,
+                    buffer: ml_buffer,
+                }))
+            }
+            #[cfg(not(feature = "ml"))]
+            {
+                let _ = (potential, region, ml_buffer);
+                Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "ML support was not compiled into this build (rebuild pyo3-gromos/py-gromos \
+                     with --features ml)",
+                ))
+            }
+        },
+    }
+}
+
 /// Load and apply position/distance restraints onto a `Forcefield`, mirroring
 /// `md.rs`'s `@posresspec`/`@refpos`/`@distrest` handling exactly (same file
 /// formats, same NTPOR/NTPORB/NTDIR dispatch) — the only gap being FEP's
@@ -370,6 +431,7 @@ fn build_simulation(
     box_dims: Vec3,
     imd: &ImdParameters,
     restraints: &RestraintFiles,
+    ml_spec: Option<&MlPotentialSpec>,
 ) -> PyResult<PySimulation> {
     // Solvate topology if not already solvated
     if topo.num_atoms() == topo.num_solute_atoms() && imd.nsm > 0 {
@@ -447,6 +509,9 @@ fn build_simulation(
         Periodicity::Triclinic(_) => BoxType::Triclinic,
         Periodicity::Vacuum(_) => BoxType::Vacuum,
     };
+    // Cloned before `Forcefield::new` below moves `periodicity` — needed again for the ML
+    // orchestrator algorithm, if one is being attached.
+    let periodicity_for_ml = periodicity.clone();
     let pairlist_algorithm = PairlistAlgorithm::from_imd(
         imd.algorithm,
         topo.num_atoms(),
@@ -504,6 +569,29 @@ fn build_simulation(
         restraints.refpos.as_deref(),
     )?;
     md_sequence.push(Box::new(forcefield));
+
+    // ML potential, if attached (PLAN.md P3.7) — pushed immediately after Forcefield, matching
+    // `orchestrator_algorithm.rs`'s own documented placement requirement (adds to Forcefield's
+    // already-computed force/virial). `ml_spec` is always `Option<MlPotentialSpec>` regardless
+    // of the `ml` feature (plain data, see its own docs); only the code that *acts* on `Some` is
+    // feature-gated, so `Simulation`'s constructor signature doesn't change across builds.
+    #[cfg(feature = "ml")]
+    if let Some(spec) = ml_spec {
+        let partition = ZonePartition::from_selections(&topo, &spec.region, spec.buffer.as_deref())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        let potential = crate::ml_potential::PySchNetPotential::from_spec(spec);
+        let algorithm = crate::ml_potential::build_ml_orchestrator_algorithm(
+            &potential,
+            &partition,
+            n_atoms,
+            periodicity_for_ml,
+        )?;
+        md_sequence.push(Box::new(algorithm));
+    }
+    #[cfg(not(feature = "ml"))]
+    {
+        let _ = (&ml_spec, &periodicity_for_ml);
+    }
 
     if is_minimization {
         // Steepest-descent minimization: replaces LeapFrogVelocity + LeapFrogPosition.
@@ -709,7 +797,8 @@ impl PySimulation {
     /// Optional restraint file paths (mirror the `md` binary's `@distrest`/
     /// `@posresspec`/`@refpos` flags): `distrest`, `posresspec`, `refpos`.
     #[new]
-    #[pyo3(signature = (arg1, arg2, arg3=None, *, distrest=None, posresspec=None, refpos=None))]
+    #[pyo3(signature = (arg1, arg2, arg3=None, *, distrest=None, posresspec=None, refpos=None, ml_potential=None, ml_region=None, ml_buffer=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         arg1: &Bound<'_, PyAny>,
         arg2: &Bound<'_, PyAny>,
@@ -717,12 +806,16 @@ impl PySimulation {
         distrest: Option<String>,
         posresspec: Option<String>,
         refpos: Option<String>,
+        ml_potential: Option<&Bound<'_, PyAny>>,
+        ml_region: Option<String>,
+        ml_buffer: Option<String>,
     ) -> PyResult<Self> {
         let restraints = RestraintFiles {
             distrest,
             posresspec,
             refpos,
         };
+        let ml_spec = resolve_ml_spec(ml_potential, ml_region, ml_buffer)?;
         match arg3 {
             None => {
                 // Two-arg form: Simulation(system, params)
@@ -743,6 +836,7 @@ impl PySimulation {
                     system.configuration.box_dims,
                     &params.inner,
                     &restraints,
+                    ml_spec.as_ref(),
                 )
             },
             Some(arg3) => {
@@ -757,6 +851,7 @@ impl PySimulation {
                         &conf_file,
                         &input_file,
                         &restraints,
+                        ml_spec.as_ref(),
                     );
                 }
 
@@ -783,6 +878,7 @@ impl PySimulation {
                     conf.box_dims,
                     &params.inner,
                     &restraints,
+                    ml_spec.as_ref(),
                 )
             },
         }
@@ -1108,6 +1204,7 @@ impl PySimulation {
             conf_file,
             input_file,
             &RestraintFiles::default(),
+            None,
         )
     }
 
@@ -1116,6 +1213,7 @@ impl PySimulation {
         conf_file: &str,
         input_file: &str,
         restraints: &RestraintFiles,
+        ml_spec: Option<&MlPotentialSpec>,
     ) -> PyResult<Self> {
         let imd = read_imd_file(input_file).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
@@ -1146,6 +1244,7 @@ impl PySimulation {
             coord_data.box_dims,
             &imd,
             restraints,
+            ml_spec,
         )
     }
 }

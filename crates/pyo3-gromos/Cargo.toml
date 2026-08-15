@@ -26,3 +26,7 @@ glam = { workspace = true }
 
 # Parallelism
 rayon = { workspace = true }
+
+[features]
+default = []
+ml = ["gromos-forces/ml"]

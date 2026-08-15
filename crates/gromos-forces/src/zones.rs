@@ -62,6 +62,8 @@
 //! - **Excluded/1-4 pairs**, which follow the usual GROMOS rules independently of zoning.
 
 use crate::provider::Embedding;
+use gromos_core::selection::{AtomSelection, SelectionError};
+use gromos_core::topology::Topology;
 
 /// Which region of a partitioned system an atom belongs to.
 ///
@@ -120,6 +122,25 @@ impl ZonePartition {
             p.zones[i] = Zone::Buffer;
         }
         p
+    }
+
+    /// Build from selector strings (the `AtomSelection::from_string` grammar — `1:res(LIG:a)`,
+    /// name lists, `not()`/`minus()`) instead of hand-counted index lists — the "renumber the
+    /// ligand every time the topology changes" ergonomics problem `AtomSelection::from_string`
+    /// already solved for atom selection generally, applied here to zones (PLAN.md P3.7).
+    /// `buffer = None` gives a plain inner/outer QM/MM split, no buffer zone.
+    pub fn from_selections(
+        topo: &Topology,
+        inner: &str,
+        buffer: Option<&str>,
+    ) -> Result<Self, SelectionError> {
+        let n_atoms = topo.num_atoms();
+        let inner_indices = AtomSelection::from_string(inner, topo)?.indices().to_vec();
+        let buffer_indices = match buffer {
+            Some(spec) => AtomSelection::from_string(spec, topo)?.indices().to_vec(),
+            None => Vec::new(),
+        };
+        Ok(Self::new(n_atoms, &inner_indices, &buffer_indices))
     }
 
     /// Set GROMOS `QMLJ` — `true` adds a classical LJ supplement for inner-inner/inner-buffer
@@ -235,10 +256,77 @@ impl ZonePartition {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gromos_core::topology::Atom;
 
     /// 6 atoms: 0-1 inner, 2-3 buffer, 4-5 outer.
     fn partition() -> ZonePartition {
         ZonePartition::new(6, &[0, 1], &[2, 3])
+    }
+
+    /// 4 atoms, 2 residues: LIG (0-1), SOL (2-3) — enough to exercise
+    /// `AtomSelection::from_string`'s residue-name grammar.
+    fn ligand_solvent_topo() -> Topology {
+        let atoms: &[(&str, usize, &str)] = &[
+            ("C1", 1, "LIG"),
+            ("C2", 1, "LIG"),
+            ("OW", 2, "SOL"),
+            ("HW", 2, "SOL"),
+        ];
+        let mut topo = Topology::new();
+        for &(name, res_nr, res_name) in atoms {
+            topo.moltypes[0].atoms.push(Atom {
+                name: name.into(),
+                residue_nr: res_nr,
+                residue_name: res_name.into(),
+                iac: 0,
+                mass: 12.0,
+                charge: 0.0,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            });
+            topo.iac.push(0);
+            topo.mass.push(12.0);
+            topo.charge.push(0.0);
+        }
+        // Populate molecules[0] so molecule_nr()/residue_name() work — same as
+        // gromos_core::selection's own `aladip_topo()` test fixture.
+        topo.init_solute_moltype();
+        topo
+    }
+
+    #[test]
+    fn from_selections_matches_hand_built_partition() {
+        let topo = ligand_solvent_topo();
+        let by_name = ZonePartition::from_selections(&topo, "1:res(LIG:a)", None)
+            .expect("selector should resolve");
+        let by_index = ZonePartition::new(4, &[0, 1], &[]);
+        for atom in 0..4 {
+            assert_eq!(
+                by_name.zone(atom),
+                by_index.zone(atom),
+                "atom {atom}: selector-built partition disagrees with the hand-built one"
+            );
+        }
+    }
+
+    #[test]
+    fn from_selections_with_buffer() {
+        let topo = ligand_solvent_topo();
+        let p = ZonePartition::from_selections(&topo, "1:res(LIG:a)", Some("1:res(SOL:a)"))
+            .expect("selectors should resolve");
+        assert_eq!(p.zone(0), Zone::Inner);
+        assert_eq!(p.zone(1), Zone::Inner);
+        assert_eq!(p.zone(2), Zone::Buffer);
+        assert_eq!(p.zone(3), Zone::Buffer);
+    }
+
+    #[test]
+    fn from_selections_propagates_a_bad_selector_as_an_error() {
+        let topo = ligand_solvent_topo();
+        let err = ZonePartition::from_selections(&topo, "not a valid selector!!", None)
+            .expect_err("a nonsense selector must not silently resolve to an empty/wrong zone");
+        assert!(matches!(err, SelectionError::ParseError(_)));
     }
 
     /// Step 4's exit criterion: every one of the six pair classes matches the decomposition

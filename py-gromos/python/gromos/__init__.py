@@ -43,7 +43,21 @@ from .gromos import (
     PressureCalculation,
     EnergyCalculation,
     RemoveCOMMotion,
+    # QM potential (real xtb — always available, no --features ml needed)
+    XtbPotential,
 )
+
+# ── ML potential API (only present if the extension was built --features ml) ─
+# `Simulation(..., ml_potential=..., ml_region=..., ml_buffer=...)` also only accepts
+# real values for these kwargs in an `ml`-enabled build; the kwargs themselves always
+# exist, but passing a SchNetPotential without one raises a clear RuntimeError instead
+# of ImportError-ing at import time — see `simulation.rs::resolve_ml_spec`.
+try:
+    from .gromos import SchNetPotential, resolve_zone_partition
+
+    _HAS_ML = True
+except ImportError:
+    _HAS_ML = False
 
 # ── Energy timeseries wrapper for Simulation.run() ────────────────────────────
 from .timeseries import EnergyTimeseries
@@ -86,6 +100,8 @@ __all__ = [
     "PressureCalculation",
     "EnergyCalculation",
     "RemoveCOMMotion",
+    # QM potential
+    "XtbPotential",
     # Timeseries
     "EnergyTimeseries",
     # Sub-modules
@@ -94,3 +110,6 @@ __all__ = [
     # Meta
     "__version__",
 ]
+
+if _HAS_ML:
+    __all__ += ["SchNetPotential", "resolve_zone_partition"]

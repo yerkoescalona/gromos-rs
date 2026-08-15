@@ -161,13 +161,31 @@ class InputParameters:
 
 class Simulation:
     @overload
-    def __init__(self, system: System, params: InputParameters) -> None: ...
+    def __init__(
+        self,
+        system: System,
+        params: InputParameters,
+        *,
+        distrest: str | None = None,
+        posresspec: str | None = None,
+        refpos: str | None = None,
+        ml_potential: SchNetPotential | None = None,
+        ml_region: str | None = None,
+        ml_buffer: str | None = None,
+    ) -> None: ...
     @overload
     def __init__(
         self,
         arg1: str | Topology,
         arg2: str | Configuration,
         arg3: str | InputParameters,
+        *,
+        distrest: str | None = None,
+        posresspec: str | None = None,
+        refpos: str | None = None,
+        ml_potential: SchNetPotential | None = None,
+        ml_region: str | None = None,
+        ml_buffer: str | None = None,
     ) -> None: ...
     @staticmethod
     def from_files(
@@ -395,6 +413,53 @@ def rdf(
     n_bins: int,
     r_max: float,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: ...
+
+# =============================================================================
+# ML potential API (only present in a --features ml build — see __init__.py)
+# =============================================================================
+
+class SchNetPotential:
+    """A trained SchNetPack 2 TorchScript model, to be attached to a
+    `Simulation`'s QM/ML zone via `ml_potential=`/`ml_region=`/`ml_buffer=`."""
+
+    def __init__(
+        self, model_path: str, cutoff: float, elements: list[int]
+    ) -> None: ...
+    def evaluate(
+        self, positions: npt.NDArray[np.float64]
+    ) -> tuple[float, npt.NDArray[np.float64]]:
+        """Real model energy (kJ/mol) and forces (kJ/mol/nm) for an Nx3
+        positions array (nm) — a standalone call, not via a Simulation."""
+        ...
+    def __repr__(self) -> str: ...
+
+class XtbPotential:
+    """A real `xtb` (GFN-xTB) QM engine, callable directly for comparison
+    against a trained `SchNetPotential`. Always available (no --features ml
+    needed — this wraps a subprocess call to the real `xtb` binary)."""
+
+    def __init__(
+        self,
+        work_dir: str,
+        elements: list[int],
+        gfn: int = 2,
+        charge: int = 0,
+        multiplicity: int = 1,
+    ) -> None: ...
+    def evaluate(
+        self, positions: npt.NDArray[np.float64]
+    ) -> tuple[float, npt.NDArray[np.float64]]:
+        """Real xtb energy (kJ/mol) and forces (kJ/mol/nm) for an Nx3
+        positions array (nm) — isolated cluster, vacuum, Embedding::None."""
+        ...
+    def __repr__(self) -> str: ...
+
+def resolve_zone_partition(
+    topology: Topology, inner: str, buffer: str | None = None
+) -> tuple[list[int], list[int], list[int]]:
+    """Resolve an inner/buffer/outer zone split by selector string against a
+    real topology. Returns (inner_indices, buffer_indices, outer_indices)."""
+    ...
 
 # Module metadata
 __version__: str
