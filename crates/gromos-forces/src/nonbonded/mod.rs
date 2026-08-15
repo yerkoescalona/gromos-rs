@@ -1,12 +1,16 @@
 //! Nonbonded interactions: Lennard-Jones and Coulomb (CRF)
 
+pub mod embedding;
 pub mod excluded;
 pub mod innerloops;
+pub mod interaction;
 pub mod params;
 pub mod perturbed;
 
+pub use embedding::ElectrostaticEmbedding;
 pub use excluded::*;
 pub use innerloops::*;
+pub use interaction::LjCrfInteraction;
 pub use params::*;
 pub use perturbed::*;
 

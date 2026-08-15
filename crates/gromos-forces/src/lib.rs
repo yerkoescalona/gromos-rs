@@ -13,8 +13,11 @@ pub mod bonded;
 pub mod electrostatics;
 pub mod energy;
 pub mod nonbonded;
+pub mod orchestrator;
 pub mod pme;
+pub mod provider;
 pub mod restraints;
+pub mod zones;
 
 // Advanced force modules
 pub mod local_elevation;
@@ -35,3 +38,6 @@ pub use bonded::{
     calculate_improper_dihedral_forces, ForceEnergy, ForceEnergyLambda, LambdaController,
 };
 pub use nonbonded::{lj_crf_interaction, CRFParameters, ForceStorage, LJParamMatrix, LJParameters};
+pub use orchestrator::ProviderOrchestrator;
+pub use provider::{Contribution, Embedding, PotentialProvider, ProviderError, ProviderExtra};
+pub use zones::{PairOwner, Zone, ZonePartition};

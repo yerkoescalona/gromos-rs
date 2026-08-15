@@ -36,6 +36,7 @@ pub mod matrix;
 pub mod pairlist;
 pub mod random;
 pub mod selection;
+pub mod spatial_index;
 pub mod stat;
 pub mod topology;
 pub mod units;
