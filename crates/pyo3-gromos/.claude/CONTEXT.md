@@ -13,8 +13,18 @@ Python-callable API for running simulations and analysing trajectories.
 - Compositional Simulation API ✓, AlgorithmSequence API ✓
 - `System` + `InputParameters` factories + 2-arg `Simulation(system, params)` ✓ (P3.1/3.2)
 - `sim.run(steps, ene_freq)` → numpy array; energy decomposition (bond/angle/dihedral/improper/lj/coulomb) ✓ (P3.3)
-- Python tests: 89 passed, 11 skipped ✓ (`py-gromos/tests/`)
+- Python tests: 121 (118 passed, 2 documented position-mismatch skips) ✓ (`py-gromos/tests/`)
 - `.pyi` stubs ✓
+- **PLAN.md 3.6 ✓ done** — `build_simulation()` (`simulation.rs`) now dispatches every gromosXX
+  feature that was already implemented lower in the stack but silently unwired from Python: NTIVEL=1
+  velocity generation, SETTLE/LINCS (`ConstraintSelection::from_imd`), Nosé-Hoover (+chain)
+  thermostat (`push_thermostat()`), distance/position restraints (`distrest=`/`posresspec=`/
+  `refpos=` kwargs), triclinic/truncated-octahedron box (`NTB=-1`, plus `sim.forces` frame
+  rotation). `REFERENCE_SYSTEMS` (`py-gromos/tests/test_gromosXX_references.py`) now covers all 37
+  active Rust reference systems except the 2 explicitly-deferred FEP ones. **Known, tracked
+  divergence:** `gromos-rs`'s own `.trc` position output disagrees with gromosXX for
+  triclinic/EM-shift-frame systems (pre-existing, Rust-side, not a Python binding bug) — see
+  `POSITION_MISMATCH_SYSTEMS` in the test file.
 - **PLAN.md 3.5 ✓ done (M1, M2, SD)**:
   - **M1**: `InputParameters.nve/nvt/npt` take `constraints="none"|"hbonds"|"allbonds"` (default
     `"none"`) → `ntc=1|2|3` (`ntc_from_constraints()`, `gromos-io/imd.rs`); readable `.constraints`
@@ -41,6 +51,9 @@ Python-callable API for running simulations and analysing trajectories.
 - Remaining P3 items:
   - [ ] Expose ForceField evaluation (single-point energy/force)
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
+  - [ ] PLAN.md 3.7 — ML potential binding (`PySchNetPotential`, `Simulation.add_ml_potential`,
+    selection-string zones). Blocked on `gromos-forces` P2.8-6 (no orchestrator-aware step path
+    exists to bind yet) and on `--features ml` needing `libtorch` (not available here).
 - Deferred (tech debt, not scheduled — full audit in `~/.claude/plans/golden-baking-liskov.md`):
   unify the two imd→sequence builders (`build_simulation` vs `resolve_algorithm_sequence`),
   consolidate scattered defaults, constraints-as-`System`-attribute, symmetric `InputParameters`

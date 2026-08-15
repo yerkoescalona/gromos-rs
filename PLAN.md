@@ -125,31 +125,20 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 ---
 
 **9a-0 — Plumbing only, zero float change** ✓ complete
-> *Invariant held:* every reference system selects `Standard`; not one summation order changed.
-> *Slot mapping:* faithful to gromosXX (`in_parameter.cc:1419-1422`): 0=Standard, 1=ExtendedGrid
-> (not yet ported → fallback Standard), 2=CellList (Heinz & Hünenberger). IMD parser also
-> recognises `"grid_cell"` keyword. 37/37 reference tests unchanged.
-- [x] `PairlistAlgorithm { Standard, CellList }` enum in `gromos-core/src/pairlist.rs` with
-  `from_imd()` and `update<BC>()` delegating via match.
-- [x] Heuristic: auto-selects `CellList` only when Rectangular + chargegroups + `n_atoms > 5000`.
-- [x] Re-exported from `gromos-core/src/lib.rs`.
-- [x] 9 unit tests covering full dispatch matrix (algorithm × box_type × n_atoms × chargegroups).
-- [x] Field type swapped in `forcefield.rs`, `gamd.rs`, `eds.rs`, `replica.rs`, `md.rs`,
-  `simulation.rs`, `algorithm_sequence.rs`. `md.rs` calls `from_imd(imd.algorithm, …)`.
-- [x] 37/37 reference tests pass unchanged.
+`PairlistAlgorithm {Standard, CellList}` enum (`gromos-core/src/pairlist.rs`), `from_imd()`/
+`update<BC>()` dispatch; slot mapping faithful to gromosXX (`in_parameter.cc:1419-1422`: 0=Standard,
+1=ExtendedGrid unported→fallback Standard, 2=CellList). Auto-selects CellList only for
+Rectangular+chargegroups+`n_atoms>5000`. Wired into all callers (`forcefield.rs`, `gamd.rs`,
+`eds.rs`, `replica.rs`, `md.rs`, `simulation.rs`, `algorithm_sequence.rs`). 9 unit tests; 37/37
+reference tests unchanged (every system still selects Standard, zero float change).
 
 **9a-1 — Turn CellList on; confront reordering head-on** ✓ complete
-> *Result:* margin = **0.0 (bit-identical)** across all 100 steps of `water_216_box`.
-> CellList iteration order happens to match Standard's on this system. Safe to lower threshold.
-- [x] `test_pairlist_margin.rs`: runs `water_216_box` twice (Standard vs CellList via `"grid_cell"`),
-  asserts per-step max |ΔE|/|E| < 1e-8. Observed margin = 0.000e0 (bit-identical).
-- [x] No auto-heuristic: `ALGORITHM standard` (0) always means Standard. CellList is only
-  activated when the input explicitly says `ALGORITHM grid_cell` (2), matching gromosXX
-  semantics. All 37 reference files use `standard` → all still run Standard.
-- [x] `water_1000_spc_gridcell` reference — 1000 equilibrated SPC (3.1057 nm, vol7 tutorial);
-  gromosXX Grid_Cell_Pairlist (7×7×7), 10 steps; gromos-rs CellList passes. Proof chain:
-  gromos-rs CellList == gromosXX grid_cell (this) + gromos-rs CellList == Standard (margin=0).
-  38/38 reference tests pass.
+Result: margin = **0.0 (bit-identical)** across all 100 steps of `water_216_box` — CellList's
+iteration order happens to match Standard's here. Activated only by explicit `ALGORITHM grid_cell`
+(2), not an auto-heuristic, matching gromosXX semantics; all 37 reference files still use `standard`.
+New `water_1000_spc_gridcell` reference (1000 equilibrated SPC, real gromosXX Grid_Cell_Pairlist
+7×7×7 grid, 10 steps) validates CellList against a real gromosXX oracle, not just against Standard.
+38/38 reference tests pass.
 - [ ] Benchmark `water_216_box` step time: Standard vs CellList — confirm O(N) gap is real.
 
 **9d — Charge groups as first-class queryable primitive** (independent; can land alongside 9a)
@@ -301,6 +290,470 @@ Wire the already-coded-but-unwired physics; keep implementations in `gromos-forc
 - [x] `frameout`, `ener`, `rmsd`, `nhoparam`, `ext_ti_ana`, `bar`, `ext_ti_merge` — real implementations
 - [ ] `visco`, `amber2gromos`, `sasa_hasel`, `dssp`, `solute_entropy` — stubs; parked
 
+**2.6 — Dim 12.5: provider-shape groundwork (QM/MM/ML seam)** ✓ classical + ML seam landed (2026-08-13)
+- [x] `SpatialIndex` trait + `ConfigurationSpatialIndex` (`gromos-core/src/spatial_index.rs`) —
+  query-based neighbor service independent of the MD pairlist's charge-group/twin-range shape,
+  carrying periodic-image shift vectors per pair.
+- [x] `PotentialProvider` trait (`gromos-forces/src/provider.rs`) — `contribute()` over read-only
+  `Topology`/`Configuration` + an `AtomSelection` region, returns a scattered `Contribution` (energy
+  + sparse per-atom forces + virial), not raw `&mut Configuration` access (rejected in review: whole-
+  system mutable access defeats the "arbitrary but *scoped* atom subset" invariant, FUTURE.md P5).
+  Concrete impls named `*Interaction` (matches gromosXX's own `Nonbonded_Interaction`/
+  `QMMM_Interaction` convention).
+- [x] `LjCrfInteraction` (`nonbonded/interaction.rs`) — first impl, wraps
+  `lj_crf_innerloop_novirial` with zero math changes; solute-solute atom-level pairs only.
+  `test_provider_reference.rs`: matches real gromosXX `pair_lj` energy to `1e-8` relative.
+- [x] `SchNetInteraction` (`nonbonded/schnet.rs`, feature `ml`) — first ML provider: loads a
+  TorchScript model via `tch`/libtorch, runs in-process (no Python subprocess/embedded interpreter),
+  forces via autograd, neighbor graph from the same `SpatialIndex` classical terms use. Runtime
+  choice (`tch`/TorchScript over ONNX) checked against 2026 prior art: GROMOS's own BuRNN embeds
+  SchNetPack via `pybind11` (the GIL tax this design avoids); OpenMM-ML and GROMACS's NNPot both
+  route through libtorch/TorchScript, not ONNX.
+  Requires **libtorch 2.11.0 exactly** (`tch=0.24.0`'s hard-pinned version — PyPI CPU wheel works,
+  a conda-forge MKL build failed to even `import torch`). Model I/O is `Dict[str, Tensor]` keyed by
+  `schnetpack.properties` (`_positions`, `_atomic_numbers`, `_idx_i`/`_idx_j`, `_offsets`, `_n_atoms`,
+  `_idx_m`) — `schnetpack.atomistic.PairwiseDistances` expects a host-supplied neighbor list, not a
+  built-in one, confirming the `SpatialIndex` design independently. `scripts/export_toy_schnet.py`
+  builds a real (untrained) SchNetPack 2.2.0 `NeuralNetworkPotential`; **SchNetPack v1 does not
+  `torch.jit.script`** (`schnetpack/nn/neighbors.py`'s conditionally-typed return — confirmed against
+  the real trained BuRNN tutorial model, `.local/gromos_tutorial_livecoms` t_06), v2's `Forces`
+  module does once `calc_forces=True` populates `required_derivatives`, and computes forces inside
+  the scripted graph (no separate `.backward()` call needed). Validated against central finite
+  differences (`5e-3` absolute — measured float32 noise floor is ~1.4e-3 across 9 components on a
+  3-atom fixture) since no gromosXX oracle exists for a neural-network potential (FUTURE.md P8).
+  `schnet_burnn_reference.rs`: real 6-atom QM zone from `t_06`'s `eq_meoh_5.cnf`, real `QMZONE`/
+  `RCUTQM=1.4` from `meoh.qmm`/`md.imd`. **Caught a real bug:** `contribute()` assumed every
+  `neighbor_pairs()` result had both endpoints in `region` — false once the region sits inside a
+  solvated system (`neighbor_pairs` deliberately also returns boundary-crossing pairs, for the future
+  embedding case). Fixed by skipping outside-region pairs; documented as a current limitation (no
+  embedding support yet). 67 `--features ml` tests green; classical 37/37 unaffected throughout.
+- [ ] **Deferred, not started:** wiring any MD binary's force loop to iterate
+  `Vec<Box<dyn PotentialProvider>>`; a real *trained* model (this pass's is untrained, seam-only);
+  async/cancellable `contribute` for external-process providers; a shared typed-units boundary.
+  `crates/gromos-forces/src/qmmm.rs` (older file-in/file-out QM scaffolding, forks `xtb`) predates
+  this design and isn't its basis — left untouched, fate undecided.
+
+**2.7 — Electrostatic embedding onto MM atoms (QM/MM + BuRNN)** ✓ Steps 1-5 landed (2026-08-13)
+
+> 2.6 left `SchNetInteraction` skipping every cross-boundary neighbor pair, i.e. no environment
+> coupling at all. Grounded in Poliak et al. 2025 (*J. Comput. Chem.* 46:e70053, mainline GROMOS
+> QM/MM) and Gómez-Flores et al. 2022 (*J. Chem. Theory Comput.* 18:1213, BuRNN), plus direct
+> inspection of the tutorial's training code and shipped model — two different mechanisms:
+
+| | Classic EE (Poliak mainline) | BuRNN (what `t_06` runs) |
+|---|---|---|
+| MM charges → model | **yes**, polarizes the QM density | **no** |
+| Model → charges | no | **no** (confirmed: shipped model is a single `Atomwise` output, no charge head) |
+| Zones | QM + MM (+ link atoms) | inner + buffer + outer |
+| Force path onto MM | QM forces / `f=qE` / pairwise Coulomb from QM charges | buffer gets NN forces; outer stays classical |
+| Main risk | link-atom boundary (out of scope, matches gromosXX: no charge redistribution) | double-counting inner/buffer |
+
+Confirmed by reading `train_dataset_tutorial/mopac.py` directly: BuRNN's training target is
+`E_burnn = E_QM(inner+buffer) − E_QM(buffer) − E_solute_vac` (QM−QM via MOPAC, **not** QM−MM) — the
+NN carries inner internal energy + inner↔buffer interaction + buffer polarisation response, not the
+buffer's own internal energy. `get_burnn_forces()` agrees per-atom. Double-counting is therefore a
+static training-time contract (A5) the orchestrator must reproduce as a fixed decomposition, not
+something detectable at runtime.
+
+- [x] **Step 1 — gather test proves the trait needs no signature change.**
+  `tests/embedding_gather_reference.rs`: on the real `t_06` system, **1363 MM atoms** found within
+  `RCUTQM`=1.4nm of the 6-atom QM zone via `neigh.neighbor_pairs`, charges/positions readable —
+  `contribute()`'s existing `topo`/`conf`/`neigh` args and `Vec<(usize, Vec3)>` forces already carry
+  everything EE needs.
+- [x] **Step 2 — `Embedding` becomes a stated, type-level property.** `provider.rs` gained
+  `Embedding {None, Mechanical, Electrostatic}` + a defaulted `PotentialProvider::embedding()`.
+  `SchNetInteraction` declares `None` (its `Dict[str,Tensor]` contract has no environment channel)
+  and now rejects an unsupported scheme with a clear error instead of silently dropping pairs.
+- [x] **Step 3 — `ElectrostaticEmbedding` (`nonbonded/embedding.rs`).** Poliak path (c): QM charges +
+  pairwise Coulomb computed in the MD code. First provider to put forces outside its own region
+  (FUTURE.md P5). Validated three ways: closed-form two-point-charge oracle (exact), FD on an MM
+  atom, and FD on a real `t_06` MM atom (E_embed = 508.06 kJ/mol, forces on all 1363 MM atoms,
+  equal-and-opposite, no intra-region double-count).
+- [x] **Step 4 — `zones.rs`: `Zone {Inner, Buffer, Outer}` + `PairOwner` + `ZonePartition::owner()`.**
+  The full six-pair-class ownership table derived directly from `get_burnn_energy()`'s decomposition
+  — an orchestration type, not logic hidden in a provider. Degrades to plain QM/MM with no buffer,
+  fully classical with no zones. 6 unit tests.
+- [x] **Step 5 — replaced: the planned oracle doesn't exist.** Originally scoped as "compare against
+  the MM baseline the training pipeline used" — checked first and found there is no such baseline
+  (training subtracts two MOPAC energies, no classical term appears anywhere in the pipeline,
+  `get_reference_energies()` is never called). Building that test would have manufactured false
+  confidence, so it was dropped rather than faked. **Replaced** with
+  `zone_partition_reference.rs`: asserts Step 4's table *partitions* the real system — no pair
+  claimed twice or zero times. On real `t_06` (`BUFFERZONE`=0.5nm, `RCUTQM`=1.4nm): 3513 atoms →
+  inner 6 / buffer 99 / outer 3408; all 6659 QM-cutoff pairs split provider 609 / embedding 6050 /
+  classical 0 cleanly.
+
+**Deferred (named so they are not silently assumed)**
+- [ ] Charge-output channel on `Contribution` — blocked on a model that actually predicts charges (A3).
+  Note it would break the pure-additive provider model: one provider's output becomes another's input
+  within a step, i.e. ordered evaluation, not summation. Do not add it speculatively.
+- [ ] Link atoms / capping / boundary charge redistribution (A4).
+- [ ] Mutual polarisation (MM polarised by QM *and* back) — Poliak: EE "includes electronic
+  polarization of the QM zone by the MM atoms, but not vice versa". Out of scope for parity.
+
+**2.8 — Wiring: from "the pieces exist" to "a QM/MM run happens"** ✓ P2.8-1..4a, 2b, 6 done;
+P2.8-4b blocked on the user, P2.8-5 deliberately deferred
+
+> After 2.7, every *piece* was built and validated in isolation but nothing was connected —
+> `ZonePartition` had no non-test caller, `LjCrfInteraction` didn't filter by zone, no binary
+> iterated providers. P2.8-1..4a below closed those one at a time. **Originally still open here:**
+> no binary drove `ProviderOrchestrator`, and the QM/ML provider's own inner-zone energy was
+> missing from every real-system test because this environment had no QM engine. Both closed: `xtb`
+> is now `apt`-installable here (P2.8-2b), and `ProviderOrchestratorAlgorithm` wires the
+> orchestrator into the real `AlgorithmSequence` step loop (P2.8-6). `SchNetInteraction`'s
+> `--features ml` build was also unblocked later the same session: `libtorch` 2.11.0 (CPU wheel,
+> exact pinned version) + `schnetpack` 2.2.0 installed into a local venv
+> (`python3 -m venv --without-pip` + `get-pip.py`, since `python3.13-venv` needed root and wasn't
+> available — see `schnet.rs` module docs for the full recipe); real `t_06` BuRNN reference test
+> and all `nonbonded::schnet::tests` now run for real here, not skipped.
+
+- [x] **P2.8-1 — `LjCrfInteraction` honours `ZonePartition`.** `pub zone_partition:
+  Option<ZonePartition>` + `with_zone_partition()` builder (`interaction.rs`); `contribute()` filters
+  through `classical_should_evaluate()`. `None` (default) preserves prior unpartitioned behaviour
+  exactly. **Exit:** on real `t_06` (3513 atoms), partitioned LJ+CRF (1970995 kept pairs) + the sum
+  over the 6659 excluded pairs reconstructs the unpartitioned full-system energy (1977654 pairs) to
+  `1e-8` relative (`zone_partitioned_lj_crf_reference.rs`). 37/37 + provider reference unaffected.
+  **Bug caught building the exit test:** ~0.5% energy mismatch traced to `Configuration::new()`
+  defaulting `box_config` to vacuum — the test set `pos` but not `box_config`, so the provider
+  computed unwrapped distances while the test's own spatial index correctly wrapped. Fixed by
+  setting `box_config` from the real `.cnf`; documented as a trap for future bare-`Configuration`
+  tests. **Open watch:** `Contribution.energy` is a single scalar, so per-term GROMOS accounting
+  (lj/crf split) is lost at the provider boundary — not decided, not blocking yet.
+- [x] **P2.8-2 — `ProviderOrchestrator` sums `Vec<Box<dyn PotentialProvider>>`.**
+  `orchestrator.rs`: `register(region, provider)` + `evaluate()`, enforcing that an `Embedding::None`
+  provider never places a force outside its own region (hard error, the P2.6 review finding this
+  exists to check) — `Mechanical`/`Electrostatic` providers exempted by definition. 5 unit tests
+  including a deliberately-lying mock provider. **Exit, revised before building:** the literal
+  "reproduces 37/37" premise doesn't survive `LjCrfInteraction`'s solute-solute-only scope (33/37
+  systems are unreachable by any orchestrator built from today's providers — a roster gap, not an
+  orchestration bug). Checked instead: the 4 pure two-atom no-solvent systems
+  (`pair_lj`/`pair_lj_mixed`/`nacl_pair`/`nacl_pair_box`) match both a direct non-orchestrated call
+  and gromosXX's real energy to `1e-8` (`test_orchestrator_reference.rs`).
+  **Bug caught:** `nacl_pair`/`nacl_pair_box` initially off by ~21% — gromosXX's reported energy
+  includes the unconditional per-atom RF self-energy term that `LjCrfInteraction` deliberately
+  excludes (separate GROMOS term); applied the same correction `interaction.rs`'s own oracle test
+  already established.
+  **Follow-up, same session as P2.8-4:** `qmmm_orchestrator_reference.rs` registers
+  `LjCrfInteraction` (zone-partitioned) + `ElectrostaticEmbedding` together on real `t_06` and
+  matches the two providers' direct calls added by hand — transparency extended to two providers on
+  a real partitioned system. Still missing: the QM/ML provider's own inner-zone energy (no
+  `libtorch` here).
+- [x] **P2.8-2a — `SchNetInteraction` driving a real MD step loop (single provider, no
+  orchestrator).** `schnet_nve_loop.rs` (feature `ml`): real leapfrog NVE dynamics, 500 steps
+  (force eval → `LeapFrog::step` → force eval), not a single isolated call. Energy conservation as
+  the check (architecture-blind to chemical accuracy, same FUTURE.md P8 tier as 2.6). `dt=1e-3`
+  chosen empirically (scanned `1e-4..2e-3`; largest step giving real KE while keeping fluctuation
+  at 0.0047% of the mean); tolerances set ~100x that measured margin. Proves `PotentialProvider` +
+  `LeapFrog` compose correctly — narrower than P2.8-2's orchestrator, doesn't attempt multi-provider.
+- [x] **P2.8-2b — `XtbInteraction`: a real `xtb` QM engine as a `PotentialProvider`.** Closes the
+  other half of the gap the P2.8 intro note above flagged ("this environment has no QM engine
+  (`xtb`/`mopac`)") — `xtb` 6.7.1-2 is now `apt`-installable here. `nonbonded/xtb.rs`: subprocess
+  file-in/file-out, not the C-API linking `gromosXX`'s real `xtb_worker.cc` uses (that's a much
+  bigger FFI-binding lift, deferred). **Grounded in real xtb runs, not docs alone** — the older
+  `qmmm.rs::XTBEngine` scaffold (predates `PotentialProvider`, never wired up) parsed a `energy`/
+  `gradient` file pair whose actual format doesn't match what it assumed; ran real GFN2-xTB on a
+  toy water molecule and found: (a) xtb's xyz parser accepts a bare atomic number in the element
+  column (verified identical energy either way) — so, like `SchNetInteraction`, atomic numbers are
+  a caller-supplied table, no symbol lookup needed; (b) `<basename>.engrad` (ORCA-style: atom
+  count, energy in Eh, flattened gradient in Eh/bohr, `#`-prefixed comments) is a cleaner parse
+  target than the Turbomole `$grad`/bare `energy` files the old scaffold used. Added
+  `HARTREE_TO_KJMOL`/`BOHR_TO_NM` to `gromos_core::units` (didn't exist) rather than reusing the
+  old scaffold's unchecked magic constant. **Scope decision:** only `Embedding::None` (the region's
+  own isolated-cluster energy) — `Mechanical`/`Electrostatic` rejected loudly, same policy
+  `schnet.rs` already uses, so this can't double-count against `ElectrostaticEmbedding`'s own
+  inner↔outer coupling (`zones.rs` A5 hazard). xtb natively supports point-charge embedding with
+  forces returned on the MM side too (`pcharge`/`pcgrad` files, confirmed by reading
+  `xtb_worker.cc` and testing the file format directly), but wiring that up was deferred at the
+  time. **Done later this session as P2.8-2d** — the "harder charge-refresh problem" turned out to
+  be smaller than expected; see that entry and the corrected P2.8-5.
+  **Exit:** `nonbonded/xtb::tests` — a pinned real-oracle energy test (`-5.018180941704 Eh` for a
+  specific water geometry on this machine's xtb 6.7.1-2), a central finite-difference
+  self-consistency check on forces (validates this provider's own sign/unit-conversion pipeline,
+  independent of xtb's physics — FUTURE.md P8 tier, same as `schnet.rs`'s own FD test), and the
+  same loud-rejection-of-unsupported-embedding test `schnet.rs` has. `xtb_nve_loop.rs`
+  (`gromos-md`): real leapfrog NVE loop driving `XtbInteraction` alone on a water monomer, 120
+  steps at `dt=2e-4` (real GFN2 PES is far stiffer than the untrained SchNet toy model, needed a
+  smaller step than P2.8-2a's `1e-3`) — 0.038% energy fluctuation, well inside the 0.5% bound.
+  Not feature-gated (no compile-time linking like `ml`/`tch` needs), so it builds everywhere;
+  tests skip cleanly if `xtb` isn't on `PATH`.
+- [x] **P2.8-2c — the first real, combined QM/MM evaluation.** `qmmm_orchestrator_reference.rs`
+  (earlier work) already proved `LjCrfInteraction` (zone-partitioned) + `ElectrostaticEmbedding`
+  combine correctly on a real system, but its own module doc said outright: "this environment has
+  no QM engine... not that the result is a complete QM/MM energy," and it used hard-coded stand-in
+  charges for the embedding term. `xtb_qmmm_water_dimer_reference.rs` closes both: registers
+  `XtbInteraction` + `ElectrostaticEmbedding` + zone-partitioned `LjCrfInteraction` together, with
+  the embedding charges coming from a real xtb Mulliken-charge calculation, not a stand-in.
+  **System:** `water_dimer` (Poliak dataset, already checked into
+  `gromosXX_qmmm_references/water_dimer_mechst/`), not `t_06` — `t_06`'s 54a7 force field is
+  united-atom, and its QM zone's true per-atom element identity lives in a `.qmm` file's
+  `QMZONE`/`QMZ` column that nothing here parses yet; `water_dimer`'s two explicit-atom SPC waters
+  need no such mapping (`[8,1,1]` per water, trivially).
+  **Charges:** read directly from xtb's own `charges` side-effect file after a real
+  `XtbInteraction::contribute()` call, rather than adding a charge-output channel to
+  `Contribution` — that channel is explicitly deferred in `provider.rs` (P2.7: "would break the
+  pure-additive provider model... do not add it speculatively"), so this reads xtb's own file
+  instead of building it.
+  **Exit:** real numbers, not just an assertion of correctness — for the real `water_dimer`
+  starting geometry: `E_QM = -13307.5`, `E_classical = -735.5`, `E_embedding = -23.1`,
+  `E_total = -14066.2` kJ/mol; real Mulliken charges `[-0.562, 0.280, 0.282]` (sums to ~0, a
+  neutral water, as a sanity check); **3 QM-zone atoms and 3 MM atoms both carry nonzero force** —
+  the concrete, checkable version of "QM and MM influence each other," not present in any earlier
+  test. Orchestrator transparency (combined == three direct calls summed) still holds with all
+  three providers, extending `qmmm_orchestrator_reference.rs`'s two-provider check.
+  **Explicit non-goals, stated in the module doc so they aren't mistaken for gaps:** doesn't match
+  gromosXX's real published number for this system (their reference run used AM1, xtb is a
+  different method — same accepted mismatch as P2.8-2b); charges are static, one xtb call, not
+  refreshed per step — this test deliberately keeps using path (c) (`ElectrostaticEmbedding`) to
+  demonstrate three-provider orchestration; path (a) (real per-step-consistent embedding, no
+  static charges at all) landed later this session as P2.8-2d and is demonstrated alongside it in
+  the same test file; single-point, not a multi-step run (the waters are SHAKE-constrained rigid
+  bodies in the real `.imd` — a dynamical version needs the constraint solver wired into the
+  sequence too, a real separate follow-up, not attempted here).
+- [x] **P2.8-2d — real electrostatic embedding in `XtbInteraction` (Poliak path (a)).** Grew out of
+  a user question: "isn't the static-charge approximation and the per-step charge-refresh problem
+  something other implementations already solved?" Read gromosXX's real `xtb_worker.cc` again with
+  that question specifically — it already links xtb's own C API (`xtb_setExternalCharges`,
+  `xtb_getPCGradient`), which is path (a): MM point charges polarize xtb's own SCF, and xtb hands
+  back MM forces directly, so there's no charge-derivative term to solve at all (see the corrected
+  P2.8-5 above). `nonbonded/xtb.rs`'s `XtbInteraction` now implements the same physics via xtb's
+  CLI-level `pcharge`/`pcgrad` files (subprocess path, not the C API — consistent with P2.8-2b's
+  original choice to avoid a native build dependency).
+  **Units determined empirically, not assumed** — xtb's man page documents `pcharge`'s columns but
+  not their length unit. Verified directly: placed a real point charge at two known distances
+  (10 and 50 Bohr) from a bare Na⁺ ion and compared the measured energy shift to the analytic
+  monopole-monopole Coulomb energy (`q₁q₂/r` in atomic units) under both Bohr and Ångström
+  hypotheses. Bohr matched to 99.85% at r=50 (residual is real, expected SCF polarization —
+  shrank correctly with distance); Ångström was off by the exact expected ~1.89× ratio. Also
+  confirmed `pcgrad`'s row order matches `pcharge`'s input order and its sign convention
+  (force = −gradient, same as `.engrad`) with a real two-point-charge run.
+  **Scope:** `Embedding::Electrostatic` now real; `Embedding::Mechanical` still rejected (nothing
+  implements it). This and `ElectrostaticEmbedding` (path (c)) are **alternatives, not additions**
+  — documented prominently in both modules to prevent the double-counting `zones.rs` (A5) exists to
+  catch. `ZonePartition::owner()` already unconditionally routes inner-outer electrostatics to
+  `Embedding` regardless of which path handles it, so a zone-partitioned `LjCrfInteraction` composes
+  correctly with either path with no extra wiring.
+  **Exit:** `nonbonded/xtb::tests` — a real polarization test (`electrostatic_embedding_changes_
+  qm_energy_and_puts_force_on_the_mm_atom`: an external −0.8e charge measurably shifts the QM
+  energy and receives a real force back, which path (c) structurally cannot do since it can only
+  ever add a fixed Coulomb term to a fixed QM energy); a finite-difference check covering *both*
+  the QM atoms' and the MM atom's forces (the tier that validates this path's own sign/unit
+  pipeline, independent of xtb's physics); loud rejection of `Mechanical` and of `Electrostatic`
+  without a cutoff set. `xtb_qmmm_water_dimer_reference.rs` gained a second test,
+  `path_a_real_electrostatic_embedding_on_the_real_water_dimer`, running the real water-dimer
+  system through path (a) instead of path (c) — total energy agrees with the path (c) demo to
+  within 0.09% (−14053.7 vs −14066.2 kJ/mol), the physically expected gap between real
+  self-consistent polarization and a frozen-charge approximation of it.
+- [x] **P2.8-2e — `MopacInteraction`: a real MOPAC engine, AM1/PM3/PM6/PM7 all for free.** Grew out
+  of the user's original AM1 question — MOPAC (apt-installable, `mopac` 23.1.2) is the real engine
+  behind AM1/PM3/PM6/PM7; `method` is a plain field on `MopacInteraction`, so all four come from one
+  implementation, not four ports.
+  **Architecture check, done before writing any code:** does a second real QM engine mean a new
+  `QmEngine` trait (mirroring gromosXX's `QM_Worker` base class, ~20 virtuals, 9 subclasses)?
+  `architecture.md` rule 3 says no — "a small, stable trait taxonomy — resist proliferation... about
+  five contracts." `MopacInteraction` is just another `PotentialProvider`, like `XtbInteraction`.
+  The real, mechanical duplication between the two (work-dir setup, stale-output removal, subprocess
+  spawn/exit-check) moved to a new crate-private `qm_subprocess.rs`, shared by both (`XtbInteraction`
+  lightly refactored to use it too, behavior unchanged — confirmed by its full existing test suite
+  still passing unmodified).
+  **Oracle checkpoint — the plan's own explicit gate, and it failed as originally scoped.** The
+  BuRNN tutorial ships 1722 real archived MOPAC `.aux` files (`MOPAC_VERSION=MOPAC2016.22.067L`,
+  PM7) — checked before building anything on top: re-ran one archived geometry through this
+  machine's installed MOPAC 23.1.2. Single-point energy at the archived geometry: **−1427.7
+  kcal/mol**; the archive itself reports **−1610.9 kcal/mol** — 165 kcal/mol (11%) apart. Diagnosed,
+  not just noted: re-optimizing MOPAC 23 from that same starting geometry converges to **−1592.1
+  kcal/mol** (close to the archive's −1610.9, ~1.2% — each version's *own* minimum agrees
+  reasonably), and a fresh single-point exactly at that MOPAC-23-optimized geometry reproduces
+  −1592.1 to 5 decimal places (MOPAC 23 is internally self-consistent — not a bug here). Conclusion:
+  the archived geometry, real MOPAC2016 stationary point though it is, isn't close to a stationary
+  point on MOPAC 23's own PM7 surface — the two versions' surfaces differ enough that cross-version
+  *fixed-geometry* comparison is unreliable, even though independent optimization lands in the same
+  ballpark. **Consequence:** the 1722 files aren't usable as tight single-point oracles. Pivoted to
+  the pattern that already worked for `XtbInteraction` (P2.8-2b): pin real values from *this
+  machine's own* MOPAC, not the 2016 archive.
+  **`.mop`/`.aux` gotchas found against real output, not docs:** MOPAC's `GRAD` keyword reports
+  nothing ("Keyword GRADIENTS used, but geometry has no variables") unless every atom's coordinate
+  flags are `1` (optimization variables) — `1SCF` then prevents any actual optimization from moving
+  the geometry, matching gromosXX's own tutorial `mopac.py` input convention exactly. `.aux` values
+  use Fortran `D` exponents (`-0.161088149248928D+04`), rejected by `f64::from_str` — normalized to
+  `E` first.
+  **Embedding:** `Embedding::None` only — gromosXX's real `mopac_worker.cc` doesn't implement
+  `parse_mm_gradients` (unlike `xtb_worker.cc`), so MOPAC never returns MM forces; pairing it with
+  QM/MM coupling means path (c) (`ElectrostaticEmbedding`), documented in both modules.
+  **Exit:** `nonbonded/mopac::tests` — a pinned water PM7 energy test (real MOPAC 23.1.2 run on this
+  machine), loud rejection of unsupported embedding, a finite-difference force check (same tier as
+  every other QM-engine test here). `tests/mopac_reference.rs` — a real multi-element (C, O, H)
+  methanol molecule, energy *and* Mulliken charges (summed to `1e-14`, confirming neutrality) both
+  matching a pinned real-MOPAC-23 run. Geometry is a standard, self-constructed methanol (typical
+  bond lengths/angles), not lifted from the BuRNN archive — that repository has no explicit license
+  file for its data, unlike the Poliak/Zenodo dataset (CC BY 4.0) already used elsewhere in this
+  suite, so nothing from it is checked into this repo's git history.
+- [x] **P2.8-3 — virial from `ElectrostaticEmbedding`.** Was `Mat3::ZERO` (NPT with an embedded QM
+  zone would silently mispressure). Added per-pair atomic virial matching `ForceStorage`'s
+  established convention. **Exit, three tiers:** closed-form exact (`trace(virial)==energy` via
+  Euler's theorem for a `1/r` pair), FD on the scaling derivative (`1e-6`), and the real periodic
+  `t_06` system (1363 pairs, `1e-8` relative) — the real-system check is the sharpest PBC-
+  correctness test since a wrong minimum-image convention would break the identity even if energy
+  and forces individually looked plausible. 82 lib tests green; 37/37 unaffected (unwired).
+- [x] **P2.8-4 — resolved the `QMLJ` ambiguity.** Cloned real gromosXX (`.local/gromosXX`) and read
+  `in_parameter.cc::read_QMMM` + `qmmm_interaction.cc::modify_exclusions` directly. **Answer:**
+  `QMLJ` gates a classical LJ *supplement* for inner-inner/inner-buffer pairs only; inner-outer LJ
+  is always classical regardless (only its electrostatics moves to embedding) — the opposite of the
+  crate's prior undocumented assumption. Extended `ZonePartition` with `qm_lj: bool` (default
+  `false`, matches `t_06`) + `lj_owner()` (separate from `owner()`) + `lj_only_should_evaluate()`;
+  wired a second CRF-zeroed LJ pass into `LjCrfInteraction`. **Exit:** real `t_06` three-way
+  decomposition (1970995 classical + 6050 lj-only-supplement + 609 fully-excluded = 1977654 total)
+  reconstructs `full` to `1e-8`. 87 lib tests; 37/37 unaffected; release build clean.
+- [x] **P2.8-4a — a real external gromosXX QM/MM oracle (not just source/synthetic).** Found the
+  Poliak et al. 2025 dataset on [Zenodo 10.5281/zenodo.14549978](https://doi.org/10.5281/zenodo.14549978)
+  (CC BY 4.0) — real production QM/MM runs (`WATER`/`WATER_DIMER`/`WATER_SINGLE`/`AA_SOLV`/
+  `TRIPEPTIDES`, 4 semi-empirical methods, 3 embedding schemes). Most needs `mndo` (not
+  apt-installable here, same blocker class as `xtb`/`libtorch`). **Reachable slice:**
+  `WATER_DIMER` mechanical-embedding-constant-charge (`mechst`) needs no QM engine at all — gromosXX
+  leaves QM-MM exclusions untouched for this scheme. `tests/gromosXX_qmmm_references/
+  water_dimer_mechst/` (real topology/config/imd/energies, extracted via ranged HTTP reads from the
+  980MB archive without downloading it whole; README carries provenance). `single_point_energy`
+  reproduces the real gromosXX `nonb` to `1.3e-9` relative.
+  **Deferred, not started:** everything needing an actual QM program (`elst`/`mech` runs,
+  `AA_SOLV`/`TRIPEPTIDES`) — genuinely unreachable without `mndo`, not attempted speculatively.
+- [ ] **P2.8-4b — unlock the full Poliak dataset via a real MNDO build.** Blocked on a step only
+  the user can do: MNDO (`mndo.mpi-muelheim.mpg.de`) is "open source for non-commercial use," but
+  distributed through a license form + Gitea instance requiring registration — not an anonymous
+  `apt`/`git clone`, and not something to complete on the user's behalf. **Blocked, specifically:
+  the user needs to be at a machine they don't currently have access to, to do that registration.**
+  Waiting on them, not on any further investigation here.
+  **Exit, once unblocked:** user hands over MNDO source (Gitea URL+token, a tarball, or a local
+  path) → build MNDO (`gfortran`, confirmed not installed here but apt-installable) → build
+  gromosXX from the `.local/gromosXX` clone wired to that binary (`NTQMSW=0`) → run the real
+  Poliak `am1`/`om2`/`om3`/`pm3` `elst`/`mech` `WATER_DIMER` systems (and potentially
+  `AA_SOLV`/`TRIPEPTIDES`) → reproduce their published energies as exact bit-for-bit oracles, the
+  same rigor P2.8-4a's `mechst` slice already has, but for the actual electrostatic-embedding case
+  `ElectrostaticEmbedding` was built for. `xtb` (apt-installable now, no registration) was offered
+  as a faster alternative path — declined in favor of this one, since it wouldn't match Poliak's
+  published numbers (different QM method).
+- [x] **P2.8-5 — refresh QM charges per step. Superseded by P2.8-2d, not implemented as
+  originally scoped.** Originally framed as "derive gromosXX's `MEDC` extra-force correction for
+  fluctuating charges, or restrict to static charges." Read gromosXX's real source
+  (`interaction/qmmm/qm_zone.cc`) directly rather than trusting the earlier paraphrase of Poliak's
+  paper: **no such correction term exists anywhere in gromosXX.** Dynamic per-step charges exist
+  only for *mechanical* embedding (`qm_zone.cc:177-196`) — the engine's charges are written
+  straight into `topo.charge()` and picked up next step by the ordinary classical loop, `dq/dR`
+  simply neglected. For *electrostatic* embedding, gromosXX doesn't refresh `ElectrostaticEmbedding`-
+  style static charges at all — it uses path (a) instead (P2.8-2d): the QM program returns MM
+  forces directly, so there is no charge-derivative problem to solve, because nothing is
+  differentiating a *fixed*-charge approximation in the first place. That's the real fix, and it's
+  done for `xtb` (`XtbInteraction`'s `Embedding::Electrostatic`, `nonbonded/xtb.rs`).
+  **What's left, correctly scoped down:** engines that only support path (c) (no `parse_mm_gradients`
+  — confirmed only `xtb_worker.cc`/`orca_worker.cc`/`turbomole_worker.cc` implement it; MOPAC/MNDO/
+  DFTB don't) still only have `ElectrostaticEmbedding`'s static charges available. Refreshing those
+  per step would be a real, much simpler feature than originally scoped (no derivative term needed —
+  just rewrite `region_charges` from a fresh engine call each step, mirroring gromosXX's own
+  mechanical-embedding behavior) — a legitimate but smaller future item, not started.
+- [x] **P2.8-6 — wire `ProviderOrchestrator` into a running binary's step loop.** Named as the real
+  remaining gap the P2.8 intro note above already flags. Every provider/orchestrator/zone piece up
+  to P2.8-2b was validated by test harnesses calling `orchestrator.evaluate()` directly, or (P2.8-2a/
+  P2.8-2b) a bespoke `LeapFrog` loop — nothing went through the real step machinery.
+  **Premise correction made while starting this:** there is no single Rust `Simulation` struct.
+  `md.rs::main()` and `pyo3-gromos/src/simulation.rs::build_simulation()` each independently build a
+  `gromos_core::algorithm::AlgorithmSequence` (`Vec<Box<dyn Algorithm>>`) and drive it with
+  `run_step()` — *that* is the real shared entry point, not a `Simulation` type. The standard
+  sequence both build: `RemoveCOMMotion → Forcefield → LeapFrogVelocity → thermostat →
+  LeapFrogPosition → constraints → TemperatureCalculation → PressureCalculation/Barostat →
+  EnergyCalculation`.
+  **What was built:** `gromos-forces/src/orchestrator_algorithm.rs` — `ProviderOrchestratorAlgorithm`
+  implements `Algorithm` directly (no new gromos-integrators↔gromos-forces dependency edge needed;
+  gromos-forces already depends on gromos-core, where `Algorithm` lives), wrapping a
+  `ProviderOrchestrator` + `Periodicity` (refreshed from the box each step, mirroring `Forcefield`'s
+  own NPT-safe refresh block verbatim). Pushed immediately after `Forcefield` in a sequence, it adds
+  (`+=`) to `Forcefield`'s already-computed force and virial.
+  **Energy-bookkeeping trap found and fixed:** the summed contribution can't go into
+  `potential_total` — `update_potential_total()` (called by both `Forcefield` and the final
+  `EnergyCalculation`) only sums bond/angle/dihedral/improper/cross_dihedral/lj/crf/ls/sasa, so a
+  direct write there would be silently wiped out by that later recompute. `Energy::total()` adds
+  `special_total` on top separately (same slot position restraints use), so that's where it goes
+  instead. A second trap: `special_total` isn't unconditionally reset to a fresh per-step baseline
+  by anything else (`Forcefield` only *sets* it, conditionally, when position restraints are
+  configured) — a naive `+=` here would silently compound across steps whenever they aren't. Fixed
+  by overwriting `special_total` rather than accumulating; documented as a known limitation
+  (`ProviderOrchestratorAlgorithm` currently claims exclusive ownership of that field — running it
+  alongside active position restraints in the same sequence isn't supported yet).
+  **Exit:** `gromos-md/tests/xtb_orchestrator_sequence.rs` — a real `AlgorithmSequence` (`Forcefield`
+  + `ProviderOrchestratorAlgorithm` registered with a real `XtbInteraction` + `LeapFrogVelocity` +
+  `LeapFrogPosition` + `TemperatureCalculation` + `EnergyCalculation`) run for 120 steps via
+  `run_step()` on a water monomer whose classical `Forcefield` contributes exactly zero (zero
+  charge/LJ/bonds) — deliberately narrower than "both nonzero simultaneously" (same incremental
+  discipline P2.8-2a used), isolating what needed proving: the orchestrator's energy/force/virial
+  actually flow through the real pipeline. NVE energy conservation via `conf.old().energies.total()`
+  (GROMOS convention — results land in `old()` after leapfrog's state exchange): 0.0032% drift over
+  120 steps, tighter than P2.8-2b's bespoke-loop equivalent (0.038%). A synthetic-provider unit test
+  in `orchestrator_algorithm.rs` separately checks the `+=`-vs-overwrite bookkeeping in isolation
+  from any real physics.
+  **Deferred, not attempted:** wiring this into `md.rs`'s actual CLI (`@qmmm` flag parsing — still
+  just help text, unused, `md.rs:98`) or into `pyo3-gromos`'s `build_simulation()` — this proves the
+  *machinery* composes, not end-user CLI/Python wiring (that's P3.7, now unblocked); a dedicated
+  `qmmm_total` `Energy` field plus `EnergyFrame`/`.tre`/`PyEnergy` reporting (`special_total` reuse
+  is coarse, same accepted-coarseness precedent as P2.8-1's `Contribution.energy` note); P2.8-5
+  (refreshing QM charges per step) — untouched, independent of this task.
+
+**2.9 — The full QM/MM → ML/MM pipeline: generate, train, compare**
+
+> Grew directly out of a user question: with real QM/MM (P2.8) and a real, working `--features ml`
+> build now both in hand, is the whole "use QM/MM to generate training data, train an ML potential,
+> run it as ML/MM, compare against QM/MM" pipeline actually reachable? Answer: yes — every piece
+> existed in isolation (`XtbInteraction` for real QM data, `SchNetInteraction` for loading *any*
+> real trained TorchScript SchNetPack 2 model, `scripts/export_toy_schnet.py` for the architecture
+> and export recipe), the missing part was the glue.
+
+- [x] **`libtorch`/`schnetpack` installed and verified.** `libtorch` 2.11.0 CPU (the exact version
+  `tch=0.24.0` pins) + `schnetpack` 2.2.0, into `/tmp/torch_venv`. `python3.13-venv` needed root
+  (not available non-interactively here) — worked around with `python3 -m venv --without-pip` +
+  manually bootstrapping pip via `get-pip.py`, then the documented recipe (`schnet.rs` module docs)
+  otherwise unchanged. `--features ml` builds; `nonbonded::schnet::tests` (3/3) and
+  `schnet_burnn_reference.rs` (the real `t_06` methanol QM-zone test) now run for real, not skipped
+  — the first time ML/MM has actually executed in this environment.
+- [x] **Physical-correctness decision, made before writing any code.** Training target is the QM
+  zone's *isolated* energy (`XtbInteraction` with `Embedding::None`), not an electrostatically-
+  embedded one. Reasoning: `SchNetInteraction`'s architecture has no environment/charge input
+  channel, so training on embedded energies would bake a specific environment's electrostatic
+  contribution into a model structurally unable to represent it — exactly the same reasoning behind
+  the real BuRNN training target (`zones.rs` docs: `E_burnn = E_QM(inner+buffer) − ...`, environment-
+  blind, with embedding handled as a *separate* additive term at inference time). Real ML/MM
+  embedding needs a charge-output channel on `Contribution` that P2.7 already deliberately defers —
+  a genuine, separate follow-up, not attempted here.
+- [x] **Phase 1 — `crates/gromos-md/examples/generate_qm_training_data.rs`.** 10 independent short
+  real `xtb`-driven NVE trajectories (91 frames each, same proven-stable setup as `xtb_nve_loop.rs`
+  — no classical bond potential or SHAKE needed; xtb's own intramolecular chemistry keeps geometry
+  bounded) from randomly perturbed starting geometries/velocities — one long trajectory would only
+  explore a single energy shell. 910 real frames written, energies ranging ~−13100 to −13300 kJ/mol
+  (matches the scale of the P2.8-2b pinned water oracle). Plain self-describing text output
+  (GROMOS-native units throughout — nm/kJ/mol/kJ·mol⁻¹·nm⁻¹ — no unit conversion needed downstream,
+  matching `schnet.rs`'s own unconverted pass-through), no new `serde_json` dependency needed.
+- [x] **Phase 2 — `scripts/train_qmmm_schnet.py`.** Imports `build_model` directly from
+  `export_toy_schnet.py` (same architecture, no duplication) with a modest capacity bump
+  (`n_atom_basis=32`, `n_interactions=2` vs the toy's 16/1) since this one needs to actually fit
+  data. Manual training loop (not SchNetPack's `Task`/`Trainer`/hydra machinery — simpler to read
+  and debug at this scale): combined energy + force MSE loss, `Adam`, train/val split, 400 epochs.
+  Exports via the identical `torch.jit.script`/`save` call `export_toy_schnet.py` already proved
+  works with this architecture.
+- [x] **Phase 3 — `crates/gromos-md/tests/qm_vs_ml_comparison.rs`** (`--features ml`). Real
+  `XtbInteraction` vs the trained `SchNetInteraction` on a held-out trajectory (a deliberately
+  different, larger starting perturbation than any generator trajectory — not a reserved split).
+  Energy and force RMSE checked against generous, explicitly-documented tolerances — the goal is
+  proving the *pipeline* works end-to-end, not a chemical-accuracy claim (≈900 frames, a small
+  toy-scale model, CPU training on one water molecule).
+  **Results, real run:** training loss dropped from 6.2M to ~3-6K over 400 epochs (noisy —
+  unbatched single-sample SGD-like updates — but a genuine, large reduction, not a plateau at
+  initialization). On 41 held-out frames from a deliberately-different starting perturbation:
+  energy RMSE 64.0 kJ/mol against a ~−12800 kJ/mol total-energy scale (≈0.5% relative), force
+  component RMSE 668 kJ/mol/nm — both comfortably inside the tolerances (200 / 5000) and, more to
+  the point, small enough relative to the energy/force scales actually present to say the trained
+  model is really tracking xtb's PES, not just passing a loose bound. Full pipeline (generate →
+  train → compare) ran for real, end to end, in this environment.
+- **Explicitly not attempted:** real embedding for the trained net (needs `Contribution`'s deferred
+  charge channel); training on a QM/MM *zone* rather than a bare vacuum molecule (would need the
+  same isolated-target reasoning applied to a real inner/buffer/outer system, e.g. `t_06` — natural
+  next step, bigger scope); anything resembling chemical-accuracy validation (would need a much
+  larger dataset/model/training budget than this CPU-only sandbox check calls for).
+
 ### Priority 3 — py-gromos API & education
 
 > **Approach: small steps, no big design commitment yet.** The full vision (the `System`
@@ -351,33 +804,84 @@ audited down to its load-bearing core: only two things were actually broken.
   real but not-physically-meaningful kinetic-only number, not zero).
 
 **3.6 — Rust↔Python reference-test parity gap** ✓ done (FEP deferred)
-> Auditing `py-gromos`'s `REFERENCE_SYSTEMS` (20) against the full Rust suite (37, via the `md`
-> CLI) found 18 systems missing — not skipped by choice, but because `build_simulation`
-> (`pyo3-gromos/simulation.rs`) never wired up features whose gromosXX-faithful implementation
-> already existed lower in the stack. Each was a real Python-API defect (silently wrong physics),
-> not a test-authoring gap. Closed, one fix each:
-> - **GENVEL** — `ntivel` was parsed but never read; added `initial_velocities()` (reuses the
->   existing `generate_velocities`). Also explained `water_1000_spc_gridcell`'s 39% mismatch
->   (same root cause, its `.imd` sets `NTIVEL=1`) — one fix, two systems.
-> - **SETTLE/LINCS** — already fully implemented in `gromos-integrators`, just never dispatched;
->   added `ConstraintSelection::from_imd` mirroring `md.rs`'s NTCP/NTCS logic. **Regression
->   caught along the way:** gating solvent constraints on `imd.nsm` (matching `md.rs`) broke a
->   3.5 test, because the compositional path pre-solvates topologies without ever setting `nsm`.
->   Fixed by gating on the topology's actual solvent-atom count instead.
-> - **Nosé-Hoover (+ chain)** — same story: implemented, not dispatched. Added `push_thermostat()`
->   dispatching on the `.imd` bath algorithm.
-> - **Distance/position restraints** — added `distrest=`/`posresspec=`/`refpos=` optional kwargs
->   on `Simulation(...)`, parsed via the existing `gromos-io` readers.
-> - **Triclinic/truncated-octahedron box** — added the `NTB=-1` cube→triclinic transform; also
->   fixed `sim.forces` to rotate back to the cube frame like GROMOS's own `.trf` writer.
->   **Found, not fixed (out of scope):** `gromos-rs`'s own `.trc` position output already
->   disagreed with gromosXX here, pre-existing and Rust-side, never caught because the Rust
->   suite doesn't compare positions for any system. Tracked via `POSITION_MISMATCH_SYSTEMS`.
-> - **Not done, deferred:** perturbation/FEP topology (`ch4_water_fep`, `aladip_vacuum_fep`) —
->   explicit user direction. The composable `AlgorithmSequence`/`resolve_algorithm_sequence` path
->   was untouched (still SHAKE/Berendsen-only) — only `build_simulation` was fixed.
-> - Verified throughout, not just at the end: Rust suite 37/37 unchanged after every change;
->   Python suite grew 73→100 (99 passed + 1 documented skip).
+> `py-gromos`'s `REFERENCE_SYSTEMS` (20) vs the full Rust suite (37) had 18 systems missing — real
+> Python-API defects (`build_simulation` never wired up features already implemented lower in the
+> stack), not a test-authoring gap. Fixed one each: **GENVEL** (`ntivel` parsed but never read,
+> also explained `water_1000_spc_gridcell`'s 39% mismatch); **SETTLE/LINCS** (implemented, never
+> dispatched — added `ConstraintSelection::from_imd`; regression caught: gating on `imd.nsm` broke
+> a 3.5 test since the compositional path never sets it, fixed by gating on actual solvent-atom
+> count instead); **Nosé-Hoover(+chain)** (same story, added `push_thermostat()`); **distance/
+> position restraints** (`distrest=`/`posresspec=`/`refpos=` kwargs on `Simulation(...)`);
+> **triclinic/truncated-octahedron box** (`NTB=-1` transform; also fixed `sim.forces` frame
+> rotation — found but left out of scope: gromos-rs's own `.trc` position output already disagreed
+> with gromosXX pre-existing, tracked via `POSITION_MISMATCH_SYSTEMS`). Deferred on explicit user
+> direction: FEP topology (`ch4_water_fep`, `aladip_vacuum_fep`); the composable
+> `AlgorithmSequence`/`resolve_algorithm_sequence` path was untouched. Rust suite 37/37 unchanged
+> throughout; Python suite grew 73→100.
+> **Follow-up:** `REFERENCE_SYSTEMS` was still missing 7 of 37 active Rust systems (6 steepest-
+> descent EM systems + `water_216_box_com_rot`) — the features were already wired, just never added
+> to the test list. Added all 7 (6 pass cleanly; `aladip_vacuum_em` has the same known EM
+> frame-count off-by-one the Rust suite already `ignore:`s — energies/forces still validate, kept in
+> `POSITION_MISMATCH_SYSTEMS` rather than dropped). Python suite: 100→121 (118 passed, 2 documented
+> position-mismatch skips). Remaining gap vs Rust is exactly the 2 deferred FEP systems.
+
+**3.7 — ML potential binding for `py-gromos`: name zones, don't count atoms** — not started;
+P2.8-6 (its blocking prerequisite) is now done, so this is unblocked but not yet begun
+
+> Grew out of a design conversation about `SchNetInteraction` (2.6/2.7) and `py-gromos`
+> (`crates/pyo3-gromos`): both already exist, but nothing connects a Python user's model to a
+> `Simulation`'s zone definition, and today's `ZonePartition::new(n_atoms, inner, buffer)`
+> (`gromos-forces/src/zones.rs`) takes raw `&[usize]` — exactly the "renumber the ligand every time
+> the topology changes" ergonomics `AtomSelection::from_string` (`gromos-core/src/selection.rs`,
+> 2.1) already solved for atom selection generally. This section is that fix applied to zones, plus
+> the binding that makes it reachable from Python.
+
+- [ ] **`ZonePartition::from_selections`** — `(topo: &Topology, inner: &str, buffer: &str) ->
+  Result<Self, SelectionError>`, building on the existing `AtomSelection::from_string` grammar
+  (`1:res(LIG:a)`, `1:res(45-52:a)`, name lists, `not()`/`minus()`) instead of hand-counted index
+  lists. Thin wrapper — `from_string` already resolves to a sorted `Vec<usize>`; this just feeds
+  `.indices()` into the existing `ZonePartition::new`. **Exit:** unit test building the same
+  `t_06`-shaped inner/buffer split `zone_partition_reference.rs` already exercises, but from residue
+  specifiers instead of a hard-coded index range, asserting the resulting `ZonePartition` is
+  identical to the hand-built one.
+- [ ] **`PySchNetPotential` binding** (`crates/pyo3-gromos/src/`, new module) — wraps
+  `SchNetInteraction::load(path, cutoff, elements)`. `elements` (per-atom atomic number) is derived
+  from `Topology` on the Rust side, not hand-supplied from Python — avoids a second place the
+  atomic-number-indexed convention (`schnet.rs`'s `Embedding(100, 256, padding_idx=0)` note) can
+  drift from the topology.
+- [ ] **`Simulation.add_ml_potential(potential, region: str, buffer: str | None = None)`** — parses
+  `region`/`buffer` via `ZonePartition::from_selections`, constructs a `ProviderOrchestrator` entry
+  (classical `LjCrfInteraction` + the ML provider, zone-partitioned per 2.7/P2.8-1/P2.8-4), and folds
+  it into whatever P2.8-6 lands as the orchestrator-aware step path. No new physics — this item is
+  pure plumbing over 2.6/2.7/2.8's already-validated pieces.
+- [ ] **Exit criterion, matching this plan's standard:** a Python-side test building the real `t_06`
+  zone split by residue name (`sim.add_ml_potential(pot, region="1:res(...)", buffer="1:res(...)")`)
+  and comparing its `ZonePartition` (indices, not just "it ran") against the Rust-side
+  `zone_partition_reference.rs` fixture's hand-built one — the Python binding must produce the exact
+  same zone assignment as the already-validated Rust path, not just "it didn't crash."
+
+**Known blockers, named so they're not silently assumed away:**
+- ~~P2.8-6 must land first~~ — done: `ProviderOrchestratorAlgorithm`
+  (`gromos-forces/src/orchestrator_algorithm.rs`) is an orchestrator-aware step in the real
+  `AlgorithmSequence`. `pyo3-gromos`'s own `build_simulation()` still doesn't construct or push one
+  — that wiring is this section's own remaining job, not a separate blocker anymore.
+- ~~No libtorch in this environment~~ — done: `libtorch` 2.11.0 CPU + `schnetpack` 2.2.0 installed
+  into `/tmp/torch_venv` (see `schnet.rs` module docs for the recipe). `--features ml` builds and
+  `SchNetInteraction::load()` runs for real here now — `nonbonded::schnet::tests` and
+  `schnet_burnn_reference.rs` both pass against the real toy-architecture model, not skipped.
+- **Still no trained, scriptable model** — `scripts/export_toy_schnet.py`'s SchNetPack 2 model is
+  real architecture but randomly initialized; the real trained BuRNN tutorial model fails
+  `torch.jit.script` outright (SchNetPack v1 issue, documented in `schnet.rs`). Training a real
+  model (on real QM/MM-generated data, not the untrained toy) is exactly the QM/MM→ML/MM training
+  pipeline now being built — see the new P2.9 section below.
+
+**Stretch, not scheduled — proximity-based zone definition.** `AtomSelection`'s grammar
+(`selection.rs`) has no distance operator; the common way people actually define an ML/QM inner
+region is "ligand + everything within a cutoff shell," not just by residue name/number. Two ways to
+get there, neither started: (a) a manual two-step using the existing `SpatialIndex::neighbor_pairs`
+to expand a residue selection into a shell at setup time, entirely in Rust/Python without touching
+the grammar; or (b) a `within(radius, spec)` grammar extension backed by the same `SpatialIndex`.
+(a) needs no parser change and is the more likely first move if this becomes real.
 
 **Deferred — composition-pattern refactor** (tech debt; reappraise, do not schedule yet)
 > Full audit prepended to `~/.claude/plans/golden-baking-liskov.md`. These are real but elective, and

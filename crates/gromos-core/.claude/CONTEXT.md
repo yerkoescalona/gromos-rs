@@ -10,7 +10,9 @@ None — foundation crate.
 `Topology`, `Configuration`, `Vec3`/`Mat3`, `Periodicity` (Vacuum/Rectangular/Triclinic),
 `Algorithm` trait + `AlgorithmSequence`, `AtomSelection`, `Stat`,
 `PairlistAlgorithm` (enum: Standard/CellList), `StandardPairlistAlgorithm`, `CellListPairlistAlgorithm`,
-`gather_chain`, `gather_bond`, `gather_molecules` (PBC gathering).
+`gather_chain`, `gather_bond`, `gather_molecules` (PBC gathering),
+`SpatialIndex` trait + `ConfigurationSpatialIndex` (query-based neighbor service for the
+`PotentialProvider` seam, PLAN.md 2.6).
 
 ## Status
 - Boundary: Vacuum ✓, Rectangular ✓, Triclinic ✓ (NTB=-1 truncated-octahedron)
@@ -22,6 +24,10 @@ None — foundation crate.
 - PBC gathering: `gather.rs` — `gather_chain`, `gather_bond`, `gather_molecules` ✓
 - Statistics: `stat.rs` — `Stat` with `ave()`, `rmsd()`, `ee()` (block averaging) ✓
 - Pairlist: `PairlistAlgorithm` enum wired everywhere (9a-0 ✓); `CellListPairlistAlgorithm` bit-identical to Standard (9a-1 ✓, margin=0); `water_1000_spc_gridcell` reference validates against gromosXX Grid_Cell_Pairlist
+- `SpatialIndex`: query-based neighbor service (`neighbor_pairs`, periodic-image shift per pair),
+  independent of the MD pairlist's charge-group/twin-range/solvent-sentinel shape. Used by every
+  `PotentialProvider` in `gromos-forces` (LJ+CRF, electrostatic embedding, SchNet) — not by the
+  production MD pairlist itself, which still uses `PairlistAlgorithm` above.
 
 ## Key files
 ```
@@ -31,6 +37,7 @@ src/gather.rs     — PBC molecule gathering
 src/stat.rs       — Stat, block-averaging ee()
 src/pairlist.rs   — StandardPairlistAlgorithm, CellListPairlistAlgorithm
 src/math.rs       — Vec3, Periodicity, truncoct_triclinic_*
+src/spatial_index.rs — SpatialIndex trait, ConfigurationSpatialIndex
 ```
 
 ## Crate-specific rules

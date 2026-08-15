@@ -14,8 +14,15 @@ matching gromosXX to reference tolerances.
 ## Status
 - Full MD loop ✓: NVE / NVT (Berendsen + NHC) / NPT
 - Force trajectory output (@trf) ✓: FREEFORCERED + CONSFORCERED, atom-by-atom tolerance 1e-6
-- **34/34 reference tests passing** (see PLAN.md Reference Test Status for the full matrix)
-- `CellListPairlistAlgorithm` exists in gromos-core but is **not yet wired here** — `StandardPairlistAlgorithm` is still the default; system-size heuristic is the remaining step (P1.6 deferred)
+- **37/39 reference tests passing** (2 ignored: `aladip_vacuum_fep` known FEP mismatch,
+  `aladip_vacuum_em` EM frame-count off-by-one — see PLAN.md Reference Test Status for the full matrix)
+- `PairlistAlgorithm::from_imd(imd.algorithm, …)` dispatches Standard/CellList here (PLAN.md 9a-0/
+  9a-1); CellList only activates on explicit `ALGORITHM grid_cell`, never via a size heuristic — all
+  37 active reference systems still use `standard`.
+- `test_provider_reference.rs` / `test_orchestrator_reference.rs` — gromosXX-reference tests for the
+  `PotentialProvider`/`ProviderOrchestrator` seam (PLAN.md 2.6/P2.8-2), not the main `md` binary path.
+  `schnet_nve_loop.rs` (feature `ml`) — real leapfrog loop driving `SchNetInteraction`, also not
+  wired into `md` itself (PLAN.md P2.8-6, still open).
 
 ## Key files
 ```
@@ -23,6 +30,9 @@ src/bin/md.rs                               — main MD driver, CLI, simulation 
 tests/test_gromosXX_references.rs           — integration tests vs gromosXX
 tests/run_references.py                     — generate gromosXX reference data
 tests/gromosXX_references/                  — reference input + expected output
+tests/test_provider_reference.rs            — LjCrfInteraction vs gromosXX (provider seam)
+tests/test_orchestrator_reference.rs        — ProviderOrchestrator vs gromosXX (multi-provider seam)
+tests/schnet_nve_loop.rs                    — SchNetInteraction + LeapFrog NVE loop (feature `ml`)
 ```
 
 ## Crate-specific rules

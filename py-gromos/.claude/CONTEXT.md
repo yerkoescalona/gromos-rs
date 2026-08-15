@@ -31,6 +31,10 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   `InputParameters.nvt(..., constraints="none")` on `aladip_solvated` diverges to ~95,000 K within 60
   steps (baked-in output, kept as documented contrast); `constraints="hbonds"` stays stable and tracks
   300 K. `SteepestDescent` + `AlgorithmSequence.minimize()` now importable from `gromos`; `.pyi` updated.
+- P3.6 ✓ — `tests/test_gromosXX_references.py`'s `REFERENCE_SYSTEMS` now covers all 37 active Rust
+  reference systems except the 2 explicitly-deferred FEP ones (was missing 18, all real Python-API
+  defects in `pyo3-gromos`, not test gaps — see that crate's CONTEXT.md). 121 tests (118 passed, 2
+  documented `POSITION_MISMATCH_SYSTEMS` skips for a pre-existing Rust-side `.trc` divergence).
 - Remaining P3 items:
   - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
