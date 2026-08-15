@@ -4,6 +4,7 @@ pub mod embedding;
 pub mod excluded;
 pub mod innerloops;
 pub mod interaction;
+pub mod mopac;
 pub mod params;
 pub mod perturbed;
 mod qm_subprocess;
@@ -15,6 +16,7 @@ pub use embedding::ElectrostaticEmbedding;
 pub use excluded::*;
 pub use innerloops::*;
 pub use interaction::LjCrfInteraction;
+pub use mopac::{MopacInteraction, MopacMethod};
 pub use params::*;
 pub use perturbed::*;
 #[cfg(feature = "ml")]
