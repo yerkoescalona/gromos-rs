@@ -79,6 +79,11 @@ gromosPlsPls
 md.trc
 md.trg
 docs/book
-.claude/worktrees/
 .gitignore
 py-gromos/site/
+
+# Benchmarking (BENCHMARKING.md): per-run scratch and generated systems are not tracked;
+# raw results (bench/results/*.json) and the GPU probe source are.
+bench/work/
+bench/systems/
+bench/gpu_probe/target/

@@ -9,7 +9,7 @@ on every system in crates/gromos-md/tests/gromosXX_references/ and overwrites
 the expected/ output files in place.
 
 Requires the patched binary at:
-    .local/gromosXX/md++/build/program/md
+    .local/gromosXX/md++/BUILD/program/md
 """
 
 import subprocess
@@ -20,7 +20,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 REF_DIR = REPO_ROOT / "crates" / "gromos-md" / "tests" / "gromosXX_references"
-MD_BIN = REPO_ROOT / ".local" / "gromosXX" / "md++" / "build" / "program" / "md"
+MD_BIN = REPO_ROOT / ".local" / "gromosXX" / "md++" / "BUILD" / "program" / "md"
 
 
 def parse_toml_str(text: str, key: str) -> str | None:

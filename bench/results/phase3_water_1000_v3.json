@@ -1,0 +1,130 @@
+[
+  {
+    "engine": "rust",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 1,
+    "externals": [
+      6.285868155013304,
+      6.355511898000259,
+      6.575461147003807
+    ],
+    "internals": [
+      6.27,
+      6.34,
+      6.56
+    ]
+  },
+  {
+    "engine": "gromosXX-omp",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 1,
+    "externals": [
+      6.982752597017679,
+      7.077410382014932,
+      7.589243460999569
+    ],
+    "internals": [
+      6.923,
+      7.021,
+      7.534
+    ]
+  },
+  {
+    "engine": "rust",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 2,
+    "externals": [
+      3.8080519910145085,
+      3.7287472039752174,
+      3.6880912960041314
+    ],
+    "internals": [
+      3.79,
+      3.72,
+      3.67
+    ]
+  },
+  {
+    "engine": "gromosXX-omp",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 2,
+    "externals": [
+      3.894128126994474,
+      3.8549835449957754,
+      3.8727112830092665
+    ],
+    "internals": [
+      3.83,
+      3.791,
+      3.811
+    ]
+  },
+  {
+    "engine": "rust",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 4,
+    "externals": [
+      2.3942616599961184,
+      2.797659809992183,
+      2.714520932000596
+    ],
+    "internals": [
+      2.38,
+      2.79,
+      2.7
+    ]
+  },
+  {
+    "engine": "gromosXX-omp",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 4,
+    "externals": [
+      2.3438266750017647,
+      2.618750055000419,
+      2.5144418080162723
+    ],
+    "internals": [
+      2.262,
+      2.544,
+      2.438
+    ]
+  },
+  {
+    "engine": "rust",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 8,
+    "externals": [
+      1.5228851749852765,
+      1.438475079019554,
+      1.393114317994332
+    ],
+    "internals": [
+      1.51,
+      1.43,
+      1.38
+    ]
+  },
+  {
+    "engine": "gromosXX-omp",
+    "system": "water_1000_spc_gridcell",
+    "steps": 2000,
+    "threads": 8,
+    "externals": [
+      1.8885188049753197,
+      1.575551121000899,
+      1.6058582919940818
+    ],
+    "internals": [
+      1.633,
+      1.462,
+      1.497
+    ]
+  }
+]
