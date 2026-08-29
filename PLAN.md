@@ -69,8 +69,9 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | aladip_solvated_em | 72  | SD EM + SHAKE + posres, solvated    | **PASS** |
 | 2   | nacl_1water_distres | 5  | distance restraint on Na-Cl pair (NTDIR=2, CDIR*w0) | **PASS** |
 | 4   | ch4_water_fep | 2998 | CH4→dummy in 999 SPC water, λ=0.5, twin-range NB FEP | **PASS** |
+| 4   | meoh_water_fep | 2862 | charged CH3OH→dummy in 953 SPC water, λ=0.5 (RF self/excluded-pair terms) | **FAIL, ignored** — CRF off by 0.16 kJ/mol at frame 0, LJ exact (2026-08-29) |
 
-**38 of 40 tests pass.** (2 ignored: `aladip_vacuum_fep` — known FEP mismatch; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
+**38 of 41 tests pass.** (3 ignored: `aladip_vacuum_fep` — FEP mismatch, bisected 2026-08-29 (see 1.7); `meoh_water_fep` — perturbed RF term for charged atoms; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
@@ -225,6 +226,15 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 - [x] dH/dλ accumulation, `.trg` output, `ext_ti_ana` integration
 - [x] `ch4_water_fep` passes to <1e-6 kJ/mol vs GROMOS; `ch4_water_fep` tracks dH/dλ in reference test
 - Note: perturbed RF self-term still needs second-sourcing from GROMOS book (flagged at `perturbed_nonbonded_term.cc:596,749,1444`). Zero-charge `ch4_water_fep` doesn't exercise it.
+  **2026-08-29: now exercised and failing** — `meoh_water_fep` (charged 54a7 CH3OH → dummies, λ=0.5):
+  LJ exact (3e-11), CRF off by 0.16 kJ/mol at frame 0. Reference in place, `ignore`d until fixed.
+- **`aladip_vacuum_fep` bisected (2026-08-29)** with single-block `.ptp` variants against the native
+  gromosXX (scratch, not committed): unperturbed run exact; `PERTBONDSTRETCH` exact; perturbed angle /
+  improper / proper-dihedral **energies are booked into the bond slot** (angle case: angle −0.715, bond
+  +0.715 — totals right, `.tre` columns wrong); soft bond/angle/improper energies differ slightly (real
+  formula differences); `PERTATOMPARAM` (charged, λ-mixed masses) differs in LJ, CRF *and* kinetic
+  (mass mixing convention); `PERTATOMPAIR` differs in LJ. Fix order: energy slots → charged perturbed
+  RF (also closes `meoh_water_fep`) → atom pairs → soft bonded → masses.
 
 **1.8 — Virtual atoms** — skip for now; not blocking any common use case
 - [ ] Port `algorithm/virtualatoms/` (aromatic centroids, lone pairs, TIP4P site)

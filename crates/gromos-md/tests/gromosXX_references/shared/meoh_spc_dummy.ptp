@@ -1,0 +1,40 @@
+TITLE
+methanol -> dummy perturbation topology (54a7 CH3OH building block)
+State A: Omet(IAC 36, -0.674) HMet(IAC 21, +0.408) CMet(IAC 35, +0.266)
+State B: dummy atoms (IAC 22, charge 0), masses unchanged, bonds unperturbed
+END
+PERTATOMPARAM
+# number of perturbed atoms
+   3
+#  NR  RES  NAME IAC(A) MASS(A) CHARGE(A) IAC(B)  MASS(B) CHARGE(B)  ALJ  ACRF
+    1    1   Omet  36   15.99940  -0.67400   22   15.99940  0.00000   0.5   0.5
+    2    1   HMet  21    1.00800   0.40800   22    1.00800  0.00000   0.5   0.5
+    3    1   CMet  35   15.03500   0.26600   22   15.03500  0.00000   0.5   0.5
+END
+PERTATOMPAIR
+   0
+END
+PERTBONDSTRETCH
+   0
+END
+PERTBONDSTRETCHH
+   0
+END
+PERTBONDANGLE
+   0
+END
+PERTBONDANGLEH
+   0
+END
+PERTIMPROPERDIH
+   0
+END
+PERTIMPROPERDIHH
+   0
+END
+PERTPROPERDIH
+   0
+END
+PERTPROPERDIHH
+   0
+END

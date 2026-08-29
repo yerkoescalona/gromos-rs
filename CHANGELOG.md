@@ -9,6 +9,14 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 
 ### Added (PLAN.md 3.9 step 5 — the first new term through the new door)
 
+- **`meoh_water_fep` reference system** (gromosXX native build, ten steps at λ = 0.5): 54a7 united-atom
+  methanol (charged) → dummies in 953 SPC waters, built with gromos++ `make_top` and the project's
+  `sim_box`, minimised and equilibrated with gromosXX. It exercises the perturbed reaction-field
+  self/excluded-pair terms that the zero-charge `ch4_water_fep` never could — and fails today (CRF off
+  by 0.16 kJ/mol at frame 0, LJ exact): registered as `ignore` in the Rust suite and a strict xfail in
+  the Python suite until the term is second-sourced (PLAN.md 1.7). The `aladip_vacuum_fep` mismatch was
+  bisected block by block against gromosXX; findings in PLAN.md 1.7.
+
 - **`Term("xtb", region=..., elements=[...], gfn=2, charge=0, multiplicity=1, work_dir=None,
   timeout_s=600, coupling="delta")`** — a real GFN-xTB subprocess (`XtbInteraction`) over a region,
   additive on top of the classical force field, no cargo feature. Wiring: the `TermSpec::Xtb`

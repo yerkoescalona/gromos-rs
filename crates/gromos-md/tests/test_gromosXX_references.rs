@@ -564,6 +564,10 @@ ref_test!(nacl_1water_distres, "nacl_1water_distres");
 // ── FEP / TI ────────────────────────────────────────────────────────────────
 ref_test!(ch4_water_fep, "ch4_water_fep");
 ref_test!(ignore: aladip_vacuum_fep, "aladip_vacuum_fep");
+// Charged perturbed atoms (54a7 CH3OH -> dummies): the perturbed reaction-field self/excluded-pair
+// terms that `ch4_water_fep` (zero charge) never exercised. Fails today on CRF only
+// (0.16 kJ/mol at frame 0; LJ exact) — PLAN.md 1.7 note. Un-ignore when the term is second-sourced.
+ref_test!(ignore: meoh_water_fep, "meoh_water_fep", "perturbed RF term for charged atoms: CRF differs by 0.16 kJ/mol (PLAN.md 1.7)");
 
 // ── Energy minimization ──────────────────────────────────────────────────────
 ref_test!(ignore: aladip_vacuum_em, "aladip_vacuum_em", "EM energy frame count off-by-one vs gromosXX");
