@@ -16,17 +16,15 @@ fn read_reference(filename: &str) -> Vec<Vec3> {
 
     if let Ok(file) = File::open(filename) {
         let reader = BufReader::new(file);
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
-                let parts: Vec<&str> = line_str.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    if let (Ok(x), Ok(y), Ok(z)) = (
-                        parts[0].parse::<f64>(),
-                        parts[1].parse::<f64>(),
-                        parts[2].parse::<f64>(),
-                    ) {
-                        positions.push(Vec3::new(x, y, z));
-                    }
+        for line_str in reader.lines().map_while(Result::ok) {
+            let parts: Vec<&str> = line_str.split_whitespace().collect();
+            if parts.len() >= 3 {
+                if let (Ok(x), Ok(y), Ok(z)) = (
+                    parts[0].parse::<f64>(),
+                    parts[1].parse::<f64>(),
+                    parts[2].parse::<f64>(),
+                ) {
+                    positions.push(Vec3::new(x, y, z));
                 }
             }
         }
@@ -38,7 +36,7 @@ fn read_reference(filename: &str) -> Vec<Vec3> {
 fn calc_centroid(positions: &[Vec3]) -> Vec3 {
     let mut sum = Vec3::ZERO;
     for pos in positions {
-        sum = sum + *pos;
+        sum += *pos;
     }
     sum / (positions.len() as f64)
 }
@@ -79,7 +77,7 @@ fn main() {
 
     let ref_centroid = calc_centroid(&ref_pos);
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Molecular fitting");
     eprintln!("# Reference atoms: {}", ref_pos.len());

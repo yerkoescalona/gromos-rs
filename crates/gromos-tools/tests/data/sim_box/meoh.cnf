@@ -1,0 +1,15 @@
+TITLE
+	MD++
+methanol in 323 SPC: NVT equilibration 300 K, 10 ps
+
+	final configuration
+END
+TIMESTEP
+           5000   10.000000000
+END
+POSITION
+# first 24 chars ignored
+    1 CH3OH Omet       1    0.256859070    2.799207111    3.000073588
+    1 CH3OH HMet       2    0.211280841    2.818682149    2.913221135
+    1 CH3OH CMet       3    0.334644410    2.923725145    3.043141077
+END

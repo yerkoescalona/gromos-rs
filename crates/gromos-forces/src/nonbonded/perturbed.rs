@@ -660,8 +660,8 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
         let (i, j) = (ap.i, ap.j);
 
         // Only handle pairs that are in the regular 1-4 list (the typical case)
-        let in_14 = one_four_pairs.get(i).map_or(false, |l| l.contains(&j))
-            || one_four_pairs.get(j).map_or(false, |l| l.contains(&i));
+        let in_14 = one_four_pairs.get(i).is_some_and(|l| l.contains(&j))
+            || one_four_pairs.get(j).is_some_and(|l| l.contains(&i));
         if !in_14 {
             continue;
         }
@@ -705,7 +705,7 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
         let f_crf_a = f_crf_reg;
 
         // b_type=None means atom pair disappears in state B → contributes 0
-        let (e_lj_b, f_lj_b) = ap.b_type.map_or((0.0, 0.0), |t| lj_pair(t));
+        let (e_lj_b, f_lj_b) = ap.b_type.map_or((0.0, 0.0), lj_pair);
         // An "excluded" state (file type 0) still carries the reaction-field term of an excluded
         // pair (gromosXX `rf_soft_interaction(r, 0, B_q, …)` in `perturbed_nonbonded_pair.cc`,
         // under `if (rf_excluded)` — NSLFEXCL): no 1/r, but the −crf_2cut3i·r² − crf_cut part

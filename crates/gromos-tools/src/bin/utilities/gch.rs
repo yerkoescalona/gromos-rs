@@ -42,17 +42,15 @@ fn main() {
     if let Some(path) = const_file {
         if let Ok(file) = File::open(&path) {
             let reader = BufReader::new(file);
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    let parts: Vec<&str> = line_str.split_whitespace().collect();
-                    if parts.len() >= 3 {
-                        if let (Ok(i), Ok(j), Ok(d)) = (
-                            parts[0].parse::<usize>(),
-                            parts[1].parse::<usize>(),
-                            parts[2].parse::<f64>(),
-                        ) {
-                            constraints.push((i - 1, j - 1, d));
-                        }
+            for line_str in reader.lines().map_while(Result::ok) {
+                let parts: Vec<&str> = line_str.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    if let (Ok(i), Ok(j), Ok(d)) = (
+                        parts[0].parse::<usize>(),
+                        parts[1].parse::<usize>(),
+                        parts[2].parse::<f64>(),
+                    ) {
+                        constraints.push((i - 1, j - 1, d));
                     }
                 }
             }
@@ -64,7 +62,7 @@ fn main() {
         constraints.push((0, 1, 0.1));
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Constraint history");
     eprintln!("# Constraints: {}", constraints.len());

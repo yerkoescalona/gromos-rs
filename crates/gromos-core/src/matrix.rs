@@ -36,6 +36,7 @@ impl<F: Float> Matrix3<F> {
 
     /// Create matrix from row values (row-major input, stored column-major)
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn from_rows(
         m00: F,
         m01: F,

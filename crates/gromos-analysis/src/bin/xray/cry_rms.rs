@@ -16,17 +16,15 @@ fn read_reference(filename: &str) -> Vec<Vec3> {
 
     if let Ok(file) = File::open(filename) {
         let reader = BufReader::new(file);
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
-                let parts: Vec<&str> = line_str.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    if let (Ok(x), Ok(y), Ok(z)) = (
-                        parts[0].parse::<f64>(),
-                        parts[1].parse::<f64>(),
-                        parts[2].parse::<f64>(),
-                    ) {
-                        positions.push(Vec3::new(x, y, z));
-                    }
+        for line_str in reader.lines().map_while(Result::ok) {
+            let parts: Vec<&str> = line_str.split_whitespace().collect();
+            if parts.len() >= 3 {
+                if let (Ok(x), Ok(y), Ok(z)) = (
+                    parts[0].parse::<f64>(),
+                    parts[1].parse::<f64>(),
+                    parts[2].parse::<f64>(),
+                ) {
+                    positions.push(Vec3::new(x, y, z));
                 }
             }
         }
@@ -83,7 +81,7 @@ fn main() {
         process::exit(1);
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Crystallography RMSD analysis");
     eprintln!("# Reference atoms: {}", ref_pos.len());

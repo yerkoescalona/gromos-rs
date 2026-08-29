@@ -243,10 +243,7 @@ fn main() {
                 total_hbonds_per_frame.push(hbonds.len());
 
                 for (hbond, dist, angle) in hbonds {
-                    hbond_stats
-                        .entry(hbond)
-                        .or_insert_with(Vec::new)
-                        .push((dist, angle));
+                    hbond_stats.entry(hbond).or_default().push((dist, angle));
                 }
 
                 if frame_count % 100 == 0 {

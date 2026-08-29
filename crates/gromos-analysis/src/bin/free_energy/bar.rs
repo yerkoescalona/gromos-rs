@@ -73,7 +73,7 @@ fn read_values(path: &str) -> Vec<f64> {
     });
     BufReader::new(file)
         .lines()
-        .filter_map(|l| l.ok())
+        .map_while(Result::ok)
         .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
         .filter_map(|l| l.trim().parse::<f64>().ok())
         .collect()

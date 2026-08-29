@@ -8,6 +8,12 @@
 //! - Enhanced sampling (local elevation, QM/MM, polarization)
 //!
 //! All calculations use f64 for molecular dynamics precision.
+//!
+//! The nonbonded kernels take their inputs as separate slices (positions, charges, types,
+//! parameters, pairlist, storage, …) — the flat signature is the point of a kernel, and it is
+//! what gromosXX's inner loops take too. Clippy's argument-count and index-loop lints are
+//! therefore off for this crate (`Cargo.toml` `[lints.clippy]` for the loop lint).
+#![allow(clippy::too_many_arguments, clippy::chunks_exact_to_as_chunks)]
 
 pub mod bonded;
 pub mod electrostatics;

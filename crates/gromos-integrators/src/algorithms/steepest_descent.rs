@@ -184,16 +184,10 @@ impl Algorithm for SteepestDescentAlgorithm {
         }
 
         // Zero velocities in both states (GROMOS: conf.old().vel = 0; conf.current().vel = 0)
-        for vel in &mut conf.old_mut().vel {
-            *vel = Vec3::ZERO;
-        }
-        for vel in &mut conf.current_mut().vel {
-            *vel = Vec3::ZERO;
-        }
+        conf.old_mut().vel.fill(Vec3::ZERO);
+        conf.current_mut().vel.fill(Vec3::ZERO);
         conf.current_mut().clear_forces();
-        for vel in &mut conf.current_mut().vel {
-            *vel = Vec3::ZERO;
-        }
+        conf.current_mut().vel.fill(Vec3::ZERO);
         conf.current_mut().clear_forces();
 
         Ok(())
@@ -201,5 +195,74 @@ impl Algorithm for SteepestDescentAlgorithm {
 
     fn name(&self) -> &str {
         "Steepest-Descent"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_core::topology::MolTypeAtom;
+
+    /// A topology of free atoms with the given masses (one solute molecule, no bonds;
+    /// `Topology::new()` already registers the solute instance).
+    fn bare(masses: &[f64]) -> Topology {
+        let mut topo = Topology::new();
+        topo.mass = masses.to_vec();
+        topo.inverse_mass = masses.iter().map(|m| 1.0 / m).collect();
+        topo.moltypes[0].atoms = masses
+            .iter()
+            .map(|m| MolTypeAtom {
+                name: "X".into(),
+                residue_nr: 0,
+                residue_name: String::new(),
+                iac: 0,
+                mass: *m,
+                charge: 0.0,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            })
+            .collect();
+        topo
+    }
+
+    #[test]
+    fn first_step_moves_along_the_normalised_force_by_the_initial_step_size() {
+        let topo = bare(&[1.0, 1.0]);
+        let mut conf = Configuration::new(2, 1, 1);
+        conf.current_mut().force[0] = Vec3::new(3.0, 0.0, 0.0);
+        conf.current_mut().force[1] = Vec3::new(0.0, 4.0, 0.0); // |F| = 5
+        let sim = SimulationState::new(0.002, 10); // step 0 ≤ min_steps
+        let mut sd = SteepestDescentAlgorithm::new().with_step_sizes(0.01, 0.05);
+        sd.apply(&topo, &mut conf, &sim).unwrap();
+        // displacement = step_size · F / |F|
+        assert!((conf.current().pos[0].x - 0.01 * 3.0 / 5.0).abs() < 1e-15);
+        assert!((conf.current().pos[1].y - 0.01 * 4.0 / 5.0).abs() < 1e-15);
+        assert_eq!(conf.current().vel[0], Vec3::ZERO);
+        assert!(!sd.is_converged());
+    }
+
+    #[test]
+    fn converges_when_the_energy_change_drops_below_the_tolerance() {
+        let topo = bare(&[1.0]);
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.current_mut().energies.potential_total = -10.0;
+        conf.old_mut().energies.potential_total = -10.00001;
+        let mut sim = SimulationState::new(0.002, 10);
+        sim.step = 5;
+        let mut sd = SteepestDescentAlgorithm::new().with_tolerance(0.001);
+        sd.apply(&topo, &mut conf, &sim).unwrap();
+        assert!(sd.is_converged());
+    }
+
+    #[test]
+    fn a_nan_force_is_reported_as_an_error() {
+        let topo = bare(&[1.0]);
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.current_mut().force[0] = Vec3::new(f64::NAN, 0.0, 0.0);
+        let sim = SimulationState::new(0.002, 10);
+        assert!(SteepestDescentAlgorithm::new()
+            .apply(&topo, &mut conf, &sim)
+            .is_err());
     }
 }

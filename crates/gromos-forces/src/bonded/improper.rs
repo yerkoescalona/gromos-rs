@@ -371,3 +371,144 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod improper_tests {
+    use super::*;
+    use gromos_core::topology::{Dihedral, ImproperDihedralParameters, MolTypeAtom};
+
+    fn four_atoms(k: f64, q0: f64) -> Topology {
+        let mut topo = Topology::new();
+        topo.mass = vec![12.0; 4];
+        topo.inverse_mass = vec![1.0 / 12.0; 4];
+        topo.moltypes[0].atoms = vec![
+            MolTypeAtom {
+                name: "C1".into(),
+                residue_nr: 0,
+                residue_name: String::new(),
+                iac: 0,
+                mass: 12.0,
+                charge: 0.0,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            },
+            MolTypeAtom {
+                name: "C2".into(),
+                residue_nr: 0,
+                residue_name: String::new(),
+                iac: 0,
+                mass: 12.0,
+                charge: 0.0,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            },
+            MolTypeAtom {
+                name: "C3".into(),
+                residue_nr: 0,
+                residue_name: String::new(),
+                iac: 0,
+                mass: 12.0,
+                charge: 0.0,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            },
+            MolTypeAtom {
+                name: "C4".into(),
+                residue_nr: 0,
+                residue_name: String::new(),
+                iac: 0,
+                mass: 12.0,
+                charge: 0.0,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            },
+        ];
+        topo.moltypes[0].improper_dihedrals.push(Dihedral {
+            i: 0,
+            j: 1,
+            k: 2,
+            l: 3,
+            dihedral_type: 0,
+        });
+        topo.improper_dihedral_parameters
+            .push(ImproperDihedralParameters { k, q0 });
+        topo
+    }
+
+    fn conf_with(pos: [Vec3; 4]) -> Configuration {
+        let mut conf = Configuration::new(4, 1, 1);
+        conf.current_mut().pos = pos.to_vec();
+        conf
+    }
+
+    #[test]
+    fn a_planar_group_at_zero_reference_has_no_energy_and_no_force() {
+        let topo = four_atoms(0.0510, 0.0);
+        let conf = conf_with([
+            Vec3::new(0.0, 0.1, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.1, 0.0, 0.0),
+            Vec3::new(0.2, 0.1, 0.0),
+        ]);
+        let r = calculate_improper_dihedral_forces(&topo, &conf);
+        assert!(r.energy.abs() < 1e-20);
+        assert!(r.forces.iter().all(|f| f.length() < 1e-12));
+    }
+
+    /// Central finite differences of the energy reproduce the analytic forces.
+    #[test]
+    fn forces_are_the_negative_gradient_of_the_energy() {
+        let topo = four_atoms(0.0510, 35.26439_f64.to_radians());
+        let base = [
+            Vec3::new(0.0, 0.1, 0.03),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.1, 0.0, -0.02),
+            Vec3::new(0.15, 0.12, 0.05),
+        ];
+        let conf = conf_with(base);
+        let analytic = calculate_improper_dihedral_forces(&topo, &conf);
+        assert!(analytic.energy > 0.0);
+        let h = 1e-6;
+        for a in 0..4 {
+            for d in 0..3 {
+                let mut plus = base;
+                let mut minus = base;
+                match d {
+                    0 => {
+                        plus[a].x += h;
+                        minus[a].x -= h;
+                    },
+                    1 => {
+                        plus[a].y += h;
+                        minus[a].y -= h;
+                    },
+                    _ => {
+                        plus[a].z += h;
+                        minus[a].z -= h;
+                    },
+                }
+                let e_plus = calculate_improper_dihedral_forces(&topo, &conf_with(plus)).energy;
+                let e_minus = calculate_improper_dihedral_forces(&topo, &conf_with(minus)).energy;
+                let fd = -(e_plus - e_minus) / (2.0 * h);
+                let an = match d {
+                    0 => analytic.forces[a].x,
+                    1 => analytic.forces[a].y,
+                    _ => analytic.forces[a].z,
+                };
+                assert!(
+                    (fd - an).abs() < 1e-6 * an.abs().max(1.0),
+                    "atom {a} dim {d}: fd {fd} vs {an}"
+                );
+            }
+        }
+        let total = analytic.forces.iter().fold(Vec3::ZERO, |acc, f| acc + *f);
+        assert!(
+            total.length() < 1e-12,
+            "forces do not sum to zero: {total:?}"
+        );
+    }
+}

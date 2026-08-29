@@ -168,3 +168,40 @@ pub fn write_bundle(
     std::fs::write(&path, text).map_err(|e| io("input.toml", e))?;
     Ok(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_written_bundle_reads_back_with_resolved_paths() {
+        let dir = std::env::temp_dir().join(format!("gromos_bundle_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let topo = dir.join("sys.top");
+        let conf = dir.join("sys.cnf");
+        std::fs::write(&topo, "").unwrap();
+        std::fs::write(&conf, "").unwrap();
+        let recipe = RunRecipe::default();
+        let manifest = write_bundle(&dir, &recipe, &topo, &conf, Some(10)).unwrap();
+        assert_eq!(manifest, dir.join("input.toml"));
+        assert!(dir.join("run.recipe.toml").exists() && dir.join("run.imd").exists());
+        let bundle = read_bundle(&manifest).unwrap();
+        assert_eq!(bundle.topology, topo);
+        assert_eq!(bundle.configuration, conf);
+        assert_eq!(
+            bundle.recipe.as_deref(),
+            Some(dir.join("run.recipe.toml").as_path())
+        );
+        let (_, loaded, _) = load_bundle(&manifest, &PassthroughPolicy::default()).unwrap();
+        assert_eq!(loaded.forcefield, recipe.forcefield);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_missing_manifest_is_an_io_error() {
+        assert!(matches!(
+            read_bundle("/nonexistent/input.toml"),
+            Err(RunError::Io { .. })
+        ));
+    }
+}

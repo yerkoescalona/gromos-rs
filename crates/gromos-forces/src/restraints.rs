@@ -1307,9 +1307,8 @@ impl JValueRestraint {
 
         // Calculate derivative dV/dφ = dV/dJ * dJ/dφ
         let dv_dj = self.k * delta_j;
-        let dj_dphi = -1.0
-            * memory_decay
-            * (2.0 * self.a * cos_phi_delta * sin_phi_delta + self.b * sin_phi_delta);
+        let dj_dphi =
+            -memory_decay * (2.0 * self.a * cos_phi_delta * sin_phi_delta + self.b * sin_phi_delta);
         let dv_dphi = dv_dj * dj_dphi;
 
         // Calculate force derivatives dphi/dr for each atom
@@ -1339,6 +1338,12 @@ impl JValueRestraint {
 #[derive(Debug, Clone)]
 pub struct JValueRestraints {
     pub restraints: Vec<JValueRestraint>,
+}
+
+impl Default for JValueRestraints {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl JValueRestraints {
@@ -1595,6 +1600,12 @@ impl RDCRestraint {
 #[derive(Debug, Clone)]
 pub struct RDCRestraints {
     pub restraints: Vec<RDCRestraint>,
+}
+
+impl Default for RDCRestraints {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RDCRestraints {

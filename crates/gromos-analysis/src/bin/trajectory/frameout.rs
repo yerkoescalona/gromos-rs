@@ -48,7 +48,7 @@ impl FrameSpec {
     fn matches(&self, idx: usize) -> bool {
         match self {
             FrameSpec::All => true,
-            FrameSpec::Every(n) => idx % n == 0,
+            FrameSpec::Every(n) => idx.is_multiple_of(*n),
             FrameSpec::Spec(list) => list.contains(&idx),
         }
     }
@@ -168,7 +168,7 @@ fn main() {
                     }
                 }
                 time_range = (
-                    tv.get(0).copied().unwrap_or(f64::NEG_INFINITY),
+                    tv.first().copied().unwrap_or(f64::NEG_INFINITY),
                     tv.get(1).copied().unwrap_or(f64::INFINITY),
                     tv.get(2).copied().unwrap_or(0.0),
                 );
@@ -183,10 +183,8 @@ fn main() {
         i += 1;
     }
 
-    if !extra_frames.is_empty() {
-        if matches!(frame_spec, FrameSpec::All) {
-            frame_spec = FrameSpec::Spec(extra_frames);
-        }
+    if !extra_frames.is_empty() && matches!(frame_spec, FrameSpec::All) {
+        frame_spec = FrameSpec::Spec(extra_frames);
     }
 
     let traj_file = traj_file.unwrap_or_else(|| {
@@ -319,9 +317,10 @@ fn main() {
                     };
 
                     // Topology for labelling (only when writing all atoms)
-                    let topo_for_write = if write_indices.as_ref().map_or(false, |idx| {
-                        idx.len() < topo_ref.map_or(0, |t| t.num_atoms())
-                    }) {
+                    let topo_for_write = if write_indices
+                        .as_ref()
+                        .is_some_and(|idx| idx.len() < topo_ref.map_or(0, |t| t.num_atoms()))
+                    {
                         None
                     } else {
                         topo_ref

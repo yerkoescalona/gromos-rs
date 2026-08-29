@@ -48,7 +48,7 @@ fn main() {
         i += 1;
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Rotational relaxation analysis");
     eprintln!("# Vector: atom {} to atom {}", atom_i + 1, atom_j + 1);

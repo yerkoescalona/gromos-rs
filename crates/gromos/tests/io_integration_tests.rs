@@ -63,8 +63,10 @@ MULTIBATH
       1
 #  TEMP0         TAU
   300.00      0.1000
-#  DOFSET: num, last_atom_index
-      1     0
+#  DOFSET
+      1
+#  LAST  COM-BATH  IR-BATH
+      2     1         1
 END
 
 CONSTRAINT
@@ -216,8 +218,10 @@ fn test_energy_writer_integration() {
 
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.contains("TITLE"));
-    assert!(content.contains("ENERTRJ"));
-    assert!(content.contains("Kinetic energy"));
+    // gromosXX's native layout (0.0.34): TIMESTEP + ENERGY03 + VOLUMEPRESSURE03 per frame
+    assert!(content.contains("ENERGY03"));
+    assert!(content.contains("VOLUMEPRESSURE03"));
+    assert_eq!(content.matches("TIMESTEP").count(), 10);
     assert_eq!(writer.frame_count(), 10);
 
     fs::remove_file(path).ok();

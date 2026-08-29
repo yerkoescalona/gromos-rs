@@ -73,7 +73,7 @@ fn main() {
     }
 
     // Read topology
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap_or_else(|e| {
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap_or_else(|e| {
         eprintln!("Error reading topology: {}", e);
         process::exit(1);
     });

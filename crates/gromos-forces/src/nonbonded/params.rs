@@ -152,3 +152,58 @@ pub struct CGPairGroup {
     /// End index (exclusive) into the flat pair array
     pub end: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reaction_field_of_the_interior_dielectric_is_a_plain_cutoff() {
+        // ε_RF = ε → C_RF = 0: no quadratic term, no force correction, shift 1/R_c
+        let crf = CRFParameters::new(1.4, 1.0, 1.0, 0.0);
+        assert_eq!(crf.crf_2cut3i, 0.0);
+        assert_eq!(crf.crf_cut3i, 0.0);
+        assert!((crf.crf_cut - 1.0 / 1.4).abs() < 1e-15);
+        assert!((crf.cutoff_sq - 1.96).abs() < 1e-12);
+    }
+
+    #[test]
+    fn spc_reaction_field_gives_the_gromos_constants() {
+        // ε_RF = 61: C_RF = 2(1−61)/(1+122) = −120/123
+        let crf = CRFParameters::new(1.4, 1.0, 61.0, 0.0);
+        let c_rf = 2.0 * (1.0 - 61.0) / (1.0 + 2.0 * 61.0);
+        assert!((crf.crf_cut3i - c_rf / 1.4_f64.powi(3)).abs() < 1e-15);
+        assert!((crf.crf_2cut3i - 0.5 * crf.crf_cut3i).abs() < 1e-15);
+        assert!((crf.crf_cut - (1.0 - c_rf / 2.0) / 1.4).abs() < 1e-15);
+    }
+
+    #[test]
+    fn lj_matrix_is_flat_and_symmetric() {
+        let mut a = LJParameters {
+            c6: 0.0,
+            c12: 0.0,
+            cs6: 0.0,
+            cs12: 0.0,
+        };
+        a.c6 = 1.0;
+        let mut b = LJParameters {
+            c6: 0.0,
+            c12: 0.0,
+            cs6: 0.0,
+            cs12: 0.0,
+        };
+        b.c6 = 2.0;
+        let mut ab = LJParameters {
+            c6: 0.0,
+            c12: 0.0,
+            cs6: 0.0,
+            cs12: 0.0,
+        };
+        ab.c6 = 3.0;
+        let m = LJParamMatrix::from_nested(&[vec![a, ab], vec![ab, b]]);
+        assert_eq!(m.n_types(), 2);
+        assert_eq!(m.get(0, 0).c6, 1.0);
+        assert_eq!(m.get(1, 1).c6, 2.0);
+        assert_eq!(m.get(0, 1).c6, m.get(1, 0).c6);
+    }
+}

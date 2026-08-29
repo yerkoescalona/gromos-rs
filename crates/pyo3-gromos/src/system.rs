@@ -141,7 +141,7 @@ impl PySystem {
             box_opt,
             Some(&self.topology.inner),
         )
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
     }
 
     fn __repr__(&self) -> String {
@@ -189,7 +189,7 @@ fn atom_count_ok(
         return Ok(());
     }
     let unsolvated = n_topo == n_solute && per_solvent > 0;
-    if unsolvated && n_conf >= n_solute && (n_conf - n_solute) % per_solvent == 0 {
+    if unsolvated && n_conf >= n_solute && (n_conf - n_solute).is_multiple_of(per_solvent) {
         return Ok(());
     }
     Err(if unsolvated {

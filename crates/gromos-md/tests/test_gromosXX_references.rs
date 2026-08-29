@@ -106,12 +106,10 @@ fn parse_energy03(path: &Path) -> Vec<EnergyFrame> {
                     in_ene = false;
                 }
             },
-            _ if in_ene => {
-                if !t.starts_with('#') && !t.is_empty() {
-                    // Single-value lines only (totals); multi-value lines fail parse
-                    if let Ok(v) = t.parse::<f64>() {
-                        vals.push(v);
-                    }
+            _ if in_ene && !t.starts_with('#') && !t.is_empty() => {
+                // Single-value lines only (totals); multi-value lines fail parse
+                if let Ok(v) = t.parse::<f64>() {
+                    vals.push(v);
                 }
             },
             _ => {},
@@ -227,38 +225,6 @@ fn assert_energy_close(actual: f64, expected: f64, label: &str) {
 //
 // Reads the POSITION block. Each data line: <label x4> <seq> x y z  (nm).
 // The first 24 chars are a label field that is ignored by gromosXX convention.
-
-fn parse_conf(path: &Path) -> Vec<[f64; 3]> {
-    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let mut positions = Vec::new();
-    let mut in_pos = false;
-
-    for line in content.lines() {
-        let t = line.trim();
-        if t == "POSITION" {
-            in_pos = true;
-            continue;
-        }
-        if t == "END" && in_pos {
-            break;
-        }
-        if in_pos && !t.starts_with('#') && !t.is_empty() {
-            // Format: resnum resname atomname atomnum x y z
-            let vals: Vec<f64> = t
-                .split_whitespace()
-                .filter_map(|s| s.parse::<f64>().ok())
-                .collect();
-            // first numeric token is an integer (resnum or atomnum), last three are x y z
-            if vals.len() >= 3 {
-                let x = vals[vals.len() - 3];
-                let y = vals[vals.len() - 2];
-                let z = vals[vals.len() - 1];
-                positions.push([x, y, z]);
-            }
-        }
-    }
-    positions
-}
 
 // ─── Test driver ────────────────────────────────────────────────────────────
 

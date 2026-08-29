@@ -88,11 +88,11 @@ impl CoordinateStats {
         let mut mean_positions = vec![Vec3::ZERO; n_atoms];
         for frame_positions in positions {
             for (i, pos) in frame_positions.iter().enumerate() {
-                mean_positions[i] = mean_positions[i] + *pos;
+                mean_positions[i] += *pos;
             }
         }
         for mean_pos in &mut mean_positions {
-            *mean_pos = *mean_pos / n_frames as f64;
+            *mean_pos /= n_frames as f64;
         }
 
         // Calculate overall mean
@@ -109,7 +109,7 @@ impl CoordinateStats {
                 variance.z += diff.z * diff.z;
             }
         }
-        variance = variance / (n_frames as f64 * n_atoms as f64);
+        variance /= n_frames as f64 * n_atoms as f64;
         let std_dev = Vec3::new(variance.x.sqrt(), variance.y.sqrt(), variance.z.sqrt());
 
         // Find min and max

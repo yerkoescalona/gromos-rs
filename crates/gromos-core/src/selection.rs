@@ -217,7 +217,7 @@ impl AtomSelection {
 
 /// Extract `keyword(...)` clauses from `spec`, returning (clause_contents, remaining_spec).
 /// Handles only the first occurrence; multiple `not()` are rare in practice.
-fn extract_parens_clause<'a>(spec: &'a str, keyword: &str) -> (String, String) {
+fn extract_parens_clause(spec: &str, keyword: &str) -> (String, String) {
     let pat = format!("{keyword}(");
     if let Some(start) = spec.find(&pat) {
         let after = &spec[start + pat.len()..];
@@ -313,7 +313,7 @@ fn resolve_mol_prefix(
         "a" => {
             // All molecules — or all atoms if molecules is empty
             if topology.molecules.is_empty() {
-                Ok(vec![0..n])
+                Ok(vec![std::ops::Range { start: 0, end: n }])
             } else {
                 Ok(topology.molecules.clone())
             }
@@ -372,26 +372,20 @@ fn resolve_mol_prefix(
                 .collect())
         },
         // ── Common mistake detection ──────────────────────────────────────────
-        "r" => {
-            return Err(SelectionError::ParseError(
-                "'r:' is not a valid prefix in gromos-rs AtomSpecifier\n  \
+        "r" => Err(SelectionError::ParseError(
+            "'r:' is not a valid prefix in gromos-rs AtomSpecifier\n  \
                  To select by residue number use: 1:res(N:a) or a:res(N:a)\n  \
                  To select by residue name use:   1:res(NAME:a)"
-                    .into(),
-            ));
-        },
-        "mol" | "molecule" => {
-            return Err(SelectionError::ParseError(
-                "'mol:' / 'molecule:' is not valid — use the molecule number directly, e.g. '1:a'"
-                    .into(),
-            ));
-        },
-        "res" | "residue" => {
-            return Err(SelectionError::ParseError(
-                "'res:' / 'residue:' is not a valid prefix — use '1:res(N:a)' or 'a:res(NAME:a)'"
-                    .into(),
-            ));
-        },
+                .into(),
+        )),
+        "mol" | "molecule" => Err(SelectionError::ParseError(
+            "'mol:' / 'molecule:' is not valid — use the molecule number directly, e.g. '1:a'"
+                .into(),
+        )),
+        "res" | "residue" => Err(SelectionError::ParseError(
+            "'res:' / 'residue:' is not a valid prefix — use '1:res(N:a)' or 'a:res(NAME:a)'"
+                .into(),
+        )),
         other => {
             // Number or number range: "1", "1-3"
             // Detect bare atom names used as prefix (e.g. "CA:a" instead of "a:CA")
@@ -440,8 +434,7 @@ fn resolve_atom_selector(
     }
 
     // res(residue_sel:atom_sel) — residue directive
-    if selector.starts_with("res(") {
-        let inner = selector.strip_prefix("res(").unwrap();
+    if let Some(inner) = selector.strip_prefix("res(") {
         if let Some(end) = find_matching_paren(inner) {
             let res_spec = &inner[..end];
             return resolve_res_directive(res_spec, mol_ranges, topology);
@@ -521,15 +514,13 @@ fn resolve_res_directive(
         for i in r.clone() {
             // Residue check
             let residue_ok = if res_by_name {
-                topology.residue_name(i).map_or(false, |rn| {
+                topology.residue_name(i).is_some_and(|rn| {
                     res_sel
                         .split(',')
                         .any(|s| s.trim().eq_ignore_ascii_case(rn))
                 })
             } else {
-                topology
-                    .residue_nr(i)
-                    .map_or(false, |rn| residue_filter(rn))
+                topology.residue_nr(i).is_some_and(&residue_filter)
             };
             if !residue_ok {
                 continue;
@@ -539,7 +530,7 @@ fn resolve_res_directive(
             let atom_ok = atom_all
                 || topology
                     .atom_name(i)
-                    .map_or(false, |name| atom_names.contains(name));
+                    .is_some_and(|name| atom_names.contains(name));
             if atom_ok {
                 indices.push(i);
             }

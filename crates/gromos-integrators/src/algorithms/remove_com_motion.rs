@@ -270,7 +270,7 @@ impl Algorithm for RemoveCOMMotion {
         // sign-derived periodic flags (gated on `skip_step`).
         let (mut remove_trans, mut remove_rot) = if sim.step == 0 {
             (self.initial_remove_trans, self.initial_remove_rot)
-        } else if self.skip_step > 0 && (sim.step % self.skip_step) == 0 {
+        } else if self.skip_step > 0 && sim.step.is_multiple_of(self.skip_step) {
             (true, true)
         } else {
             (false, false)
@@ -312,5 +312,88 @@ impl Algorithm for RemoveCOMMotion {
 
     fn name(&self) -> &str {
         "Remove_COM_Motion"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_core::topology::MolTypeAtom;
+
+    /// A topology of free atoms with the given masses (one solute molecule, no bonds;
+    /// `Topology::new()` already registers the solute instance).
+    fn bare(masses: &[f64]) -> Topology {
+        let mut topo = Topology::new();
+        topo.mass = masses.to_vec();
+        topo.inverse_mass = masses.iter().map(|m| 1.0 / m).collect();
+        topo.moltypes[0].atoms = masses
+            .iter()
+            .map(|m| MolTypeAtom {
+                name: "X".into(),
+                residue_nr: 0,
+                residue_name: String::new(),
+                iac: 0,
+                mass: *m,
+                charge: 0.0,
+                is_perturbed: false,
+                is_polarisable: false,
+                is_coarse_grained: false,
+            })
+            .collect();
+        topo
+    }
+
+    fn two_atoms() -> (Topology, Configuration) {
+        let topo = bare(&[1.0, 3.0]);
+        let mut conf = Configuration::new(2, 1, 1);
+        conf.current_mut().pos[1] = Vec3::new(1.0, 0.0, 0.0);
+        conf.current_mut().vel[0] = Vec3::new(1.0, 0.0, 0.0);
+        conf.current_mut().vel[1] = Vec3::new(1.0, 0.0, 0.0);
+        (topo, conf)
+    }
+
+    fn momentum(topo: &Topology, conf: &Configuration) -> Vec3 {
+        topo.mass[0] * conf.current().vel[0] + topo.mass[1] * conf.current().vel[1]
+    }
+
+    #[test]
+    fn nticom_1_removes_the_initial_translation() {
+        let (topo, mut conf) = two_atoms();
+        let sim = SimulationState::new(0.002, 10); // step 0
+        RemoveCOMMotion::new(1, 0)
+            .apply(&topo, &mut conf, &sim)
+            .unwrap();
+        let p = momentum(&topo, &conf);
+        assert!(p.length() < 1e-14, "COM momentum left: {p:?}");
+    }
+
+    #[test]
+    fn nticom_0_leaves_the_initial_velocities() {
+        let (topo, mut conf) = two_atoms();
+        let sim = SimulationState::new(0.002, 10);
+        RemoveCOMMotion::new(0, 0)
+            .apply(&topo, &mut conf, &sim)
+            .unwrap();
+        assert_eq!(conf.current().vel[0], Vec3::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn nscm_sets_the_period() {
+        let (topo, mut conf) = two_atoms();
+        let mut sim = SimulationState::new(0.002, 10);
+        let mut alg = RemoveCOMMotion::new(0, 5);
+        sim.step = 3;
+        alg.apply(&topo, &mut conf, &sim).unwrap();
+        assert_eq!(
+            conf.current().vel[0],
+            Vec3::new(1.0, 0.0, 0.0),
+            "no removal off-period"
+        );
+        sim.step = 5;
+        alg.apply(&topo, &mut conf, &sim).unwrap();
+        assert!(
+            momentum(&topo, &conf).length() < 1e-14,
+            "removal expected at step 5"
+        );
     }
 }

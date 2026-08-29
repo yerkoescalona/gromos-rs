@@ -247,20 +247,14 @@ impl Energy {
         self.kinetic_energy_new = 0.0;
         self.virial_total = 0.0;
 
-        for ke in &mut self.kinetic_energy {
-            *ke = 0.0;
-        }
+        self.kinetic_energy.fill(0.0);
 
         for row in &mut self.lj_energy {
-            for e in row {
-                *e = 0.0;
-            }
+            row.fill(0.0);
         }
 
         for row in &mut self.crf_energy {
-            for e in row {
-                *e = 0.0;
-            }
+            row.fill(0.0);
         }
     }
 }
@@ -308,18 +302,14 @@ impl State {
 
     /// Clear forces and virial
     pub fn clear_forces(&mut self) {
-        for f in &mut self.force {
-            *f = Vec3::ZERO;
-        }
+        self.force.fill(Vec3::ZERO);
         self.virial_tensor = Mat3::ZERO;
         self.kinetic_energy_tensor = Mat3::ZERO;
     }
 
     /// Clear constraint forces
     pub fn clear_constraint_forces(&mut self) {
-        for f in &mut self.constraint_force {
-            *f = Vec3::ZERO;
-        }
+        self.constraint_force.fill(Vec3::ZERO);
     }
 
     /// Calculate kinetic energy

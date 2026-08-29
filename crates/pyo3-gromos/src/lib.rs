@@ -116,6 +116,12 @@ impl PyVec3 {
 }
 
 /// Python-wrapped Energy container
+impl Default for PyEnergy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pyclass(name = "Energy")]
 #[derive(Clone, Debug)]
 pub struct PyEnergy {
@@ -333,6 +339,7 @@ pub fn rdf<'py>(
     let mut r_values = Vec::with_capacity(n_bins);
     let mut g_values = Vec::with_capacity(n_bins);
 
+    #[allow(clippy::needless_range_loop)] // one index over several arrays
     for bin in 0..n_bins {
         let r_inner = bin as f64 * dr;
         let r_outer = (bin + 1) as f64 * dr;

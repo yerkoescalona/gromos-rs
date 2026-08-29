@@ -52,3 +52,29 @@ impl Algorithm for EnergyCalculation {
         "Energy_Calculation"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn potential_total_is_the_sum_of_the_potential_terms() {
+        let topo = Topology::new();
+        let mut conf = Configuration::new(1, 1, 1);
+        let e = &mut conf.old_mut().energies;
+        e.bond_total = 1.0;
+        e.angle_total = 2.0;
+        e.dihedral_total = 3.0;
+        e.improper_total = 4.0;
+        e.lj_total = -10.0;
+        e.crf_total = -20.0;
+        e.kinetic_total = 100.0; // not part of the potential
+        e.distanceres_total = 7.0; // special, not part of the potential
+        let sim = SimulationState::new(0.002, 1);
+        EnergyCalculation::new()
+            .apply(&topo, &mut conf, &sim)
+            .unwrap();
+        assert_eq!(conf.old().energies.potential_total, -20.0);
+        assert_eq!(conf.old().energies.total(), 100.0 - 20.0 + 7.0);
+    }
+}

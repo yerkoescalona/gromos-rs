@@ -233,8 +233,8 @@ impl EdsBlock {
         ))
     }
 
-    /// Write EDS block to string
-    pub fn to_string(&self) -> String {
+    /// Render the EDS block as input text (also available through `Display`).
+    pub fn render(&self) -> String {
         let mut output = String::new();
         output.push_str("EDS\n");
 
@@ -287,6 +287,12 @@ impl EdsBlock {
         output.push_str("END\n");
 
         output
+    }
+}
+
+impl std::fmt::Display for EdsBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.render())
     }
 }
 

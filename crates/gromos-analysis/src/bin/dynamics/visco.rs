@@ -38,7 +38,7 @@ fn main() {
         i += 1;
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Viscosity calculation");
     eprintln!("# Temperature: {} K", temperature);
@@ -60,7 +60,7 @@ fn main() {
                 let density = n_atoms as f64 / volume;
 
                 // Rough estimate: viscosity ~ sqrt(T) * density
-                let visco_estimate = density * (temperature as f64).sqrt() * 0.1;
+                let visco_estimate = density * f64::sqrt(temperature) * 0.1;
 
                 avg_stress += visco_estimate;
                 frame_count += 1;

@@ -378,7 +378,7 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
                         println!();
                     }
                 }
-                if sorted.len() % 20 != 0 {
+                if !sorted.len().is_multiple_of(20) {
                     println!();
                 }
             }
@@ -396,7 +396,7 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
                         println!();
                     }
                 }
-                if sorted.len() % 20 != 0 {
+                if !sorted.len().is_multiple_of(20) {
                     println!();
                 }
             }

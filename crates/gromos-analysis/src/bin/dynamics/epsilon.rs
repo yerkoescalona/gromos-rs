@@ -51,9 +51,9 @@ fn main() {
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
     let topo = build_topology(topo_data);
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Dielectric constant calculation");
     eprintln!("# Temperature: {} K", temperature);
@@ -68,7 +68,7 @@ fn main() {
                 for (idx, pos) in frame.positions.iter().enumerate() {
                     if idx < topo.charge.len() {
                         let charge = topo.charge[idx];
-                        dipole = dipole + *pos * charge;
+                        dipole += *pos * charge;
                     }
                 }
 

@@ -129,12 +129,12 @@ fn calc_center_of_mass(positions: &[Vec3], masses: &[f64], atom_selection: &[usi
     let mut total_mass = 0.0;
 
     for &idx in atom_selection {
-        com = com + positions[idx] * (masses[idx]);
+        com += positions[idx] * (masses[idx]);
         total_mass += masses[idx];
     }
 
     if total_mass > 0.0 {
-        com = com / (total_mass);
+        com /= total_mass;
     }
 
     com
@@ -145,9 +145,9 @@ fn calc_rgyr_unweighted(positions: &[Vec3], atom_selection: &[usize]) -> f64 {
     // Calculate geometric center
     let mut center = Vec3::ZERO;
     for &idx in atom_selection {
-        center = center + positions[idx];
+        center += positions[idx];
     }
-    center = center / atom_selection.len() as f64;
+    center /= atom_selection.len() as f64;
 
     // Calculate Rg²
     let mut rg_squared = 0.0;

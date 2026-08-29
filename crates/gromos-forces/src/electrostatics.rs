@@ -437,17 +437,17 @@ fn assign_charges_to_grid(
         let u_z = (pos.z / h_z) % grid_z as f64;
 
         // Nearest grid point (for even spline order, use grid center)
-        let k_x = if spline_order % 2 == 0 {
+        let k_x = if spline_order.is_multiple_of(2) {
             u_x.floor() as i32
         } else {
             u_x.round() as i32
         };
-        let k_y = if spline_order % 2 == 0 {
+        let k_y = if spline_order.is_multiple_of(2) {
             u_y.floor() as i32
         } else {
             u_y.round() as i32
         };
-        let k_z = if spline_order % 2 == 0 {
+        let k_z = if spline_order.is_multiple_of(2) {
             u_z.floor() as i32
         } else {
             u_z.round() as i32
@@ -606,8 +606,8 @@ fn fft_3d_forward(
 
     // Create FFTW plan and execute
     let mut output = vec![c64::new(0.0, 0.0); nx * ny as f64 * (nz / 2 + 1)];
-    let mut plan: R2CPlan64 = R2CPlan::aligned(&[nx, ny, nz], Flag::MEASURE).unwrap();
-    plan.r2c(&mut input, &mut output).unwrap();
+    let mut plan: R2CPlan64 = R2CPlan::aligned(&[nx, ny, nz], Flag::MEASURE).expect("FFTW real-to-complex plan for the PME grid");
+    plan.r2c(&mut input, &mut output).expect("FFTW forward transform of the PME grid");
 
     // Convert to 3D complex grid
     let mut complex_grid = vec![vec![vec![Complex64::new(0.0, 0.0); nz / 2 + 1]; ny]; nx];
@@ -717,8 +717,8 @@ fn fft_3d_inverse(
 
     // Execute inverse FFT
     let mut output = vec![0.0; nx * ny as f64 * nz as f64];
-    let mut plan: C2RPlan64 = C2RPlan::aligned(&[nx, ny, nz], Flag::MEASURE).unwrap();
-    plan.c2r(&mut input, &mut output).unwrap();
+    let mut plan: C2RPlan64 = C2RPlan::aligned(&[nx, ny, nz], Flag::MEASURE).expect("FFTW complex-to-real plan for the PME grid");
+    plan.c2r(&mut input, &mut output).expect("FFTW backward transform of the PME grid");
 
     // Normalize and convert to 3D grid
     let norm = 1.0 / (nx * ny as f64 * nz as f64);
@@ -927,17 +927,17 @@ fn interpolate_forces_from_grid(
         let u_z = (pos.z / h_z) % grid_z as f64;
 
         // Nearest grid point
-        let k_x = if spline_order % 2 == 0 {
+        let k_x = if spline_order.is_multiple_of(2) {
             u_x.floor() as i32
         } else {
             u_x.round() as i32
         };
-        let k_y = if spline_order % 2 == 0 {
+        let k_y = if spline_order.is_multiple_of(2) {
             u_y.floor() as i32
         } else {
             u_y.round() as i32
         };
-        let k_z = if spline_order % 2 == 0 {
+        let k_z = if spline_order.is_multiple_of(2) {
             u_z.floor() as i32
         } else {
             u_z.round() as i32

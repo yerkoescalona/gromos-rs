@@ -186,7 +186,7 @@ pub fn kabsch_rotation(
 /// Modifies `positions` in-place: applies the optimal rotation + translation.
 /// Returns the rotation matrix applied.
 pub fn superimpose(
-    positions: &mut Vec<Vec3>,
+    positions: &mut [Vec3],
     reference: &[Vec3],
     fit_indices: &[usize],
     weights: Option<&[f64]>,
@@ -212,7 +212,7 @@ pub fn rmsd(positions: &[Vec3], reference: &[Vec3], indices: &[usize]) -> f64 {
 
 /// Superimpose then compute RMSD over `rmsd_indices` (may differ from `fit_indices`).
 pub fn rmsd_after_fit(
-    positions: &mut Vec<Vec3>,
+    positions: &mut [Vec3],
     reference: &[Vec3],
     fit_indices: &[usize],
     rmsd_indices: &[usize],

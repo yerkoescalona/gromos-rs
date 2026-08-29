@@ -692,7 +692,7 @@ mod tests {
         );
         // Forces equal and opposite
         assert!((res.forces[0].x + res.forces[1].x).abs() < 1e-9);
-        assert_eq!(res.lambda_derivative.is_finite(), true);
+        assert!(res.lambda_derivative.is_finite());
     }
 
     #[test]

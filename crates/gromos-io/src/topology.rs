@@ -260,6 +260,7 @@ fn parse_name_block<I: Iterator<Item = Result<String, std::io::Error>>>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_soluteatom<I: Iterator<Item = Result<String, std::io::Error>>>(
     lines: &mut I,
     n_atoms: &mut usize,
@@ -1450,7 +1451,7 @@ pub fn write_topology_file<P: AsRef<Path>>(
         writeln!(writer, "BOND").map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "# NBH: number of bonds")
             .map_err(|e| IoError::WriteError(e.to_string()))?;
-        writeln!(writer, "{}", &topo.moltypes[0].bonds.len())
+        writeln!(writer, "{}", topo.moltypes[0].bonds.len())
             .map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "#  IB   JB  ICB").map_err(|e| IoError::WriteError(e.to_string()))?;
         for bond in &topo.moltypes[0].bonds {
@@ -1493,7 +1494,7 @@ pub fn write_topology_file<P: AsRef<Path>>(
         writeln!(writer, "BONDANGLE").map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "# NTHEH: number of angles")
             .map_err(|e| IoError::WriteError(e.to_string()))?;
-        writeln!(writer, "{}", &topo.moltypes[0].angles.len())
+        writeln!(writer, "{}", topo.moltypes[0].angles.len())
             .map_err(|e| IoError::WriteError(e.to_string()))?;
         writeln!(writer, "#  IT   JT   KT  ICT").map_err(|e| IoError::WriteError(e.to_string()))?;
         for angle in &topo.moltypes[0].angles {

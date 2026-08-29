@@ -204,3 +204,63 @@ pub fn one_four_interaction_loop<BC: BoundaryCondition>(
         n_pairs
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_core::math::Vacuum;
+
+    /// Two excluded solute atoms: the self terms plus the excluded-pair reaction-field term,
+    /// forces equal and opposite along the pair vector (gromosXX `RF_excluded_interaction`).
+    #[test]
+    fn excluded_pair_energy_and_forces_follow_the_reaction_field_formula() {
+        let crf = CRFParameters::new(1.4, 1.0, 61.0, 0.0);
+        let charges = [0.5, -0.3];
+        let exclusions = vec![vec![1], vec![]];
+        let r = Vec3::new(0.1, 0.2, 0.0);
+        let positions = [Vec3::ZERO, r];
+        let fpepsi = 138.9354;
+        let mut storage = ForceStorage::new(2);
+        rf_excluded_interactions(
+            &charges,
+            &exclusions,
+            &positions,
+            &crf,
+            &Vacuum,
+            fpepsi,
+            &mut storage,
+            2,
+        );
+        let q_prod = charges[0] * charges[1] * fpepsi;
+        let expected = -0.5 * (charges[0].powi(2) + charges[1].powi(2)) * fpepsi * crf.crf_cut
+            + q_prod * (-crf.crf_2cut3i * r.length_squared() - crf.crf_cut);
+        assert!(
+            (storage.e_crf - expected).abs() < 1e-12,
+            "{} vs {expected}",
+            storage.e_crf
+        );
+        let f = (positions[0] - positions[1]) * (q_prod * crf.crf_cut3i);
+        assert!((storage.forces[0] - f).length() < 1e-12);
+        assert!((storage.forces[1] + f).length() < 1e-12);
+    }
+
+    #[test]
+    fn only_solute_atoms_get_self_terms() {
+        let crf = CRFParameters::new(1.4, 1.0, 61.0, 0.0);
+        let charges = [1.0, 1.0];
+        let exclusions = vec![vec![], vec![]];
+        let positions = [Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)];
+        let mut storage = ForceStorage::new(2);
+        rf_excluded_interactions(
+            &charges,
+            &exclusions,
+            &positions,
+            &crf,
+            &Vacuum,
+            1.0,
+            &mut storage,
+            1,
+        );
+        assert!((storage.e_crf - (-0.5 * crf.crf_cut)).abs() < 1e-15);
+    }
+}

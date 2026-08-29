@@ -41,9 +41,9 @@ fn main() {
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
     let topo = build_topology(topo_data);
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     println!("# Time (ps)    COG/COM_x (nm)  COG/COM_y (nm)  COG/COM_z (nm)");
 
@@ -58,22 +58,22 @@ fn main() {
                     for (i, pos) in frame.positions.iter().enumerate() {
                         if i < topo.mass.len() {
                             let mass = topo.mass[i];
-                            com = com + *pos * mass;
+                            com += *pos * mass;
                             total_mass += topo.mass[i];
                         }
                     }
 
                     if total_mass > 0.0 {
-                        com = com / (total_mass);
+                        com /= total_mass;
                     }
                     com
                 } else {
                     // Center of geometry
                     let mut cog = Vec3::ZERO;
                     for pos in &frame.positions {
-                        cog = cog + *pos;
+                        cog += *pos;
                     }
-                    cog = cog / frame.positions.len() as f64;
+                    cog /= frame.positions.len() as f64;
                     cog
                 };
 

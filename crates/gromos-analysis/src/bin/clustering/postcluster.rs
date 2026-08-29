@@ -42,11 +42,9 @@ fn main() {
     if let Some(path) = cluster_file {
         if let Ok(file) = File::open(&path) {
             let reader = BufReader::new(file);
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    if let Ok(cluster_id) = line_str.trim().parse::<usize>() {
-                        assignments.push(cluster_id);
-                    }
+            for line_str in reader.lines().map_while(Result::ok) {
+                if let Ok(cluster_id) = line_str.trim().parse::<usize>() {
+                    assignments.push(cluster_id);
                 }
             }
         }

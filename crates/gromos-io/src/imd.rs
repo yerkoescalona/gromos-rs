@@ -484,7 +484,7 @@ fn parse_block(
             // Line 0: NPM NSM
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.npm = parse_usize(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -496,7 +496,7 @@ fn parse_block(
             // Line 0: NSTLIM T DT
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.nstlim = parse_usize(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -511,7 +511,7 @@ fn parse_block(
             // Line 0: NTB NDFMIN
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntb = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -611,7 +611,7 @@ fn parse_block(
             //   Lines 2-4: reference pressure (3x3)
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     // Parse COUPLE keyword/number
                     let couple = match v[0].to_lowercase().as_str() {
                         "off" => 0,
@@ -679,8 +679,8 @@ fn parse_block(
                         for row in 0..3 {
                             if dl < data_lines.len() {
                                 let pv = parse_values(&data_lines[dl]);
-                                for col in 0..3.min(pv.len()) {
-                                    pp.pressure0[row][col] = parse_f64(&pv[col])?;
+                                for (col, tok) in pv.iter().take(3).enumerate() {
+                                    pp.pressure0[row][col] = parse_f64(tok)?;
                                 }
                                 dl += 1;
                             }
@@ -753,8 +753,8 @@ fn parse_block(
             //   Line 1: NEGR NRE(1) NRE(2) ... NRE(NEGR)
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                for i in 0..6.min(v.len()) {
-                    params.ntf[i] = parse_i32(&v[i])?;
+                for (i, tok) in v.iter().take(6).enumerate() {
+                    params.ntf[i] = parse_i32(tok)?;
                 }
             }
             if data_lines.len() >= 2 {
@@ -773,7 +773,7 @@ fn parse_block(
             //   Line 0: ALGORITHM NSNB RCUTP RCUTL SIZE TYPE
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     // ALGORITHM: faithful to gromosXX in_parameter.cc:1419-1422
                     //   "standard" / 0 → Standard_Pairlist_Algorithm
                     //   "grid"     / 1 → Extended_Grid_Pairlist_Algorithm (production default)
@@ -823,7 +823,7 @@ fn parse_block(
             }
             if data_lines.len() >= 2 {
                 let v = parse_values(&data_lines[1]);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.appak = parse_f64(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -899,7 +899,7 @@ fn parse_block(
             //   Line 3: IG TEMPI
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntivel = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -914,7 +914,7 @@ fn parse_block(
             }
             if data_lines.len() >= 2 {
                 let v = parse_values(&data_lines[1]);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntishi = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -933,7 +933,7 @@ fn parse_block(
             }
             if data_lines.len() >= 4 {
                 let v = parse_values(&data_lines[3]);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ig = v[0].parse::<i64>().map_err(|_| {
                         IoError::ParseError(format!("expected an integer seed, found {:?}", v[0]))
                     })?;
@@ -948,7 +948,7 @@ fn parse_block(
             //   Line 0: NTWX NTWSE NTWV NTWF NTWE NTWG NTWB
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntwx = parse_usize(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -976,7 +976,7 @@ fn parse_block(
             //   Line 0: NTPR NTPP
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntpr = parse_usize(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -988,7 +988,7 @@ fn parse_block(
             // Line 0: NSCM
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.nscm = parse_i32(&v[0])?;
                 }
             }
@@ -998,7 +998,7 @@ fn parse_block(
             //   Line 0: NTPOR NTPORB NTPORS CPOR
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntpor = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -1017,7 +1017,7 @@ fn parse_block(
             //   NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE VDIR NTWDIR
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntdir = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -1049,7 +1049,7 @@ fn parse_block(
             //   ALPHLJ ALPHC NLAM NSCALE
             let combined: Vec<String> = data_lines.iter().flat_map(|l| parse_values(l)).collect();
             let v = &combined[..];
-            if v.len() >= 1 {
+            if !v.is_empty() {
                 params.ntg = parse_i32(&v[0])?;
             }
             if v.len() >= 2 {
@@ -1079,7 +1079,7 @@ fn parse_block(
             //   Line 0: NTEM NCYC DELE DX0 DXM NMIN FLIM
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
-                if v.len() >= 1 {
+                if !v.is_empty() {
                     params.ntem = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
@@ -1531,16 +1531,15 @@ MULTIBATH\n    {algo_line}\n#   NBATHS\n    1\n#   TEMP0  TAU\n    300.0  0.1\n#
         }
 
         // 0 = Berendsen / weak-coupling
-        let p = read_imd_file(&write_tmp(&make_imd("weak-coupling"), "nhc_wc")).unwrap();
+        let p = read_imd_file(write_tmp(&make_imd("weak-coupling"), "nhc_wc")).unwrap();
         assert_eq!(p.temp_bath[0].algorithm, 0, "weak-coupling should map to 0");
 
         // 1 = NHC single
-        let p = read_imd_file(&write_tmp(&make_imd("nose-hoover"), "nhc_nh")).unwrap();
+        let p = read_imd_file(write_tmp(&make_imd("nose-hoover"), "nhc_nh")).unwrap();
         assert_eq!(p.temp_bath[0].algorithm, 1, "nose-hoover should map to 1");
 
         // N = NHC chain of length N (N >= 2)
-        let p =
-            read_imd_file(&write_tmp(&make_imd("nose-hoover-chains  3"), "nhc_chain3")).unwrap();
+        let p = read_imd_file(write_tmp(&make_imd("nose-hoover-chains  3"), "nhc_chain3")).unwrap();
         assert_eq!(
             p.temp_bath[0].algorithm, 3,
             "nose-hoover-chains 3 should map to 3"
@@ -1548,10 +1547,10 @@ MULTIBATH\n    {algo_line}\n#   NBATHS\n    1\n#   TEMP0  TAU\n    300.0  0.1\n#
         assert_eq!(p.temp_bath[0].nhc_chain, 3, "nhc_chain should be 3");
 
         // Numeric fallback: "0" → 0, "1" → 1
-        let p = read_imd_file(&write_tmp(&make_imd("0"), "nhc_num0")).unwrap();
+        let p = read_imd_file(write_tmp(&make_imd("0"), "nhc_num0")).unwrap();
         assert_eq!(p.temp_bath[0].algorithm, 0, "numeric 0 should map to 0");
 
-        let p = read_imd_file(&write_tmp(&make_imd("1"), "nhc_num1")).unwrap();
+        let p = read_imd_file(write_tmp(&make_imd("1"), "nhc_num1")).unwrap();
         assert_eq!(p.temp_bath[0].algorithm, 1, "numeric 1 should map to 1");
     }
 

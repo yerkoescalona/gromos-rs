@@ -174,10 +174,8 @@ pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoErr
                             IoError::ParseError(format!("Invalid GENBOX type: {}", parts[0]))
                         })?;
                     },
-                    1 => {
-                        if parts.len() >= 3 {
-                            box_dims = parse_vec3(&parts[..3])?;
-                        }
+                    1 if parts.len() >= 3 => {
+                        box_dims = parse_vec3(&parts[..3])?;
                     },
                     _ => {}, // angles, origin lines - skip for now
                 }
@@ -322,10 +320,8 @@ pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData
                             IoError::ParseError(format!("Invalid GENBOX type: {}", parts[0]))
                         })?;
                     },
-                    1 => {
-                        if parts.len() >= 3 {
-                            box_dims = parse_vec3(&parts[..3])?;
-                        }
+                    1 if parts.len() >= 3 => {
+                        box_dims = parse_vec3(&parts[..3])?;
                     },
                     _ => {},
                 }

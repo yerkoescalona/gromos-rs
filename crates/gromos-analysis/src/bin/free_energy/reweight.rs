@@ -38,18 +38,18 @@ fn main() {
     }
 
     // Read weights
-    let file = File::open(&weights_file.unwrap()).unwrap();
+    let file = File::open(weights_file.unwrap()).unwrap();
     let reader = BufReader::new(file);
     let weights: Vec<f64> = reader
         .lines()
-        .filter_map(|line| line.ok())
+        .map_while(Result::ok)
         .filter(|line| !line.starts_with('#') && !line.is_empty())
         .filter_map(|line| line.trim().parse().ok())
         .collect();
 
     eprintln!("# Loaded {} weights", weights.len());
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     println!("# Frame    Time (ps)    Weight");
 

@@ -23,7 +23,7 @@ fn calc_angle(pos1: (f64, f64, f64), pos2: (f64, f64, f64), pos3: (f64, f64, f64
     let len2 = (v2x * v2x + v2y * v2y + v2z * v2z).sqrt();
 
     if len1 > 0.0 && len2 > 0.0 {
-        let cos_theta = (dot / (len1 * len2)).max(-1.0).min(1.0);
+        let cos_theta = (dot / (len1 * len2)).clamp(-1.0, 1.0);
         cos_theta.acos().to_degrees()
     } else {
         0.0
@@ -57,9 +57,9 @@ fn main() {
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
     let topo = build_topology(topo_data);
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     let n_angles = topo.moltypes[0].angles.len();
 

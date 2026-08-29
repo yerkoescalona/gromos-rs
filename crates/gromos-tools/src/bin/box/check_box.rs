@@ -27,7 +27,7 @@ fn main() {
         i += 1;
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     println!("# Frame    Time (ps)    Box_X (nm)    Box_Y (nm)    Box_Z (nm)    Volume (nm³)");
 

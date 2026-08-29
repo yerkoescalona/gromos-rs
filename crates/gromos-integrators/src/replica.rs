@@ -202,8 +202,7 @@ impl Replica {
         // Nonbonded forces (LJ + CRF)
         let nonbonded_storage = if self.parallel_forces {
             // Convert pairlist to (u32, u32) format
-            let pairlist_short: Vec<(u32, u32)> =
-                self.pairlist.solute_short.iter().copied().collect();
+            let pairlist_short: Vec<(u32, u32)> = self.pairlist.solute_short.to_vec();
 
             // Convert charge from Vec<f64> to Vec<f32> for compatibility
 
@@ -223,8 +222,7 @@ impl Replica {
             )
         } else {
             // Convert pairlist to (u32, u32) format
-            let pairlist_short: Vec<(u32, u32)> =
-                self.pairlist.solute_short.iter().copied().collect();
+            let pairlist_short: Vec<(u32, u32)> = self.pairlist.solute_short.to_vec();
 
             // Convert charge from Vec<f64> to Vec<f32> for compatibility
 
@@ -355,7 +353,7 @@ impl Replica {
 
             // Scale velocities
             for vel in self.configuration.current_mut().vel.iter_mut() {
-                *vel = *vel * scale_factor;
+                *vel *= scale_factor;
             }
 
             // Recalculate kinetic energy

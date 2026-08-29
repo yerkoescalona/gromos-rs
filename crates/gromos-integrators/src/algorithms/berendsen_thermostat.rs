@@ -124,3 +124,59 @@ impl Algorithm for BerendsenThermostat {
         "Berendsen_Thermostat"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_core::math::Vec3;
+
+    /// One atom, three degrees of freedom, τ = Δt: one step scales the velocities so that the
+    /// new kinetic energy is exactly the target temperature's.
+    #[test]
+    fn tau_equal_to_dt_reaches_the_target_temperature_in_one_step() {
+        let topo = Topology::new();
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.current_mut().vel[0] = Vec3::new(1.0, 2.0, 2.0); // |v|² = 9
+        let mass = 4.0;
+        let ekin = 0.5 * mass * 9.0;
+        conf.current_mut().energies.kinetic_energy_new = ekin;
+        let dof = 3.0;
+        let t_free = 2.0 * ekin / (dof * kB);
+        let t0 = 300.0;
+        let dt = 0.002;
+        let sim = SimulationState::new(dt, 1);
+        let mut bath = BerendsenThermostat::new_single_bath(t0, dt, dof, 1);
+        bath.apply(&topo, &mut conf, &sim).unwrap();
+        let scale = (t0 / t_free).sqrt();
+        let v = conf.current().vel[0];
+        assert!((v.x - scale).abs() < 1e-12 && (v.y - 2.0 * scale).abs() < 1e-12);
+        let ekin_after = 0.5 * mass * v.length_squared();
+        assert!((2.0 * ekin_after / (dof * kB) - t0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn negative_tau_disables_the_bath() {
+        let topo = Topology::new();
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.current_mut().vel[0] = Vec3::new(1.0, 0.0, 0.0);
+        conf.current_mut().energies.kinetic_energy_new = 0.5;
+        let sim = SimulationState::new(0.002, 1);
+        let mut bath = BerendsenThermostat::new_single_bath(300.0, -1.0, 3.0, 1);
+        bath.apply(&topo, &mut conf, &sim).unwrap();
+        assert_eq!(conf.current().vel[0], Vec3::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_system_already_at_the_target_is_left_alone() {
+        let topo = Topology::new();
+        let mut conf = Configuration::new(1, 1, 1);
+        let dof = 3.0;
+        let t0 = 300.0;
+        conf.current_mut().vel[0] = Vec3::new(1.0, 0.0, 0.0);
+        conf.current_mut().energies.kinetic_energy_new = 0.5 * dof * kB * t0;
+        let sim = SimulationState::new(0.002, 1);
+        let mut bath = BerendsenThermostat::new_single_bath(t0, 0.1, dof, 1);
+        bath.apply(&topo, &mut conf, &sim).unwrap();
+        assert!((conf.current().vel[0].x - 1.0).abs() < 1e-12);
+    }
+}

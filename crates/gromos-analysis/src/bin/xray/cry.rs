@@ -50,7 +50,7 @@ fn main() {
         i += 1;
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Crystallography analysis");
     eprintln!("# Unit cell: a={} b={} c={} nm", cell_a, cell_b, cell_c);

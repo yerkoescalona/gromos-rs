@@ -60,3 +60,28 @@ pub struct RunOptions {
     /// binary allows `GAMD`/`EDS` because it applies them itself; the Python binding allows none.
     pub passthrough: crate::recipe::PassthroughPolicy,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallel_policy_resolves_as_documented() {
+        assert!(!ParallelPolicy::Auto.resolve(100));
+        assert!(ParallelPolicy::Auto.resolve(101));
+        assert!(!ParallelPolicy::Serial.resolve(1_000_000));
+        assert!(ParallelPolicy::Parallel.resolve(1));
+    }
+
+    #[test]
+    fn run_options_serialise_with_snake_case_policies() {
+        let o = RunOptions {
+            parallel: ParallelPolicy::Serial,
+            ..Default::default()
+        };
+        let text = toml::to_string(&o).unwrap();
+        assert!(text.contains("parallel = \"serial\""), "{text}");
+        let back: RunOptions = toml::from_str(&text).unwrap();
+        assert_eq!(back, o);
+    }
+}

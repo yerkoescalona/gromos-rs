@@ -35,8 +35,8 @@ fn main() {
         i += 1;
     }
 
-    let topo1_data = read_topology_file(&topo1_file.unwrap()).unwrap();
-    let topo2_data = read_topology_file(&topo2_file.unwrap()).unwrap();
+    let topo1_data = read_topology_file(topo1_file.unwrap()).unwrap();
+    let topo2_data = read_topology_file(topo2_file.unwrap()).unwrap();
 
     let n1 = topo1_data.masses.len();
     let n2 = topo2_data.masses.len();

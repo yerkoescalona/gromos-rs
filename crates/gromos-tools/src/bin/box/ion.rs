@@ -165,6 +165,7 @@ fn main() {
         );
 
         let mut phi = 0.0;
+        #[allow(clippy::needless_range_loop)] // one index over several arrays
         for j in 0..n_solute {
             let q_j = parsed_topo.charges[j];
             if q_j.abs() < 1e-10 {
@@ -189,6 +190,7 @@ fn main() {
         let mut best_idx = None;
         let mut best_pot = f64::MAX;
 
+        #[allow(clippy::needless_range_loop)] // one index over several arrays
         for j in 0..n_solvent_mols {
             if excluded.contains(&j) {
                 continue;
@@ -223,6 +225,7 @@ fn main() {
         let mut best_idx = None;
         let mut best_pot = f64::MIN;
 
+        #[allow(clippy::needless_range_loop)] // one index over several arrays
         for j in 0..n_solvent_mols {
             if excluded.contains(&j) {
                 continue;
@@ -287,6 +290,7 @@ fn main() {
     let mut atom_counter = 1;
 
     // Write solute atoms as-is
+    #[allow(clippy::needless_range_loop)] // one index over several arrays
     for i in 0..n_solute {
         let a = &atoms[i];
         println!(

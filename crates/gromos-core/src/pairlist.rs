@@ -927,15 +927,13 @@ impl ParallelPairlistAlgorithm {
     }
 
     /// Update pairlist in parallel
-    pub fn update<BC: BoundaryCondition + Sync>(
+    pub fn update<BC: BoundaryCondition + Sync + Clone>(
         &self,
         topo: &Topology,
         conf: &Configuration,
         pairlist: &mut PairlistContainer,
         periodicity: &BC,
-    ) where
-        BC: Clone,
-    {
+    ) {
         let n_atoms = topo.num_atoms();
         let cutoff2_short = (pairlist.short_range_cutoff + pairlist.skin).powi(2);
         let cutoff2_long = (pairlist.long_range_cutoff + pairlist.skin).powi(2);
@@ -1225,7 +1223,7 @@ mod tests {
         // Should have pairs (0,1), (0,3), and (1,3) in short range
         // and (0,2) in long range
         assert!(pairlist.solute_short.len() >= 2);
-        assert!(pairlist.solute_long.len() >= 1);
+        assert!(!pairlist.solute_long.is_empty());
     }
 
     /// Sort + min/max-normalize a pair list so two pairlists can be compared

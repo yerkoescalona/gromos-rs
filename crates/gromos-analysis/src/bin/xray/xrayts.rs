@@ -40,11 +40,9 @@ fn main() {
     if let Some(path) = obs_file {
         if let Ok(file) = File::open(&path) {
             let reader = BufReader::new(file);
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    if let Ok(val) = line_str.trim().parse::<f64>() {
-                        obs_data.push(val);
-                    }
+            for line_str in reader.lines().map_while(Result::ok) {
+                if let Ok(val) = line_str.trim().parse::<f64>() {
+                    obs_data.push(val);
                 }
             }
         }
@@ -54,11 +52,9 @@ fn main() {
     if let Some(path) = calc_file {
         if let Ok(file) = File::open(&path) {
             let reader = BufReader::new(file);
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    if let Ok(val) = line_str.trim().parse::<f64>() {
-                        calc_data.push(val);
-                    }
+            for line_str in reader.lines().map_while(Result::ok) {
+                if let Ok(val) = line_str.trim().parse::<f64>() {
+                    calc_data.push(val);
                 }
             }
         }

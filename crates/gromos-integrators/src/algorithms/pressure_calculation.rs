@@ -97,3 +97,50 @@ impl Algorithm for PressureCalculation {
         "Pressure_Calculation"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_core::configuration::Box as SimBox;
+    use gromos_core::math::Vec3;
+
+    #[test]
+    fn pressure_is_two_over_volume_times_kinetic_plus_half_virial() {
+        let topo = Topology::new();
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.old_mut().box_config = SimBox::rectangular(2.0, 2.0, 2.0); // V = 8
+        conf.old_mut().kinetic_energy_tensor = Mat3::from_cols(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::new(0.0, 0.0, 3.0),
+        );
+        conf.old_mut().virial_tensor = Mat3::from_cols(
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, -2.0),
+        );
+        let sim = SimulationState::new(0.002, 1);
+        PressureCalculation::new(VirialType::Atomic)
+            .apply(&topo, &mut conf, &sim)
+            .unwrap();
+        let p = conf.old().pressure_tensor;
+        // P = 2/V (E_kin + ½ W): xx = 2/8·(1+2) = 0.75, yy = 2/8·2 = 0.5, zz = 2/8·(3−1) = 0.5
+        assert!((p.x_axis.x - 0.75).abs() < 1e-14);
+        assert!((p.y_axis.y - 0.5).abs() < 1e-14);
+        assert!((p.z_axis.z - 0.5).abs() < 1e-14);
+    }
+
+    #[test]
+    fn no_virial_means_no_pressure_update() {
+        let topo = Topology::new();
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.old_mut().box_config = SimBox::rectangular(2.0, 2.0, 2.0);
+        conf.old_mut().kinetic_energy_tensor = Mat3::IDENTITY;
+        let before = conf.old().pressure_tensor;
+        let sim = SimulationState::new(0.002, 1);
+        PressureCalculation::new(VirialType::None)
+            .apply(&topo, &mut conf, &sim)
+            .unwrap();
+        assert_eq!(conf.old().pressure_tensor, before);
+    }
+}

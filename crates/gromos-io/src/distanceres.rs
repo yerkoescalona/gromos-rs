@@ -179,3 +179,30 @@ pub fn read_distanceres<P: AsRef<Path>>(
 
     Ok((unperturbed, perturbed))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_nacl_restraint_of_the_reference_suite() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../gromos-md/tests/gromosXX_references/nacl_1water_distres/nacl_1water_distres.distrest"
+        );
+        let (unpert, pert) = read_distanceres(p).unwrap();
+        assert_eq!(unpert.len(), 1);
+        assert!(pert.is_empty());
+        let r = &unpert[0];
+        assert!((r.r0 - 0.3).abs() < 1e-12);
+        assert!((r.w0 - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_missing_file_is_reported_as_such() {
+        assert!(matches!(
+            read_distanceres("/nonexistent/x.distrest"),
+            Err(IoError::FileNotFound(_))
+        ));
+    }
+}

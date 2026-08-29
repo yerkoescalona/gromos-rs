@@ -55,9 +55,9 @@ fn main() {
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
     let topo = build_topology(topo_data);
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Interaction energy analysis");
     eprintln!("# Group 1: atoms {} to {}", g1_start + 1, g1_end);

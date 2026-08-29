@@ -221,8 +221,8 @@ impl GamdBlock {
         params
     }
 
-    /// Write GAMD block to string
-    pub fn to_string(&self) -> String {
+    /// Render the GAMD block as input text (also available through `Display`).
+    pub fn render(&self) -> String {
         let mut output = String::new();
         output.push_str("GAMD\n");
         output.push_str("# SEARCH  FORM  THRESH\n");
@@ -272,6 +272,12 @@ impl GamdBlock {
         output.push_str("END\n");
 
         output
+    }
+}
+
+impl std::fmt::Display for GamdBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.render())
     }
 }
 

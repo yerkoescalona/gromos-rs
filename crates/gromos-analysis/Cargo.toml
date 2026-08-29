@@ -7,6 +7,10 @@ license.workspace = true
 description = "Analysis tools for GROMOS-RS molecular dynamics"
 autobins = false
 
+[lints.clippy]
+# Analysis kernels index several arrays with one loop variable, as the C++ they port does.
+needless_range_loop = "allow"
+
 [dependencies]
 gromos-core = { workspace = true }
 gromos-io = { workspace = true }

@@ -61,6 +61,7 @@ impl SpatialIndex for ConfigurationSpatialIndex<'_> {
 
         let mut pairs = Vec::new();
         for &i in atoms.indices() {
+            #[allow(clippy::needless_range_loop)] // one index over several arrays
             for j in 0..n {
                 if j == i {
                     continue;

@@ -63,7 +63,7 @@ fn all_frames_cnf_output() {
     let cnf_files: Vec<_> = fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "cnf"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "cnf"))
         .collect();
     assert_eq!(
         cnf_files.len(),
@@ -145,7 +145,7 @@ fn every_n_frames() {
     let cnf_count = fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "cnf"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "cnf"))
         .count();
     assert_eq!(
         cnf_count, 4,
@@ -178,7 +178,7 @@ fn spec_frame_list() {
     let cnf_count = fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "cnf"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "cnf"))
         .count();
     assert_eq!(cnf_count, 3, "frames 0,2,4 → 3 files, got {cnf_count}");
     fs::remove_dir_all(dir).ok();
@@ -210,7 +210,7 @@ fn time_range_filter() {
     let cnf_count = fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "cnf"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "cnf"))
         .count();
     assert_eq!(
         cnf_count, 4,
@@ -241,11 +241,11 @@ fn pdb_output_format() {
     let pdb_files: Vec<_> = fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "pdb"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "pdb"))
         .collect();
     assert_eq!(pdb_files.len(), 1);
 
-    let content = fs::read_to_string(&pdb_files[0].path()).unwrap();
+    let content = fs::read_to_string(pdb_files[0].path()).unwrap();
     let atom_count = content.lines().filter(|l| l.starts_with("ATOM")).count();
     assert_eq!(atom_count, 3, "expected 3 ATOM records, got {atom_count}");
     assert!(content.contains("END"));
@@ -279,7 +279,7 @@ fn single_cnf_overwrites_with_last_frame() {
     let cnf_count = fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "cnf"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "cnf"))
         .count();
     assert_eq!(cnf_count, 1);
     fs::remove_dir_all(dir).ok();

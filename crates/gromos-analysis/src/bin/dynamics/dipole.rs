@@ -131,7 +131,7 @@ fn parse_args(args: Vec<String>) -> Result<DipoleArgs, String> {
 fn calc_center_of_geometry(positions: &[Vec3], atom_selection: &[usize]) -> Vec3 {
     let mut cog = Vec3::ZERO;
     for &idx in atom_selection {
-        cog = cog + positions[idx];
+        cog += positions[idx];
     }
     cog / (atom_selection.len() as f64)
 }
@@ -156,7 +156,7 @@ fn calc_dipole(
     for &idx in atom_selection {
         let r = positions[idx] - origin;
         let q = charges[idx];
-        dipole = dipole + r * q;
+        dipole += r * q;
     }
 
     // Convert to f64 for magnitude calculation

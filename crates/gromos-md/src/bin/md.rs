@@ -120,7 +120,7 @@ fn print_usage() {
 /// GROMOS-compatible command-line arguments.
 /// These are file paths and control flags — all simulation parameters
 /// come from the @input file.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct MDArgs {
     // Required input files
     topo_file: String,
@@ -150,36 +150,6 @@ struct MDArgs {
     develop: bool,
     /// `@dump`: print the run recipe and the algorithm plan (JSON) and exit without running.
     dump: bool,
-}
-
-impl Default for MDArgs {
-    fn default() -> Self {
-        Self {
-            topo_file: String::new(),
-            conf_file: String::new(),
-            input_file: String::new(),
-            pttopo_file: None,
-            posresspec_file: None,
-            refpos_file: None,
-            distrest_file: None,
-            angrest_file: None,
-            dihrest_file: None,
-            gamd_file: None,
-            fin_file: None,
-            trc_file: None,
-            trv_file: None,
-            trf_file: None,
-            trs_file: None,
-            tre_file: None,
-            trg_file: None,
-            bae_file: None,
-            bag_file: None,
-            verbose: 0,
-            print_flags: Vec::new(),
-            develop: false,
-            dump: false,
-        }
-    }
 }
 
 fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
@@ -353,7 +323,7 @@ fn main() {
     let nstener = imd.ntwe;
     let nstlog = imd.ntpr;
     // GROMOS convention: a write/print frequency of 0 disables that output entirely.
-    let due = |step: usize, freq: usize| freq > 0 && step % freq == 0;
+    let due = |step: usize, freq: usize| freq > 0 && step.is_multiple_of(freq);
 
     // Derive output file paths (from @args or defaults)
     let trc_file = md_args
@@ -1138,31 +1108,28 @@ fn main() {
         };
 
         // Minimization convergence check (mirrors GROMOS: compare potential_total + special_total)
-        if is_minimization && step > imd.nmin {
-            if min_de.abs() < imd.dele {
-                minimization_converged = true;
-                println!();
-                println!("*** Energy minimization CONVERGED at step {} ***", step);
-                println!(
-                    "    dE = {:.6e} kJ/mol (tolerance: {:.6e})",
-                    min_de.abs(),
-                    imd.dele
-                );
-                println!("    E_pot = {:.10e} kJ/mol", state.energies.potential_total);
-                println!();
-                // Write final frames before breaking. gromosXX writes the converged energies
-                // once more, labelled with the previous step (its frame count is NSTEPS + 1).
-                if let Err(e) = traj_writer.write_frame(step, time, &conf) {
-                    eprintln!("Error writing final trajectory frame: {}", e);
-                }
-                let last = step.saturating_sub(1);
-                let ene_frame =
-                    native_energy_frame(conf.old(), &topo, last, last as f64 * dt, temp);
-                if let Err(e) = ene_writer.write_frame(&ene_frame) {
-                    eprintln!("Error writing final energy frame: {}", e);
-                }
-                break;
+        if is_minimization && step > imd.nmin && min_de.abs() < imd.dele {
+            minimization_converged = true;
+            println!();
+            println!("*** Energy minimization CONVERGED at step {} ***", step);
+            println!(
+                "    dE = {:.6e} kJ/mol (tolerance: {:.6e})",
+                min_de.abs(),
+                imd.dele
+            );
+            println!("    E_pot = {:.10e} kJ/mol", state.energies.potential_total);
+            println!();
+            // Write final frames before breaking. gromosXX writes the converged energies
+            // once more, labelled with the previous step (its frame count is NSTEPS + 1).
+            if let Err(e) = traj_writer.write_frame(step, time, &conf) {
+                eprintln!("Error writing final trajectory frame: {}", e);
             }
+            let last = step.saturating_sub(1);
+            let ene_frame = native_energy_frame(conf.old(), &topo, last, last as f64 * dt, temp);
+            if let Err(e) = ene_writer.write_frame(&ene_frame) {
+                eprintln!("Error writing final energy frame: {}", e);
+            }
+            break;
         }
 
         // Log progress

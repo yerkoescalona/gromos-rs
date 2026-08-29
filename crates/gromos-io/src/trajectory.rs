@@ -332,7 +332,7 @@ impl TrajectoryReader {
         // Read step and time
         buffer.clear();
         reader.read_line(buffer)?;
-        let parts: Vec<&str> = buffer.trim().split_whitespace().collect();
+        let parts: Vec<&str> = buffer.split_whitespace().collect();
         if parts.len() < 2 {
             return Err(IoError::FormatError(
                 "TIMESTEP data should have step and time".to_string(),
@@ -392,7 +392,7 @@ impl TrajectoryReader {
             } else {
                 (4, 5, 6)
             };
-            if parts.len() >= zi + 1 {
+            if parts.len() > zi {
                 let x = parts[xi]
                     .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid x: {e}")))?;
@@ -561,7 +561,7 @@ impl TrajectoryReader {
 
         buffer.clear();
         reader.read_line(buffer)?;
-        let parts: Vec<&str> = buffer.trim().split_whitespace().collect();
+        let parts: Vec<&str> = buffer.split_whitespace().collect();
         if parts.len() < 3 {
             return Err(IoError::FormatError(
                 "GENBOX should have 3 dimensions".to_string(),
@@ -607,7 +607,7 @@ impl TrajectoryReader {
         // Delegate to existing reader (already positioned past "GENBOX" line)
         buffer.clear();
         reader.read_line(buffer)?;
-        let parts: Vec<&str> = buffer.trim().split_whitespace().collect();
+        let parts: Vec<&str> = buffer.split_whitespace().collect();
         if parts.len() < 3 {
             return Ok(Vec3::ZERO);
         }

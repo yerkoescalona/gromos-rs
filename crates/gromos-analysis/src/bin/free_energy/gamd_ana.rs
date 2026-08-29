@@ -151,9 +151,7 @@ fn perform_cumulant_expansion(frames: &[GamdFrame], temperature: f64) -> f64 {
     let avg_dv = sum_dv / n;
     let avg_dv_sq = sum_dv_sq / n;
 
-    let delta_g = -avg_dv + (beta / 2.0) * (avg_dv_sq - avg_dv * avg_dv);
-
-    delta_g
+    -avg_dv + (beta / 2.0) * (avg_dv_sq - avg_dv * avg_dv)
 }
 
 fn write_pmf(path: &str, frames: &[GamdFrame], free_energy_correction: f64) -> Result<(), String> {

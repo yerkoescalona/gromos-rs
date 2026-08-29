@@ -13,12 +13,18 @@ make_pt_top, prep_posres, build_box.
 ## Status
 - All system-building tools built ✓
 - make_top tested: GB3 (56 res, 457 atoms) + Na+ with 54A7 ✓
-- **No reference tests yet** — target of P2 roadmap (hand-craft minimal systems, mirror `gromosXX_references/` harness)
+- `sim_box` follows gromos++'s algorithm exactly (box from the longest solute atom–atom distance,
+  template centred and replicated `int(box/template)+1` times, hydrogen-blind clash filter, GENBOX
+  output); `tests/sim_box_reference.rs` requires gromos++'s box, count and positions (2026-08-30).
+- Other tools: no reference tests yet — target of P2 roadmap (hand-craft minimal systems, mirror
+  `gromosXX_references/` harness). Adding one: put gromos++'s output under `tests/data/<tool>/` with a
+  README that records the exact command, and compare in `tests/<tool>_reference.rs`.
 
 ## Key files
 ```
 src/bin/topology/   — make_top, com_top, check_top, etc.
 src/bin/box/        — sim_box, build_box, ion, etc.
+tests/              — reference tests against gromos++ output (`tests/data/<tool>/README.md`)
 ```
 
 ## Crate-specific rules

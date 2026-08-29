@@ -136,3 +136,41 @@ pub fn build_posres_entries(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str, content: &str) -> std::path::PathBuf {
+        let p =
+            std::env::temp_dir().join(format!("gromos_posres_test_{}_{name}", std::process::id()));
+        std::fs::write(&p, content).unwrap();
+        p
+    }
+
+    #[test]
+    fn posresspec_atom_indices_become_zero_based() {
+        let p = temp("por", "TITLE\nx\nEND\nPOSRESSPEC\n# comment\n    1  GLY   CB     1    2.5 0.6 1.5\n    1  GLY   C      2    2.6 0.7 1.5\n    2  ALA   N      5    2.7 0.7 1.4\nEND\n");
+        let atoms = read_posresspec(&p).unwrap();
+        assert_eq!(atoms, vec![0, 1, 4]);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn refpos_reads_the_coordinates_after_the_fixed_prefix() {
+        let p = temp("rpr", "TITLE\nx\nEND\nREFPOSITION\n# first 24 chars ignored\n    1 GLY   CB         1    2.531603046    0.617897712    1.571590349\n    1 GLY   C          2    2.630229425    0.728537177    1.537541193\nEND\n");
+        let pos = read_refpos(&p).unwrap();
+        assert_eq!(pos.len(), 2);
+        assert!((pos[1].x - 2.630229425).abs() < 1e-12);
+        assert!((pos[0].z - 1.571590349).abs() < 1e-12);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn a_missing_file_is_reported_as_such() {
+        assert!(matches!(
+            read_posresspec("/nonexistent/x.por"),
+            Err(IoError::FileNotFound(_))
+        ));
+    }
+}

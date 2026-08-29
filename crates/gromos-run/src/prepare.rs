@@ -261,3 +261,62 @@ fn validate(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_io::coordinate::read_coordinates;
+    use gromos_io::topology::{build_topology, read_topology_file};
+    use std::path::PathBuf;
+
+    fn shared() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../gromos-md/tests/gromosXX_references/shared")
+    }
+
+    fn aladip(imd: &ImdParameters, pttopo: bool) -> Prepared {
+        let parsed = read_topology_file(shared().join("aladip.topo")).unwrap();
+        let constants = parsed.physical_constants;
+        let topo = build_topology(parsed);
+        let coords: Coordinates = read_coordinates(shared().join("aladip.conf"))
+            .unwrap()
+            .into();
+        let inputs = RunInputs {
+            pttopo: pttopo.then(|| shared().join("aladip.pttopo")),
+            ..Default::default()
+        };
+        prepare_system(imd, topo, constants, coords, &inputs).unwrap()
+    }
+
+    #[test]
+    fn solvates_to_the_configuration_size() {
+        let imd = ImdParameters {
+            nsm: 20,
+            ..Default::default()
+        };
+        let p = aladip(&imd, false);
+        assert_eq!(p.topology.num_atoms(), 72);
+        assert_eq!(p.topology.num_solute_atoms(), 12);
+        assert_eq!(p.configuration.current().pos.len(), 72);
+    }
+
+    #[test]
+    fn perturbation_mixes_the_masses_only_when_ntg_is_set() {
+        let mut imd = ImdParameters {
+            nsm: 20,
+            ..Default::default()
+        };
+        let plain = aladip(&imd, false);
+        let ignored = aladip(&imd, true); // NTG = 0: gromosXX ignores the perturbation topology
+        assert_eq!(ignored.topology.mass, plain.topology.mass);
+        assert!(ignored.topology.perturbed_solute.is_empty());
+        imd.ntg = 1;
+        imd.rlam = 0.5;
+        let mixed = aladip(&imd, true);
+        assert!(!mixed.topology.perturbed_solute.is_empty());
+        assert_ne!(
+            mixed.topology.mass, plain.topology.mass,
+            "λ-mixed masses expected"
+        );
+    }
+}

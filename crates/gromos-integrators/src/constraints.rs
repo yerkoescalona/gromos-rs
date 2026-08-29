@@ -183,6 +183,12 @@ impl LincsData {
 }
 
 /// Result of constraint application
+impl Default for LincsData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ConstraintResult {
     pub converged: bool,
@@ -690,7 +696,7 @@ pub fn perturbed_shake(
     let dt_sq = dt * dt;
     let tolerance_sq = params.tolerance * params.tolerance;
 
-    let mut max_error = std::f64::MAX;
+    let mut max_error = f64::MAX;
     let mut iteration = 0;
 
     // Iterate until convergence or max iterations
@@ -1520,7 +1526,7 @@ pub fn angle_constraints(
     let _dt_sq = dt * dt;
     let tolerance_sq = params.tolerance * params.tolerance;
 
-    let mut max_error = std::f64::MAX;
+    let mut max_error = f64::MAX;
     let mut iteration = 0;
 
     while iteration < params.max_iterations && max_error > tolerance_sq {
@@ -1649,7 +1655,7 @@ pub fn perturbed_angle_constraints(
     let _dt_sq = dt * dt;
     let tolerance_sq = params.tolerance * params.tolerance;
 
-    let mut max_error = std::f64::MAX;
+    let mut max_error = f64::MAX;
     let mut iteration = 0;
 
     while iteration < params.max_iterations && max_error > tolerance_sq {

@@ -45,15 +45,11 @@ fn main() {
     if let Some(path) = pairs_file {
         if let Ok(file) = File::open(&path) {
             let reader = BufReader::new(file);
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    let parts: Vec<&str> = line_str.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        if let (Ok(i), Ok(j)) =
-                            (parts[0].parse::<usize>(), parts[1].parse::<usize>())
-                        {
-                            pairs.push((i, j));
-                        }
+            for line_str in reader.lines().map_while(Result::ok) {
+                let parts: Vec<&str> = line_str.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let (Ok(i), Ok(j)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
+                        pairs.push((i, j));
                     }
                 }
             }

@@ -468,12 +468,11 @@ pub fn read_energy_trajectory_native<P: AsRef<Path>>(path: P) -> Result<Vec<Ener
                                     ("volume", Some(v)) => f.volume = *v,
                                     ("pressure", Some(v)) => f.pressure = *v,
                                     ("mass", Some(v)) => f.mass = *v,
-                                    ("temperature", _) => {
+                                    ("temperature", _)
                                         // count, then one line of 4 per bath: the first bath's total
-                                        if vals.len() >= 2 {
+                                        if vals.len() >= 2 => {
                                             f.temperature = vals[1];
-                                        }
-                                    },
+                                        },
                                     _ => {},
                                 }
                             }

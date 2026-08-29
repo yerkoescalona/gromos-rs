@@ -218,12 +218,12 @@ fn calculate_rmsf(
             continue;
         }
 
-        if (frame_idx - skip) % every != 0 {
+        if !(frame_idx - skip).is_multiple_of(every) {
             continue;
         }
 
         for (i, &atom_idx) in atoms.iter().enumerate() {
-            avg_pos[i] = avg_pos[i] + frame.positions[atom_idx];
+            avg_pos[i] += frame.positions[atom_idx];
         }
 
         frames_used += 1;
@@ -237,7 +237,7 @@ fn calculate_rmsf(
 
     // Normalize averages
     for pos in &mut avg_pos {
-        *pos = *pos / frames_used as f64;
+        *pos /= frames_used as f64;
     }
 
     // Second pass: Calculate fluctuations
@@ -253,7 +253,7 @@ fn calculate_rmsf(
             continue;
         }
 
-        if (frame_idx - skip) % every != 0 {
+        if !(frame_idx - skip).is_multiple_of(every) {
             continue;
         }
 

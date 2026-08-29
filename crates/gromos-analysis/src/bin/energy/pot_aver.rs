@@ -21,12 +21,9 @@ fn main() {
 
     let mut i = 1;
     while i < args.len() {
-        match args[i].as_str() {
-            "@ene" => {
-                i += 1;
-                ene_file = Some(args[i].clone());
-            },
-            _ => {},
+        if args[i].as_str() == "@ene" {
+            i += 1;
+            ene_file = Some(args[i].clone());
         }
         i += 1;
     }
@@ -36,11 +33,9 @@ fn main() {
     if let Some(path) = ene_file {
         if let Ok(file) = File::open(&path) {
             let reader = BufReader::new(file);
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    if let Ok(val) = line_str.trim().parse::<f64>() {
-                        energies.push(val);
-                    }
+            for line_str in reader.lines().map_while(Result::ok) {
+                if let Ok(val) = line_str.trim().parse::<f64>() {
+                    energies.push(val);
                 }
             }
         }

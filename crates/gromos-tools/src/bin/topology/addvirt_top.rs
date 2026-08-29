@@ -35,7 +35,7 @@ fn main() {
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
 
     let original_atoms = topo_data.masses.len();
     let total_atoms = original_atoms + n_virtual;

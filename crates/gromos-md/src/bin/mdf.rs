@@ -40,7 +40,7 @@ fn main() {
         i += 1;
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Mean force analysis");
     eprintln!("# Coordinate: {}", coord);

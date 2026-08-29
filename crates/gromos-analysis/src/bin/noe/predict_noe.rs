@@ -41,9 +41,9 @@ fn main() {
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
     let _topo = build_topology(topo_data);
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# NOE prediction");
     eprintln!("# Distance cutoff: {} nm", cutoff);
@@ -70,10 +70,7 @@ fn main() {
 
                         if dist_sq <= cutoff_sq {
                             let dist = dist_sq.sqrt();
-                            pair_distances
-                                .entry((i, j))
-                                .or_insert_with(Vec::new)
-                                .push(dist);
+                            pair_distances.entry((i, j)).or_default().push(dist);
                         }
                     }
                 }

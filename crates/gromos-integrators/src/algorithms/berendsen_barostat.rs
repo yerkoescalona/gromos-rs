@@ -84,3 +84,54 @@ impl Algorithm for BerendsenBarostat {
         "Berendsen_Barostat"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_core::configuration::Box as SimBox;
+    use gromos_core::math::{Mat3, Vec3};
+
+    fn system(pressure: f64) -> (Topology, Configuration) {
+        let topo = Topology::new();
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.current_mut().box_config = SimBox::rectangular(2.0, 2.0, 2.0);
+        conf.current_mut().pos[0] = Vec3::new(1.0, 0.5, 0.25);
+        conf.old_mut().pressure_tensor = Mat3::IDENTITY * pressure;
+        (topo, conf)
+    }
+
+    #[test]
+    fn at_the_reference_pressure_nothing_moves() {
+        let (topo, mut conf) = system(0.06102);
+        let sim = SimulationState::new(0.002, 1);
+        let mut alg = BerendsenBarostat::new(BerendsenBarostatParams {
+            pressure0: 0.06102,
+            compressibility: 4.575e-4,
+            tau: 0.5,
+        });
+        alg.apply(&topo, &mut conf, &sim).unwrap();
+        assert!((conf.current().box_config.vectors.x_axis.x - 2.0).abs() < 1e-15);
+        assert_eq!(conf.current().pos[0], Vec3::new(1.0, 0.5, 0.25));
+    }
+
+    #[test]
+    fn above_the_reference_pressure_the_box_and_positions_grow_together() {
+        let (topo, mut conf) = system(1.0);
+        let sim = SimulationState::new(0.002, 1);
+        let (p0, comp, tau) = (0.0, 4.575e-4, 0.5);
+        let mut alg = BerendsenBarostat::new(BerendsenBarostatParams {
+            pressure0: p0,
+            compressibility: comp,
+            tau,
+        });
+        alg.apply(&topo, &mut conf, &sim).unwrap();
+        let mu = (1.0 - comp * 0.002 / tau * (p0 - 1.0)).powf(1.0 / 3.0);
+        assert!(mu > 1.0);
+        assert!((conf.current().box_config.vectors.x_axis.x - 2.0 * mu).abs() < 1e-15);
+        assert!((conf.current().pos[0].x - mu).abs() < 1e-15);
+        assert!((conf.current().pos[0].z - 0.25 * mu).abs() < 1e-15);
+        // the inverse box is kept consistent
+        let prod = conf.current().box_config.vectors * conf.current().box_config.inv_vectors;
+        assert!((prod.x_axis.x - 1.0).abs() < 1e-12 && prod.x_axis.y.abs() < 1e-12);
+    }
+}

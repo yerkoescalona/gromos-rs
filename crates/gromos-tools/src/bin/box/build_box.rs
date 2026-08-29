@@ -55,7 +55,7 @@ fn center_of_mass(atoms: &[G96Atom], masses: &[f64]) -> Vec3 {
     let mut com = Vec3::ZERO;
     let mut total_mass = 0.0;
     for (atom, &mass) in atoms.iter().zip(masses) {
-        com = com + atom.pos * mass;
+        com += atom.pos * mass;
         total_mass += mass;
     }
     com / total_mass

@@ -223,7 +223,7 @@ impl DcdWriter {
         self.writer.write_i32::<LittleEndian>(2)?;
 
         // Title line 1
-        let title1 = format!("GROMOS-RS DCD trajectory");
+        let title1 = "GROMOS-RS DCD trajectory".to_string();
         let mut title_bytes = [b' '; 80];
         let bytes = title1.as_bytes();
         let copy_len = bytes.len().min(80);
@@ -502,24 +502,24 @@ impl BinaryTrajectoryReader for DcdReader {
         }
 
         let mut x_coords = vec![0.0f32; self.n_atoms];
-        for i in 0..self.n_atoms {
-            x_coords[i] = self.reader.read_f32::<LittleEndian>()?;
+        for c in x_coords.iter_mut().take(self.n_atoms) {
+            *c = self.reader.read_f32::<LittleEndian>()?;
         }
         self.reader.read_i32::<LittleEndian>()?; // End marker
 
         // Read Y coordinates
         self.reader.read_i32::<LittleEndian>()?; // Block size
         let mut y_coords = vec![0.0f32; self.n_atoms];
-        for i in 0..self.n_atoms {
-            y_coords[i] = self.reader.read_f32::<LittleEndian>()?;
+        for c in y_coords.iter_mut().take(self.n_atoms) {
+            *c = self.reader.read_f32::<LittleEndian>()?;
         }
         self.reader.read_i32::<LittleEndian>()?; // End marker
 
         // Read Z coordinates
         self.reader.read_i32::<LittleEndian>()?; // Block size
         let mut z_coords = vec![0.0f32; self.n_atoms];
-        for i in 0..self.n_atoms {
-            z_coords[i] = self.reader.read_f32::<LittleEndian>()?;
+        for c in z_coords.iter_mut().take(self.n_atoms) {
+            *c = self.reader.read_f32::<LittleEndian>()?;
         }
         self.reader.read_i32::<LittleEndian>()?; // End marker
 

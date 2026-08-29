@@ -262,9 +262,12 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
   VOLUMEPRESSURE03, frames at steps 0…NSTLIM−1); gromos++ `ene_ana` (with the current library
   `.local/gromosXX/md++/data/ene_ana.md++.lib`, not `gromos++/data_old/`) reads both engines' `.tre` and
   `.trg` and reports identical averages for the same window. Python: `sim.dhdl`, `sim.dhdl_terms`,
-  `dhdl` column in `run()`. Open: our `sim_box` builds a 2.148 nm box where gromos++ builds 2.200 nm
-  for the same `@minwall 1.0` (323 vs 350 waters) — a box-size rounding convention, not randomness;
-  the solvation itself is deterministic in both.
+  `dhdl` column in `run()`. `sim_box` (fixed 2026-08-30, 0.0.36): it took the per-axis extent
+  where gromos++ takes the longest solute atom–atom distance, replicated one template copy too
+  many (`ceil` + 1 instead of `int` + 1, which shifts the lattice), did not centre the template on
+  its COG and counted solute hydrogens in the clash test. Now the same algorithm; the reference
+  test `gromos-tools/tests/sim_box_reference.rs` requires the same box, count and positions as
+  gromos++ for methanol in SPC (352 waters, 2.207681950 nm).
 
 **1.8 — Virtual atoms** — skip for now; not blocking any common use case
 - [ ] Port `algorithm/virtualatoms/` (aromatic centroids, lone pairs, TIP4P site)
@@ -311,11 +314,21 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 - [x] `ext_ti_merge` — linear interpolation between λ windows, trapezoidal ΔG
 - [ ] `reweight`, `m_widom`, `dg_ener` — stubs exist; skip for now (rarely used)
 
-**2.4 — Code quality** ← after 3.9 (390 warnings hide real bugs)
-- [ ] Clippy pass: `gromos-forces` (89), `gromos-integrators` (77), `gromos-io` (31), `gromos-core` (15)
-- [ ] Replace bare `unwrap()` in non-test code with `.expect("msg")` or `?`
-- [ ] Add missing `#[test]`: SHAKE constraints (0 today), improper dihedral unit test
-- [ ] Split large files: `nonbonded.rs` (~1500 LOC), `gromos-io/topology.rs` (~1200 LOC)
+**2.4 — Code quality** — done 2026-08-30 except the file split (0.0.36)
+- [x] Clippy pass: `cargo clippy --workspace --all-targets` is clean (was 294 warnings). Mechanical
+      fixes verified bit-for-bit on seven reference systems (`.trc/.tre/.trf/.trg/final.conf` byte-identical
+      before and after). Two lints are allowed per crate with the reason next to them: `too_many_arguments`
+      (nonbonded kernels take flat slices, as gromosXX's inner loops do — `gromos-forces/src/lib.rs`) and
+      `needless_range_loop` in the numeric crates (`[lints.clippy]` in `gromos-forces`, `gromos-integrators`,
+      `gromos-analysis`: one index over several arrays, as the C++ being ported).
+- [x] Bare `unwrap()` in non-test library code: none left in `gromos-core/-forces/-integrators/-io/-run`
+      (user-input parses propagate errors; infallible cases carry an `expect` that says why).
+- [x] Missing `#[test]`: SHAKE / SETTLE / LINCS algorithm wrappers, improper dihedral (planar zero,
+      finite-difference forces, force sum), temperature / Berendsen thermostat / COM removal / pressure /
+      barostat / energy / steepest descent, excluded-pair reaction field, CRF constants, IMD write→read,
+      posres / distanceres / `.trg` round trips, `gromos-run` dof / constraint selection / bundle / prepare —
+      52 tests, every `src` file of those crates now has at least one.
+- [ ] Split large files: `nonbonded.rs` (~1500 LOC), `gromos-io/topology.rs` (~1200 LOC) — parked
 
 **2.5 — Stub cleanup** — parked
 - [x] `frameout`, `ener`, `rmsd`, `nhoparam`, `ext_ti_ana`, `bar`, `ext_ti_merge` — real implementations

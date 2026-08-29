@@ -92,3 +92,42 @@ impl Algorithm for TemperatureCalculation {
         "Temperature_Calculation"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gromos_core::math::Vec3;
+
+    #[test]
+    fn kinetic_energy_is_the_average_of_the_old_and_new_half_steps() {
+        // gromosXX: E_kin = ½ m (v_old² + v_new²) / 2 — the leap-frog average
+        let mut topo = Topology::new();
+        topo.mass = vec![2.0];
+        topo.inverse_mass = vec![0.5];
+        let mut conf = Configuration::new(1, 1, 1);
+        conf.old_mut().vel[0] = Vec3::new(1.0, 0.0, 0.0);
+        conf.current_mut().vel[0] = Vec3::new(3.0, 0.0, 0.0);
+        let sim = SimulationState::new(0.002, 1);
+        TemperatureCalculation::new()
+            .apply(&topo, &mut conf, &sim)
+            .unwrap();
+        // ½·2·(1 + 9)/2 = 5 ; new-only: ½·2·9 = 9
+        assert_eq!(conf.old().energies.kinetic_total, 5.0);
+        assert_eq!(conf.old().energies.kinetic_energy_new, 9.0);
+    }
+
+    #[test]
+    fn init_computes_the_same_thing_as_apply() {
+        let mut topo = Topology::new();
+        topo.mass = vec![1.0, 1.0];
+        topo.inverse_mass = vec![1.0, 1.0];
+        let mut conf = Configuration::new(2, 1, 1);
+        conf.old_mut().vel[1] = Vec3::new(0.0, 2.0, 0.0);
+        conf.current_mut().vel[1] = Vec3::new(0.0, 2.0, 0.0);
+        let sim = SimulationState::new(0.002, 1);
+        TemperatureCalculation::new()
+            .init(&topo, &mut conf, &sim)
+            .unwrap();
+        assert_eq!(conf.old().energies.kinetic_total, 2.0);
+    }
+}

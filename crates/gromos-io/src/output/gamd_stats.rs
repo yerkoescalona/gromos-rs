@@ -127,7 +127,7 @@ impl GamdStatsWriter {
         gamd: &GamdParameters,
     ) -> Result<(), String> {
         // Only write at specified intervals
-        if step % self.write_interval != 0 {
+        if !step.is_multiple_of(self.write_interval) {
             return Ok(());
         }
 

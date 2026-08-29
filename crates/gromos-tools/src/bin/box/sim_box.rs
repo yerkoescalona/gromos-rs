@@ -3,11 +3,17 @@
 //! Usage: sim_box @topo <topology> @pbc <r|t> @pos <solute.cnf> @solvent <solvent.g96>
 //!               [@minwall <distance>] [@thresh <distance>] [@boxsize]
 //!
-//! Solvates a molecular system by:
-//! 1. Reading solute coordinates
-//! 2. Replicating a pre-equilibrated solvent box
-//! 3. Removing solvent molecules that clash with the solute
-//! 4. Writing the solvated system to stdout
+//! Solvates a molecular system the way gromos++ `sim_box` does (`programs/sim_box.cc`):
+//! 1. box from the longest solute atom–atom distance plus twice `@minwall` (cubic with one
+//!    value; with three values the x/xy/xyz maximum distances, which assumes a solute rotated
+//!    with its longest axis along z), or the solute file's box with `@boxsize`;
+//! 2. solute shifted to its centre of geometry, the solvent template centred likewise and
+//!    replicated `int(box / template) + 1` times per dimension around the origin;
+//! 3. a solvent molecule is kept when its centre of geometry lies inside the box and is farther
+//!    than `@thresh` from every non-hydrogen solute atom (hydrogens: mass 1.008 in `@topo`);
+//! 4. the solvated system is written to stdout as GROMOS96 with a GENBOX block.
+//!
+//! Reference: `tests/sim_box_reference.rs` reproduces gromos++'s output for methanol in SPC.
 
 use gromos::math::Vec3;
 use gromos_io::{read_g96_labeled, G96Atom};
@@ -196,7 +202,7 @@ fn parse_args(args: Vec<String>) -> Result<SimBoxArgs, String> {
 fn calc_cog(atoms: &[G96Atom]) -> Vec3 {
     let mut cog = Vec3::ZERO;
     for a in atoms {
-        cog = cog + a.pos;
+        cog += a.pos;
     }
     cog / atoms.len() as f64
 }
@@ -204,29 +210,41 @@ fn calc_cog(atoms: &[G96Atom]) -> Vec3 {
 /// Shift all positions by a vector
 fn shift_atoms(atoms: &mut [G96Atom], shift: Vec3) {
     for a in atoms {
-        a.pos = a.pos + shift;
+        a.pos += shift;
     }
 }
 
-/// Calculate maximum extent of solute in each dimension
-fn calc_max_extent(atoms: &[G96Atom]) -> Vec3 {
-    if atoms.is_empty() {
-        return Vec3::ZERO;
+/// gromos++ `calc_max_size`: the longest distance between two solute atoms considering the
+/// first `dim` coordinates (3 = full distance, 2 = in the xy plane, 1 = along x).
+fn calc_max_size(atoms: &[G96Atom], dim: usize) -> (f64, usize, usize) {
+    let mut max2 = 0.0;
+    let mut pair = (0, 0);
+    for (i, a) in atoms.iter().enumerate() {
+        for (j, b) in atoms.iter().enumerate().skip(i) {
+            let d = [a.pos.x - b.pos.x, a.pos.y - b.pos.y, a.pos.z - b.pos.z];
+            let d2: f64 = d.iter().take(dim).map(|x| x * x).sum();
+            if d2 > max2 {
+                max2 = d2;
+                pair = (i, j);
+            }
+        }
     }
+    (max2.sqrt(), pair.0, pair.1)
+}
 
-    let mut min = atoms[0].pos;
-    let mut max = atoms[0].pos;
+/// gromos++ hydrogen rule (`setHmass(1.008)` + `isH()`): the topology mass is exactly 1.008.
+fn is_hydrogen(mass: f64) -> bool {
+    (mass - 1.008).abs() < 1e-9
+}
 
-    for a in atoms {
-        min.x = min.x.min(a.pos.x);
-        min.y = min.y.min(a.pos.y);
-        min.z = min.z.min(a.pos.z);
-        max.x = max.x.max(a.pos.x);
-        max.y = max.y.max(a.pos.y);
-        max.z = max.z.max(a.pos.z);
-    }
-
-    Vec3::new(max.x - min.x, max.y - min.y, max.z - min.z)
+/// Rectangular nearest image of `r` to the origin, as gromos++ `nearestImage` computes it
+/// (`r - box * rint(r / box)`); a molecule is inside the box when this returns `r` unchanged.
+fn nearest_image(r: Vec3, box_dims: Vec3) -> Vec3 {
+    Vec3::new(
+        r.x - box_dims.x * (r.x / box_dims.x).round(),
+        r.y - box_dims.y * (r.y / box_dims.y).round(),
+        r.z - box_dims.z * (r.z / box_dims.z).round(),
+    )
 }
 
 fn main() {
@@ -278,6 +296,27 @@ fn main() {
         },
     };
     eprintln!("  Solute: {} atoms", solute_atoms.len());
+    // Solute masses: the clash filter ignores hydrogens, as gromos++ does.
+    let solute_is_h: Vec<bool> = match gromos_io::topology::read_topology_file(&sb_args.topo) {
+        Ok(parsed) => {
+            if parsed.masses.len() < solute_atoms.len() {
+                eprintln!(
+                    "Error: topology has {} solute atoms, coordinate file {}",
+                    parsed.masses.len(),
+                    solute_atoms.len()
+                );
+                process::exit(1);
+            }
+            parsed.masses[..solute_atoms.len()]
+                .iter()
+                .map(|&m| is_hydrogen(m))
+                .collect()
+        },
+        Err(e) => {
+            eprintln!("Error reading topology: {}", e);
+            process::exit(1);
+        },
+    };
 
     // Read solvent coordinates
     eprintln!("Reading solvent coordinates...");
@@ -328,73 +367,80 @@ fn main() {
             },
         }
     } else {
-        // Calculate from solute extent + minwall
-        let extent = calc_max_extent(&solute_atoms);
-        eprintln!(
-            "  Solute extent: ({:.3}, {:.3}, {:.3}) nm",
-            extent.x, extent.y, extent.z
-        );
-
-        let box_size = if sb_args.minwall.len() == 1 {
-            // Cubic box
-            let max_extent = extent.x.max(extent.y).max(extent.z);
-            let size = max_extent + 2.0 * sb_args.minwall[0];
+        // gromos++: box = longest solute atom-atom distance + 2 * minwall
+        if sb_args.minwall.len() == 1 {
+            let (max_dist, a, b) = calc_max_size(&solute_atoms, 3);
+            let size = max_dist + 2.0 * sb_args.minwall[0];
             eprintln!(
-                "  Creating cubic box: {:.3} nm (minwall: {:.3} nm)",
-                size, sb_args.minwall[0]
+                "  Cubic box {:.6} nm: maximum solute atom-atom distance {:.6} nm (atoms {} and {}) + 2 x minwall {:.3} nm",
+                size,
+                max_dist,
+                a + 1,
+                b + 1,
+                sb_args.minwall[0]
             );
             Vec3::new(size, size, size)
         } else {
-            // Rectangular box
-            let size_x = extent.x + 2.0 * sb_args.minwall[0];
-            let size_y = extent.y + 2.0 * sb_args.minwall[1];
-            let size_z = extent.z + 2.0 * sb_args.minwall[2];
-            eprintln!(
-                "  Creating rectangular box: ({:.3}, {:.3}, {:.3}) nm",
-                size_x, size_y, size_z
+            // three minwall values: gromos++ expects the solute rotated (longest axis along z)
+            // and takes the x, xy and xyz maximum distances for K, L and M respectively
+            let (dx, _, _) = calc_max_size(&solute_atoms, 1);
+            let (dxy, _, _) = calc_max_size(&solute_atoms, 2);
+            let (dxyz, _, _) = calc_max_size(&solute_atoms, 3);
+            let size = Vec3::new(
+                dx + 2.0 * sb_args.minwall[0],
+                dxy + 2.0 * sb_args.minwall[1],
+                dxyz + 2.0 * sb_args.minwall[2],
             );
             eprintln!(
-                "  Minwall distances: ({:.3}, {:.3}, {:.3}) nm",
-                sb_args.minwall[0], sb_args.minwall[1], sb_args.minwall[2]
+                "  Rectangular box ({:.6}, {:.6}, {:.6}) nm from solute distances ({:.6}, {:.6}, {:.6}) nm along x / in xy / in xyz",
+                size.x, size.y, size.z, dx, dxy, dxyz
             );
-            Vec3::new(size_x, size_y, size_z)
-        };
-
-        box_size
+            eprintln!("  (gromos++ assumes a solute rotated with its longest axis along z)");
+            size
+        }
     };
-
     // Move solute to center
     let solute_cog = calc_cog(&solute_atoms);
     let shift_to_origin = Vec3::ZERO - solute_cog;
     shift_atoms(&mut solute_atoms, shift_to_origin);
     eprintln!("  Shifted solute to origin");
 
-    // Calculate how many solvent boxes needed in each dimension
-    let nx = (target_box.x / solvent_box.x).ceil() as i32 + 1;
-    let ny = (target_box.y / solvent_box.y).ceil() as i32 + 1;
-    let nz = (target_box.z / solvent_box.z).ceil() as i32 + 1;
+    // Centre the solvent template on its centre of geometry (gromos++ does the same).
+    let mut solvent_atoms_orig = solvent_atoms_orig;
+    let solvent_cog = calc_cog(&solvent_atoms_orig);
+    shift_atoms(&mut solvent_atoms_orig, Vec3::ZERO - solvent_cog);
 
+    // Number of template copies per dimension: gromos++ `int(box / template) + 1`, laid out
+    // symmetrically around the origin.
+    let needed = [
+        (target_box.x / solvent_box.x) as i32 + 1,
+        (target_box.y / solvent_box.y) as i32 + 1,
+        (target_box.z / solvent_box.z) as i32 + 1,
+    ];
+    let start = Vec3::new(
+        -0.5 * (needed[0] - 1) as f64 * solvent_box.x,
+        -0.5 * (needed[1] - 1) as f64 * solvent_box.y,
+        -0.5 * (needed[2] - 1) as f64 * solvent_box.z,
+    );
     eprintln!();
     eprintln!("Replicating solvent box...");
-    eprintln!("  Need {} x {} x {} = {} boxes", nx, ny, nz, nx * ny * nz);
-
-    // Replicate solvent boxes
+    eprintln!(
+        "  {} x {} x {} = {} copies of the template",
+        needed[0],
+        needed[1],
+        needed[2],
+        needed[0] * needed[1] * needed[2]
+    );
     let mut all_solvent: Vec<G96Atom> = Vec::new();
-    let half_box = target_box * 0.5;
-
-    // Center the replicated grid
-    let start_x = -((nx as f64 - 1.0) * 0.5 * solvent_box.x);
-    let start_y = -((ny as f64 - 1.0) * 0.5 * solvent_box.y);
-    let start_z = -((nz as f64 - 1.0) * 0.5 * solvent_box.z);
-
-    for ix in 0..nx {
-        for iy in 0..ny {
-            for iz in 0..nz {
-                let shift = Vec3::new(
-                    start_x + ix as f64 * solvent_box.x,
-                    start_y + iy as f64 * solvent_box.y,
-                    start_z + iz as f64 * solvent_box.z,
-                );
+    for ix in 0..needed[0] {
+        for iy in 0..needed[1] {
+            for iz in 0..needed[2] {
+                let shift = start
+                    + Vec3::new(
+                        ix as f64 * solvent_box.x,
+                        iy as f64 * solvent_box.y,
+                        iz as f64 * solvent_box.z,
+                    );
                 for atom in &solvent_atoms_orig {
                     let mut shifted = atom.clone();
                     shifted.pos = atom.pos + shift;
@@ -403,116 +449,105 @@ fn main() {
             }
         }
     }
+    eprintln!("  Total solvent atoms before filtering: {}", all_solvent.len());
 
-    eprintln!(
-        "  Total solvent atoms before filtering: {}",
-        all_solvent.len()
-    );
-
-    // Assume solvent is water (3 atoms per molecule)
-    // TODO: Get this from topology
-    let atoms_per_molecule = 3;
+    // Atoms per solvent molecule from the template's residue numbering (3 for water).
+    let atoms_per_molecule = {
+        let first = solvent_atoms_orig.first().map(|a| a.res_num);
+        let n = solvent_atoms_orig
+            .iter()
+            .take_while(|a| Some(a.res_num) == first)
+            .count();
+        n.max(1)
+    };
     let num_molecules = all_solvent.len() / atoms_per_molecule;
 
-    // Filter solvent molecules
+    // Keep a molecule when its centre of geometry is inside the box (nearest image to the
+    // origin is itself) and farther than @thresh from every non-hydrogen solute atom.
     eprintln!("Filtering solvent molecules...");
     let mut kept_solvent: Vec<G96Atom> = Vec::new();
     let thresh2 = sb_args.thresh * sb_args.thresh;
-
+    let min_init = target_box.length_squared();
     for mol_idx in 0..num_molecules {
-        let start_atom = mol_idx * atoms_per_molecule;
-        let end_atom = start_atom + atoms_per_molecule;
-        let mol_atoms = &all_solvent[start_atom..end_atom];
-
-        // Calculate center of geometry of this solvent molecule
-        let mol_cog = calc_cog(mol_atoms);
-
-        // Check if inside target box (rectangular PBC)
-        if mol_cog.x.abs() > half_box.x
-            || mol_cog.y.abs() > half_box.y
-            || mol_cog.z.abs() > half_box.z
-        {
-            continue; // Outside box
+        let mol_atoms = &all_solvent[mol_idx * atoms_per_molecule..(mol_idx + 1) * atoms_per_molecule];
+        let cog = calc_cog(mol_atoms);
+        let check = nearest_image(cog, target_box);
+        if check != cog {
+            continue; // outside the box
         }
-
-        // Check minimum distance to solute atoms
-        let mut min_dist2 = f64::MAX;
-        for solute_atom in &solute_atoms {
-            let dx = mol_cog.x - solute_atom.pos.x;
-            let dy = mol_cog.y - solute_atom.pos.y;
-            let dz = mol_cog.z - solute_atom.pos.z;
-            let dist2 = dx * dx + dy * dy + dz * dz;
-            if dist2 < min_dist2 {
-                min_dist2 = dist2;
+        let mut min2 = min_init;
+        for (atom, &is_h) in solute_atoms.iter().zip(&solute_is_h) {
+            if is_h {
+                continue;
+            }
+            let d2 = (check - atom.pos).length_squared();
+            if d2 < min2 {
+                min2 = d2;
             }
         }
-
-        // Keep if far enough from solute
-        if min_dist2 > thresh2 {
-            for atom in mol_atoms {
-                kept_solvent.push(atom.clone());
-            }
+        if min2 > thresh2 {
+            kept_solvent.extend(mol_atoms.iter().cloned());
         }
     }
-
     let kept_molecules = kept_solvent.len() / atoms_per_molecule;
     eprintln!(
-        "  Kept {} solvent molecules ({} atoms)",
+        "  Kept {} solvent molecules ({} atoms), removed {}",
         kept_molecules,
-        kept_solvent.len()
-    );
-    eprintln!(
-        "  Removed {} molecules due to clashes or being outside box",
+        kept_solvent.len(),
         num_molecules - kept_molecules
     );
 
-    // Combine solute and solvent
-    let mut final_atoms = solute_atoms.clone();
-    final_atoms.extend(kept_solvent);
-
     eprintln!();
     eprintln!("Final system:");
-    eprintln!("  Total atoms: {}", final_atoms.len());
-    eprintln!("  Solute atoms: {}", solute_atoms.len());
     eprintln!(
-        "  Solvent atoms: {}",
-        final_atoms.len() - solute_atoms.len()
+        "  {} solute atoms + {} solvent atoms = {}",
+        solute_atoms.len(),
+        kept_solvent.len(),
+        solute_atoms.len() + kept_solvent.len()
     );
     eprintln!(
-        "  Box: ({:.3}, {:.3}, {:.3}) nm",
+        "  Box: ({:.6}, {:.6}, {:.6}) nm",
         target_box.x, target_box.y, target_box.z
     );
     eprintln!();
 
-    // Write to stdout
+    // Write to stdout (gromos++ OutG96S layout: solute as read, solvent residues SOLV numbered
+    // per molecule from 1, GENBOX with the box angles, Euler angles and origin).
     println!("TITLE");
-    println!(
-        "Solvated system: {} in {}\nBox: {:.3} x {:.3} x {:.3} nm",
-        sb_args.pos, sb_args.solvent, target_box.x, target_box.y, target_box.z
-    );
+    println!("Solvating {} in {}", sb_args.pos, sb_args.solvent);
+    println!("Added {} solvent molecules", kept_molecules);
     println!("END");
-
     println!("POSITION");
-    for (i, atom) in final_atoms.iter().enumerate() {
+    let mut serial = 0usize;
+    for atom in &solute_atoms {
+        serial += 1;
         println!(
-            "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-            atom.res_num,
-            atom.res_name,
+            "{:>5} {:<5} {:<6}{:>6}{:15.9}{:15.9}{:15.9}",
+            atom.res_num, atom.res_name, atom.atom_name, serial, atom.pos.x, atom.pos.y, atom.pos.z
+        );
+    }
+    for (i, atom) in kept_solvent.iter().enumerate() {
+        serial += 1;
+        println!(
+            "{:>5} {:<5} {:<6}{:>6}{:15.9}{:15.9}{:15.9}",
+            i / atoms_per_molecule + 1,
+            "SOLV",
             atom.atom_name,
-            i + 1,
+            serial,
             atom.pos.x,
             atom.pos.y,
             atom.pos.z
         );
     }
     println!("END");
-
-    println!("BOX");
+    println!("GENBOX");
+    println!("{:>8}", 1);
     println!(
         "{:15.9}{:15.9}{:15.9}",
         target_box.x, target_box.y, target_box.z
     );
+    println!("{:15.9}{:15.9}{:15.9}", 90.0, 90.0, 90.0);
+    println!("{:15.9}{:15.9}{:15.9}", 0.0, 0.0, 0.0);
+    println!("{:15.9}{:15.9}{:15.9}", 0.0, 0.0, 0.0);
     println!("END");
-
-    eprintln!("Done!");
 }

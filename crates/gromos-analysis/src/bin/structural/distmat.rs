@@ -38,7 +38,7 @@ fn main() {
         i += 1;
     }
 
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Distance matrix");
     eprintln!("# Atoms: {} to {}", atom_start + 1, atom_end);

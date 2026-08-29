@@ -396,3 +396,46 @@ fn write_pressurescale(o: &mut String, couple_pressure: bool, pp: &PressureParam
         row(o, vals![r[0], r[1], r[2]]);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::imd::{parse_imd_str, read_imd_file};
+
+    const REFERENCE_IN: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../gromos-md/tests/gromosXX_references/aladip_solvated/aladip_solvated.in"
+    );
+
+    #[test]
+    fn a_reference_input_survives_write_then_read() {
+        let p = read_imd_file(REFERENCE_IN).expect("reference input");
+        let text = write_imd(&p, Some(72));
+        let q =
+            parse_imd_str(&text).unwrap_or_else(|e| panic!("re-read what we wrote: {e}\n{text}"));
+        assert_eq!(q.nstlim, p.nstlim);
+        assert_eq!(q.dt, p.dt);
+        assert_eq!(q.ntc, p.ntc);
+        assert_eq!(q.ntf, p.ntf);
+        assert_eq!(q.rcutp, p.rcutp);
+        assert_eq!(q.rcutl, p.rcutl);
+        assert_eq!(q.epsrf, p.epsrf);
+        assert_eq!(q.nslfexcl, p.nslfexcl);
+        assert_eq!(q.rlam, p.rlam);
+        assert_eq!(q.temp_bath.len(), p.temp_bath.len());
+        if let (Some(a), Some(b)) = (q.temp_bath.first(), p.temp_bath.first()) {
+            assert_eq!(a.temp0, b.temp0);
+            assert_eq!(a.tau, b.tau);
+            assert_eq!(a.dof_sets, b.dof_sets);
+        }
+    }
+
+    #[test]
+    fn defaults_round_trip_and_carry_the_gromosxx_nslfexcl() {
+        let p = ImdParameters::default();
+        let q = parse_imd_str(&write_imd(&p, None)).expect("defaults re-read");
+        assert_eq!(q.nslfexcl, 1);
+        assert_eq!(q.nstlim, p.nstlim);
+        assert_eq!(q.ntc, p.ntc);
+    }
+}

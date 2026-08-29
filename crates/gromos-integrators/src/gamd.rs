@@ -348,7 +348,7 @@ impl GamdParameters {
         }
 
         // Check for window reset
-        if self.window_size > 0 && self.dih_stats.steps % self.window_size == 0 {
+        if self.window_size > 0 && self.dih_stats.steps.is_multiple_of(self.window_size) {
             self.dih_stats.reset();
             self.tot_stats.reset();
         }
@@ -590,7 +590,7 @@ impl GamdRunner {
         let lj_params = LJParamMatrix::from_nested(&lj_params_nested);
 
         // Convert pairlist to (u32, u32) format
-        let pairlist_short: Vec<(u32, u32)> = self.pairlist.solute_short.iter().copied().collect();
+        let pairlist_short: Vec<(u32, u32)> = self.pairlist.solute_short.to_vec();
 
         // Convert charge and iac
 

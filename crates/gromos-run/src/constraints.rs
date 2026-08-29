@@ -77,3 +77,36 @@ impl ConstraintSelection {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ntc_1_with_settle_water() {
+        let s = ConstraintSelection::from_codes(1, 1, 3, true);
+        assert!(!s.solute_shake && !s.solute_lincs);
+        assert!(s.settle_enabled && !s.solvent_shake && !s.lincs_enabled);
+        assert!(s.any() && s.solvent_constrained() && !s.solute_constrained());
+    }
+
+    #[test]
+    fn ntc_3_shake_everywhere() {
+        let s = ConstraintSelection::from_codes(3, 1, 1, true);
+        assert!(s.solute_shake && s.solvent_shake && s.shake_enabled());
+        assert!(!s.settle_enabled && !s.lincs_enabled);
+    }
+
+    #[test]
+    fn ntcp_2_selects_lincs_for_the_solute() {
+        let s = ConstraintSelection::from_codes(2, 2, 2, true);
+        assert!(s.solute_lincs && s.solvent_lincs && s.lincs_enabled);
+        assert!(!s.shake_enabled());
+    }
+
+    #[test]
+    fn no_solvent_means_no_solvent_constraints() {
+        let s = ConstraintSelection::from_codes(1, 1, 3, false);
+        assert!(!s.any());
+    }
+}

@@ -177,8 +177,8 @@ impl ReplicaBlock {
         Self::parse(&mut reader)
     }
 
-    /// Write REPLICA block to string
-    pub fn to_string(&self) -> String {
+    /// Render the REPLICA block as input text (also available through `Display`).
+    pub fn render(&self) -> String {
         let mut output = String::new();
         output.push_str("REPLICA\n");
         output.push_str("# NRET  LRESCALE  RET(1:NRET)\n");
@@ -191,7 +191,7 @@ impl ReplicaBlock {
         ));
         for (i, temp) in self.temperatures.iter().enumerate() {
             if i > 0 {
-                output.push_str(" ");
+                output.push(' ');
             }
             output.push_str(&format!("{:.1}", temp));
         }
@@ -257,6 +257,12 @@ impl ReplicaBlock {
         let avg_spacing = spacings.iter().sum::<f64>() / spacings.len() as f64;
 
         (min_spacing, max_spacing, avg_spacing)
+    }
+}
+
+impl std::fmt::Display for ReplicaBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.render())
     }
 }
 

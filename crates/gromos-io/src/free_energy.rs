@@ -252,8 +252,7 @@ impl FreeEnergyWriter {
             writeln!(w, "{:>18.9e}", v)?;
         }
         let zeros = |n: usize| {
-            std::iter::repeat("   0.000000000e0")
-                .take(n)
+            std::iter::repeat_n("   0.000000000e0", n)
                 .collect::<Vec<_>>()
                 .join("")
         };
@@ -298,5 +297,35 @@ impl FreeEnergyWriter {
 
     pub fn flush(&mut self) -> Result<(), IoError> {
         self.writer.flush().map_err(IoError::Io)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_survive_write_then_read() {
+        let p = std::env::temp_dir().join(format!("gromos_trg_test_{}.trg", std::process::id()));
+        {
+            let mut w = FreeEnergyWriter::new(&p, "round trip")
+                .unwrap()
+                .with_layout(2, 3);
+            let mut f = FreeEnergyFrame::new(0.002, 0.25, -12.5);
+            f.dhdl_lj = -10.0;
+            f.dhdl_crf = -2.5;
+            w.write_frame(&f).unwrap();
+            w.write_frame(&FreeEnergyFrame::new(0.004, 0.25, -11.0))
+                .unwrap();
+            w.flush().unwrap();
+        }
+        let frames = read_free_energy_trajectory(&p).unwrap();
+        assert_eq!(frames.len(), 2);
+        assert!((frames[0].time - 0.002).abs() < 1e-12);
+        assert!((frames[0].lambda - 0.25).abs() < 1e-12);
+        assert!((frames[0].dhdl_total + 12.5).abs() < 1e-9);
+        assert!((frames[0].dhdl_lj + 10.0).abs() < 1e-9);
+        assert!((frames[1].dhdl_total + 11.0).abs() < 1e-9);
+        std::fs::remove_file(p).ok();
     }
 }

@@ -523,8 +523,14 @@ impl Umbrella {
 
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() == 2 {
-                let idx: usize = parts[0].parse().unwrap();
-                let pot: f64 = parts[1].parse().unwrap();
+                let bad = |what: &str| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("{filename}: bad {what} in line {line:?}"),
+                    )
+                };
+                let idx: usize = parts[0].parse().map_err(|_| bad("grid index"))?;
+                let pot: f64 = parts[1].parse().map_err(|_| bad("potential"))?;
                 if idx < self.potential_grid.len() {
                     self.potential_grid[idx] = pot;
                 }
@@ -569,7 +575,11 @@ impl LocalElevation {
             umbrella.calculate_coordinates(conf);
 
             // Build potential if enabled
-            if umbrella.building && (self.step_counter % umbrella.deposition_frequency == 0) {
+            if umbrella.building
+                && self
+                    .step_counter
+                    .is_multiple_of(umbrella.deposition_frequency)
+            {
                 umbrella.build(conf);
             }
 

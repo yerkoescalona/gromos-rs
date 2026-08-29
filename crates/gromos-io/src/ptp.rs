@@ -62,13 +62,13 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
                 if v.len() < 4 {
                     continue;
                 }
-                let i = parse_usize(&v[0])? - 1; // 1-indexed in file → 0-indexed
-                let j = parse_usize(&v[1])? - 1;
+                let i = parse_usize(v[0])? - 1; // 1-indexed in file → 0-indexed
+                let j = parse_usize(v[1])? - 1;
                 // Interaction type: 1-indexed in file → 0-indexed (file 1→0: full LJ, file 2→1: 1-4 LJ)
-                let a_type = parse_usize(&v[2])? - 1;
+                let a_type = parse_usize(v[2])? - 1;
                 // b_type=0 in file is a sentinel: "atom pair absent in state B" → None
                 let b_type = {
-                    let raw = parse_usize(&v[3])?;
+                    let raw = parse_usize(v[3])?;
                     if raw == 0 {
                         None
                     } else {
@@ -105,16 +105,16 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
                 if v.len() < 11 {
                     continue;
                 }
-                let seq = parse_usize(&v[0])? - 1; // 0-indexed
-                                                   // v[1] = residue, v[2] = name — skip
-                let a_iac = parse_usize(&v[3])? - 1; // 0-indexed
-                let a_mass = parse_f64(&v[4])?;
-                let a_charge = parse_f64(&v[5])?;
-                let b_iac = parse_usize(&v[6])? - 1;
-                let b_mass = parse_f64(&v[7])?;
-                let b_charge = parse_f64(&v[8])?;
-                let lj_soft = parse_f64(&v[9])?;
-                let crf_soft = parse_f64(&v[10])?;
+                let seq = parse_usize(v[0])? - 1; // 0-indexed
+                                                  // v[1] = residue, v[2] = name — skip
+                let a_iac = parse_usize(v[3])? - 1; // 0-indexed
+                let a_mass = parse_f64(v[4])?;
+                let a_charge = parse_f64(v[5])?;
+                let b_iac = parse_usize(v[6])? - 1;
+                let b_mass = parse_f64(v[7])?;
+                let b_charge = parse_f64(v[8])?;
+                let lj_soft = parse_f64(v[9])?;
+                let crf_soft = parse_f64(v[10])?;
                 max_seq = max_seq.max(seq);
                 ps.atoms.push(PerturbedAtom {
                     seq,
@@ -157,10 +157,10 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
                 if v.len() < 4 {
                     continue;
                 }
-                let i = parse_usize(&v[0])? - 1;
-                let j = parse_usize(&v[1])? - 1;
-                let a_type = parse_usize(&v[2])? - 1; // file is 1-indexed
-                let b_type = parse_usize(&v[3])? - 1;
+                let i = parse_usize(v[0])? - 1;
+                let j = parse_usize(v[1])? - 1;
+                let a_type = parse_usize(v[2])? - 1; // file is 1-indexed
+                let b_type = parse_usize(v[3])? - 1;
                 ps.bonds.push(PerturbedBond {
                     i,
                     j,
@@ -184,11 +184,11 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
                 if v.len() < 5 {
                     continue;
                 }
-                let i = parse_usize(&v[0])? - 1;
-                let j = parse_usize(&v[1])? - 1;
-                let k = parse_usize(&v[2])? - 1;
-                let a_type = parse_usize(&v[3])? - 1;
-                let b_type = parse_usize(&v[4])? - 1;
+                let i = parse_usize(v[0])? - 1;
+                let j = parse_usize(v[1])? - 1;
+                let k = parse_usize(v[2])? - 1;
+                let a_type = parse_usize(v[3])? - 1;
+                let b_type = parse_usize(v[4])? - 1;
                 ps.angles.push(PerturbedAngle {
                     i,
                     j,
@@ -213,12 +213,12 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
                 if v.len() < 6 {
                     continue;
                 }
-                let i = parse_usize(&v[0])? - 1;
-                let j = parse_usize(&v[1])? - 1;
-                let k = parse_usize(&v[2])? - 1;
-                let l = parse_usize(&v[3])? - 1;
-                let a_type = parse_usize(&v[4])? - 1;
-                let b_type = parse_usize(&v[5])? - 1;
+                let i = parse_usize(v[0])? - 1;
+                let j = parse_usize(v[1])? - 1;
+                let k = parse_usize(v[2])? - 1;
+                let l = parse_usize(v[3])? - 1;
+                let a_type = parse_usize(v[4])? - 1;
+                let b_type = parse_usize(v[5])? - 1;
                 ps.improper_dihedrals.push(PerturbedDihedral {
                     i,
                     j,
@@ -247,12 +247,12 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
                 if v.len() < 6 {
                     continue;
                 }
-                let i = parse_usize(&v[0])? - 1;
-                let j = parse_usize(&v[1])? - 1;
-                let k = parse_usize(&v[2])? - 1;
-                let l = parse_usize(&v[3])? - 1;
-                let a_type = parse_usize(&v[4])? - 1;
-                let b_type = parse_usize(&v[5])? - 1;
+                let i = parse_usize(v[0])? - 1;
+                let j = parse_usize(v[1])? - 1;
+                let k = parse_usize(v[2])? - 1;
+                let l = parse_usize(v[3])? - 1;
+                let a_type = parse_usize(v[4])? - 1;
+                let b_type = parse_usize(v[5])? - 1;
                 ps.proper_dihedrals.push(PerturbedDihedral {
                     i,
                     j,
@@ -281,12 +281,12 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             if v.len() < 5 {
                 continue;
             }
-            let i = parse_usize(&v[0])? - 1;
-            let j = parse_usize(&v[1])? - 1;
-            let a_type = parse_usize(&v[2])? - 1;
-            let b_raw = parse_usize(&v[3])?;
+            let i = parse_usize(v[0])? - 1;
+            let j = parse_usize(v[1])? - 1;
+            let a_type = parse_usize(v[2])? - 1;
+            let b_raw = parse_usize(v[3])?;
             let b_type = if b_raw == 0 { None } else { Some(b_raw - 1) };
-            let alpha = parse_f64(&v[4])?;
+            let alpha = parse_f64(v[4])?;
             ps.soft_bonds.push(SoftBond {
                 i,
                 j,
@@ -313,13 +313,13 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             if v.len() < 6 {
                 continue;
             }
-            let i = parse_usize(&v[0])? - 1;
-            let j = parse_usize(&v[1])? - 1;
-            let k = parse_usize(&v[2])? - 1;
-            let a_type = parse_usize(&v[3])? - 1;
-            let b_raw = parse_usize(&v[4])?;
+            let i = parse_usize(v[0])? - 1;
+            let j = parse_usize(v[1])? - 1;
+            let k = parse_usize(v[2])? - 1;
+            let a_type = parse_usize(v[3])? - 1;
+            let b_raw = parse_usize(v[4])?;
             let b_type = if b_raw == 0 { None } else { Some(b_raw - 1) };
-            let alpha = parse_f64(&v[5])?;
+            let alpha = parse_f64(v[5])?;
             ps.soft_angles.push(SoftAngle {
                 i,
                 j,
@@ -346,14 +346,14 @@ pub fn read_pttopo<P: AsRef<Path>>(path: P) -> Result<PerturbedTopology, IoError
             if v.len() < 7 {
                 continue;
             }
-            let i = parse_usize(&v[0])? - 1;
-            let j = parse_usize(&v[1])? - 1;
-            let k = parse_usize(&v[2])? - 1;
-            let l = parse_usize(&v[3])? - 1;
-            let a_type = parse_usize(&v[4])? - 1;
-            let b_raw = parse_usize(&v[5])?;
+            let i = parse_usize(v[0])? - 1;
+            let j = parse_usize(v[1])? - 1;
+            let k = parse_usize(v[2])? - 1;
+            let l = parse_usize(v[3])? - 1;
+            let a_type = parse_usize(v[4])? - 1;
+            let b_raw = parse_usize(v[5])?;
             let b_type = if b_raw == 0 { None } else { Some(b_raw - 1) };
-            let alpha = parse_f64(&v[6])?;
+            let alpha = parse_f64(v[6])?;
             ps.soft_impropers.push(SoftImproper {
                 i,
                 j,

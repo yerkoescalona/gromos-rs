@@ -41,7 +41,7 @@ fn parse_dhdl_file(path: &str) -> Vec<(f64, f64)> {
         process::exit(1);
     });
     let mut result = Vec::new();
-    for line in BufReader::new(file).lines().filter_map(|l| l.ok()) {
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
         let t = line.trim();
         if t.starts_with('#') || t.is_empty() {
             continue;

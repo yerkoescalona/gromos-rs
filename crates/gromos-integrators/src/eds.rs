@@ -87,9 +87,7 @@ impl EDSState {
 
     /// Clear forces and virial for next step
     pub fn clear(&mut self) {
-        for f in &mut self.forces {
-            *f = Vec3::ZERO;
-        }
+        self.forces.fill(Vec3::ZERO);
         self.virial = [[0.0; 3]; 3];
         self.energy = 0.0;
     }
@@ -461,10 +459,8 @@ impl AEDSParameters {
     pub fn acceleration_factor(&self) -> f64 {
         let v_mix = self.eds.mixed_energy;
 
-        if v_mix <= self.e_min {
-            return 1.0; // No acceleration below E_min
-        } else if v_mix >= self.e_max {
-            return 1.0; // No acceleration above E_max
+        if v_mix <= self.e_min || v_mix >= self.e_max {
+            1.0 // no acceleration below E_min or above E_max
         } else {
             // Linear interpolation in acceleration region
             let de_mix = v_mix - self.e_min;
@@ -483,7 +479,7 @@ impl AEDSParameters {
         // Scale by acceleration factor if in acceleration region
         if factor < 1.0 {
             for force in configuration.current_mut().force.iter_mut() {
-                *force = *force * factor;
+                *force *= factor;
             }
         }
     }
@@ -624,7 +620,7 @@ impl AEDSParameters {
         self.update_statistics(update_alpha);
 
         // Every N steps, optimize parameters
-        if self.eds.states[0].visit_count % 100 == 0 {
+        if self.eds.states[0].visit_count.is_multiple_of(100) {
             self.estimate_free_energies();
             self.optimize_offsets(learning_rate);
             self.optimize_smoothing(learning_rate * 0.5); // More conservative for s
@@ -747,7 +743,7 @@ impl EDSRunner {
         let lj_params = LJParamMatrix::from_nested(&lj_params_nested);
 
         // Convert pairlist to (u32, u32) format
-        let pairlist_short: Vec<(u32, u32)> = self.pairlist.solute_short.iter().copied().collect();
+        let pairlist_short: Vec<(u32, u32)> = self.pairlist.solute_short.to_vec();
 
         // Convert charge and iac
 

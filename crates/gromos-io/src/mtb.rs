@@ -323,8 +323,8 @@ fn parse_solute_block(lines: &[&str], i: &mut usize) -> Result<BbSolute, IoError
                     IoError::ParseError(format!("Invalid MAE in {}: {}", name, tokens[1]))
                 })?;
                 let mut excluded = Vec::new();
-                for j in 2..tokens.len().min(2 + mae) {
-                    if let Ok(v) = tokens[j].parse::<i32>() {
+                for tok in tokens.iter().take(2 + mae).skip(2) {
+                    if let Ok(v) = tok.parse::<i32>() {
                         excluded.push(v);
                     }
                 }
@@ -621,8 +621,8 @@ fn parse_bb_atom(line: &str, block_name: &str) -> Result<BbAtom, IoError> {
     if tokens.len() > 6 {
         let mae: usize = tokens[6].parse().unwrap_or(0);
         expected_exclusions = mae;
-        for j in 7..tokens.len() {
-            if let Ok(v) = tokens[j].parse::<i32>() {
+        for tok in tokens.iter().skip(7) {
+            if let Ok(v) = tok.parse::<i32>() {
                 exclusions.push(v);
             }
         }

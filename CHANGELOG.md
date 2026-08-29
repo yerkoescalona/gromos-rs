@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.36] (2026-08-30)
+
+### Fixed
+
+- **`sim_box` solvated differently from gromos++** (323 vs 352 waters, 2.148 vs 2.208 nm box for the
+  same methanol and `@minwall 1.0`). Four deviations: the box was the per-axis extent instead of the
+  longest solute atom–atom distance; the template was replicated `ceil(box/template)+1` times instead
+  of `int(...)+1`, which shifts the lattice; the template was not centred on its centre of geometry;
+  and solute hydrogens counted in the clash test (gromos++ ignores atoms of mass 1.008). Now the same
+  algorithm, with a GENBOX block on output. `gromos-tools/tests/sim_box_reference.rs` compares box,
+  count and every position with gromos++'s output (`tests/data/sim_box/`).
+- `crates/gromos/tests/io_integration_tests.rs`: the MULTIBATH fixture had an invented DOFSET layout
+  that gromosXX would reject; the energy-writer test still expected the pre-0.0.34 `ENERTRJ` block.
+
+### Changed
+
+- **Code quality (PLAN.md 2.4):** `cargo clippy --workspace --all-targets` is clean (294 warnings
+  before). The mechanical fixes were checked bit-for-bit on seven reference systems (all output files
+  byte-identical). `too_many_arguments` is allowed for `gromos-forces` and `needless_range_loop` for
+  the numeric crates, each with its reason next to the allow. No bare `unwrap()` is left in the
+  non-test code of the library crates: user-input parses now return errors (`local_elevation`
+  potential files, MOPAC input writing) and the infallible cases say why in an `expect`.
+- 52 new unit tests: the SHAKE / SETTLE / LINCS algorithm wrappers, improper dihedrals (planar zero,
+  finite-difference forces), temperature, Berendsen thermostat and barostat, COM-motion removal,
+  pressure, energy totals, steepest descent, excluded-pair reaction field, CRF constants, IMD
+  write→read, posres / distanceres / `.trg` round trips, and `gromos-run`'s degrees of freedom,
+  constraint selection, bundle and prepare. Every `src` file of `gromos-integrators`, `gromos-forces`,
+  `gromos-io` and `gromos-run` now carries at least one test.
+- `EdsBlock` / `GamdBlock` / `ReplicaBlock`: the inherent `to_string` became `render` plus a `Display`
+  impl (`.to_string()` keeps working).
+
 ## [0.0.35] (2026-08-30)
 
 ### Added

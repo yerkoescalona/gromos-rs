@@ -128,16 +128,16 @@ impl Pme {
 pub fn bspline(order: usize, x: f64) -> f64 {
     match order {
         1 => {
-            if x >= 0.0 && x < 1.0 {
+            if (0.0..1.0).contains(&x) {
                 1.0
             } else {
                 0.0
             }
         },
         2 => {
-            if x >= 0.0 && x < 1.0 {
+            if (0.0..1.0).contains(&x) {
                 x
-            } else if x >= 1.0 && x < 2.0 {
+            } else if (1.0..2.0).contains(&x) {
                 2.0 - x
             } else {
                 0.0

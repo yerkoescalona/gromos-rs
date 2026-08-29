@@ -20,17 +20,14 @@ fn main() {
 
     let mut i = 1;
     while i < args.len() {
-        match args[i].as_str() {
-            "@topo" => {
-                i += 1;
-                topo_file = Some(args[i].clone());
-            },
-            _ => {},
+        if args[i].as_str() == "@topo" {
+            i += 1;
+            topo_file = Some(args[i].clone());
         }
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
 
     eprintln!("# Converting topology to build file");
     eprintln!("# Atoms: {}", topo_data.masses.len());

@@ -241,7 +241,7 @@ fn calculate_rdf(
         }
 
         // Use every Nth frame
-        if (frame_idx - skip) % every != 0 {
+        if !(frame_idx - skip).is_multiple_of(every) {
             continue;
         }
 

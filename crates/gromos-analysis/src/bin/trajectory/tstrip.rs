@@ -63,7 +63,7 @@ fn main() {
     }
 
     // Read topology
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap_or_else(|e| {
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap_or_else(|e| {
         eprintln!("Error reading topology: {}", e);
         process::exit(1);
     });
@@ -72,7 +72,7 @@ fn main() {
     let num_solute = natoms.unwrap_or(topo.num_solute_atoms());
 
     // Open trajectory
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap_or_else(|e| {
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap_or_else(|e| {
         eprintln!("Error opening trajectory: {}", e);
         process::exit(1);
     });

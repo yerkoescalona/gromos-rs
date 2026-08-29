@@ -186,7 +186,7 @@ impl Float for f32 {
     const PI: Self = std::f32::consts::PI;
     const TWO_PI: Self = 2.0 * std::f32::consts::PI;
     const FRAC_PI_2: Self = std::f32::consts::FRAC_PI_2;
-    const EPSILON: Self = std::f32::EPSILON;
+    const EPSILON: Self = f32::EPSILON;
     const ZERO: Self = 0.0;
     const ONE: Self = 1.0;
     const TWO: Self = 2.0;
@@ -352,7 +352,7 @@ impl Float for f64 {
     const PI: Self = std::f64::consts::PI;
     const TWO_PI: Self = 2.0 * std::f64::consts::PI;
     const FRAC_PI_2: Self = std::f64::consts::FRAC_PI_2;
-    const EPSILON: Self = std::f64::EPSILON;
+    const EPSILON: Self = f64::EPSILON;
     const ZERO: Self = 0.0;
     const ONE: Self = 1.0;
     const TWO: Self = 2.0;

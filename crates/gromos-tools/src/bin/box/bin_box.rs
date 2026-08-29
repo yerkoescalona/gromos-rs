@@ -47,9 +47,9 @@ fn main() {
         i += 1;
     }
 
-    let topo_data = read_topology_file(&topo_file.unwrap()).unwrap();
+    let topo_data = read_topology_file(topo_file.unwrap()).unwrap();
     let _topo = build_topology(topo_data);
-    let mut traj = TrajectoryReader::new(&traj_file.unwrap()).unwrap();
+    let mut traj = TrajectoryReader::new(traj_file.unwrap()).unwrap();
 
     eprintln!("# Binning into {} x {} x {} grid", nx, ny, nz);
 
@@ -72,6 +72,7 @@ fn main() {
         }
 
         // Print non-empty bins
+        #[allow(clippy::needless_range_loop)] // one index over several arrays
         for ix in 0..nx {
             for iy in 0..ny {
                 for iz in 0..nz {

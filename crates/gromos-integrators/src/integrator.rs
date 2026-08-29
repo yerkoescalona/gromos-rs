@@ -309,9 +309,7 @@ impl Integrator for SteepestDescent {
         self.step_count += 1;
 
         // Zero velocities (minimization, not dynamics)
-        for vel in &mut conf.current_mut().vel {
-            *vel = Vec3::ZERO;
-        }
+        conf.current_mut().vel.fill(Vec3::ZERO);
 
         // Check convergence after minimum steps
         if self.step_count > self.min_steps {
@@ -354,9 +352,7 @@ impl Integrator for SteepestDescent {
         }
 
         // Zero velocities and forces for next iteration
-        for vel in &mut conf.current_mut().vel {
-            *vel = Vec3::ZERO;
-        }
+        conf.current_mut().vel.fill(Vec3::ZERO);
         conf.current_mut().clear_forces();
     }
 
@@ -573,7 +569,7 @@ impl Integrator for StochasticDynamics {
             rand::rngs::StdRng::from_entropy()
         };
 
-        let normal = Normal::new(0.0, 1.0).unwrap();
+        let normal = Normal::new(0.0, 1.0).expect("the standard normal distribution is valid");
 
         // Step 1: Update velocities with Langevin dynamics
         // v(t+dt/2) = c1*v(t) + c2*F(t)/m + c3*ξ₁ + c4*ξ₂
@@ -1069,9 +1065,7 @@ impl Integrator for ConjugateGradient {
         self.step_count += 1;
 
         // Zero velocities (minimization, not dynamics)
-        for vel in &mut conf.current_mut().vel {
-            *vel = Vec3::ZERO;
-        }
+        conf.current_mut().vel.fill(Vec3::ZERO);
 
         // Calculate current energy
         let current_energy = conf.current().energies.total();
@@ -1091,7 +1085,7 @@ impl Integrator for ConjugateGradient {
 
         // Determine if we should reset search direction
         let should_reset = self.old_forces.is_empty()
-            || (self.reset_interval > 0 && self.step_count % self.reset_interval == 0);
+            || (self.reset_interval > 0 && self.step_count.is_multiple_of(self.reset_interval));
 
         // Calculate beta
         let beta = if should_reset {
@@ -1212,9 +1206,7 @@ impl Integrator for ConjugateGradient {
         self.prev_energy = current_energy;
 
         // Clear velocities and forces
-        for vel in &mut conf.current_mut().vel {
-            *vel = Vec3::ZERO;
-        }
+        conf.current_mut().vel.fill(Vec3::ZERO);
         conf.current_mut().clear_forces();
     }
 
@@ -1300,7 +1292,6 @@ impl LatticeShiftTracker {
         match box_type {
             BoxType::Vacuum => {
                 // No periodic boundaries
-                return;
             },
             BoxType::Rectangular => {
                 self.apply_rectangular(conf, &box_vectors, &box_inv);
@@ -1392,9 +1383,7 @@ impl LatticeShiftTracker {
     ///
     /// Should be called when starting a new simulation or after trajectory restart
     pub fn reset(&self, conf: &mut Configuration) {
-        for shifts in &mut conf.lattice_shifts {
-            *shifts = [0, 0, 0];
-        }
+        conf.lattice_shifts.fill([0, 0, 0]);
     }
 
     /// Get unwrapped position for an atom

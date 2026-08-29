@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)] // reference comparisons index several arrays in lockstep
 //! Integration tests validating gromos-rs against GROMOS reference data
 //!
 //! These tests parse the reference topology/coordinates/parameters,

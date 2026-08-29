@@ -155,6 +155,9 @@ impl MopacInteraction {
         let mut file = std::fs::File::create(path).map_err(|e| {
             ProviderError::ComputationFailed(format!("failed to create .mop input: {e}"))
         })?;
+        let io = |e: std::io::Error| {
+            ProviderError::ComputationFailed(format!("failed to write .mop input: {e}"))
+        };
         let mut keywords = format!(
             "{} 1SCF GRAD AUX(PRECISION=9) CHARGE={}",
             self.method.keyword(),
@@ -164,9 +167,9 @@ impl MopacInteraction {
             keywords.push(' ');
             keywords.push_str(spin);
         }
-        writeln!(file, "{keywords}").unwrap();
-        writeln!(file, "gromos-rs MopacInteraction").unwrap();
-        writeln!(file).unwrap();
+        writeln!(file, "{keywords}").map_err(io)?;
+        writeln!(file, "gromos-rs MopacInteraction").map_err(io)?;
+        writeln!(file).map_err(io)?;
         for &g in atom_indices {
             let symbol = element_symbol(self.atomic_numbers[g])?;
             let p = conf.current().pos[g] * NM_TO_ANGSTROM;
@@ -175,7 +178,7 @@ impl MopacInteraction {
                 "{:>2}{:14.9} 1{:14.9} 1{:14.9} 1",
                 symbol, p.x, p.y, p.z
             )
-            .unwrap();
+            .map_err(io)?;
         }
         Ok(())
     }

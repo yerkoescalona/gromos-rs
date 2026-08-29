@@ -138,7 +138,7 @@ fn match_atoms(
     topo_atoms: &[(usize, String)],
     topo_res_name: &str,
     pdb_res: &PdbResidue,
-    used: &mut Vec<bool>,
+    used: &mut [bool],
     lib: &Library,
     coords: &mut [(f64, f64, f64)],
     masses: &[f64],
@@ -385,6 +385,7 @@ fn main() {
     println!("END");
 
     println!("POSITION");
+    #[allow(clippy::needless_range_loop)] // one index over several arrays
     for i in 0..n_atoms {
         let res_nr = parsed_topo.residue_numbers[i];
         let res_name = if res_nr > 0 && res_nr <= parsed_topo.residue_names.len() {

@@ -197,6 +197,7 @@ fn main() {
 }
 
 /// Add a beginning (N-terminal) end group. All atoms are added directly.
+#[allow(clippy::too_many_arguments)]
 fn add_begin(
     atoms: &mut Vec<TopAtom>,
     bonds: &mut Vec<TopBond>,
@@ -231,6 +232,7 @@ fn add_begin(
 }
 
 /// Add a solute residue, handling overlap with previous residue.
+#[allow(clippy::too_many_arguments)]
 fn add_solute(
     atoms: &mut Vec<TopAtom>,
     bonds: &mut Vec<TopBond>,
@@ -465,7 +467,7 @@ fn resolve_bb_index(bb_idx: i32, offset: usize) -> usize {
 }
 
 /// Build exclusion lists from connectivity (nearest-neighbour exclusions).
-fn build_exclusions(atoms: &mut Vec<TopAtom>, bonds: &[TopBond], link_exclusions: usize) {
+fn build_exclusions(atoms: &mut [TopAtom], bonds: &[TopBond], link_exclusions: usize) {
     let n = atoms.len();
 
     // Build adjacency list
@@ -478,6 +480,7 @@ fn build_exclusions(atoms: &mut Vec<TopAtom>, bonds: &[TopBond], link_exclusions
     }
 
     // For each atom, find all atoms within `link_exclusions` bonds
+    #[allow(clippy::needless_range_loop)] // one index over several arrays
     for i in 0..n {
         let mut excluded = HashSet::new();
         let mut frontier = vec![i];
@@ -506,7 +509,7 @@ fn build_exclusions(atoms: &mut Vec<TopAtom>, bonds: &[TopBond], link_exclusions
 }
 
 /// Build 1-4 pair lists (atoms separated by exactly 3 bonds, not already excluded).
-fn build_14_pairs(atoms: &mut Vec<TopAtom>, bonds: &[TopBond], _angles: &[TopAngle]) {
+fn build_14_pairs(atoms: &mut [TopAtom], bonds: &[TopBond], _angles: &[TopAngle]) {
     let n = atoms.len();
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
     for bond in bonds {
@@ -541,6 +544,7 @@ fn build_14_pairs(atoms: &mut Vec<TopAtom>, bonds: &[TopBond], _angles: &[TopAng
 }
 
 /// Write the complete topology to stdout.
+#[allow(clippy::too_many_arguments)]
 fn write_topology(
     atoms: &[TopAtom],
     bonds: &[TopBond],
