@@ -130,7 +130,8 @@ cargo build --release --bin md
 make test                      # cargo test --workspace
 
 # Python: build the extension into py-gromos/.venv and run the Python suite
-make test-python               # uv sync + maturin develop --release + pytest
+make test-python               # uv sync --all-groups (builds the extension) + pytest
+make build-release             # optimised extension build when timing matters
 
 # Format, lint, and the full local CI pass (fmt-check + lint + test)
 make fmt lint-rust
@@ -188,8 +189,14 @@ This project uses comprehensive CI/CD inspired by [Polars](https://github.com/po
 
 | Command | Description |
 |---------|-------------|
+| `make check` | `cargo fmt` + `cargo check --tests` — run before every commit |
+| `make test` | `cargo test --workspace` (incl. the gromosXX reference suite) |
+| `make test-python` | `uv sync --all-groups` (builds the extension) + `pytest` |
+| `make build-release` | Optimised build of the Python extension (`maturin develop --release`) |
 | `make fmt` / `make fmt-check` | Format code / verify formatting |
-| `make lint-rust` | Clippy |
+| `make lint-rust` | Clippy across the workspace |
+| `make ci` | fmt-check + lint-rust + test, as CI runs them |
+| `make docs` / `make docs-serve` | Build (`--strict`) / serve the py-gromos mkdocs site |
 
 **Developer Tools:**
 
