@@ -125,21 +125,20 @@ This repository contains **gromos-rs**, a modern reimplementation of GROMOS feat
 #### Quick Start
 
 ```bash
-# Setup development environment
-./scripts/setup-dev.sh
+# Rust: build the md binary and run the workspace tests (incl. the gromosXX reference suite)
+cargo build --release --bin md
+make test                      # cargo test --workspace
 
-# Build both Rust and Python projects
-make build
+# Python: build the extension into py-gromos/.venv and run the Python suite
+make test-python               # uv sync + maturin develop --release + pytest
 
-# Run tests
-make test
-
-# Format and lint code
-make fmt lint
-
-# Run complete CI checks locally
+# Format, lint, and the full local CI pass (fmt-check + lint + test)
+make fmt lint-rust
 make ci
 ```
+
+`just ref` / `just lint` (see `Justfile`) run the reference suite and clippy plus the G6 drift
+gates; `INSTALL.md` lists the toolchain and the optional QM/ML layers.
 
 #### Components
 
@@ -189,12 +188,8 @@ This project uses comprehensive CI/CD inspired by [Polars](https://github.com/po
 
 | Command | Description |
 |---------|-------------|
-| `make build` | Build both projects |
-| `make test` | Run all tests |
-| `make fmt` | Format code |
-| `make lint` | Lint code |
-| `make ci` | Run full CI pipeline locally |
-| `make help` | Show all available commands |
+| `make fmt` / `make fmt-check` | Format code / verify formatting |
+| `make lint-rust` | Clippy |
 
 **Developer Tools:**
 
