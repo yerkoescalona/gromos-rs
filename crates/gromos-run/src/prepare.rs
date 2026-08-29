@@ -130,6 +130,25 @@ pub fn prepare_system(
         ));
     }
 
+    // gromosXX `Topology::update_for_lambda`: a perturbed atom's mass is λ-mixed,
+    // m(λ) = (1 − λ)·m_A + λ·m_B (the mass λ has no NLAM exponent). It changes the kinetic
+    // energy and the integration, so it is part of the prepared topology — whichever way the
+    // perturbation arrived (the `.ptp` file above, or `Topology.apply_perturbation` from Python).
+    if imd.ntg != 0 && !topology.perturbed_solute.atoms.is_empty() {
+        let lambda = imd.rlam;
+        let mixed: Vec<(usize, f64)> = topology
+            .perturbed_solute
+            .atoms
+            .iter()
+            .map(|a| (a.seq, (1.0 - lambda) * a.a_mass + lambda * a.b_mass))
+            .collect();
+        for (seq, mass) in mixed {
+            if seq < topology.mass.len() && mass > 0.0 {
+                topology.mass[seq] = mass;
+                topology.inverse_mass[seq] = 1.0 / mass;
+            }
+        }
+    }
     // 2. NTB=-1: truncated octahedron. GROMOS converts the legacy "cube edge length L" BOX
     //    block into the lower-triangular triclinic box vectors and rotates positions and
     //    velocities into that frame on read (io/configuration/in_configuration.cc).

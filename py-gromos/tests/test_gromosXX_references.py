@@ -292,7 +292,6 @@ EXPECTED_ENGINE_FAILURES = {
     # `water_216_nve_nobath` (absent MULTIBATH) passed here until PLAN.md 3.9 step 2 fixed the
     # parser defaults; it now runs as a regular reference system.
     # Same known FEP mismatch the Rust suite `ignore`s (PLAN.md Reference Test Status).
-    "aladip_vacuum_fep": "known FEP mismatch vs gromosXX (ignored in the Rust suite too)",
 }
 
 REFERENCE_PARAMS = [

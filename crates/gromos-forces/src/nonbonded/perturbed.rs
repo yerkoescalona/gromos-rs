@@ -705,8 +705,13 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
 
         // b_type=None means atom pair disappears in state B → contributes 0
         let (e_lj_b, f_lj_b) = ap.b_type.map_or((0.0, 0.0), |t| lj_pair(t));
-        let e_crf_b = ap.b_type.map_or(0.0, |_| e_crf_reg);
-        let f_crf_b = ap.b_type.map_or(0.0, |_| f_crf_reg);
+        // An "excluded" state (file type 0) still carries the reaction-field term of an excluded
+        // pair (gromosXX `rf_soft_interaction(r, 0, B_q, …)` in `perturbed_nonbonded_pair.cc`):
+        // no 1/r, but the −crf_2cut3i·r² − crf_cut part and its force.
+        let e_crf_excl = q_prod * (-crf.crf_2cut3i * r2 - crf.crf_cut);
+        let f_crf_excl = q_prod * crf.crf_cut3i;
+        let e_crf_b = ap.b_type.map_or(e_crf_excl, |_| e_crf_reg);
+        let f_crf_b = ap.b_type.map_or(f_crf_excl, |_| f_crf_reg);
 
         let e_lj_pert = lp.a_lj_lambda_n * e_lj_a + lp.b_lj_lambda_n * e_lj_b;
         let e_crf_pert = lp.a_crf_lambda_n * e_crf_a + lp.b_crf_lambda_n * e_crf_b;

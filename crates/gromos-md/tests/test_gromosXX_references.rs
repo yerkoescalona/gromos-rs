@@ -585,7 +585,9 @@ ref_test!(ch4_water_fep_l000, "ch4_water_fep_l000");
 ref_test!(ch4_water_fep_l025, "ch4_water_fep_l025");
 ref_test!(ch4_water_fep_l075, "ch4_water_fep_l075");
 ref_test!(ch4_water_fep_l100, "ch4_water_fep_l100");
-ref_test!(ignore: aladip_vacuum_fep, "aladip_vacuum_fep");
+// Perturbed bonded (regular and soft-core), atom types, charges, λ-mixed masses and a
+// PERTATOMPAIR entry, all at once — passes since the 2026-08-29/30 FEP fixes.
+ref_test!(aladip_vacuum_fep, "aladip_vacuum_fep");
 // Charged perturbed atoms (54a7 CH3OH -> dummies): the soft-core reaction-field terms that
 // `ch4_water_fep` (zero charge) never exercised. Found and fixed the 1/cutoff³ error in the
 // perturbed pair kernel's softened RF term (0.0.34).

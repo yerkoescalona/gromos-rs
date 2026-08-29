@@ -5,9 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
-## [0.0.33] (2026-08-29)
+## [0.0.34] (2026-08-30)
 
-### Fixed
+### Fixed — every FEP reference now matches gromosXX
+
+Found by bisecting `aladip_vacuum_fep` against the native gromosXX one perturbation block, atom
+and property at a time, ending with *null perturbations* (identical A and B states, α = 0) — a
+non-zero Δ there is a bookkeeping bug by construction. `aladip_vacuum_fep`, ignored since 1.7,
+passes; so do `meoh_water_fep` and CH4 at five λ. Rust suite 44 passed / 1 ignored (`aladip_vacuum_em`,
+an EM frame-count question, not physics); Python suite 344 passed, no xfail left.
 
 - **Perturbed nonbonded electrostatics, two defects found by bisecting `aladip_vacuum_fep` against
   gromosXX with single-block `.ptp` files.** (1) The soft-core pair kernel's reaction-field term
@@ -17,15 +23,17 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   atom was perturbed; gromosXX routes a pair to the perturbed list when either atom is. A
   perturbed atom that is not at the start of the topology lost most of its soft-core pairs.
   `meoh_water_fep` now passes (energies, positions, forces, dH/dλ per term, ten steps);
-  every single-atom null/charge/type variant of the dipeptide is exact. Suite: 43 passed, 2 ignored.
+  every single-atom null/charge/type variant of the dipeptide is exact.
+- **λ-mixed masses were never applied** in the `md` path (`mass_at_lambda` had no caller):
+  `prepare_system` now sets m(λ) = (1−λ)·m_A + λ·m_B for perturbed atoms, as gromosXX's
+  `update_for_lambda` does.
+- **`PERTATOMPAIR` entries were ignored unless some atom was also perturbed** (the whole perturbed
+  nonbonded block was guarded by "any perturbed atom"), their CRF part was never applied, and an
+  "excluded" end state dropped the reaction-field term an excluded pair keeps in gromosXX.
+- With these, **`aladip_vacuum_fep` passes** — the reference that had been `ignore`d since 1.7 —
+  and every FEP reference (CH4 at five λ, methanol, the dipeptide) matches gromosXX. Suite: 44
+  passed, 1 ignored (`aladip_vacuum_em`, an EM frame-count question, not physics).
 
-- **dH/dλ was never compared against gromosXX.** The reference suite (and `gromos-io`'s `.trg`
-  reader, hence `ext_ti_ana`) looked for a one-line `FREEENERGY03` block, while the native binary
-  writes `TIMESTEP` + `FREEENERDERIVS03` (`# lambda`, `# totals` in ENERGY03 order, per-bath and
-  per-group sections) — so every "dH/dλ tracked" claim since 1.7 rested on zero frames. The reader
-  now parses both layouts, the reference test compares the total and the LJ / CRF / bonded parts
-  per frame (aligned by time), and the writer emits the native layout with the run's bath and
-  energy-group counts (per-group derivatives as zeros).
 - Perturbed bonded energies (bonds, angles, impropers, dihedrals, and their soft variants) are
   booked in their own `.tre` columns instead of all in `bond_total` — totals were right, columns
   were not (`ForceEnergyLambda` carries the split). In the `aladip_vacuum_fep` bisection the
@@ -35,6 +43,18 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   (`PerturbedSolute::is_empty` ignored those lists): the regular term was removed from the topology
   and nothing replaced it. Every soft bonded case of the `aladip_vacuum_fep` bisection is now exact
   against gromosXX (the soft-core formulas themselves were already right).
+
+## [0.0.33] (2026-08-29)
+
+### Fixed
+
+- **dH/dλ was never compared against gromosXX.** The reference suite (and `gromos-io`'s `.trg`
+  reader, hence `ext_ti_ana`) looked for a one-line `FREEENERGY03` block, while the native binary
+  writes `TIMESTEP` + `FREEENERDERIVS03` (`# lambda`, `# totals` in ENERGY03 order, per-bath and
+  per-group sections) — so every "dH/dλ tracked" claim since 1.7 rested on zero frames. The reader
+  now parses both layouts, the reference test compares the total and the LJ / CRF / bonded parts
+  per frame (aligned by time), and the writer emits the native layout with the run's bath and
+  energy-group counts (per-group derivatives as zeros).
 - The perturbed nonbonded derivative is split into its LJ and CRF parts
   (`PertNBCorrection::dhdl_lj/dhdl_crf`, `Energy::dhdl_lj/dhdl_crf/dhdl_bonded`), so the `.trg`
   carries the same per-term derivatives gromosXX writes.

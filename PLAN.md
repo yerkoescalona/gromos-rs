@@ -72,7 +72,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | ch4_water_fep_l000 / l025 / l075 / l100 | 2998 | the same system at λ = 0, 0.25, 0.75, 1; ten steps; dH/dλ total, LJ, CRF, bonded per step | **PASS** (2026-08-29) |
 | 4   | meoh_water_fep | 2862 | charged CH3OH→dummy in 953 SPC water, λ=0.5, ten steps, dH/dλ per term (soft-core RF for charged atoms) | **PASS** (2026-08-29, after the kernel fix) |
 
-**43 of 45 tests pass.** (2 ignored: `aladip_vacuum_fep` — λ-mixed masses and PERTATOMPAIR still open (see 1.7); `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
+**44 of 45 tests pass.** (1 ignored: `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
@@ -246,8 +246,11 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
   ignoring the soft lists, so a soft-only `.ptp` removed the regular term and evaluated nothing; every
   bonded case (regular and soft, absent or same B state) is now exact. `PERTATOMPARAM` charge and LJ
   type changes: exact after the two nonbonded fixes above (every single-atom null / charge / type
-  variant). Still open: λ-mixed **masses** are never applied in the `md` path (`mass_at_lambda` has no
-  caller; kinetic 4.5681 vs 4.5769), and `PERTATOMPAIR` differs in LJ (−5.1358 vs −5.2921).
+  variant). λ-mixed masses (never applied in the `md` path) and `PERTATOMPAIR` (skipped unless an atom
+  was also perturbed; CRF never applied; excluded end state without its RF term): **fixed 2026-08-30**.
+  **`aladip_vacuum_fep` passes** — every FEP reference matches gromosXX. Method worth keeping: single-block
+  / single-atom / single-property `.ptp` variants through both binaries, then a null perturbation
+  (identical A and B, α = 0) — a non-zero Δ there is a bookkeeping bug by construction.
 
 **1.8 — Virtual atoms** — skip for now; not blocking any common use case
 - [ ] Port `algorithm/virtualatoms/` (aromatic centroids, lone pairs, TIP4P site)

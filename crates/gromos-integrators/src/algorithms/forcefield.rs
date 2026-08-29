@@ -980,8 +980,14 @@ impl Algorithm for Forcefield {
         //   perturbed_self_energy_correction → corrects RF self for perturbed atoms
         //   perturbed_excluded_correction    → corrects RF excluded pairs for perturbed atoms
         //   perturbed_one_four_correction    → corrects 1-4 for perturbed atoms
+        // A `.ptp` may carry only PERTATOMPAIR entries (no perturbed atom): the atom-pair
+        // correction must still run (`pert_info` is then all `None`, which every other
+        // correction treats as "nothing to do").
+        let has_perturbed_atoms =
+            !self.pert_info.is_empty() && self.pert_info.iter().any(|x| x.is_some());
+        let has_atom_pairs = !topo.perturbed_solute.atom_pairs.is_empty();
         let (pert_nb_dhdl, pert_nb_dhdl_lj, pert_nb_dhdl_crf) =
-            if !self.pert_info.is_empty() && self.pert_info.iter().any(|x| x.is_some()) {
+            if has_perturbed_atoms || has_atom_pairs {
                 let (lam, _) = self.lambda_and_derivative;
                 let lp = PerturbedLambdaParams::from_lambda(
                     lam,
@@ -1148,7 +1154,10 @@ impl Algorithm for Forcefield {
                         &mut corr_ap,
                     );
                     self.nonbonded_storage.e_lj += corr_ap.delta_e_lj;
+                    self.nonbonded_storage.e_crf += corr_ap.delta_e_crf;
                     dhdl_nb += corr_ap.dhdl;
+                    dhdl_nb_lj += corr_ap.dhdl_lj;
+                    dhdl_nb_crf += corr_ap.dhdl_crf;
                     for i in 0..n_atoms {
                         self.nonbonded_storage.forces[i] += corr_ap.forces[i];
                     }

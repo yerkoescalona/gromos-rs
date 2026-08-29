@@ -771,3 +771,36 @@ provider pattern was designed for exactly this) behind a `gpu` feature using `wg
 (reference-suite-verified), per-atom neighbour lists uploaded every `NSNB` steps, forces read back
 per step; f32 as a second flag later. Order of value on this machine: parallel SHAKE/SETTLE on the
 CPU first, then the GPU provider. Not started; the probe is kept in `bench/gpu_probe`.
+
+## 7. Thermodynamic integration, engine vs engine (2026-08-29)
+
+`scripts/ti_ch4.py --steps 5000`: CH4 → dummy in 999 SPC (54a7, the vol. 7 tutorial system, the
+inputs proven bit-for-bit at λ = 0, 0.25, 0.5, 0.75, 1), eleven λ windows of 10 ps each, NVT 300 K,
+run by the native gromosXX and by `md` from the same `.imd` files, integrated with the project's
+`ext_ti_ana` (trapezoid over ⟨∂H/∂λ⟩, first 20 % of each window dropped). One run per window — the
+per-window means differ by up to 25 kJ/mol at λ = 0.9 (independent 10 ps trajectories in the
+soft-core end-point region, ee 16–20 kJ/mol), so the ΔG agreement is statistical, not bit-for-bit;
+the bit-for-bit statement is the reference suite. Binary: `md` 0.0.33 (the fixes of 0.0.33/0.0.34 do
+not touch a zero-charge, atom-1, equal-mass perturbation).
+
+| λ | ⟨∂H/∂λ⟩ gromosxx ± ee (n) | ⟨∂H/∂λ⟩ gromos-rs ± ee (n) | Δ (rs − XX) |
+|---|---|---|---|
+| 0.00 |    13.549 ± 0.609 (400) |    13.918 ± 0.328 (401) | +0.368 |
+| 0.10 |    11.941 ± 0.769 (400) |    13.336 ± 0.698 (401) | +1.395 |
+| 0.20 |     9.445 ± 0.795 (400) |    10.795 ± 0.924 (401) | +1.350 |
+| 0.30 |     9.233 ± 0.329 (400) |     9.384 ± 0.931 (401) | +0.151 |
+| 0.40 |     6.129 ± 1.633 (400) |     6.828 ± 0.995 (401) | +0.699 |
+| 0.50 |     3.704 ± 1.259 (400) |     1.895 ± 2.193 (401) | -1.808 |
+| 0.60 |    -0.771 ± 1.767 (400) |     1.967 ± 2.813 (401) | +2.738 |
+| 0.70 |    -2.957 ± 2.711 (400) |   -11.261 ± 3.833 (401) | -8.304 |
+| 0.80 |   -13.256 ± 6.245 (400) |   -35.797 ± 1.931 (401) | -22.541 |
+| 0.90 |  -107.265 ± 16.436 (400) |   -81.536 ± 20.108 (401) | +25.729 |
+| 1.00 |   -65.329 ± 5.188 (400) |   -62.112 ± 9.043 (401) | +3.217 |
+
+- **gromosxx**: ΔG = -10.97 kJ/mol; wall time 0 s for 11 windows (all cached)
+- **gromos-rs**: ΔG = -10.85 kJ/mol; wall time 167 s for 11 windows
+- ΔG(gromos-rs) − ΔG(gromosXX) = +0.120 kJ/mol
+- Reference: ΔG_hyd(CH4) experiment ≈ +8.4 kJ/mol, i.e. ΔG(CH4→dummy) ≈ −8 kJ/mol; the tutorial's 54a7 result is of that size. Windows are independent short runs, not a converged study.
+
+Wall time (this machine, 1 thread for gromosXX, `execution.parallel = auto` for `md`): gromosXX
+≈ 40 s per window (25.8 s / 1000 steps), `md` ≈ 12 s per window (5.8 s / 1000 steps).
