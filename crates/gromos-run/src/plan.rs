@@ -70,6 +70,9 @@ pub struct ForcefieldPlan {
     pub pairlist_type: i32,
     pub epsilon_rf: f64,
     pub kappa: f64,
+    /// NSLFEXCL: reaction-field contribution of the excluded pairs and the self term
+    /// (gromosXX `nonbonded.rf_excluded`; 0 is the GROMOS96 behaviour, 1 the current one).
+    pub rf_excluded: bool,
     pub four_pi_eps_i: f64,
     pub bonds: bool,
     pub angles: bool,
@@ -244,6 +247,7 @@ impl AlgorithmSpec {
                 pairlist_type: 0,
                 epsilon_rf: 61.0,
                 kappa: 0.0,
+                rf_excluded: true,
                 four_pi_eps_i: gromos_core::units::four_pi_eps_i,
                 bonds: true,
                 angles: true,
@@ -532,6 +536,7 @@ pub fn build_plan(
         pairlist_type: recipe.to_imd().type_,
         epsilon_rf: ff.electrostatics.epsilon_rf,
         kappa: ff.electrostatics.kappa,
+        rf_excluded: ff.electrostatics.self_exclusion != 0,
         four_pi_eps_i,
         bonds: ff.bonds,
         angles: ff.angles,

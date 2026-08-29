@@ -198,7 +198,8 @@ pub struct NonbondedSpec {
     pub rf_cutoff: f64,
     /// EPSRF
     pub epsilon_rf: f64,
-    /// NSLFEXCL
+    /// NSLFEXCL — 0: no reaction-field term for the excluded pairs and no self term (GROMOS96);
+    /// 1: include them (gromosXX default). Consumed by the force field (`ForcefieldPlan::rf_excluded`).
     pub self_exclusion: i32,
     pub lattice_sum: LatticeSum,
     /// Unused PME leftovers carried for the round trip.

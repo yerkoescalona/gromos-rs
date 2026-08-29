@@ -72,7 +72,13 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | ch4_water_fep_l000 / l025 / l075 / l100 | 2998 | the same system at λ = 0, 0.25, 0.75, 1; ten steps; dH/dλ total, LJ, CRF, bonded per step | **PASS** (2026-08-29) |
 | 4   | meoh_water_fep | 2862 | charged CH3OH→dummy in 953 SPC water, λ=0.5, ten steps, dH/dλ per term (soft-core RF for charged atoms) | **PASS** (2026-08-29, after the kernel fix) |
 
-**45 of 45 tests pass** (2026-08-30; nothing ignored).
+**45 of 45 tests pass** (2026-08-30; nothing ignored). Plus gromosXX's own regression oracle,
+ported: `tests/gromos_check_suite.rs` evaluates the `check/{aladip,aladip_unperturbed,
+aladip_special}.t.cc` per-term energies (bonded, perturbed, soft-core, both reaction-field
+variants, atomic cutoff, distance restraints, λ-derivatives) — 7 pass against the *current*
+gromosXX binary to 1e-7 and against the suite's hard-coded table with its own δ; the dihedral
+restraint value is `#[ignore]`d until 1.6 lands. It caught NSLFEXCL being parsed and never
+consumed (fixed 0.0.35).
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
@@ -884,7 +890,7 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
 | CONSTRAINT | NTC, NTCP, NTCP0, NTCS, NTCS0 (kept for SHAKE) | `constraints` | all |
 | FORCE | NTF×6, NEGR, NRE | `forcefield.{bonds,…}`, `energy_groups` | NTF; energy groups carried, not used |
 | PAIRLIST | ALGORITHM NSNB RCUTP RCUTL SIZE TYPE | `forcefield.pairlist` | all |
-| NONBONDED | NLRELE APPAK RCRF EPSRF NSLFEXCL + lines 3–7 (kept) | `forcefield.electrostatics` (+ `lattice_sum`) | APPAK, EPSRF, RCUTL; lattice-sum lines inert |
+| NONBONDED | NLRELE APPAK RCRF EPSRF NSLFEXCL + lines 3–7 (kept) | `forcefield.electrostatics` (+ `lattice_sum`) | APPAK, EPSRF, RCUTL, NSLFEXCL (gates the excluded-pair + self RF terms — parsed but never consumed until 0.0.35, caught by the check-suite port); lattice-sum lines inert |
 | POSITIONRES | NTPOR NTPORB NTPORS CPOR | `forcefield.restraints.position` | all but NTPORS |
 | DISTANCERES | NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE VDIR NTWDIR | `forcefield.restraints.distance` | NTDIR, CDIR, DIR0, TAUDIR |
 | PERTURBATION | NTG NRDGL RLAM DLAMT ALPHLJ ALPHC NLAM NSCALE | `perturbation` | NTG, RLAM, ALPHLJ, ALPHC, NLAM (DLAMT parsed, never applied — open) |
@@ -1068,6 +1074,12 @@ per-term reference energies in `md++/src/check/`: `aladip.t.cc` carries `Quartic
 `NonBonded_newRF=-84.092443`, `DistanceRestraint=257.189539`, and perturbed/soft-core terms.
 Porting these as unit tests gives per-term validation independent of the md binary — and is a
 genuine second source of truth for the perturbed terms.
+**Done 2026-08-30** — `crates/gromos-md/tests/gromos_check_suite.rs`, inputs under
+`shared/check/` (see its README). Two findings: the check inputs list one `TEMP0 TAU` pair per line,
+which our line-based MULTIBATH reader misparsed (now a token stream, as gromosXX reads it); and
+NSLFEXCL was never consumed (both reaction-field variants of the suite gave the same number).
+Not portable yet: `lambdas.t.cc` (LAMBDAS block), `scaling.t.cc`, the lattice-sum and CG checks,
+and the angle/dihedral/X-ray/local-elevation/order-parameter restraints (1.6).
 
 ### Cross-cutting — differential audit (do continuously)
 

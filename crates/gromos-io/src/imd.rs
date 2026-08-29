@@ -322,7 +322,7 @@ impl Default for ImdParameters {
             appak: 0.0,
             rcrf: 1.4,
             epsrf: 0.0,
-            nslfexcl: 0,
+            nslfexcl: 1,             // gromosXX parameter.h: `rf_excluded(true)`
             ntf: [1, 1, 1, 1, 1, 1], // All force terms on by default
             negr: 1,
             nre: Vec::new(),
@@ -567,52 +567,34 @@ fn parse_block(
                 line_idx += 1;
             }
 
-            // Line 1: NBATHS
-            if line_idx < data_lines.len() {
-                let v = parse_values(&data_lines[line_idx]);
-                if let Some(nb) = v.first() {
-                    bath.num_bath_groups = parse_usize(nb)?;
-                }
-                line_idx += 1;
+            // The rest of the block is a token stream, as gromosXX reads it (in_parameter.cc
+            // reads `>> nbaths`, then `>> temp0 >> tau` per bath, then `>> dofset`, then
+            // `>> last >> com >> ir` per set) — the values may be laid out one bath per line
+            // (the check suite's inputs) or all on one line; line breaks carry no meaning.
+            let tokens: Vec<String> = data_lines[line_idx..]
+                .iter()
+                .flat_map(|l| parse_values(l))
+                .collect();
+            let mut next = tokens.iter();
+            let mut take = |what: &str| -> Result<&String, IoError> {
+                next.next().ok_or_else(|| {
+                    IoError::ParseError(format!("block MULTIBATH: missing value for {what}"))
+                })
+            };
+            bath.num_bath_groups = parse_usize(take("NBATHS")?)?;
+            bath.temp0.clear();
+            bath.tau.clear();
+            for _ in 0..bath.num_bath_groups {
+                bath.temp0.push(parse_f64(take("TEMP0")?)?);
+                bath.tau.push(parse_f64(take("TAU")?)?);
             }
-
-            // Line 2: TEMP0 TAU (repeated per bath)
-            if line_idx < data_lines.len() {
-                let v = parse_values(&data_lines[line_idx]);
-                bath.temp0.clear();
-                bath.tau.clear();
-                // Format: temp0_1 tau_1 [temp0_2 tau_2 ...]
-                let mut i = 0;
-                while i + 1 < v.len() {
-                    bath.temp0.push(parse_f64(&v[i])?);
-                    bath.tau.push(parse_f64(&v[i + 1])?);
-                    i += 2;
-                }
-                line_idx += 1;
-            }
-
-            // Line 3: DOFSET (number of DOF sets), lines 4+: LAST COM-BATH IR-BATH per set.
-            if line_idx < data_lines.len() {
-                let n_sets = parse_values(&data_lines[line_idx])
-                    .first()
-                    .map(|s| parse_usize(s))
-                    .transpose()?
-                    .unwrap_or(0);
-                line_idx += 1;
-                for _ in 0..n_sets {
-                    if line_idx >= data_lines.len() {
-                        break;
-                    }
-                    let v = parse_values(&data_lines[line_idx]);
-                    if v.len() >= 3 {
-                        bath.dof_sets.push([
-                            parse_usize(&v[0])?,
-                            parse_usize(&v[1])?,
-                            parse_usize(&v[2])?,
-                        ]);
-                    }
-                    line_idx += 1;
-                }
+            let n_sets = parse_usize(take("DOFSET")?)?;
+            for _ in 0..n_sets {
+                bath.dof_sets.push([
+                    parse_usize(take("LAST")?)?,
+                    parse_usize(take("COM-BATH")?)?,
+                    parse_usize(take("IR-BATH")?)?,
+                ]);
             }
 
             params.temp_bath = vec![bath];

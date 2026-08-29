@@ -48,7 +48,8 @@ and crate-specific rules that extend the workspace-wide guides.
 
 ## How to verify
 
-`cargo build --release --bin md`, then `cargo test -p gromos-md --test test_gromosXX_references`.
+`cargo build --release --bin md`, then `cargo test -p gromos-md --test test_gromosXX_references`,
+and `cargo test -p gromos-md --test gromos_check_suite` (gromosXX's own per-term oracle).
 See `crates/gromos-md/.claude/CONTEXT.md` for how to add a reference test.
 
 The same behaviour from the Python side (both suites must stay green — they drive one builder):

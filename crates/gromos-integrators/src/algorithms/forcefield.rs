@@ -66,6 +66,10 @@ pub struct Forcefield {
     pub crf_params: CRFParameters,
     /// Coulomb prefactor 1/(4πε₀) in GROMOS units (kJ mol⁻¹ nm e⁻²).
     pub four_pi_eps_i: f64,
+    /// NSLFEXCL: add the reaction-field term of the excluded pairs and the self term
+    /// (gromosXX `sim.param().nonbonded.rf_excluded`, which gates `RF_excluded_outerloop`,
+    /// the perturbed variant, and the excluded-state term of perturbed atom pairs).
+    pub rf_excluded: bool,
     /// Boundary conditions
     pub periodicity: Periodicity,
     /// Pairlist container
@@ -157,6 +161,7 @@ impl Forcefield {
             lj_params: LJParamMatrix::from_nested(&lj_params),
             crf_params,
             four_pi_eps_i: gromos_core::units::four_pi_eps_i,
+            rf_excluded: true,
             periodicity,
             pairlist,
             pairlist_algorithm,
@@ -941,20 +946,22 @@ impl Algorithm for Forcefield {
             self.timing.longrange += t.elapsed();
         }
 
-        // RF self-energy and excluded-pair Coulomb (energy + forces)
-        let t_rf = self.timing_enabled.then(std::time::Instant::now);
-        rf_excluded_interactions(
-            &self.charges,
-            &topo.exclusions,
-            &conf.current().pos,
-            &self.crf_params,
-            &self.periodicity,
-            self.four_pi_eps_i,
-            &mut self.nonbonded_storage,
-            topo.num_solute_atoms(),
-        );
-        if let Some(t) = t_rf {
-            self.timing.rf_excluded += t.elapsed();
+        // RF self-energy and excluded-pair Coulomb (energy + forces) — NSLFEXCL
+        if self.rf_excluded {
+            let t_rf = self.timing_enabled.then(std::time::Instant::now);
+            rf_excluded_interactions(
+                &self.charges,
+                &topo.exclusions,
+                &conf.current().pos,
+                &self.crf_params,
+                &self.periodicity,
+                self.four_pi_eps_i,
+                &mut self.nonbonded_storage,
+                topo.num_solute_atoms(),
+            );
+            if let Some(t) = t_rf {
+                self.timing.rf_excluded += t.elapsed();
+            }
         }
 
         // 1-4 interactions: LJ with cs6/cs12 + CRF with coulomb scaling
@@ -1070,19 +1077,25 @@ impl Algorithm for Forcefield {
                     dhdl_nb
                 );
 
-                // 3b-2: RF self-energy correction for perturbed atoms
-                let (de_self, dhdl_self) = perturbed_self_energy_correction(
-                    &self.pert_info,
-                    &self.crf_params,
-                    &lp,
-                    self.four_pi_eps_i,
-                );
-                self.nonbonded_storage.e_crf += de_self;
-                dhdl_nb += dhdl_self;
-                dhdl_nb_crf += dhdl_self;
+                // 3b-2: RF self-energy correction for perturbed atoms (NSLFEXCL, like the
+                // unperturbed term: gromosXX `perturbed_nonbonded_set.cc` gates the perturbed
+                // RF-excluded outerloop, self term included, on `rf_excluded`)
+                let mut de_self = 0.0;
+                if self.rf_excluded {
+                    let (e, dhdl_self) = perturbed_self_energy_correction(
+                        &self.pert_info,
+                        &self.crf_params,
+                        &lp,
+                        self.four_pi_eps_i,
+                    );
+                    de_self = e;
+                    self.nonbonded_storage.e_crf += de_self;
+                    dhdl_nb += dhdl_self;
+                    dhdl_nb_crf += dhdl_self;
+                }
 
                 // 3b-3: excluded-pair CRF correction (separate accumulator to avoid double-add)
-                {
+                if self.rf_excluded {
                     use gromos_forces::nonbonded::PertNBCorrection;
                     let mut corr_ex = PertNBCorrection::new(n_atoms);
                     perturbed_excluded_correction(
@@ -1151,6 +1164,7 @@ impl Algorithm for Forcefield {
                         &lp,
                         &self.periodicity,
                         self.four_pi_eps_i,
+                        self.rf_excluded,
                         &mut corr_ap,
                     );
                     self.nonbonded_storage.e_lj += corr_ap.delta_e_lj;

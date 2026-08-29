@@ -51,6 +51,7 @@ matching gromosXX to reference tolerances.
 ```
 src/bin/md.rs                               — main MD driver, CLI, simulation setup
 tests/test_gromosXX_references.rs           — integration tests vs gromosXX
+tests/gromos_check_suite.rs                 — gromosXX's check/*.t.cc per-term energies, ported
 tests/run_references.py                     — generate gromosXX reference data
 tests/gromosXX_references/                  — reference input + expected output
 tests/test_provider_reference.rs            — LjCrfInteraction vs gromosXX (provider seam)

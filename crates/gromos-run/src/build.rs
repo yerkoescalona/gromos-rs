@@ -255,6 +255,7 @@ fn instantiate_forcefield(
         pairlist_algorithm,
     );
     forcefield.four_pi_eps_i = ff.four_pi_eps_i;
+    forcefield.rf_excluded = ff.rf_excluded;
     forcefield.ntf_bond = ff.bonds;
     forcefield.ntf_angle = ff.angles;
     forcefield.ntf_improper = ff.impropers;

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.35] (2026-08-30)
+
+### Added
+
+- **gromosXX's own regression oracle, ported** — `crates/gromos-md/tests/gromos_check_suite.rs`
+  evaluates the per-term energies hard-coded in `md++/src/check/{aladip,aladip_unperturbed,
+  aladip_special}.t.cc` (quartic bonds, angles, impropers, dihedrals, their perturbed and soft-core
+  variants, the nonbonded term with both reaction-field variants and the atomic cutoff, distance
+  restraints, and finite-difference λ-derivatives) on the suite's own inputs (`shared/check/`,
+  byte-identical to gromosXX's). Every value is checked against the *current* gromosXX binary
+  (gromos-rs matches to ten digits) and against the suite's table with the suite's own δ. The
+  dihedral-restraint value is `#[ignore]`d until PLAN.md 1.6 lands.
+
+### Fixed
+
+- **NSLFEXCL was parsed and never consumed.** The reaction-field term of the excluded pairs and the
+  self term were always added; gromosXX skips them when NSLFEXCL = 0 (`nonbonded.rf_excluded`,
+  also the excluded-state term of perturbed atom pairs). `ForcefieldPlan::rf_excluded` now gates all
+  three places. The default is 1, as in gromosXX (`parameter.h`); every reference input already
+  says 1, so nothing else moves.
+- The MULTIBATH reader assumed one line of `TEMP0 TAU` pairs; gromosXX reads the block as a token
+  stream and its own check inputs list one bath per line. Now token-based — both layouts read.
+
 ## [0.0.34] (2026-08-30)
 
 ### Added
