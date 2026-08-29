@@ -68,10 +68,11 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | aladip_solvated_em_posres | 72 | SD EM + position restraints     | **PASS** |
 | 4   | aladip_solvated_em | 72  | SD EM + SHAKE + posres, solvated    | **PASS** |
 | 2   | nacl_1water_distres | 5  | distance restraint on Na-Cl pair (NTDIR=2, CDIR*w0) | **PASS** |
-| 4   | ch4_water_fep | 2998 | CH4→dummy in 999 SPC water, λ=0.5, twin-range NB FEP | **PASS** |
+| 4   | ch4_water_fep | 2998 | CH4→dummy in 999 SPC water, λ=0.5, twin-range NB FEP | **PASS** (its `.trg` is empty — NTWG=0; dH/dλ is covered by the rows below) |
+| 4   | ch4_water_fep_l000 / l025 / l075 / l100 | 2998 | the same system at λ = 0, 0.25, 0.75, 1; ten steps; dH/dλ total, LJ, CRF, bonded per step | **PASS** (2026-08-29) |
 | 4   | meoh_water_fep | 2862 | charged CH3OH→dummy in 953 SPC water, λ=0.5 (RF self/excluded-pair terms) | **FAIL, ignored** — CRF off by 0.16 kJ/mol at frame 0, LJ exact (2026-08-29) |
 
-**38 of 41 tests pass.** (3 ignored: `aladip_vacuum_fep` — FEP mismatch, bisected 2026-08-29 (see 1.7); `meoh_water_fep` — perturbed RF term for charged atoms; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
+**42 of 45 tests pass.** (3 ignored: `aladip_vacuum_fep` — FEP mismatch, bisected 2026-08-29 (see 1.7); `meoh_water_fep` — perturbed RF term for charged atoms; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
@@ -228,6 +229,12 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 - Note: perturbed RF self-term still needs second-sourcing from GROMOS book (flagged at `perturbed_nonbonded_term.cc:596,749,1444`). Zero-charge `ch4_water_fep` doesn't exercise it.
   **2026-08-29: now exercised and failing** — `meoh_water_fep` (charged 54a7 CH3OH → dummies, λ=0.5):
   LJ exact (3e-11), CRF off by 0.16 kJ/mol at frame 0. Reference in place, `ignore`d until fixed.
+- **dH/dλ comparison was vacuous until 2026-08-29:** the suite parsed `FREEENERGY03` blocks, gromosXX
+  writes `FREEENERDERIVS03` — zero frames were ever compared. Fixed (reader/writer/test on the native
+  layout, per-term split recorded); `ch4_water_fep_l000/l025/l075/l100` now prove dH/dλ (total, LJ,
+  CRF, bonded) across the λ range. gromos++ `ene_ana` cannot cross-check either engine's `.trg` here:
+  the checkout ships only the pre-2023 `data_old/ene_ana.md++.lib`, which rejects gromosXX's own
+  files ("Tried to read an integer for NUM_ENERGY_GROUPS"); `ext_ti_ana` (ours) reads both.
 - **`aladip_vacuum_fep` bisected (2026-08-29)** with single-block `.ptp` variants against the native
   gromosXX (scratch, not committed): unperturbed run exact; `PERTBONDSTRETCH` exact; perturbed angle /
   improper / proper-dihedral **energies are booked into the bond slot** (angle case: angle −0.715, bond

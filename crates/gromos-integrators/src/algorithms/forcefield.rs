@@ -980,7 +980,7 @@ impl Algorithm for Forcefield {
         //   perturbed_self_energy_correction → corrects RF self for perturbed atoms
         //   perturbed_excluded_correction    → corrects RF excluded pairs for perturbed atoms
         //   perturbed_one_four_correction    → corrects 1-4 for perturbed atoms
-        let pert_nb_dhdl =
+        let (pert_nb_dhdl, pert_nb_dhdl_lj, pert_nb_dhdl_crf) =
             if !self.pert_info.is_empty() && self.pert_info.iter().any(|x| x.is_some()) {
                 let (lam, _) = self.lambda_and_derivative;
                 let lp = PerturbedLambdaParams::from_lambda(
@@ -1013,6 +1013,8 @@ impl Algorithm for Forcefield {
                 self.nonbonded_storage.e_lj += corr_pl.delta_e_lj;
                 self.nonbonded_storage.e_crf += corr_pl.delta_e_crf;
                 let mut dhdl_nb = corr_pl.dhdl;
+                let mut dhdl_nb_lj = corr_pl.dhdl_lj;
+                let mut dhdl_nb_crf = corr_pl.dhdl_crf;
                 for i in 0..n_atoms {
                     self.nonbonded_storage.forces[i] += corr_pl.forces[i];
                 }
@@ -1043,6 +1045,8 @@ impl Algorithm for Forcefield {
                     self.nonbonded_storage.e_lj += corr.delta_e_lj;
                     self.nonbonded_storage.e_crf += corr.delta_e_crf;
                     dhdl_nb += corr.dhdl;
+                    dhdl_nb_lj += corr.dhdl_lj;
+                    dhdl_nb_crf += corr.dhdl_crf;
                     for i in 0..n_atoms {
                         self.nonbonded_storage.forces[i] += corr.forces[i];
                     }
@@ -1069,6 +1073,7 @@ impl Algorithm for Forcefield {
                 );
                 self.nonbonded_storage.e_crf += de_self;
                 dhdl_nb += dhdl_self;
+                dhdl_nb_crf += dhdl_self;
 
                 // 3b-3: excluded-pair CRF correction (separate accumulator to avoid double-add)
                 {
@@ -1088,6 +1093,7 @@ impl Algorithm for Forcefield {
                     );
                     self.nonbonded_storage.e_crf += corr_ex.delta_e_crf;
                     dhdl_nb += corr_ex.dhdl;
+                    dhdl_nb_crf += corr_ex.dhdl_crf;
                     for i in 0..n_atoms {
                         self.nonbonded_storage.forces[i] += corr_ex.forces[i];
                     }
@@ -1118,6 +1124,8 @@ impl Algorithm for Forcefield {
                     self.nonbonded_storage.e_lj += corr14.delta_e_lj;
                     self.nonbonded_storage.e_crf += corr14.delta_e_crf;
                     dhdl_nb += corr14.dhdl;
+                    dhdl_nb_lj += corr14.dhdl_lj;
+                    dhdl_nb_crf += corr14.dhdl_crf;
                     for i in 0..n_atoms {
                         self.nonbonded_storage.forces[i] += corr14.forces[i];
                     }
@@ -1164,9 +1172,9 @@ impl Algorithm for Forcefield {
                     self.nonbonded_storage.e_crf
                 );
 
-                dhdl_nb
+                (dhdl_nb, dhdl_nb_lj, dhdl_nb_crf)
             } else {
-                0.0
+                (0.0, 0.0, 0.0)
             };
 
         // --- 4. Assemble forces and energies ---
@@ -1194,10 +1202,13 @@ impl Algorithm for Forcefield {
             state.energies.angle_total = bonded_result.angle_energy;
             state.energies.dihedral_total = bonded_result.dihedral_energy;
             state.energies.improper_total = bonded_result.improper_energy;
-            state.energies.dhdl_total = perturbed_bonded
+            let dhdl_bonded = perturbed_bonded
                 .as_ref()
-                .map_or(0.0, |p| p.lambda_derivative)
-                + pert_nb_dhdl;
+                .map_or(0.0, |p| p.lambda_derivative);
+            state.energies.dhdl_total = dhdl_bonded + pert_nb_dhdl;
+            state.energies.dhdl_bonded = dhdl_bonded;
+            state.energies.dhdl_lj = pert_nb_dhdl_lj;
+            state.energies.dhdl_crf = pert_nb_dhdl_crf;
             state.energies.lj_total = self.nonbonded_storage.e_lj;
             state.energies.crf_total = self.nonbonded_storage.e_crf;
             state.energies.update_potential_total();

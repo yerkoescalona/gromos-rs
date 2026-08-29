@@ -258,6 +258,10 @@ REFERENCE_SYSTEMS = [
     "aladip_solvated_em",
     # Free-energy perturbation (Topology.apply_perturbation + NTG != 0), PLAN.md 3.9 step 1
     "ch4_water_fep",
+    "ch4_water_fep_l000",
+    "ch4_water_fep_l025",
+    "ch4_water_fep_l075",
+    "ch4_water_fep_l100",
     "meoh_water_fep",
     "aladip_vacuum_fep",
 ]

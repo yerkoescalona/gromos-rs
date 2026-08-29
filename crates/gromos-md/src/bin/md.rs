@@ -843,7 +843,9 @@ fn main() {
             .trg_file
             .clone()
             .unwrap_or_else(|| "md.trg".to_string());
-        match FreeEnergyWriter::new(&trg_path, "GROMOS-RS free energy trajectory") {
+        match FreeEnergyWriter::new(&trg_path, &imd.title)
+            .map(|w| w.with_layout(imd.num_temp_baths, imd.negr))
+        {
             Ok(w) => {
                 println!("  Free-energy output: {}", trg_path);
                 Some(w)
@@ -1168,8 +1170,20 @@ fn main() {
         // Write free-energy trajectory (dH/dλ) at energy output frequency
         if let Some(ref mut fw) = free_energy_writer {
             if due(step, nstener) {
-                let dhdl = conf.old().energies.dhdl_total;
-                let fe_frame = FreeEnergyFrame::new(time, imd.rlam, dhdl);
+                let e = &conf.old().energies;
+                let fe_frame = FreeEnergyFrame {
+                    step,
+                    time,
+                    lambda: imd.rlam,
+                    dhdl_bond: e.dhdl_bonded,
+                    dhdl_angle: 0.0,
+                    dhdl_improper: 0.0,
+                    dhdl_dihedral: 0.0,
+                    dhdl_lj: e.dhdl_lj,
+                    dhdl_crf: e.dhdl_crf,
+                    dhdl_special: 0.0,
+                    dhdl_total: e.dhdl_total,
+                };
                 if let Err(e) = fw.write_frame(&fe_frame) {
                     eprintln!("Error writing free-energy trajectory: {}", e);
                 }

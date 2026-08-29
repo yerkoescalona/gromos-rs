@@ -66,6 +66,10 @@ tests/schnet_nve_loop.rs                    — SchNetInteraction + LeapFrog NVE
 - **Tolerances:** force_abs=1e-6, energy_rel=1e-8, position_abs=1e-9.
 
 ## How to add a reference test
-1. Add to `SYSTEMS` list in `tests/run_references.py`
-2. Run `python3 tests/run_references.py --md-binary .local/gromosXX/md++/build/program/md`
-3. Add `ref_test!(name, "dir")` in `tests/test_gromosXX_references.rs`
+1. Create `tests/gromosXX_references/<name>/` with the `.imd` and an `input.toml` (copy a sibling's;
+   inputs may live in `shared/`). Set `NTWG=1` in WRITETRAJ when the system perturbs (dH/dλ frames).
+2. `python3 scripts/regen_gromosXX_references.py <name>` — runs the native gromosXX
+   (`.local/gromosXX/md++/BUILD/program/md`) and writes `expected/`. Never re-run it without names:
+   the other systems' `expected/` files are the record.
+3. Add `ref_test!(name, "dir")` in `tests/test_gromosXX_references.rs` (or `ref_test!(ignore: …,
+   "reason")` while it fails) and the name to `REFERENCE_SYSTEMS` in `py-gromos/tests/test_gromosXX_references.py`.

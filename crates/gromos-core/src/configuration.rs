@@ -146,6 +146,12 @@ pub struct Energy {
 
     /// Accumulated dH/dλ across all perturbed terms this step (free-energy / TI).
     pub dhdl_total: f64,
+    /// dH/dλ of the bonded terms (perturbed bonds, angles, impropers, dihedrals).
+    pub dhdl_bonded: f64,
+    /// dH/dλ of the Lennard-Jones part of the perturbed nonbonded terms.
+    pub dhdl_lj: f64,
+    /// dH/dλ of the reaction-field part (pairs, self and excluded-pair terms).
+    pub dhdl_crf: f64,
 
     /// Kinetic energy from the current (new) velocities, used for thermostat scaling.
     pub kinetic_energy_new: f64,
@@ -184,6 +190,9 @@ impl Energy {
             sasa_total: 0.0,
             constraint_total: 0.0,
             dhdl_total: 0.0,
+            dhdl_bonded: 0.0,
+            dhdl_lj: 0.0,
+            dhdl_crf: 0.0,
             kinetic_energy_new: 0.0,
             kinetic_energy: vec![0.0; num_temperature_groups],
             lj_energy: vec![vec![0.0; num_energy_groups]; num_energy_groups],
@@ -232,6 +241,9 @@ impl Energy {
         self.sasa_total = 0.0;
         self.constraint_total = 0.0;
         self.dhdl_total = 0.0;
+        self.dhdl_bonded = 0.0;
+        self.dhdl_lj = 0.0;
+        self.dhdl_crf = 0.0;
         self.kinetic_energy_new = 0.0;
         self.virial_total = 0.0;
 

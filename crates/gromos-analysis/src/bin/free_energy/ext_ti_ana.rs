@@ -96,7 +96,7 @@ fn main() {
         };
 
         if frames.is_empty() {
-            eprintln!("Warning: {path} contains no FREEENERGY03 frames — skipping");
+            eprintln!("Warning: {path} contains no free-energy frames (FREEENERDERIVS03 / FREEENERGY03) — skipping");
             continue;
         }
 

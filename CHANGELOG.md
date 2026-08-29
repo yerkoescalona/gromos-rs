@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.33] (2026-08-29)
+
+### Fixed
+
+- **dH/dλ was never compared against gromosXX.** The reference suite (and `gromos-io`'s `.trg`
+  reader, hence `ext_ti_ana`) looked for a one-line `FREEENERGY03` block, while the native binary
+  writes `TIMESTEP` + `FREEENERDERIVS03` (`# lambda`, `# totals` in ENERGY03 order, per-bath and
+  per-group sections) — so every "dH/dλ tracked" claim since 1.7 rested on zero frames. The reader
+  now parses both layouts, the reference test compares the total and the LJ / CRF / bonded parts
+  per frame (aligned by time), and the writer emits the native layout with the run's bath and
+  energy-group counts (per-group derivatives as zeros).
+- The perturbed nonbonded derivative is split into its LJ and CRF parts
+  (`PertNBCorrection::dhdl_lj/dhdl_crf`, `Energy::dhdl_lj/dhdl_crf/dhdl_bonded`), so the `.trg`
+  carries the same per-term derivatives gromosXX writes.
+
+### Added
+
+- **CH4 λ-range references** `ch4_water_fep_l000/l025/l075/l100` (ten steps each, NTWG=1): the
+  proven CH4 → dummy system at λ = 0, 0.25, 0.75, 1 — energies, positions, forces and now dH/dλ
+  (total, LJ, CRF, bonded) match gromosXX at every λ. Reference suite: 42 pass, 3 ignored.
+- `scripts/ti_ch4.py`: thermodynamic integration of CH4 → dummy through gromosXX and gromos-rs
+  from the same inputs (11 windows, NVT 300 K), integrated with the project's `ext_ti_ana`;
+  per-window ⟨∂H/∂λ⟩ ± ee (n) for both engines, ΔG and timings, into `bench/work/ti_ch4/`.
+- `scripts/regen_gromosXX_references.py <system …>` regenerates only the named systems.
+
 ## [0.0.32] (2026-08-29)
 
 ### Added (PLAN.md 3.9 step 5 — the first new term through the new door)

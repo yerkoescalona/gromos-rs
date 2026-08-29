@@ -157,49 +157,37 @@ fn parse_enertrj(path: &Path) -> Vec<EnergyFrame> {
     frames
 }
 
-// ─── Parser: FREEENERGY03 blocks from .trg files ────────────────────────────
+// ─── Parser: free-energy trajectories (.trg) ────────────────────────────────
 //
-// Each block has one data line:
-//   time  lambda  dhdl_bond  dhdl_angle  dhdl_improper  dhdl_dihedral  dhdl_lj  dhdl_crf  dhdl_total
+// gromosXX writes `TIMESTEP` + `FREEENERDERIVS03` blocks (`# lambda`, then `# totals` in
+// ENERGY03 order: total, kinetic, potential, covalent, bond, angle, improper, dihedral,
+// cross-dihedral, nonbonded, LJ, CRF, …). Until 0.0.33 this parser looked for the legacy
+// one-line `FREEENERGY03` block only, so no dH/dλ was ever compared against the native files.
+// Both layouts are read through the crate's own reader now.
 
 #[derive(Debug, Clone)]
 struct FreeEnergyFrame {
     time: f64,
     lambda: f64,
     dhdl_total: f64,
+    dhdl_lj: f64,
+    dhdl_crf: f64,
+    dhdl_bonded: f64,
 }
 
 fn parse_freeenergy03(path: &Path) -> Vec<FreeEnergyFrame> {
-    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let mut frames = Vec::new();
-    let mut in_block = false;
-
-    for line in content.lines() {
-        let t = line.trim();
-        if t == "FREEENERGY03" {
-            in_block = true;
-            continue;
-        }
-        if t == "END" && in_block {
-            in_block = false;
-            continue;
-        }
-        if in_block && !t.starts_with('#') && !t.is_empty() {
-            let vals: Vec<f64> = t
-                .split_whitespace()
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            // columns: time lambda dhdl_bond dhdl_angle dhdl_improper dhdl_dihedral dhdl_lj dhdl_crf dhdl_total
-            if vals.len() >= 9 {
-                frames.push(FreeEnergyFrame {
-                    time: vals[0],
-                    lambda: vals[1],
-                    dhdl_total: vals[8],
-                });
-            }
-        }
-    }
-    frames
+    gromos_io::read_free_energy_trajectory(path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .into_iter()
+        .map(|f| FreeEnergyFrame {
+            time: f.time,
+            lambda: f.lambda,
+            dhdl_total: f.dhdl_total,
+            dhdl_lj: f.dhdl_lj,
+            dhdl_crf: f.dhdl_crf,
+            dhdl_bonded: f.dhdl_bond + f.dhdl_angle + f.dhdl_improper + f.dhdl_dihedral,
+        })
+        .collect()
 }
 
 fn assert_dhdl_close(actual: f64, expected: f64, label: &str) {
@@ -467,15 +455,45 @@ fn run_reference(system: &str) {
                 exp_fe.len(),
                 act_fe.len()
             );
-            for (i, (ef, af)) in exp_fe.iter().zip(&act_fe).enumerate() {
-                assert_dhdl_close(
-                    af.dhdl_total,
-                    ef.dhdl_total,
-                    &format!(
-                        "{system}[{i}] dH/dλ (t={:.3}ps λ={:.3})",
-                        ef.time, ef.lambda
-                    ),
+            if exp_fe.is_empty() {
+                // The legacy ch4_water_fep reference was generated with NTWG=0: an empty .trg.
+                // Its λ-range siblings (ch4_water_fep_l*) carry the dH/dλ frames.
+                eprintln!(
+                    "{system}: reference .trg has no free-energy frames — dH/dλ not compared"
                 );
+            }
+            // Align by time: the engine may write a frame at t=0 that gromosXX does not.
+            let mut actual = act_fe.iter().peekable();
+            for (i, ef) in exp_fe.iter().enumerate() {
+                let af = loop {
+                    match actual.next() {
+                        Some(af) if (af.time - ef.time).abs() < 1e-9 => break af,
+                        Some(af) if af.time < ef.time => continue,
+                        other => panic!(
+                            "{system}[{i}]: no free-energy frame at t={:.4} ps (next: {:?})",
+                            ef.time,
+                            other.map(|f| f.time)
+                        ),
+                    }
+                };
+                let label = |what: &str| {
+                    format!(
+                        "{system}[{i}] dH/dλ {what} (t={:.3}ps λ={:.3})",
+                        ef.time, ef.lambda
+                    )
+                };
+                assert_dhdl_close(af.dhdl_total, ef.dhdl_total, &label("total"));
+                // Per-term derivatives only where the engine records them (a frame whose
+                // components are all zero while the total is not carries the total only).
+                let has_split = af.dhdl_total == 0.0
+                    || af.dhdl_lj != 0.0
+                    || af.dhdl_crf != 0.0
+                    || af.dhdl_bonded != 0.0;
+                if has_split {
+                    assert_dhdl_close(af.dhdl_lj, ef.dhdl_lj, &label("LJ"));
+                    assert_dhdl_close(af.dhdl_crf, ef.dhdl_crf, &label("CRF"));
+                    assert_dhdl_close(af.dhdl_bonded, ef.dhdl_bonded, &label("bonded"));
+                }
             }
         }
     }
@@ -563,6 +581,10 @@ ref_test!(nacl_1water_distres, "nacl_1water_distres");
 
 // ── FEP / TI ────────────────────────────────────────────────────────────────
 ref_test!(ch4_water_fep, "ch4_water_fep");
+ref_test!(ch4_water_fep_l000, "ch4_water_fep_l000");
+ref_test!(ch4_water_fep_l025, "ch4_water_fep_l025");
+ref_test!(ch4_water_fep_l075, "ch4_water_fep_l075");
+ref_test!(ch4_water_fep_l100, "ch4_water_fep_l100");
 ref_test!(ignore: aladip_vacuum_fep, "aladip_vacuum_fep");
 // Charged perturbed atoms (54a7 CH3OH -> dummies): the perturbed reaction-field self/excluded-pair
 // terms that `ch4_water_fep` (zero charge) never exercised. Fails today on CRF only

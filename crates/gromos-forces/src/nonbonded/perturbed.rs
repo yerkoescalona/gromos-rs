@@ -283,7 +283,13 @@ pub struct PertNBCorrection {
     pub forces: Vec<Vec3>,
     pub delta_e_lj: f64,
     pub delta_e_crf: f64,
+    /// dH/dλ of the corrected pairs (LJ + CRF).
     pub dhdl: f64,
+    /// The LJ part of `dhdl` — kept apart so the `.trg` file carries the same per-term
+    /// derivatives gromosXX writes (FREEENERDERIVS03 totals: LJ, CRF).
+    pub dhdl_lj: f64,
+    /// The CRF part of `dhdl`.
+    pub dhdl_crf: f64,
 }
 
 impl PertNBCorrection {
@@ -293,6 +299,8 @@ impl PertNBCorrection {
             delta_e_lj: 0.0,
             delta_e_crf: 0.0,
             dhdl: 0.0,
+            dhdl_lj: 0.0,
+            dhdl_crf: 0.0,
         }
     }
 }
@@ -381,6 +389,8 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
         out.delta_e_lj += e_lj_p - e_lj_a;
         out.delta_e_crf += e_crf_p - e_crf_a;
         out.dhdl += de_lj + de_crf;
+        out.dhdl_lj += de_lj;
+        out.dhdl_crf += de_crf;
     }
     out
 }
@@ -506,6 +516,7 @@ pub fn perturbed_excluded_correction<BC: BoundaryCondition>(
             out.forces[j] -= df;
             out.delta_e_crf += e_crf_p - e_crf_a;
             out.dhdl += de_crf;
+            out.dhdl_crf += de_crf;
         }
     }
 }
@@ -600,6 +611,8 @@ pub fn perturbed_one_four_correction<BC: BoundaryCondition>(
             out.delta_e_lj += e_lj_p - e_lj_a;
             out.delta_e_crf += e_crf_p - e_crf_a;
             out.dhdl += de_lj + de_crf;
+            out.dhdl_lj += de_lj;
+            out.dhdl_crf += de_crf;
         }
     }
 }
@@ -703,6 +716,8 @@ pub fn perturbed_atom_pair_correction<BC: BoundaryCondition>(
         out.delta_e_lj += e_lj_pert - e_lj_reg;
         out.delta_e_crf += e_crf_pert - e_crf_reg;
         out.dhdl += de_lj + de_crf;
+        out.dhdl_lj += de_lj;
+        out.dhdl_crf += de_crf;
     }
 }
 

@@ -2,7 +2,8 @@
 """Regenerate gromosXX reference data using the patched CODATA binary.
 
 Run from the repo root:
-    python3 scripts/regen_gromosXX_references.py
+    python3 scripts/regen_gromosXX_references.py             # every system
+    python3 scripts/regen_gromosXX_references.py meoh_water_fep ch4_water_fep_l000   # only these
 
 The script runs the gromosXX md binary (patched to use CODATA 2018 constants)
 on every system in crates/gromos-md/tests/gromosXX_references/ and overwrites
@@ -125,6 +126,15 @@ def main():
     print()
 
     systems = sorted(p for p in REF_DIR.iterdir() if p.is_dir() and p.name != "shared")
+    # Optional: regenerate only the named systems (new references) — the committed expected/
+    # files of the others are never rewritten by accident.
+    if len(sys.argv) > 1:
+        wanted = set(sys.argv[1:])
+        unknown = wanted - {p.name for p in systems}
+        if unknown:
+            print(f"ERROR: unknown system(s): {', '.join(sorted(unknown))}")
+            sys.exit(1)
+        systems = [p for p in systems if p.name in wanted]
 
     failed = []
     for sys_dir in systems:
