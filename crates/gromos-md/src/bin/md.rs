@@ -352,6 +352,8 @@ fn main() {
     let nstxout = imd.ntwx;
     let nstener = imd.ntwe;
     let nstlog = imd.ntpr;
+    // GROMOS convention: a write/print frequency of 0 disables that output entirely.
+    let due = |step: usize, freq: usize| freq > 0 && step % freq == 0;
     let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
         imd.temp_bath[0].temp0[0]
     } else {
@@ -839,9 +841,17 @@ fn main() {
         0.0,       // skin (no extra distance)
     );
     pairlist.update_frequency = pairlist_update;
+    // PAIRLIST block SIZE; 0.0 means "auto" and is resolved by the cell-list
+    // algorithm to half the short cutoff, as gromosXX does.
+    pairlist.grid_size = imd.size;
     log::debug!(
-        "Pairlist update frequency: {} steps",
-        pairlist.update_frequency
+        "Pairlist update frequency: {} steps, grid size: {}",
+        pairlist.update_frequency,
+        if pairlist.grid_size > 0.0 {
+            format!("{:.3} nm", pairlist.grid_size)
+        } else {
+            "auto".to_string()
+        }
     );
 
     let periodicity = if let Some(triclinic_box) = truncoct_box_matrix {
@@ -861,6 +871,7 @@ fn main() {
         topo.num_atoms(),
         box_type,
         !topo.chargegroups.is_empty(),
+        imd.type_,
     );
 
     // Initial pairlist generation
@@ -1542,6 +1553,11 @@ fn main() {
     let mut prev_min_energy = f64::MAX;
     let mut actual_steps: usize = 0;
 
+    // Per-algorithm breakdown, comparable to the gromosXX TIMING block.
+    // Costs two clock reads per algorithm per step, so it is opt-in via @verb.
+    let timing_enabled = md_args.verbose >= 1;
+    md_sequence.enable_timing(timing_enabled);
+
     // Main simulation loop
     for step in 0..=n_steps {
         let time = step as f64 * dt;
@@ -1751,7 +1767,7 @@ fn main() {
         }
 
         // Log progress
-        if step % nstlog == 0 {
+        if due(step, nstlog) {
             if is_minimization {
                 println!(
                     "Step {:6}  E_pot: {:18.10e}  dE: {:12.4e}",
@@ -1771,14 +1787,14 @@ fn main() {
         }
 
         // Write trajectory
-        if step % nstxout == 0 {
+        if due(step, nstxout) {
             if let Err(e) = traj_writer.write_frame(step, time, &conf) {
                 eprintln!("Error writing trajectory: {}", e);
             }
         }
 
         // Write energies
-        if step % nstener == 0 {
+        if due(step, nstener) {
             let volume = conf.old().box_config.volume();
             let pressure = conf.old().pressure();
             let ene_frame =
@@ -1791,7 +1807,7 @@ fn main() {
 
         // Write free-energy trajectory (dH/dλ) at energy output frequency
         if let Some(ref mut fw) = free_energy_writer {
-            if step % nstener == 0 {
+            if due(step, nstener) {
                 let dhdl = conf.old().energies.dhdl_total;
                 let fe_frame = FreeEnergyFrame::new(time, imd.rlam, dhdl);
                 if let Err(e) = fw.write_frame(&fe_frame) {
@@ -1802,7 +1818,7 @@ fn main() {
 
         // Write forces (same frequency as trajectory)
         if let Some(ref mut fw) = force_writer {
-            if step % nstxout == 0 {
+            if due(step, nstxout) {
                 let forces = &conf.old().force;
                 let constraint_forces = if shake_enabled || settle_enabled || lincs_enabled {
                     Some(conf.old().constraint_force.as_slice())
@@ -1958,6 +1974,48 @@ fn main() {
 
     let elapsed = start_time.elapsed();
     let total_elapsed = t_total.elapsed();
+
+    if timing_enabled {
+        let total = elapsed.as_secs_f64();
+        let pct = |s: f64| if total > 0.0 { s / total * 100.0 } else { 0.0 };
+        let detailed = md_sequence.detailed_timings();
+        let accounted: f64 = detailed.iter().map(|(_, d, _)| d.as_secs_f64()).sum();
+
+        println!();
+        println!("TIMING");
+        for (name, d, subs) in &detailed {
+            let s = d.as_secs_f64();
+            println!("{:>38} {:>12.3} {:>9.2}%", name, s, pct(s));
+            let sub_total: f64 = subs.iter().map(|(_, sd)| sd.as_secs_f64()).sum();
+            for (label, sd) in subs {
+                let ss = sd.as_secs_f64();
+                if ss > 0.0 {
+                    println!(
+                        "{:>44} {:>10.3} {:>9.2}%",
+                        format!("- {label}"),
+                        ss,
+                        pct(ss)
+                    );
+                }
+            }
+            if !subs.is_empty() && s > sub_total {
+                println!(
+                    "{:>44} {:>10.3} {:>9.2}%",
+                    "- unaccounted",
+                    s - sub_total,
+                    pct(s - sub_total)
+                );
+            }
+        }
+        println!(
+            "{:>38} {:>12.3} {:>9.2}%",
+            "unaccounted",
+            total - accounted,
+            pct(total - accounted)
+        );
+        println!("END");
+    }
+
     log::info!("Simulation wall time: {:.2} s", elapsed.as_secs_f64());
     log::info!(
         "Total wall time: {:.3} s (init: {:.3} s, sim: {:.3} s)",

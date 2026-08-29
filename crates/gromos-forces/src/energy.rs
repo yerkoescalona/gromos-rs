@@ -143,13 +143,13 @@ pub fn single_point_energy(
         .solute_short
         .iter()
         .chain(pairlist.solute_long.iter())
-        .map(|&(i, j)| (i as u32, j as u32))
+        .copied()
         .collect();
     let solvent_u32: Vec<(u32, u32)> = pairlist
         .solvent_short
         .iter()
         .chain(pairlist.solvent_long.iter())
-        .map(|&(i, j)| (i as u32, j as u32))
+        .copied()
         .collect();
 
     // ── Bonded ──────────────────────────────────────────────────────────────

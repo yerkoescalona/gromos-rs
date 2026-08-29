@@ -1198,6 +1198,7 @@ pub(crate) fn resolve_algorithm_sequence(
 
                 let mut pairlist = PairlistContainer::new(rcutp, cutoff, 0.0);
                 pairlist.update_frequency = pairlist_update;
+                pairlist.grid_size = imd.size;
 
                 let periodicity = if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
                     Periodicity::Vacuum(Vacuum)
@@ -1214,6 +1215,7 @@ pub(crate) fn resolve_algorithm_sequence(
                     topo.num_atoms(),
                     box_type,
                     !topo.chargegroups.is_empty(),
+                    imd.type_,
                 );
 
                 pairlist_algorithm.update(topo, conf, &mut pairlist, &periodicity);

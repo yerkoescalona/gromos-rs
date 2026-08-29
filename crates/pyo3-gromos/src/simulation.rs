@@ -39,12 +39,12 @@ use gromos_core::{
     Topology,
 };
 use gromos_forces::nonbonded::CRFParameters;
+use gromos_forces::restraints::{
+    DistanceRestraint, DistanceRestraints, PerturbedDistanceRestraint, PerturbedDistanceRestraints,
+    PositionRestraint, PositionRestraints,
+};
 #[cfg(feature = "ml")]
 use gromos_forces::zones::ZonePartition;
-use gromos_forces::restraints::{
-    DistanceRestraint, DistanceRestraints, PerturbedDistanceRestraint,
-    PerturbedDistanceRestraints, PositionRestraint, PositionRestraints,
-};
 use gromos_integrators::algorithms::{
     BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, EnergyCalculation, Forcefield,
     LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm, NoseHooverThermostat, PressureCalculation,
@@ -76,7 +76,11 @@ use super::PyEnergy;
 /// Build a `ShakeAlgorithm` from IMD constraint settings — the single place
 /// both the standard-MD and steepest-descent branches of `build_simulation`
 /// construct SHAKE from, so they can't silently drift apart.
-fn shake_algorithm_from_imd(imd: &ImdParameters, solute_shake: bool, solvent_shake: bool) -> ShakeAlgorithm {
+fn shake_algorithm_from_imd(
+    imd: &ImdParameters,
+    solute_shake: bool,
+    solvent_shake: bool,
+) -> ShakeAlgorithm {
     let ntc_mode = if solute_shake {
         match imd.ntc {
             3 => NtcMode::AllBonds,
@@ -391,8 +395,8 @@ fn apply_restraints(
         let mut pdr = PerturbedDistanceRestraints::new();
         for spec in &perturbed {
             let r = PerturbedDistanceRestraint::new(
-                spec.atom1, spec.atom2, spec.n, spec.m, spec.a_r0, spec.b_r0, spec.a_w0,
-                spec.b_w0, spec.rah, k, r_linear, mode,
+                spec.atom1, spec.atom2, spec.n, spec.m, spec.a_r0, spec.b_r0, spec.a_w0, spec.b_w0,
+                spec.rah, k, r_linear, mode,
             );
             pdr.add(r);
         }
@@ -447,8 +451,7 @@ fn build_simulation(
         )));
     }
 
-    let truncoct_box_matrix =
-        apply_truncoct_box(imd, box_dims, &mut positions, &mut velocities);
+    let truncoct_box_matrix = apply_truncoct_box(imd, box_dims, &mut positions, &mut velocities);
 
     // Build Configuration (double-buffered state)
     let mut conf = Configuration::new(n_atoms, 1, 1);
@@ -496,6 +499,7 @@ fn build_simulation(
     // Pairlist
     let mut pairlist = PairlistContainer::new(imd.rcutp, cutoff, 0.0);
     pairlist.update_frequency = pairlist_update;
+    pairlist.grid_size = imd.size;
 
     let periodicity = if let Some(triclinic_box) = truncoct_box_matrix {
         Periodicity::Triclinic(Triclinic::new(triclinic_box))
@@ -517,6 +521,7 @@ fn build_simulation(
         topo.num_atoms(),
         box_type,
         !topo.chargegroups.is_empty(),
+        imd.type_,
     );
 
     pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
@@ -613,7 +618,14 @@ fn build_simulation(
 
         // 3b. Thermostat (Berendsen or Nose-Hoover/chain, per MULTIBATH algorithm)
         if thermostat_on {
-            push_thermostat(&mut md_sequence, imd, temperature, thermostat_tau, total_dof, n_atoms);
+            push_thermostat(
+                &mut md_sequence,
+                imd,
+                temperature,
+                thermostat_tau,
+                total_dof,
+                n_atoms,
+            );
         }
 
         // 4. Leap-Frog position

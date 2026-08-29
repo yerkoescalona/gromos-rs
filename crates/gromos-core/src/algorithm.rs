@@ -72,6 +72,20 @@ pub trait Algorithm {
 
     /// Algorithm name for logging/debugging.
     fn name(&self) -> &str;
+
+    /// Opt in to accumulating an internal sub-phase breakdown.
+    ///
+    /// Default: no-op. Algorithms that expose [`Self::sub_timings`] should honour
+    /// this, since timing costs two clock reads per phase per step.
+    fn enable_timing(&mut self, _enabled: bool) {}
+
+    /// Internal sub-phase breakdown, as `(label, accumulated wall time)`.
+    ///
+    /// Default: empty. Reported nested under this algorithm's own total, matching
+    /// the gromosXX `TIMING` block's sub-entries.
+    fn sub_timings(&self) -> Vec<(&'static str, std::time::Duration)> {
+        Vec::new()
+    }
 }
 
 /// An ordered sequence of algorithms that defines the MD step.
@@ -80,6 +94,10 @@ pub trait Algorithm {
 /// The main MD loop calls `run_step()` which iterates through all algorithms.
 pub struct AlgorithmSequence {
     algorithms: Vec<Box<dyn Algorithm>>,
+    /// Per-algorithm accumulated wall time, parallel to `algorithms`.
+    /// Only written when `timing_enabled`; see [`Self::enable_timing`].
+    timings: Vec<std::time::Duration>,
+    timing_enabled: bool,
 }
 
 impl AlgorithmSequence {
@@ -87,12 +105,54 @@ impl AlgorithmSequence {
     pub fn new() -> Self {
         Self {
             algorithms: Vec::new(),
+            timings: Vec::new(),
+            timing_enabled: false,
         }
     }
 
     /// Add an algorithm to the end of the sequence.
     pub fn push(&mut self, alg: Box<dyn Algorithm>) {
         self.algorithms.push(alg);
+        self.timings.push(std::time::Duration::ZERO);
+    }
+
+    /// Enable per-algorithm wall-clock accumulation.
+    ///
+    /// Off by default: each timed algorithm costs two `Instant::now()` reads per
+    /// step, which is pure overhead in a production run. Enable it to produce the
+    /// breakdown reported by [`Self::timings`], equivalent to the gromosXX
+    /// `TIMING` block.
+    pub fn enable_timing(&mut self, enabled: bool) {
+        self.timing_enabled = enabled;
+        for alg in &mut self.algorithms {
+            alg.enable_timing(enabled);
+        }
+    }
+
+    /// Accumulated wall time per algorithm, as `(name, duration)` pairs.
+    ///
+    /// All-zero unless [`Self::enable_timing`] was called.
+    pub fn timings(&self) -> Vec<(&str, std::time::Duration)> {
+        self.algorithms
+            .iter()
+            .map(|a| a.name())
+            .zip(self.timings.iter().copied())
+            .collect()
+    }
+
+    /// Per-algorithm totals together with each algorithm's own sub-phase breakdown.
+    pub fn detailed_timings(
+        &self,
+    ) -> Vec<(
+        &str,
+        std::time::Duration,
+        Vec<(&'static str, std::time::Duration)>,
+    )> {
+        self.algorithms
+            .iter()
+            .zip(self.timings.iter().copied())
+            .map(|(a, d)| (a.name(), d, a.sub_timings()))
+            .collect()
     }
 
     /// Initialize all algorithms in the sequence.
@@ -115,12 +175,15 @@ impl AlgorithmSequence {
         conf: &mut Configuration,
         sim: &SimulationState,
     ) -> Result<(), String> {
-        for alg in &mut self.algorithms {
-            let t = std::time::Instant::now();
-            alg.apply(topo, conf, sim)?;
-            let dt = t.elapsed().as_nanos();
-            if dt > 0 {
-                log::trace!("  algo {:20} {:>9} ns", alg.name(), dt);
+        if self.timing_enabled {
+            for (alg, slot) in self.algorithms.iter_mut().zip(self.timings.iter_mut()) {
+                let t = std::time::Instant::now();
+                alg.apply(topo, conf, sim)?;
+                *slot += t.elapsed();
+            }
+        } else {
+            for alg in &mut self.algorithms {
+                alg.apply(topo, conf, sim)?;
             }
         }
         Ok(())

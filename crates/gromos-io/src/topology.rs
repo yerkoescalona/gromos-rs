@@ -1155,10 +1155,16 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
     // GROMOS convention: 1-4 pairs are excluded from the regular pairlist
     // (merged into all_exclusion) but computed separately with cs6/cs12.
     // They are NOT included in topo.exclusions (used for RF excluded interactions).
+    // Stored symmetrically, like `exclusions`, so `Topology::is_excluded_or_14`
+    // can query one side. INE14 lists each pair once (from the lower atom); the
+    // list is only ever used for membership tests, never to enumerate pairs.
     topo.one_four_pairs = vec![Vec::new(); n_solute];
     for (i, pairs_14) in parsed.one_four_pairs.iter().enumerate() {
         for &j in pairs_14 {
             topo.one_four_pairs[i].push(j);
+            if j < n_solute {
+                topo.one_four_pairs[j].push(i);
+            }
         }
     }
 

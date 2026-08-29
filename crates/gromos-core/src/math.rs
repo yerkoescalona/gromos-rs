@@ -58,13 +58,26 @@ impl Rectangular {
 impl BoundaryCondition for Rectangular {
     #[inline(always)]
     fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
-        let mut r = ri - rj;
+        let r = ri - rj;
 
-        // Apply minimum image convention
-        // Branchless version using SIMD
-        r = r - self.box_size * (r * self.inv_box).round();
+        // Minimum image, branchless.
+        //
+        // Ties-to-even, not ties-away-from-zero: this is `rint`, which is what
+        // gromosXX uses (`boundary_implementation.cc:267`,
+        // `nim(d) -= abs(box(d)) * rint(nim(d)/abs(box(d)))`). The two differ only
+        // when a separation is exactly half a box length, so matching gromosXX
+        // there is the faithful choice — and ties-to-even is the only mode x86
+        // implements natively, as a single `roundsd`. `f64::round()` has no native
+        // encoding and expands to several extra instructions per component, which
+        // measured as ~47% of the whole nonbonded kernel on `water_216_box`.
+        let k = r * self.inv_box;
+        let n = Vec3::new(
+            k.x.round_ties_even(),
+            k.y.round_ties_even(),
+            k.z.round_ties_even(),
+        );
 
-        r
+        r - self.box_size * n
     }
 
     #[inline(always)]

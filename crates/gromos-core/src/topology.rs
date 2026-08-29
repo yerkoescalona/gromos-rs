@@ -392,6 +392,27 @@ impl Default for LJParameters {
 /// (2-6 per atom), this is much faster than HashSet due to cache locality.
 pub type Exclusions = Vec<usize>;
 
+/// Membership test on one atom's sorted exclusion list.
+///
+/// Relies on two invariants every construction path maintains (the topology
+/// reader, [`Topology::build_exclusions`], and the solvent expansion):
+/// lists are **sorted** and **symmetric** — `j ∈ exclusions[i]` iff
+/// `i ∈ exclusions[j]` — which is what lets callers query one side only.
+/// Both are checked by `exclusion_invariants` in the gromos-io tests.
+///
+/// The `last < j` early-out is gromosXX's (`topology/exclusions.h:79`,
+/// `Exclusions::is_excluded`): exclusions are intramolecular and the lists
+/// are short, so for a partner in another molecule the answer is usually
+/// settled by looking at the last element, with no search at all.
+#[inline]
+fn exclusion_list_contains(list: &[usize], j: usize) -> bool {
+    match list.last() {
+        None => false,
+        Some(&last) if last < j => false,
+        _ => list.binary_search(&j).is_ok(),
+    }
+}
+
 /// Chargegroup - atoms whose charge sum is zero (or small)
 ///
 /// Chargegroups are used for cutoff optimizations:
@@ -842,26 +863,23 @@ impl Topology {
 
     /// Check if atoms i and j are excluded from nonbonded interactions
     /// (1-2 and 1-3 bonded pairs only — used for RF excluded interactions)
+    ///
+    /// One lookup suffices: exclusion lists are symmetric (see
+    /// [`exclusion_list_contains`]), so `j ∈ exclusions[i]` ⇔ `i ∈ exclusions[j]`.
     #[inline]
     pub fn is_excluded(&self, i: usize, j: usize) -> bool {
-        self.exclusions[i].binary_search(&j).is_ok() || self.exclusions[j].binary_search(&i).is_ok()
+        exclusion_list_contains(&self.exclusions[i], j)
     }
 
     /// Check if atoms i and j are excluded OR are a 1-4 pair.
     /// Used for pairlist exclusion (GROMOS: all_exclusion).
     #[inline]
     pub fn is_excluded_or_14(&self, i: usize, j: usize) -> bool {
-        if self.exclusions[i].binary_search(&j).is_ok()
-            || self.exclusions[j].binary_search(&i).is_ok()
-        {
-            return true;
-        }
-        if !self.one_four_pairs.is_empty() {
-            if self.one_four_pairs[i].contains(&j) || self.one_four_pairs[j].contains(&i) {
-                return true;
-            }
-        }
-        false
+        // Both lists are symmetric, so each needs only one direction. This is
+        // the pairlist's innermost test — one call per candidate atom pair on
+        // every rebuild — which is why the second lookup was worth removing.
+        exclusion_list_contains(&self.exclusions[i], j)
+            || (!self.one_four_pairs.is_empty() && self.one_four_pairs[i].contains(&j))
     }
 
     /// Get chargegroup index for atom i
@@ -1241,6 +1259,13 @@ impl Topology {
 
         // Extend exclusions for solvent atoms
         self.exclusions.resize(n_total, Vec::new());
+        // `one_four_pairs` is either empty (no 1-4 data at all) or indexed by
+        // every atom; solvent atoms have no 1-4 partners but must still be
+        // addressable, or an atomic-cutoff pairlist on a solvated system
+        // indexes past the end.
+        if !self.one_four_pairs.is_empty() {
+            self.one_four_pairs.resize(n_total, Vec::new());
+        }
 
         // Solvent intra-molecular exclusions: all atoms within each molecule exclude each other
         for mol in 0..nsm {

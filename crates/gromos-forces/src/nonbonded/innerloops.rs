@@ -4,6 +4,7 @@ use super::{CGPairGroup, CRFParameters, ForceStorage, LJParamMatrix};
 use gromos_core::math::{BoundaryCondition, Vec3};
 
 use rayon::prelude::*;
+use wide::{f64x4, CmpLt};
 
 /// Core LJ + CRF interaction calculation (hot path!)
 ///
@@ -54,45 +55,149 @@ pub fn lj_crf_interaction(
     (force_magnitude, e_lj, e_crf)
 }
 
-/// Vectorized version processing 4 pairs simultaneously (AVX2/AVX-512)
-#[cfg(feature = "simd")]
-#[inline]
-pub fn lj_crf_interaction_simd_x4(
-    r: [Vec3; 4],
-    c6: [f64; 4],
-    c12: [f64; 4],
-    q_prod: [f64; 4],
-    crf: &CRFParameters,
-) -> ([f64; 4], [f64; 4], [f64; 4]) {
-    use wide::f64x4;
+/// Pairs evaluated per SIMD batch — one AVX2 `f64x4` register.
+const BATCH: usize = 4;
 
-    let r2_array: [f64; 4] = r.map(|v| v.length_squared());
-    let r2 = f64x4::from(r2_array);
+/// [`lj_crf_interaction`] for four pairs at once.
+///
+/// Takes `r²` rather than `r` so the caller decides how the separation is
+/// formed (minimum image vs. charge-group shift). Every expression is written
+/// in the same association order as the scalar kernel, and `wide` lowers `/`
+/// and `sqrt` to the correctly-rounded `vdivpd`/`vsqrtpd`, so each lane is
+/// bit-identical to the scalar result for the same pair. That is what lets the
+/// batched and remainder paths coexist without changing any reference output.
+///
+/// The divide and the square root are the expensive part of the pair
+/// arithmetic; doing four of each per instruction is the point.
+#[inline(always)]
+fn lj_crf_interaction_x4(
+    r2: [f64; BATCH],
+    c6: [f64; BATCH],
+    c12: [f64; BATCH],
+    q_prod: [f64; BATCH],
+    crf: &CRFParameters,
+) -> ([f64; BATCH], [f64; BATCH], [f64; BATCH]) {
+    let r2 = f64x4::from(r2);
+    let c6 = f64x4::from(c6);
+    let c12 = f64x4::from(c12);
+    let q_prod = f64x4::from(q_prod);
 
     let inv_r2 = f64x4::splat(1.0) / r2;
     let inv_r6 = inv_r2 * inv_r2 * inv_r2;
 
-    let c6_vec = f64x4::from(c6);
-    let c12_vec = f64x4::from(c12);
+    let e_lj = (c12 * inv_r6 - c6) * inv_r6;
+    let f_lj = (f64x4::splat(12.0) * c12 * inv_r6 - f64x4::splat(6.0) * c6) * inv_r6 * inv_r2;
 
-    let e_lj = (c12_vec * inv_r6 - c6_vec) * inv_r6;
-    let f_lj =
-        (f64x4::splat(12.0) * c12_vec * inv_r6 - f64x4::splat(6.0) * c6_vec) * inv_r6 * inv_r2;
-
-    let q_prod_vec = f64x4::from(q_prod);
     let inv_r = inv_r2.sqrt();
-
-    let e_crf =
-        q_prod_vec * (inv_r - f64x4::splat(crf.crf_2cut3i) * r2 - f64x4::splat(crf.crf_cut));
-    let f_crf = q_prod_vec * (inv_r * inv_r2 + f64x4::splat(crf.crf_cut3i));
+    let e_crf = q_prod * (inv_r - f64x4::splat(crf.crf_2cut3i) * r2 - f64x4::splat(crf.crf_cut));
+    let f_crf = q_prod * (inv_r * inv_r2 + f64x4::splat(crf.crf_cut3i));
 
     let force = f_lj + f_crf;
 
-    let force_array: [f64; 4] = force.into();
-    let e_lj_array: [f64; 4] = e_lj.into();
-    let e_crf_array: [f64; 4] = e_crf.into();
+    // Same zero-distance guard as the scalar kernel, as a lane mask.
+    let near_zero = r2.cmp_lt(f64x4::splat(1e-10));
+    let zero = f64x4::splat(0.0);
+    (
+        near_zero.blend(zero, force).to_array(),
+        near_zero.blend(zero, e_lj).to_array(),
+        near_zero.blend(zero, e_crf).to_array(),
+    )
+}
 
-    (force_array, e_lj_array, e_crf_array)
+/// Scatter one evaluated pair into the accumulator. Shared by the batched and
+/// remainder paths so the accumulation order is identical to the scalar loop.
+#[inline(always)]
+fn accumulate_pair<const VIRIAL: bool>(
+    storage: &mut ForceStorage,
+    i: usize,
+    j: usize,
+    r: Vec3,
+    f_mag: f64,
+    e_lj: f64,
+    e_crf: f64,
+) {
+    let force = r * f_mag;
+    storage.forces[i] += force;
+    storage.forces[j] -= force;
+
+    storage.e_lj += e_lj;
+    storage.e_crf += e_crf;
+
+    if VIRIAL {
+        for a in 0..3 {
+            for b in 0..3 {
+                storage.virial[a][b] += r[a] * force[b];
+            }
+        }
+    }
+}
+
+/// The nonbonded innerloop over a slice of atom pairs.
+///
+/// This is the single source of truth for the LJ + CRF pair physics. The flat,
+/// charge-group-grouped, and solvent kernels differ only in how the separation
+/// vector is formed and where the pair's `(c6, c12, q_prod)` come from, which
+/// they pass in as `separation` and `params`. Pairs are evaluated four at a
+/// time through [`lj_crf_interaction_x4`], with the tail through the scalar
+/// [`lj_crf_interaction`]; both are scattered by [`accumulate_pair`] in pair
+/// order, so results match the original one-pair-at-a-time loops exactly.
+///
+/// Only the divide/sqrt arithmetic is vectorised; the separations stay as
+/// per-pair `Vec3`s. A structure-of-arrays variant that also vectorised the
+/// minimum image and the force products was measured slower (the AoS↔SoA
+/// shuffles cost more than the dozen scalar ops they replaced), so this is
+/// the deliberate shape, not an oversight.
+#[inline(always)]
+fn process_pair_slice<const VIRIAL: bool>(
+    pairs: &[(u32, u32)],
+    separation: impl Fn(usize, usize) -> Vec3,
+    params: impl Fn(usize, usize) -> (f64, f64, f64),
+    crf: &CRFParameters,
+    storage: &mut ForceStorage,
+) {
+    let mut batches = pairs.chunks_exact(BATCH);
+
+    for batch in &mut batches {
+        let mut r = [Vec3::ZERO; BATCH];
+        let mut r2 = [0.0; BATCH];
+        let mut c6 = [0.0; BATCH];
+        let mut c12 = [0.0; BATCH];
+        let mut q_prod = [0.0; BATCH];
+
+        for (lane, &(i, j)) in batch.iter().enumerate() {
+            let i = i as usize;
+            let j = j as usize;
+            r[lane] = separation(i, j);
+            r2[lane] = r[lane].length_squared();
+            let (pair_c6, pair_c12, pair_q) = params(i, j);
+            c6[lane] = pair_c6;
+            c12[lane] = pair_c12;
+            q_prod[lane] = pair_q;
+        }
+
+        let (f_mag, e_lj, e_crf) = lj_crf_interaction_x4(r2, c6, c12, q_prod, crf);
+
+        for (lane, &(i, j)) in batch.iter().enumerate() {
+            accumulate_pair::<VIRIAL>(
+                storage,
+                i as usize,
+                j as usize,
+                r[lane],
+                f_mag[lane],
+                e_lj[lane],
+                e_crf[lane],
+            );
+        }
+    }
+
+    for &(i, j) in batches.remainder() {
+        let i = i as usize;
+        let j = j as usize;
+        let r = separation(i, j);
+        let (c6, c12, q_prod) = params(i, j);
+        let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, c6, c12, q_prod, crf);
+        accumulate_pair::<VIRIAL>(storage, i, j, r, f_mag, e_lj, e_crf);
+    }
 }
 
 /// CG-grouped kernel: compute nearest_image once per charge-group pair,
@@ -124,40 +229,22 @@ fn process_pairs_cg_grouped<BC: BoundaryCondition, const VIRIAL: bool>(
         let tz = r_ref.z - ri.z + rj.z;
 
         let block = &pairs[group.start as usize..group.end as usize];
-        for &(ii, jj) in block {
-            let i = ii as usize;
-            let j = jj as usize;
-
-            let r = Vec3::new(
-                positions[i].x + tx - positions[j].x,
-                positions[i].y + ty - positions[j].y,
-                positions[i].z + tz - positions[j].z,
-            );
-
-            let type_i = iac[i] as usize;
-            let type_j = iac[j] as usize;
-            let lj = lj_params.get(type_i, type_j);
-            let q_prod = charges[i] * charges[j] * four_pi_eps_i;
-
-            let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
-
-            let force = r * f_mag;
-            storage.forces[i] += force;
-            storage.forces[j] -= force;
-
-            storage.e_lj += e_lj;
-            storage.e_crf += e_crf;
-
-            if VIRIAL {
-                let r = [r.x, r.y, r.z];
-                let f = [force.x, force.y, force.z];
-                for a in 0..3 {
-                    for b in 0..3 {
-                        storage.virial[a][b] += r[a] * f[b];
-                    }
-                }
-            }
-        }
+        process_pair_slice::<VIRIAL>(
+            block,
+            |i, j| {
+                Vec3::new(
+                    positions[i].x + tx - positions[j].x,
+                    positions[i].y + ty - positions[j].y,
+                    positions[i].z + tz - positions[j].z,
+                )
+            },
+            |i, j| {
+                let lj = lj_params.get(iac[i] as usize, iac[j] as usize);
+                (lj.c6, lj.c12, charges[i] * charges[j] * four_pi_eps_i)
+            },
+            crf,
+            storage,
+        );
     }
 }
 
@@ -177,36 +264,16 @@ fn process_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
     four_pi_eps_i: f64,
     storage: &mut ForceStorage,
 ) {
-    for &(i, j) in pairs {
-        let i = i as usize;
-        let j = j as usize;
-
-        let pos_i = positions[i];
-        let pos_j = positions[j];
-        let r = periodicity.nearest_image(pos_i, pos_j);
-
-        let type_i = iac[i] as usize;
-        let type_j = iac[j] as usize;
-        let lj = lj_params.get(type_i, type_j);
-        let q_prod = charges[i] * charges[j] * four_pi_eps_i;
-
-        let (f_mag, e_lj, e_crf) = lj_crf_interaction(r, lj.c6, lj.c12, q_prod, crf);
-
-        let force = r * f_mag;
-        storage.forces[i] += force;
-        storage.forces[j] -= force;
-
-        storage.e_lj += e_lj;
-        storage.e_crf += e_crf;
-
-        if VIRIAL {
-            for a in 0..3 {
-                for b in 0..3 {
-                    storage.virial[a][b] += r[a] * force[b];
-                }
-            }
-        }
-    }
+    process_pair_slice::<VIRIAL>(
+        pairs,
+        |i, j| periodicity.nearest_image(positions[i], positions[j]),
+        |i, j| {
+            let lj = lj_params.get(iac[i] as usize, iac[j] as usize);
+            (lj.c6, lj.c12, charges[i] * charges[j] * four_pi_eps_i)
+        },
+        crf,
+        storage,
+    );
 }
 
 /// Shared kernel: process a slice of solvent molecule pairs into a ForceStorage.
@@ -254,6 +321,10 @@ fn process_solvent_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
         }
     }
 
+    // One sentinel pair expands to the n×n atom pairs of the two molecules,
+    // enumerated in (atom_i, atom_j) order so accumulation matches the
+    // original nested loop. n ≤ 4 is asserted above, hence the fixed 16.
+    let mut block = [(0u32, 0u32); 16];
     for &(i_first, j_first) in pairs {
         let i_first = i_first as usize;
         let j_first = j_first as usize;
@@ -266,45 +337,30 @@ fn process_solvent_pairs<BC: BoundaryCondition, const VIRIAL: bool>(
         let ty = r_first.y - pos_i0.y + pos_j0.y;
         let tz = r_first.z - pos_i0.z + pos_j0.z;
 
+        let mut count = 0;
         for atom_i in 0..n {
-            let i = i_first + atom_i;
-            let xi = positions[i].x + tx;
-            let yi = positions[i].y + ty;
-            let zi = positions[i].z + tz;
-
             for atom_j in 0..n {
-                let j = j_first + atom_j;
-
-                let r = Vec3::new(
-                    xi - positions[j].x,
-                    yi - positions[j].y,
-                    zi - positions[j].z,
-                );
-
-                let (f_mag, e_lj, e_crf) = lj_crf_interaction(
-                    r,
-                    lj_c6[atom_i][atom_j],
-                    lj_c12[atom_i][atom_j],
-                    q_prod[atom_i][atom_j],
-                    crf,
-                );
-
-                let force = r * f_mag;
-                storage.forces[i] += force;
-                storage.forces[j] -= force;
-
-                storage.e_lj += e_lj;
-                storage.e_crf += e_crf;
-
-                if VIRIAL {
-                    for a in 0..3 {
-                        for b in 0..3 {
-                            storage.virial[a][b] += r[a] * force[b];
-                        }
-                    }
-                }
+                block[count] = ((i_first + atom_i) as u32, (j_first + atom_j) as u32);
+                count += 1;
             }
         }
+
+        process_pair_slice::<VIRIAL>(
+            &block[..count],
+            |i, j| {
+                Vec3::new(
+                    positions[i].x + tx - positions[j].x,
+                    positions[i].y + ty - positions[j].y,
+                    positions[i].z + tz - positions[j].z,
+                )
+            },
+            |i, j| {
+                let (ai, aj) = (i - i_first, j - j_first);
+                (lj_c6[ai][aj], lj_c12[ai][aj], q_prod[ai][aj])
+            },
+            crf,
+            storage,
+        );
     }
 }
 
@@ -518,7 +574,12 @@ fn lj_crf_innerloop_cg_grouped_parallel_virial<BC: BoundaryCondition, const VIRI
 
     let pc_fpi = four_pi_eps_i;
     result = groups
-        .par_chunks(groups.len() / rayon::current_num_threads().max(1))
+        .par_chunks(
+            groups
+                .len()
+                .div_ceil(rayon::current_num_threads().max(1))
+                .max(1),
+        )
         .fold(
             || ForceStorage::new(n_atoms),
             |mut local_storage, chunk| {
@@ -636,9 +697,18 @@ fn lj_crf_innerloop_parallel_virial<BC: BoundaryCondition, const VIRIAL: bool>(
         return result;
     }
 
+    // One chunk per thread, not a fixed 1024. Each fold accumulator is a full
+    // n_atoms force buffer that has to be allocated, zeroed, and merged back, so
+    // chunking finer than the thread count multiplies that cost for no added
+    // parallelism — at 62k pairs the fixed size produced 61 buffers per step and
+    // dominated the kernel. Matches the CG-grouped parallel path's sizing.
     let pc_fpi = four_pi_eps_i;
+    let chunk = pairlist
+        .len()
+        .div_ceil(rayon::current_num_threads().max(1))
+        .max(1);
     result = pairlist
-        .par_chunks(1024)
+        .par_chunks(chunk)
         .fold(
             || ForceStorage::new(n_atoms),
             |mut acc, chunk| {
@@ -768,9 +838,14 @@ pub fn solvent_innerloop_parallel<BC: BoundaryCondition>(
         return result;
     }
 
+    // One chunk per thread; see the note in lj_crf_innerloop_parallel_virial.
     let pc_fpi = four_pi_eps_i;
+    let chunk = pairlist
+        .len()
+        .div_ceil(rayon::current_num_threads().max(1))
+        .max(1);
     result = pairlist
-        .par_chunks(512)
+        .par_chunks(chunk)
         .fold(
             || ForceStorage::new(n_atoms),
             |mut acc, chunk| {
@@ -832,9 +907,14 @@ pub fn solvent_innerloop_parallel_novirial<BC: BoundaryCondition>(
         return result;
     }
 
+    // One chunk per thread; see the note in lj_crf_innerloop_parallel_virial.
     let pc_fpi = four_pi_eps_i;
+    let chunk = pairlist
+        .len()
+        .div_ceil(rayon::current_num_threads().max(1))
+        .max(1);
     result = pairlist
-        .par_chunks(512)
+        .par_chunks(chunk)
         .fold(
             || ForceStorage::new(n_atoms),
             |mut acc, chunk| {

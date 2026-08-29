@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.26] (2026-08-29)
+
+### Performance
+
+Single-core benchmarking against gromosXX 1.6.0 (both `-march=native`) began with gromos-rs at
+0.48× (`water_216_box`), 0.77× (`water_1000_spc_gridcell`) and 0.82× (`ch4_water_fep`) of
+gromosXX's speed. After this work it is at 0.97×, 1.11× and 0.90× (mean ratios, n = 3–5), and
+**1.14× on a 24 000-atom production-regime box** (NSNB=5, twin-range, grid_cell) built with
+`sim_box` via `scripts/make_solvated_box.py`. With 8 threads (Phase 3) it is 1.38× faster than
+gromosXX's OpenMP build on that box and 1.06× on the 3 000-atom system; before the
+parallel-pairlist work it was 0.53× and 0.43× there. See `BENCHMARKING.md`. Every change preserves the reference-suite
+output; the nonbonded kernels are bit-identical per pair to the previous scalar code.
+
+- **gromos-core:** `Rectangular::nearest_image` rounds ties-to-even (`rint`, as gromosXX does)
+  instead of ties-away-from-zero — the latter has no native x86 encoding and was ~47 % of the
+  nonbonded kernel on `water_216_box`.
+- **gromos-core:** cell-list pairlist takes its grid spacing from the IMD `PAIRLIST` `SIZE` field
+  (`auto` = half the short cutoff, as gromosXX) instead of a hardcoded cutoff-wide cell, and prunes
+  cell pairs by true inter-cell distance instead of a cubic shell. On `water_1000` the old sizing
+  produced a 3×3×3 grid where every cell neighboured every other, i.e. no pruning at all.
+  Pairlist phase 3.15 s → 2.15 s. `SIZE` had been parsed and never used.
+- **gromos-core:** `PairlistContainer` stores `(u32, u32)`; the per-step copy into `u32` in the
+  forcefield is gone (2.5 s on `ch4_water_fep`) and pairlist write traffic is halved.
+- **gromos-core:** `is_excluded_or_14` / `is_excluded` query one side of the (symmetric, sorted)
+  lists with gromosXX's `last < j` early-out; 1-4 pairs are now stored symmetrically by the reader.
+  Invariants pinned by `gromos-io/tests/exclusion_invariants.rs`.
+- **gromos-forces:** LJ/CRF innerloop evaluates four pairs per `f64x4` register (divide and sqrt
+  were the arithmetic cost); the flat, charge-group-grouped and solvent kernels now share one
+  `process_pair_slice` — the file's "single source of truth" promise now holds.
+- **gromos-forces:** parallel kernels size chunks per thread instead of per 1024 pairs, which was
+  allocating and merging a full force buffer 61 times per step on `water_216_box`; also fixes a
+  latent `par_chunks(0)` panic when there are fewer charge-group pairs than threads.
+- **gromos-core / gromos-integrators:** long-range solvent–solvent pairs are stored as one sentinel
+  pair per molecule pair and evaluated with a shared periodic shift when that is provably exact
+  for the box (`sentinel_long_range_is_exact`; `PairlistContainer::solvent_long_is_sentinel`),
+  as the short-range solvent list always was; otherwise the expanded per-atom-image path is kept.
+  Verified against the expanded path by `gromos-forces/tests/solvent_longrange_sentinel.rs`.
+- **gromos-integrators:** long-range kernels use the `_novirial` variants when no pressure
+  coupling reads the virial, matching the short-range path.
+- **gromos-core:** pairlist construction runs in parallel — the cell list over cell ranges, the
+  standard O(N²) algorithm over charge-group ranges — into private lists appended in order, so
+  pair order and all outputs are unchanged. Per-pair debug logging in the standard algorithm's
+  hot loop was removed.
+- **gromos-integrators:** charge-group pair-group metadata is built in parallel (per-chunk runs
+  stitched at chunk boundaries; identical group boundaries).
+- **gromos-integrators:** the long-range block dispatches to the parallel kernels when
+  `parallel_nonbonded` is set, as the short-range block already did; both phases previously ran
+  serial regardless of thread count.
+- **bench:** `scripts/bench_engines.py` reports n, mean, standard deviation, median and min;
+  `scripts/make_solvated_box.py` builds large solvated boxes through the project's `sim_box`.
+- **gromos-integrators:** twin-range long-range solute interactions use the charge-group-grouped
+  kernel (one `nearest_image` per CG pair) under the same safety condition as short-range, and
+  reuse one force buffer; 1.59 s → 0.60 s on `water_1000`.
+- **gromos-integrators / gromos-core:** per-algorithm and per-force-phase timing is opt-in
+  (`AlgorithmSequence::enable_timing`); `md @verb 1` prints a `TIMING` block comparable line by
+  line with gromosXX's. Previously two `Instant::now()` calls per algorithm per step ran
+  unconditionally.
+
+### Fixed
+
+- **gromos-md:** `md` panicked with "remainder with a divisor of zero" whenever `NTWX`, `NTWE` or
+  `NTPR` was 0 (GROMOS: "never write").
+- **gromos-core:** `PAIRLIST` `TYPE atomic` was parsed and ignored; it now selects the atom-based
+  cutoff. `ALGORITHM grid` fell through to the O(N²) algorithm; it now selects the cell list
+  (documented deviation: same pair set, different traversal).
+- **gromos-core:** `Topology::solvate` left `one_four_pairs` at the solute length; any per-atom
+  query on a solvent atom (reachable via `TYPE atomic`) indexed past the end.
+- **gromos-md:** `benches/md_bench.rs`, `scripts/benchmark.sh` and
+  `scripts/regen_gromosXX_references.py` pointed at non-existent paths.
+
+### Added
+
+- `BENCHMARKING.md`: the engine-vs-engine protocol, assumptions, and measured results;
+  `scripts/bench_engines.py`: the harness that produces them.
+
 ## [0.0.25] (2026-08-13)
 
 ### Features
