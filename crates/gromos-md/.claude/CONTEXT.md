@@ -14,15 +14,27 @@ matching gromosXX to reference tolerances.
 ## Status
 - Full MD loop ✓: NVE / NVT (Berendsen + NHC) / NPT
 - Force trajectory output (@trf) ✓: FREEFORCERED + CONSFORCERED, atom-by-atom tolerance 1e-6
-- **37/39 reference tests passing** (2 ignored: `aladip_vacuum_fep` known FEP mismatch,
-  `aladip_vacuum_em` EM frame-count off-by-one — see PLAN.md Reference Test Status for the full matrix)
+- **37/40 reference tests passing** (3 ignored: `aladip_vacuum_fep` known FEP mismatch,
+  `aladip_vacuum_em` EM frame-count off-by-one, `water_216_nve_nobath` — a *correct* reference the
+  engine fails because the IMD parser turns an absent MULTIBATH block into a Berendsen bath, PLAN.md
+  3.9 A18 — see PLAN.md Reference Test Status for the full matrix)
 - `PairlistAlgorithm::from_imd(imd.algorithm, …)` dispatches Standard/CellList here (PLAN.md 9a-0/
   9a-1); CellList only activates on explicit `ALGORITHM grid_cell`, never via a size heuristic — all
   37 active reference systems still use `standard`.
 - `test_provider_reference.rs` / `test_orchestrator_reference.rs` — gromosXX-reference tests for the
   `PotentialProvider`/`ProviderOrchestrator` seam (PLAN.md 2.6/P2.8-2), not the main `md` binary path.
-  `schnet_nve_loop.rs` (feature `ml`) — real leapfrog loop driving `SchNetInteraction`, also not
-  wired into `md` itself (PLAN.md P2.8-6, still open).
+  `schnet_nve_loop.rs` (feature `ml`) — real leapfrog loop driving `SchNetInteraction`;
+  `xtb_orchestrator_sequence.rs` — `ProviderOrchestratorAlgorithm` inside a real `AlgorithmSequence`
+  (PLAN.md P2.8-6 ✓). Neither is wired into the `md` CLI yet.
+- **PLAN.md 3.9 (next): `md.rs`'s run assembly moves out of this crate.** `src/lib.rs` exports
+  nothing, which is why `pyo3-gromos` re-implements `md.rs`'s IMD→`AlgorithmSequence` assembly (and
+  has drifted: `four_pi_eps_i`, `parallel_nonbonded`, NSM-from-coordinates, DOF, FEP). After a
+  five-framework review the target is a new library crate `crates/gromos-run` (no clap/env_logger/
+  mpi/cudarc; serde non-optional) with `RunRecipe` (+ `from_imd`/`to_imd`, `Diagnostics`),
+  `prepare_system`, `build_plan` → `Vec<AlgorithmSpec>`, `validate_plan`, `instantiate` (reads only
+  the plan), `start` (init + step 0); this crate's binaries and `pyo3-gromos` both call it. Do not add
+  a second sequence builder or a second IMD reader anywhere. Known parser hazard recorded there: an
+  `.imd` without MULTIBATH silently runs a Berendsen bath (τ = 0.1) — fixed by 3.9 step 2.
 
 ## Key files
 ```

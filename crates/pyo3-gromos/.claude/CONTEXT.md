@@ -59,6 +59,12 @@ Python-callable API for running simulations and analysing trajectories.
   consolidate scattered defaults, constraints-as-`System`-attribute, symmetric `InputParameters`
   construction (kwargs ctor + setters + `write_imd_file`/`.save()`).
 
+- **Composition audit + target model (2026-08-29): PLAN.md 3.8/3.9.** Three IMD→sequence builders
+  exist (`md.rs`, `build_simulation`, `resolve_algorithm_sequence`), the descriptor enum is closed,
+  and force terms arrive as `Simulation` kwargs. Target: one `RunRecipe` in a `gromos-md` library,
+  one builder, IMD and Python objects as front-ends, providers as `terms`. Do not add new kwargs to
+  `Simulation` or new `AlgorithmDescriptor` variants without reading 3.9 first.
+
 ## Crate-specific rules
 - **Thin wrapper only.** Zero physics, zero data structures that duplicate the Rust core.
 - **API design reference:** study Polars pyo3 patterns (`PyDataFrame` / `PyExpr` / `PyLazyFrame`) at `.local/polars/py-polars/src/`.

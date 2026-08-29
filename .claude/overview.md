@@ -3,7 +3,8 @@
 gromos-rs ports **gromosXX/md++** (MD engine) + **gromosPlsPls/gromos++** (analysis + tools) into
 one Rust workspace with a single shared core. The architectural invariants live in `architecture.md`.
 The porting discipline lives in `porting.md`. The long-horizon bets live in `FUTURE.md`. The live
-roadmap and reference test matrix live in `PLAN.md`.
+roadmap and reference test matrix live in `PLAN.md` (finished items condensed there; their full
+working notes — traps, oracle numbers, rejected alternatives — are verbatim in `PLAN_ARCHIVE.md`).
 
 ## When working in a crate, read its stage contract
 

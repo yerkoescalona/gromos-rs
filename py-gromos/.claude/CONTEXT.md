@@ -35,6 +35,14 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   reference systems except the 2 explicitly-deferred FEP ones (was missing 18, all real Python-API
   defects in `pyo3-gromos`, not test gaps — see that crate's CONTEXT.md). 121 tests (118 passed, 2
   documented `POSITION_MISMATCH_SYSTEMS` skips for a pre-existing Rust-side `.trc` divergence).
+- **PLAN.md 3.9 step 0 ✓ (2026-08-29)** — `tests/test_front_end_parity.py`: every reference system
+  through `Simulation(...)` and through `AlgorithmSequence.from_parameters` → `np.array_equal`
+  (never `allclose`), plus a `same_path_twice` determinism baseline. 27/37 systems are bit-identical
+  between the two builders; the 10 divergences are `xfail(strict=True)` entries in
+  `EXPECTED_DIVERGENCE`, each naming the feature path C lacks — they must be *deleted* when the shared
+  builder lands, never left to rot. `test_gromosXX_references.py` gained `EXPECTED_ENGINE_FAILURES`
+  (`water_216_nve_nobath`, the absent-MULTIBATH parser bug) and `REFERENCE_PARAMS`. Suite: 185 passed,
+  2 skipped, 13 xfailed.
 - Remaining P3 items:
   - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
@@ -71,6 +79,11 @@ Three documented design shapes in system_builder.py:
 
 Motivation: vsomm_modeler required manual tracking of atom counts, binary
 paths as plain strings, and `input_xxx` dicts per step — all encapsulated now.
+
+- **Composition model (2026-08-29): PLAN.md 3.8/3.9.** The Python API should build a `Recipe`
+  (run control ⟂ forcefield+terms ⟂ constraints ⟂ ensemble) that the engine consumes; IMD files are
+  the serialisation of the same recipe. `test_basic.py`/`test_advanced_features.py` are placeholders
+  for a past API (eleven skipped classes reference non-existent types) — replace, don't extend.
 
 ## Crate-specific rules
 - **No physics, no data structures** — this layer only wraps what pyo3-gromos exposes.
