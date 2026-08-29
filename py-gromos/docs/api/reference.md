@@ -99,85 +99,106 @@ conf = Configuration("initial.cnf")
 
 ---
 
-## InputParameters
+## Recipe
 
-MD / minimisation control parameters. Two construction paths: load an existing
-`.imd` file, or use a factory that sets sensible defaults for the chosen ensemble.
+The one description of a run — the data of a GROMOS `.imd` grouped by concern, plus
+additive `terms` and auxiliary `inputs`. Immutable: `update`/`with_*` return a new recipe.
+`Recipe`, `Term`, `Algorithm` and `Plan` are the engine's own (`gromos-run`) types, so a
+typo'd field or an unknown kind is a `RecipeError`, never a silent default.
 
 ```python
-from gromos import InputParameters
+from gromos import Recipe, Term, Plan, Algorithm, terms, algorithms, build_info
 ```
 
 ### Constructors
 
 ```python
-InputParameters(input_file: str)             # load from file
-InputParameters.from_file(input_file: str)   # identical staticmethod alias
+Recipe.from_imd(path: str, allow_passthrough: list[str] | None = None)   # a GROMOS .imd
+Recipe.from_toml(text: str) / Recipe.from_json(text: str) / Recipe.from_dict(d: dict)
+Recipe.from_bundle(path: str, allow_passthrough=None)                    # a run bundle's input.toml
+Recipe(**groups)                                                         # defaults + groups
 ```
+
+An `.imd` block the engine does not model is an error unless named in `allow_passthrough`;
+an absent optional block is reported in `recipe.diagnostics` together with what gromosXX does
+without it.
 
 ### Factory methods (staticmethod)
 
 ```python
-InputParameters.nve(dt: float, steps: int, constraints: str = "none") -> InputParameters
+Recipe.nve(dt: float, steps: int, constraints: str = "none") -> Recipe
+Recipe.nvt(dt: float, steps: int, temperature: float, constraints: str = "none") -> Recipe
+Recipe.npt(dt: float, steps: int, temperature: float, pressure: float, constraints: str = "none") -> Recipe
+Recipe.minimize(steps: int) -> Recipe
 ```
-Microcanonical ensemble. Thermostat coupling time set to −1 (no coupling).
+`nve`: a bath with coupling time −1 (gromosXX's "no coupling"). `nvt`: Berendsen thermostat,
+τ = 0.1 ps. `npt`: Berendsen thermostat + barostat, `pressure` in bar, compressibility
+4.575 × 10⁻⁴ nm² kJ⁻¹ mol (water). `constraints`: `"none"` | `"hbonds"` | `"allbonds"`
+(solute SHAKE, GROMOS `NTC`).
+
+### Groups (read-only dicts) and derived views
+
+`recipe.version`, `.title`, `.system`, `.control`, `.boundary`, `.forcefield`, `.constraints`,
+`.ensemble`, `.minimisation`, `.perturbation`, `.outputs`, `.execution`, `.inputs`,
+`.passthrough`, `.terms` (`list[Term]`), `.diagnostics` (`list[str]`), `is_minimization()`.
+
+### Building a new recipe
 
 ```python
-InputParameters.nvt(dt: float, steps: int, temperature: float, constraints: str = "none") -> InputParameters
+recipe.update(**groups) -> Recipe            # deep merge; unknown group/field -> RecipeError
+recipe.with_term(term: Term) -> Recipe       # add an additive term (e.g. Term("schnet", ...))
+recipe.without_terms() -> Recipe
+recipe.with_inputs(pttopo=None, posresspec=None, refpos=None, distrest=None) -> Recipe
+recipe.with_execution(parallel: str) -> Recipe   # "auto" | "serial" | "parallel"
 ```
-Canonical ensemble. Berendsen thermostat, τ = 0.1 ps.
+
+### Serialisation
 
 ```python
-InputParameters.npt(dt: float, steps: int, temperature: float, pressure: float, constraints: str = "none") -> InputParameters
+recipe.to_dict() / .to_toml() / .to_json()
+recipe.to_imd(n_atoms: int | None = None) -> str          # what gromosXX would run
+recipe.save_imd(path: str, n_atoms=None)
+recipe.to_bundle(directory: str, system: System, topology_path: str, configuration_path: str) -> str
 ```
-Isothermal-isobaric ensemble. Berendsen thermostat + barostat.  
-`pressure` in bar. Compressibility defaults to 4.575 × 10⁻⁴ nm² kJ⁻¹ mol (water).
+
+### The plan
 
 ```python
-InputParameters.steepest_descent(steps: int) -> InputParameters
+recipe.plan(system: System) -> Plan
 ```
-Steepest-descent energy minimisation (`ENERGYMIN` block, `ntem=1`). Runs through
-`Simulation`/`AlgorithmSequence.minimize()` — see [Energy minimization](#energy-minimization) below.
+Stage 1 of the builder: the MD step as an ordered, validated list of `Algorithm`s. Address
+entries by index or kind: `plan["forcefield"]`, `plan[-1]`, `"remove_com" in plan`, `len(plan)`,
+`plan.kinds`; edit with `insert(i, alg)`, `insert_after(target, alg)`, `insert_before(target,
+alg)`, `remove(target)`, `replace(target, alg)`; `plan.validate()` raises `PlanError` on a broken
+GROMOS step order; `to_json()` / `Plan.from_json(text)` / `to_dicts()`. Run it with
+`Simulation(system, recipe, plan=plan)` (re-validated).
 
-**`constraints`** (on `nve`/`nvt`/`npt`): `"none"` (default, matches GROMOS's own
-`NTC=1` default) | `"hbonds"` | `"allbonds"` — sets SHAKE on solute bonds. A system
-with flexible solute H-bonds (e.g. a peptide) run with `constraints="none"` at a
-normal MD timestep will diverge; use `"hbonds"` or `"allbonds"` for such systems, or
-load a validated `.in` file with SHAKE already configured via `from_file()`. This
-only sets solute constraints (`NTC`) — solvent rigidity (SETTLE) is a separate,
-orthogonal setting not yet exposed on the factories.
+### Registries
 
-**Example**
 ```python
-params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0)
-print(params.dt, params.nstlim, params.temperature)
-
-# A peptide with flexible H-bonds needs constraints to stay stable:
-params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0, constraints="hbonds")
+terms()      -> [{"kind", "params", "feature", "available"}, ...]
+algorithms() -> [{"kind", "params", "rules"}, ...]      # rules: unique/required/first/last/after/before/...
+build_info() -> {"version", "recipe_version", "features"}
 ```
 
-### Properties (read-only)
+### Exceptions (`gromos.exceptions`)
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `dt` | `float` | Timestep, ps |
-| `nstlim` | `int` | Number of steps |
-| `temperature` | `float` | First bath target temperature, K |
-| `cutoff` | `float` | Long-range cutoff (rcutl), nm |
-| `rcutp` | `float` | Short-range pairlist cutoff, nm |
-| `nsm` | `int` | Number of solvent molecules |
-| `ntc` | `int` | SHAKE mode (1=none, 2=H-bonds, 3=all) |
-| `constraints` | `str` | SHAKE mode as the factory convenience string (`"none"`/`"hbonds"`/`"allbonds"`) — inverse of `ntc` |
-| `ntb` | `int` | Boundary type (0=vacuum, 1=rectangular) |
-| `nsnb` | `int` | Pairlist update frequency |
-| `ntwx` | `int` | Trajectory write frequency |
-| `ntwe` | `int` | Energy write frequency |
+`RecipeError(ValueError)`, `PlanError(ValueError)`, `MissingFeatureError(RuntimeError)` — a term
+needs a cargo feature this build lacks (`Term("schnet", ...)` on a non-`ml` build) —
+`RunError(RuntimeError)`.
+
+### Deprecated: `InputParameters`
+
+`InputParameters(path)` / `.from_file` / `.nve` / `.nvt` / `.npt` / `.steepest_descent` still
+work for one release, warn, and are translated into a recipe when passed to `Simulation`.
+See the migration table in the [Quick Start](../user-guide/quick-start.md).
 
 ---
 
 ## Simulation
 
-Builds an algorithm sequence from the parameters and runs the MD loop.
+Prepares the system, builds (or takes) the plan of the recipe, instantiates it and runs the
+MD loop — through the same `gromos-run` code the `md` binary uses.
 
 ```python
 from gromos import Simulation
@@ -186,19 +207,21 @@ from gromos import Simulation
 ### Constructors
 
 ```python
-# Recommended — two-argument form
-Simulation(system: System, params: InputParameters)
+# Recommended
+Simulation(system: System, recipe: Recipe)
+Simulation(system: System, recipe: Recipe, plan=plan)      # an edited recipe.plan(system)
 
-# Three-argument forms (legacy, still supported)
-Simulation(topo: Topology, conf: Configuration, params: InputParameters)
+# Three-argument forms
+Simulation(topo: Topology, conf: Configuration, recipe: Recipe)
 Simulation(topo_file: str, conf_file: str, input_file: str)
-
-# Explicit file-path staticmethod
 Simulation.from_files(topo_file: str, conf_file: str, input_file: str)
+Simulation.from_bundle(path: str, allow_passthrough=None)   # everything from a run bundle
 
-# Custom algorithm sequence
-Simulation.from_sequence(topo: Topology, conf: Configuration,
-                         params: InputParameters, sequence: AlgorithmSequence)
+# Deprecated (one release; warn and are translated into a recipe)
+Simulation(system, params: InputParameters)
+Simulation(..., distrest=, posresspec=, refpos=)            # -> recipe.with_inputs(...)
+Simulation(..., ml_potential=, ml_region=, ml_buffer=)      # -> recipe.with_term(Term("schnet", ...))
+Simulation.from_sequence(topo, conf, params, sequence: Plan)
 ```
 
 ### Running
@@ -243,77 +266,48 @@ ts.plot("bond", "angle")
 | `n_solute_atoms` | `int` | Solute atom count |
 | `n_solvent_atoms` | `int` | Solvent atom count |
 | `algorithm_names` | `list[str]` | Names of algorithms in the sequence |
+| `recipe` | `Recipe` | The effective recipe the engine ran (`recipe_toml`: as TOML) |
+| `plan` | `Plan` | The plan the engine instantiated, a frozen snapshot (`plan_json`: as JSON) |
+| `diagnostics` | `list[str]` | Absent optional blocks (and what that means), passed-through blocks |
 | `energies` | `Energy` | Full energy object, all components (bond/angle/dihedral/improper/lj/coulomb) |
 
 ### Energy minimization
 
-`InputParameters.steepest_descent(steps)` runs real steepest-descent minimization
-through `Simulation` — the algorithm sequence swaps in `SteepestDescent` for the
-leap-frog integrator and skips the thermostat/barostat/temperature calculation
-(GROMOS convention: no velocities during EM, `total_energy == potential_energy`).
-The minimizer converges (and becomes a no-op) once the energy change between steps
-drops below its tolerance — a flat tail in `sim.run()`'s output is expected, not a bug.
+`Recipe.minimize(steps)` runs real steepest-descent minimization through `Simulation` —
+the plan swaps in `steepest_descent` for the leap-frog integrator and skips the
+thermostat/barostat/temperature calculation (GROMOS convention: no velocities during EM,
+`total_energy == potential_energy`). The minimizer converges (and becomes a no-op) once
+the energy change between steps drops below its tolerance — a flat tail in `sim.run()`'s
+output is expected, not a bug.
 
 ```python
-params = InputParameters.steepest_descent(steps=500)
-sim = Simulation(system, params)
+recipe = Recipe.minimize(steps=500)
+sim = Simulation(system, recipe)
 energies = sim.run(500, ene_freq=10)
-print(sim.algorithm_names)
-# ['Forcefield', 'Steepest-Descent', 'Energy_Calculation']
+print(sim.plan.kinds)
+# ['forcefield', 'steepest_descent', 'energy_calculation']
 ```
 
 ---
 
-## AlgorithmSequence
+## AlgorithmSequence (deprecated)
 
-The ordered list of algorithms executed each MD step. Allows inspection and
-modification of the pipeline before constructing a `Simulation`.
+The descriptor path (`Forcefield`, `LeapFrogIntegrator`, `BerendsenThermostat`, … building
+blocks and a second builder) was removed in PLAN.md 3.9 step 4. The preset names survive one
+release: each returns the `Plan` of `params` (what `Recipe.from_imd(...).plan(system)`
+builds) and warns. `AlgorithmSequence` itself cannot be instantiated.
 
 ```python
-from gromos import AlgorithmSequence
+AlgorithmSequence.nve / nvt / npt / minimize / from_parameters(topo: Topology, params: InputParameters) -> Plan
+Simulation.from_sequence(topo, conf, params, sequence: Plan)   # deprecated
 ```
 
-### Factory methods (staticmethod)
+Today:
 
 ```python
-AlgorithmSequence.nve(topo: Topology, params: InputParameters) -> AlgorithmSequence
-AlgorithmSequence.nvt(topo: Topology, params: InputParameters) -> AlgorithmSequence
-AlgorithmSequence.npt(topo: Topology, params: InputParameters) -> AlgorithmSequence
-AlgorithmSequence.minimize(topo: Topology, params: InputParameters) -> AlgorithmSequence
-AlgorithmSequence.from_parameters(topo: Topology, params: InputParameters) -> AlgorithmSequence
-```
-
-`from_parameters` picks the right preset from `params` alone: `minimize` if
-`ntem > 0` (i.e. built via `steepest_descent()`), else `npt` if a barostat is
-configured, else `nvt` if a thermostat is configured, else `nve`.
-
-### Modification methods
-
-```python
-seq.add(algorithm)                          # append
-seq.insert_after(name: str, algorithm)      # insert after named step
-seq.insert_before(name: str, algorithm)     # insert before named step
-seq.remove(name: str)                       # remove by name
-seq.replace(name: str, algorithm)           # swap by name
-```
-
-### Inspection
-
-```python
-seq.names          # list[str] — ordered algorithm names
-len(seq)           # int
-"Forcefield" in seq  # bool
-```
-
-**Example**
-```python
-seq = AlgorithmSequence.nvt(topo, params)
-print(seq.names)
-# ['RemoveCOMMotion', 'Forcefield', 'LeapFrogVelocity', 'BerendsenThermostat',
-#  'LeapFrogPosition', 'TemperatureCalculation', 'EnergyCalculation']
-
-seq.remove("RemoveCOMMotion")
-sim = Simulation.from_sequence(topo, conf, params, seq)
+plan = recipe.plan(system)
+plan.remove("remove_com")
+sim = Simulation(system, recipe, plan=plan)
 ```
 
 ---
@@ -577,14 +571,3 @@ system.write("prepared.topo", "prepared.cnf")
 ```
 
 ---
-
-## Legacy: `gromos.md_runners`
-
-The `md_runners` sub-module contains Python classes that shell out to the `md`
-binary (`MDSimulation`, `GaMDSimulation`, `EDSSimulation`, `REMDSimulation`,
-`TISimulation`). They write temporary `.imd` files and parse output files.
-
-**Deprecated.** Prefer `System` + `InputParameters` + `Simulation` (and
-`sim.run()` / `EnergyTimeseries` for streaming energies) for new code — it runs
-natively without a subprocess or file round-trip. Kept for back-compat until
-callers migrate.

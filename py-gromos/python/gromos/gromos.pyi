@@ -10,31 +10,19 @@ import numpy.typing as npt
 __all__ = [
     "Algorithm",
     "AlgorithmSequence",
-    "BerendsenBarostat",
-    "BerendsenThermostat",
     "Configuration",
     "Energy",
-    "EnergyCalculation",
-    "Forcefield",
     "Frame",
     "InputParameters",
-    "LeapFrogIntegrator",
-    "LeapFrogPosition",
-    "LeapFrogVelocity",
     "MissingFeatureError",
     "Plan",
     "PlanError",
-    "PressureCalculation",
     "Recipe",
     "RecipeError",
-    "RemoveCOMMotion",
     "RunError",
     "SchNetPotential",
-    "ShakeConstraints",
     "Simulation",
-    "SteepestDescent",
     "System",
-    "TemperatureCalculation",
     "Term",
     "Topology",
     "Vec3",
@@ -489,8 +477,10 @@ class Simulation:
         topo: Topology,
         conf: Configuration,
         params: InputParameters,
-        sequence: AlgorithmSequence,
-    ) -> Simulation: ...
+        sequence: Plan,
+    ) -> Simulation:
+        """Deprecated: ``Simulation(System(topo, conf), recipe, plan=sequence)``."""
+        ...
     def step(self, n_steps: int) -> None: ...
     def run(
         self, n_steps: int, ene_freq: int = 100
@@ -506,24 +496,20 @@ class Simulation:
     @property
     def algorithm_names(self) -> list[str]: ...
     @property
-    def recipe(self) -> Recipe | None:
-        """The effective recipe — what the engine actually ran; None for a Simulation built
-        from a hand-made AlgorithmSequence."""
+    def recipe(self) -> Recipe:
+        """The effective recipe — what the engine actually ran."""
         ...
     @property
-    def plan(self) -> Plan | None:
-        """The algorithm plan the engine instantiated; None for a Simulation built from a
-        hand-made AlgorithmSequence."""
+    def plan(self) -> Plan:
+        """The algorithm plan the engine instantiated (a frozen snapshot)."""
         ...
     @property
-    def recipe_toml(self) -> str | None:
-        """Effective run recipe (TOML) — what the engine actually used; None for a
-        Simulation built from a hand-made AlgorithmSequence."""
+    def recipe_toml(self) -> str:
+        """The effective recipe as TOML — the text the `md` binary writes next to its `.tre`."""
         ...
     @property
-    def plan_json(self) -> str | None:
-        """The algorithm plan (JSON, one fully-resolved entry per algorithm); None for a
-        Simulation built from a hand-made AlgorithmSequence."""
+    def plan_json(self) -> str:
+        """The plan as JSON, one fully-resolved entry per algorithm."""
         ...
     @property
     def diagnostics(self) -> list[str]:
@@ -557,153 +543,26 @@ class Simulation:
     def __repr__(self) -> str: ...
 
 # =============================================================================
-# Algorithm sequence API
+# AlgorithmSequence — deprecated shim (PLAN.md 3.9 step 4): use recipe.plan(system)
 # =============================================================================
-
-@final
-class Forcefield:
-    cutoff: float | None
-    rcutp: float | None
-    epsilon_rf: float | None
-    kappa: float | None
-    pairlist_update: int | None
-    virial: str | None
-    ntf_bond: bool | None
-    ntf_angle: bool | None
-    ntf_improper: bool | None
-    ntf_dihedral: bool | None
-    def __new__(
-        cls,
-        cutoff: float | None = ...,
-        rcutp: float | None = ...,
-        epsilon_rf: float | None = ...,
-        kappa: float | None = ...,
-        pairlist_update: int | None = ...,
-        virial: str | None = ...,
-        ntf_bond: bool | None = ...,
-        ntf_angle: bool | None = ...,
-        ntf_improper: bool | None = ...,
-        ntf_dihedral: bool | None = ...,
-    ) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class LeapFrogIntegrator:
-    def __new__(cls) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class LeapFrogVelocity:
-    def __new__(cls) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class LeapFrogPosition:
-    def __new__(cls) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class BerendsenThermostat:
-    temperature: float
-    tau: float
-    def __new__(cls, temperature: float = ..., tau: float = ...) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class BerendsenBarostat:
-    pressure: float
-    tau: float
-    compressibility: float
-    virial: str | None
-    def __new__(
-        cls,
-        pressure: float = ...,
-        tau: float = ...,
-        compressibility: float = ...,
-        virial: str | None = ...,
-    ) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class ShakeConstraints:
-    tolerance: float
-    max_iterations: int
-    mode: str
-    def __new__(
-        cls,
-        tolerance: float = ...,
-        max_iterations: int = ...,
-        mode: str = ...,
-    ) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class SteepestDescent:
-    tolerance: float
-    initial_step: float
-    max_step: float
-    min_steps: int
-    force_limit: float
-    def __new__(
-        cls,
-        tolerance: float = ...,
-        initial_step: float = ...,
-        max_step: float = ...,
-        min_steps: int = ...,
-        force_limit: float = ...,
-    ) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class TemperatureCalculation:
-    def __new__(cls) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class PressureCalculation:
-    virial: str
-    def __new__(cls, virial: str = ...) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class EnergyCalculation:
-    def __new__(cls) -> Self: ...
-    def __repr__(self) -> str: ...
-
-@final
-class RemoveCOMMotion:
-    initial: bool
-    nscm: int
-    def __new__(cls, initial: bool = ..., nscm: int = ...) -> Self: ...
-    def __repr__(self) -> str: ...
 
 @final
 class AlgorithmSequence:
-    def __new__(cls) -> Self: ...
-    def add(self, algorithm: object) -> None: ...
-    def insert_after(self, after: str, algorithm: object) -> None: ...
-    def insert_before(self, before: str, algorithm: object) -> None: ...
-    def remove(self, name: str) -> None: ...
-    def replace(self, name: str, algorithm: object) -> None: ...
-    @property
-    def names(self) -> list[str]: ...
-    @staticmethod
-    def nve(topo: Topology, params: InputParameters) -> AlgorithmSequence: ...
-    @staticmethod
-    def nvt(topo: Topology, params: InputParameters) -> AlgorithmSequence: ...
-    @staticmethod
-    def npt(topo: Topology, params: InputParameters) -> AlgorithmSequence: ...
-    @staticmethod
-    def minimize(topo: Topology, params: InputParameters) -> AlgorithmSequence: ...
-    @staticmethod
-    def from_parameters(
-        topo: Topology, params: InputParameters
-    ) -> AlgorithmSequence: ...
-    def __len__(self) -> int: ...
-    def __contains__(self, key: object, /) -> bool: ...
-    def __repr__(self) -> str: ...
+    """Deprecated (one release). The descriptor path is gone: each preset returns the
+    :class:`Plan` of ``params`` (what ``Recipe.from_imd(...).plan(system)`` builds) and
+    warns. Cannot be instantiated."""
 
-# =============================================================================
+    @staticmethod
+    def nve(topo: Topology, params: InputParameters) -> Plan: ...
+    @staticmethod
+    def nvt(topo: Topology, params: InputParameters) -> Plan: ...
+    @staticmethod
+    def npt(topo: Topology, params: InputParameters) -> Plan: ...
+    @staticmethod
+    def minimize(topo: Topology, params: InputParameters) -> Plan: ...
+    @staticmethod
+    def from_parameters(topo: Topology, params: InputParameters) -> Plan: ...
+
 # =============================================================================
 # System
 # =============================================================================

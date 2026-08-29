@@ -608,8 +608,8 @@ def test_steepest_descent_via_simulation():
 
 
 def test_steepest_descent_via_algorithm_sequence():
-    """The composable path (AlgorithmSequence.minimize / .from_parameters) must
-    agree with the direct Simulation(system, params) EM path."""
+    """The deprecated `AlgorithmSequence.minimize / .from_parameters` shims (now returning the
+    `Plan` of the parameters) must agree with the direct Simulation(system, params) EM path."""
     system_dir = REF_DIR / "aladip_vacuum"
     topo_path = str(system_dir / ".." / "shared" / "aladip.topo")
     conf_path = str(system_dir / "aladip_vacuum.conf")
@@ -619,7 +619,7 @@ def test_steepest_descent_via_algorithm_sequence():
 
     seq_direct = AlgorithmSequence.minimize(system.topology, params)
     seq_auto = AlgorithmSequence.from_parameters(system.topology, params)
-    assert seq_direct.names == seq_auto.names
+    assert seq_direct.kinds == seq_auto.kinds == ["forcefield", "steepest_descent", "energy_calculation"]
 
     sim = Simulation.from_sequence(system.topology, system.configuration, params, seq_auto)
     frames = sim.run(30, ene_freq=1)

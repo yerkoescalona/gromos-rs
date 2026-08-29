@@ -903,16 +903,27 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
       topology with a solvated coordinate file (the reference suite never hit it — it passed `Topology`
       and `Configuration` separately); fixed (`system::atom_count_ok`, unit-tested).
 
-- [ ] **Step 4 — Delete the copies (S).** Remove `resolve_algorithm_sequence`, `AlgorithmDescriptor`,
-      the preset bodies, `RestraintFiles`/`MlPotentialSpec`, the ad-hoc `PyErr::new` sites replaced by
-      `gromos.exceptions`, and the `AlgorithmSequence::new()` in `simulation.rs`; delete
-      `test_basic.py`/`test_advanced_features.py` (replaced by `test_recipe.py`); delete `md_runners.py`
-      and drop `analysis` from `__init__` (stays importable explicitly); `Vec3`/`Frame` to `f64`; ▲
-      remove the `Simulation.add_ml_potential` mention from `pyo3-gromos/.claude/CONTEXT.md`. Add the
-      G6 grep-gates to `just lint`.
-      **Gate:** G6 returns nothing; `crates/pyo3-gromos/src/algorithm_sequence.rs` under 400 lines (from
-      1446); all suites green; CHANGELOG + version bump; the `gromos-run`, `gromos-md`, `pyo3-gromos` and
-      `py-gromos` CONTEXT.md files describe the recipe as the only entry point.
+- [x] **Step 4 — Delete the copies (S).** ✓ 2026-08-29. Removed: `resolve_algorithm_sequence`,
+      `AlgorithmDescriptor`, the twelve descriptor pyclasses and the preset bodies (`algorithm_sequence.rs`
+      1473 → 101 lines: only the deprecated `AlgorithmSequence.nve/nvt/npt/minimize/from_parameters` names,
+      each returning the `Plan` of the parameters via `gromos_run::build_plan`), `RestraintFiles`/
+      `MlPotentialSpec` (gone since step 3), `build_simulation_from_sequence` (the `AlgorithmSequence::new()`
+      in `simulation.rs`), the ad-hoc `PyValueError` sites for recipe/atom-count errors (→ `RecipeError`),
+      `test_basic.py`/`test_advanced_features.py`, `md_runners.py`; `analysis` out of the default namespace;
+      `Vec3`/`Frame`/`rmsd`/`rdf` to `f64` (`gromos_core::math::Vec3`); the `Simulation.add_ml_potential`
+      mention; `py-gromos`'s `glam` dependency. Added: `gromos_run::read_imd` — the `md` binary,
+      `Recipe.from_imd`, `InputParameters` and the bundle loader all open parameter files through it — and
+      the G6 gates in `just lint` (four greps after clippy; `just` is not installed on this machine, the
+      recipe body was run directly). `Simulation.recipe`/`.plan` are always present.
+      ✗ Narrowed: the gate greps `read_imd_file(`/`parse_imd_str(`, not `parse_file(` — `GamdBlock`/
+      `EdsBlock::parse_file` in `md.rs` re-read the file for the passthrough blocks they own (parsing them
+      from `recipe.passthrough` is 1.9's job, GaMD/EDS as algorithms).
+      **Gate met 2026-08-29:** G6 clean; `algorithm_sequence.rs` 101 lines; Rust `gromos-run`/`gromos-io`/
+      `pyo3-gromos` tests and the 38/40 reference suite green; Python suite 300 passed / 8 skipped / 3 xfailed
+      (was 308 / 16 / 15: the eleven placeholder skips and the twelve descriptor xfails are gone); stubtest clean;
+      CHANGELOG 0.0.31; the four CONTEXT.md files name the recipe as the only entry point.
+      `test_front_end_parity.py` lost path C and its twelve `xfail` rows; the deprecated names are now
+      checked as a translation (`from_sequence` shim vs `Recipe`, exact) on every non-restraint system.
 
 - [ ] **Step 5 — First new term through the new door (S), as the proof.** `Term("xtb", coupling=
       "delta", …)` over `XtbInteraction` (no feature gate). Two measures, ▲ both required:
@@ -955,7 +966,7 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
 | `ch4_water_fep`, `aladip_vacuum_fep` | A vs C | kinetic, frame 0 | C never resolves the PERTURBATION block onto `Forcefield` (λ, soft-core, NLAM) | recipe `perturbation` group (step 2) | open → step 2 |
 | six >100-atom systems (`water_216_*`, `water_1000_spc_gridcell`) | A vs C, after step 1 | last-digit energies from frame 0 | A inherited the binary's `ParallelPolicy::Auto`; C's resolver built a serial `Forcefield` (A2) | resolver applies the same policy + `four_pi_eps_i` | **closed, step 1** |
 | every reference system | A vs B vs D (`InputParameters` vs `Recipe` vs `Recipe` + `Plan`) | none — `array_equal` on energies, positions, forces | — | the shims translate into the recipe; `plan=` is stage 1 of the same builder | **closed, step 3** |
-| (rows above marked "open → step 1/2") | | | | the binary and `Simulation` share one builder; C is still the descriptor resolver, kept only so the A-vs-C xfails stay honest | still open → step 4 (C is deleted, not fixed) |
+| (rows above marked "open → step 1/2") | | | | path C — the descriptor resolver — deleted with its xfail table; the names that survive are translations into the recipe, checked exact against path B | **closed, step 4** (deleted, not fixed) |
 
 **Explicitly out of scope here** (tracked elsewhere): the `System` building algebra (FUTURE.md,
 D1–D8); zone-aware `Forcefield` and `coupling: Replace` (2.8); GaMD/EDS/REMD as algorithms (1.9); PME

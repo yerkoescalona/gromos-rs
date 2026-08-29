@@ -109,15 +109,17 @@ def test_diagnostics_report_absent_blocks():
     assert all("block absent" in n for n in sim.diagnostics), sim.diagnostics
 
 
-def test_descriptor_path_has_no_recipe():
+def test_from_sequence_shim_is_a_translation():
+    """The deprecated names return and consume a `Plan`: there is no descriptor path left."""
     topo, conf, params = _load(WATER)
-    seq = AlgorithmSequence.from_parameters(topo, params)
-    sim = Simulation.from_sequence(topo, conf, params, seq)
-    assert sim.recipe_toml is None
-    assert sim.plan_json is None
-    assert sim.recipe is None
-    assert sim.plan is None
-    assert sim.diagnostics == []
+    plan = AlgorithmSequence.from_parameters(topo, params)
+    assert isinstance(plan, Plan)
+    sim = Simulation.from_sequence(topo, conf, params, plan)
+    assert sim.recipe == Recipe.from_imd(_paths(WATER)[2])
+    assert sim.plan.kinds == plan.kinds
+    assert json.loads(sim.plan_json)[-1]["kind"] == "energy_calculation"
+    with pytest.raises(TypeError):
+        AlgorithmSequence()
 
 
 def test_factory_parameters_default_to_what_gromosxx_does_without_the_blocks():

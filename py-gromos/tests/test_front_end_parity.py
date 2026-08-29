@@ -1,31 +1,26 @@
 """
-Front-end parity — PLAN.md 3.9, step 0 (drift guard G2, v0).
+Front-end parity — PLAN.md 3.9, drift guard G2.
 
-The reference suite (`test_gromosXX_references.py`) guards each Python construction path
-against gromosXX individually; nothing guarded the paths against *each other* — the trap
-FUTURE.md named when it parked the builder unification. This file is that missing test.
+The reference suite (`test_gromosXX_references.py`) guards the Python front-end against gromosXX;
+this file guards the front-ends against *each other* — the trap FUTURE.md named when it parked the
+builder unification. Every path below must be **exactly** equal (``np.array_equal``, never
+``allclose``) on every reference system: per-step energy rows, final positions, final forces.
+Same builder, same kernels, same order — any difference is a defect, never a tolerance question
+(PLAN.md 3.9 A1/A3).
 
-v0 compares the two builders that exist today:
+  path A — ``Simulation(topo, conf, InputParameters, **restraint_kwargs)``   (deprecated shim)
+  path B — ``Simulation(system, Recipe.from_imd(...).with_inputs(...))``      (the front-end)
+  path D — ``Simulation(system, recipe, plan=recipe.plan(system))``           (the plan front-end)
+  shim   — ``Simulation.from_sequence(topo, conf, params, AlgorithmSequence.from_parameters(...))``
 
-  path A — ``Simulation(topo, conf, params, **restraint_kwargs)``   (``build_simulation``)
-  path C — ``Simulation.from_sequence(topo, conf, params,
-                AlgorithmSequence.from_parameters(topo, params))``   (``resolve_algorithm_sequence``)
-
-on every reference system, for NSTLIM steps, and asserts **exact** equality
-(``np.array_equal``, never ``allclose``) of the per-step energy rows, final positions and final
-forces. Same build, same kernels, same order: any difference is a defect or a missing feature,
-never a tolerance question (PLAN.md 3.9 A1/A3).
-
-Known divergences are ``xfail(strict=True)`` with a reason naming the feature, so that when the
-shared builder lands (steps 1–2) they *must* be removed — a silent pass is drift in the other
-direction. Rows are mirrored in PLAN.md 3.9's divergence table.
-
-``test_same_path_twice`` is the determinism baseline (A3): path A run twice must be identical
-before any cross-path comparison means anything. The Python path is serial
-(``parallel_nonbonded`` is never set by ``build_simulation``); the multi-thread outcome of the
-*binary* is measured separately by ``scripts/kernel_determinism.py`` and recorded in
-BENCHMARKING.md.
+Path C (the descriptor resolver, a second builder) was deleted in step 4 together with its
+``xfail`` table: the shims that replaced it are translations into a recipe, and the tests below
+prove it. ``test_same_path_twice`` is the determinism baseline (A3). All paths run with the
+binary's ``ParallelPolicy::Auto`` — the same kernels at the same thread count; run-to-run
+determinism at a fixed thread count is measured by ``scripts/kernel_determinism.py``
+(BENCHMARKING.md).
 """
+
 
 from __future__ import annotations
 
@@ -52,37 +47,6 @@ from gromos import (
     algorithms,
     terms,
 )
-
-# ---------------------------------------------------------------------------------------------
-# Known divergences between path A and path C (filled from the first run of this file, step 0).
-# Each entry names the *feature* path C lacks or gets wrong. strict=True: when the shared
-# builder makes the two paths agree, the entry must be deleted, not left to rot.
-# ---------------------------------------------------------------------------------------------
-EXPECTED_DIVERGENCE: dict[str, str] = {
-    # Constraint algorithms: the descriptor enum has only ShakeConstraints; path C runs SHAKE
-    # where the IMD asks for SETTLE (NTCS=3) or LINCS (NTCP/NTCS=2).
-    "nacl_1water_settle": "path C lacks SETTLE (ShakeConstraints is the only constraint descriptor)",
-    "nacl_1water_lincs": "path C lacks LINCS for solvent (NTCS=2 resolved as SHAKE)",
-    "aladip_vacuum_lincs": "path C lacks LINCS for solute (NTCP=2 resolved as SHAKE)",
-    # Thermostats: BerendsenThermostat is the only thermostat descriptor.
-    "water_216_nvt_nosehoover": "path C lacks Nosé-Hoover (MULTIBATH algorithm 1 resolved as Berendsen)",
-    "water_216_nvt_nhc_chain": "path C lacks Nosé-Hoover chains (MULTIBATH algorithm >=2 resolved as Berendsen)",
-    # COM motion: RemoveCOMMotion(initial: bool, nscm) collapses NTICOM=2 (translation +
-    # rotation) to NTICOM=1 — the rotation removal is lost on path C.
-    "water_216_box_com_rot": "path C collapses NTICOM=2 to a bool (rotation removal lost)",
-    # Boundary: build_simulation_from_sequence hard-codes SimBox::rectangular; the NTB=-1
-    # truncated-octahedron transform never happens on path C.
-    "aladip_trunc_oct": "path C lacks the NTB=-1 truncated-octahedron box transform",
-    # Restraints: constructor kwargs on path A, inexpressible on path C.
-    "nacl_1water_distres": "restraints are Simulation kwargs; Simulation.from_sequence has none (distrest)",
-    "aladip_solvated_em_posres": "restraints are Simulation kwargs; Simulation.from_sequence has none (posresspec/refpos)",
-    "aladip_solvated_em": "restraints are Simulation kwargs; Simulation.from_sequence has none (posresspec/refpos)",
-    # FEP: path A sets lambda / soft-core / NLAM on Forcefield from the PERTURBATION block;
-    # the Forcefield descriptor has no such fields, so path C runs the perturbed topology
-    # with lambda = 0 and no soft-core.
-    "ch4_water_fep": "path C lacks FEP (PERTURBATION block not resolved onto Forcefield)",
-    "aladip_vacuum_fep": "path C lacks FEP (PERTURBATION block not resolved onto Forcefield)",
-}
 
 
 def _load(system_name: str):
@@ -143,15 +107,15 @@ def _run_path_d(system_name: str):
     return _trace(Simulation(system, recipe, plan=plan), _get_n_steps(REF_DIR / system_name))
 
 
-def _run_path_c(system_name: str):
+def _run_path_shim(system_name: str):
+    """The deprecated `AlgorithmSequence.from_parameters` + `Simulation.from_sequence` names,
+    now a translation: `params` -> recipe, the preset -> `recipe.plan`. They carry no restraint
+    inputs, so the restraint systems skip here (path B covers them)."""
     topo, conf, params, kwargs = _load(system_name)
     if kwargs:
-        pytest.fail(
-            f"{system_name}: restraint inputs {sorted(kwargs)} cannot be expressed on the "
-            "AlgorithmSequence path (Simulation.from_sequence has no restraint arguments)"
-        )
-    seq = AlgorithmSequence.from_parameters(topo, params)
-    sim = Simulation.from_sequence(topo, conf, params, seq)
+        pytest.skip(f"{system_name}: the deprecated from_sequence shim has no restraint inputs")
+    plan = AlgorithmSequence.from_parameters(topo, params)
+    sim = Simulation.from_sequence(topo, conf, params, plan)
     return _trace(sim, _get_n_steps(REF_DIR / system_name))
 
 
@@ -179,27 +143,10 @@ def _assert_identical(label: str, a, b) -> None:
     assert not problems, f"{label}:\n  " + "\n  ".join(problems)
 
 
-def _params_for(system_name: str):
-    marks = []
-    if system_name in EXPECTED_DIVERGENCE:
-        marks.append(pytest.mark.xfail(strict=True, reason=EXPECTED_DIVERGENCE[system_name]))
-    return pytest.param(system_name, marks=marks, id=system_name)
-
-
 @pytest.mark.parametrize("system_name", [pytest.param(s, id=s) for s in REFERENCE_SYSTEMS])
 def test_same_path_twice(system_name):
     """Determinism baseline (A3): the same construction path twice must be bit-identical."""
     _assert_identical(f"{system_name}: path A vs path A", _run_path_a(system_name), _run_path_a(system_name))
-
-
-@pytest.mark.parametrize("system_name", [_params_for(s) for s in REFERENCE_SYSTEMS])
-def test_front_end_parity(system_name):
-    """Path A (build_simulation) vs path C (from_parameters + resolve_algorithm_sequence)."""
-    _assert_identical(
-        f"{system_name}: path A (Simulation) vs path C (AlgorithmSequence.from_parameters)",
-        _run_path_a(system_name),
-        _run_path_c(system_name),
-    )
 
 
 @pytest.mark.parametrize("system_name", [pytest.param(s, id=s) for s in REFERENCE_SYSTEMS])
@@ -209,6 +156,16 @@ def test_recipe_front_end_parity(system_name):
     _assert_identical(
         f"{system_name}: path A (InputParameters) vs path B (Recipe)",
         _run_path_a(system_name),
+        _run_path_b(system_name),
+    )
+
+
+@pytest.mark.parametrize("system_name", [pytest.param(s, id=s) for s in REFERENCE_SYSTEMS])
+def test_from_sequence_shim_parity(system_name):
+    """The deprecated `AlgorithmSequence`/`from_sequence` names vs path B."""
+    _assert_identical(
+        f"{system_name}: from_sequence shim vs path B (Recipe)",
+        _run_path_shim(system_name),
         _run_path_b(system_name),
     )
 

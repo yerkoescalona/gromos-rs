@@ -21,7 +21,6 @@ use pythonize::{depythonize_bound, pythonize};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use gromos_io::imd::read_imd_file;
 use gromos_run::plan::{build_plan, validate_plan, AlgorithmSpec};
 use gromos_run::recipe::{PassthroughPolicy, RunRecipe, TermSpec, RECIPE_VERSION};
 use gromos_run::{prepare_system, Coordinates};
@@ -468,11 +467,7 @@ impl PyRecipe {
     #[staticmethod]
     #[pyo3(signature = (path, allow_passthrough=None))]
     pub(crate) fn from_imd(path: &str, allow_passthrough: Option<Vec<String>>) -> PyResult<Self> {
-        let imd = read_imd_file(path).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                "Failed to read input file '{path}': {e}"
-            ))
-        })?;
+        let imd = gromos_run::read_imd(path).map_err(run_err)?;
         let policy = PassthroughPolicy::allow(allow_passthrough.unwrap_or_default());
         let (inner, diag) = RunRecipe::from_imd_with(&imd, &policy).map_err(run_err)?;
         Ok(Self {

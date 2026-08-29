@@ -16,7 +16,6 @@ use gromos::{
         energy::{EnergyFrame, EnergyWriter},
         force::ForceWriter,
         free_energy::{FreeEnergyFrame, FreeEnergyWriter},
-        imd::read_imd_file,
         topology::{build_topology, read_topology_file},
         trajectory::TrajectoryWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
@@ -300,7 +299,7 @@ fn main() {
 
     // === Read simulation parameters from @input file ===
     println!("Loading input parameters: {}", md_args.input_file);
-    let imd = match read_imd_file(&md_args.input_file) {
+    let imd = match gromos_run::read_imd(&md_args.input_file) {
         Ok(p) => p,
         Err(e) => {
             log::error!("Failed to read input file: {}", e);

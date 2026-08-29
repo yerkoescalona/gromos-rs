@@ -65,11 +65,14 @@ src/error.rs        — RunError
 - **No `println!`, no `process::exit`, no logging.** Everything the binary prints comes back as
   data or as a `RunError`.
 - **No second builder, no second IMD reader.** Callers that need a different sequence edit the
-  plan (step 2); they never push algorithms themselves. `pyo3-gromos` may *insert* an extra
-  algorithm (the ML term) into a built sequence via `AlgorithmSequence::insert`, nothing more.
+  plan (`build_plan` → `Plan` → `build_sequence_from_plan`); they never push algorithms
+  themselves, and they read parameter files only through `read_imd` / `RunRecipe::from_imd`.
+  `just lint` (G6, PLAN.md 3.9 step 4) greps for violations.
 - **Behaviour is defined by the reference suite from both sides:** `cargo test -p gromos-md
   --test test_gromosXX_references` (drives the binary) and `py-gromos/tests/` (drives the binding)
   must both stay green; `py-gromos/tests/test_front_end_parity.py` compares the Python front-ends
   with `np.array_equal`.
-- Defaults (`300.0`, `-1.0`, `1.0`, `4.575e-4`, `0.5`, `1000`) still live here as literals until
-  step 2 derives them from `ImdParameters::default()` (PLAN.md 3.9 G7).
+- Defaults are derived from `ImdParameters::default()` (PLAN.md 3.9 G7, step 2) — no second table.
+- **This crate is the only entry point** for building a run: the `md` binary and `py-gromos`'s
+  `Simulation` both call `prepare_system` → `build_plan` → `validate_plan` → `instantiate` → `start`
+  (steps 1–4). Every `.imd`/Python front-end is a translation into a `RunRecipe`.

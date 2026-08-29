@@ -47,9 +47,6 @@ use gromos_run::{
     Coordinates,
 };
 
-use super::algorithm_sequence::{
-    compute_total_dof, resolve_algorithm_sequence, PyAlgorithmSequence,
-};
 use super::parameters::{deprecated, PyInputParameters};
 use super::py_conf::PyConfiguration;
 use super::recipe::{run_err, MissingFeatureError, PyPlan, PyRecipe};
@@ -253,63 +250,9 @@ fn build_from_recipe(
         dt,
         n_atoms,
         total_dof: summary.total_dof,
-        recipe: Some(recipe),
-        plan: Some(plan),
+        recipe,
+        plan,
         diagnostics,
-    })
-}
-
-/// Build a simulation from a user-provided *descriptor* sequence (the pre-recipe path,
-/// deprecated: use `recipe.plan(system)` + `Simulation(system, recipe, plan=...)`).
-fn build_simulation_from_sequence(
-    parts: Parts,
-    params: &PyInputParameters,
-    sequence: &PyAlgorithmSequence,
-) -> PyResult<PySimulation> {
-    let imd = &params.inner;
-    let (topo, physical_constants, coords) = parts.into_pieces();
-    let prepared = prepare_system(
-        imd,
-        topo,
-        physical_constants,
-        coords,
-        &gromos_run::RunInputs::default(),
-    )
-    .map_err(run_err)?;
-    let gromos_run::Prepared {
-        topology: topo,
-        configuration: mut conf,
-        box_dims,
-        physical_constants,
-        ..
-    } = prepared;
-    let n_atoms = topo.num_atoms();
-    let total_dof = compute_total_dof(&topo, imd);
-
-    let mut md_sequence =
-        resolve_algorithm_sequence(sequence, &topo, &conf, imd, physical_constants, box_dims)
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                    "Failed to resolve algorithm sequence: {}",
-                    e
-                ))
-            })?;
-
-    let mut sim_state = SimulationState::new(imd.dt, imd.nstlim);
-    start(&mut md_sequence, &topo, &mut conf, &sim_state).map_err(run_err)?;
-    sim_state.advance();
-
-    Ok(PySimulation {
-        topology: topo,
-        configuration: conf,
-        md_sequence,
-        sim_state,
-        dt: imd.dt,
-        n_atoms,
-        total_dof,
-        recipe: None,
-        plan: None,
-        diagnostics: Vec::new(),
     })
 }
 
@@ -336,10 +279,10 @@ pub struct PySimulation {
     /// at build time by `gromos_run::total_dof` and reused for `temperature` —
     /// the same value the thermostat (if any) couples to.
     total_dof: f64,
-    /// The run recipe this simulation was built from (`None` on the descriptor path).
-    recipe: Option<RunRecipe>,
-    /// The algorithm plan (`None` on the descriptor path).
-    plan: Option<Vec<AlgorithmSpec>>,
+    /// The run recipe this simulation was built from.
+    recipe: RunRecipe,
+    /// The algorithm plan that was instantiated (a frozen snapshot).
+    plan: Vec<AlgorithmSpec>,
     /// What `from_imd` defaulted or passed through.
     diagnostics: Vec<String>,
 }
@@ -553,39 +496,35 @@ impl PySimulation {
             .collect()
     }
 
-    /// The recipe this simulation was built from (`None` for the deprecated descriptor path).
+    /// The recipe this simulation was built from.
     #[getter]
-    fn recipe(&self) -> Option<PyRecipe> {
-        self.recipe.as_ref().map(|r| PyRecipe {
-            inner: r.clone(),
+    fn recipe(&self) -> PyRecipe {
+        PyRecipe {
+            inner: self.recipe.clone(),
             diagnostics: self.diagnostics.clone(),
-        })
+        }
     }
 
     /// The plan that was instantiated — a frozen snapshot, editing it does not change this
-    /// simulation (`None` for the deprecated descriptor path).
+    /// simulation.
     #[getter]
-    fn plan(&self) -> Option<PyPlan> {
-        self.plan.as_ref().map(|p| PyPlan { specs: p.clone() })
+    fn plan(&self) -> PyPlan {
+        PyPlan {
+            specs: self.plan.clone(),
+        }
     }
 
     /// The effective run recipe as TOML — every value the engine actually used, the same
     /// text the `md` binary writes next to its `.tre`.
     #[getter]
-    fn recipe_toml(&self) -> PyResult<Option<String>> {
-        self.recipe
-            .as_ref()
-            .map(|r| r.to_toml().map_err(run_err))
-            .transpose()
+    fn recipe_toml(&self) -> PyResult<String> {
+        self.recipe.to_toml().map_err(run_err)
     }
 
     /// The algorithm plan as JSON (one entry per algorithm, fully resolved).
     #[getter]
-    fn plan_json(&self) -> PyResult<Option<String>> {
-        self.plan
-            .as_ref()
-            .map(|p| gromos_run::plan_to_json(p).map_err(run_err))
-            .transpose()
+    fn plan_json(&self) -> PyResult<String> {
+        gromos_run::plan_to_json(&self.plan).map_err(run_err)
     }
 
     /// Notes from reading the parameters: which optional blocks were absent (and what that
@@ -734,14 +673,22 @@ impl PySimulation {
         topo: &PyTopology,
         conf: &PyConfiguration,
         params: &PyInputParameters,
-        sequence: &PyAlgorithmSequence,
+        sequence: &PyPlan,
     ) -> PyResult<Self> {
         deprecated(
             py,
             "Simulation.from_sequence(topo, conf, params, sequence)",
             "Simulation(system, recipe, plan=recipe.plan(system))",
         )?;
-        build_simulation_from_sequence(Parts::from_objects(topo, conf), params, sequence)
+        let (recipe, diagnostics) =
+            RunRecipe::from_imd_with(&params.inner, &PassthroughPolicy::default())
+                .map_err(run_err)?;
+        build_from_recipe(
+            Parts::from_objects(topo, conf),
+            recipe,
+            Some(sequence.specs.clone()),
+            diagnostics.notes,
+        )
     }
 
     fn __repr__(&self) -> String {

@@ -7,7 +7,9 @@ A guide to understanding the py-gromos codebase and where things are headed.
 The cleanest way to understand the current state is to look at `__init__.py`:
 it imports only what actually works from the Rust extension. Everything that
 raises `NotImplementedError` or shells out to a binary lives in sub-modules
-(`md_runners`, `analysis`, `system_builder`) and is not in the default namespace.
+(`analysis`, `system_builder`), importable explicitly (`import gromos.analysis`) but not
+in the default namespace. The legacy `md_runners` subprocess wrappers were removed in
+PLAN.md 3.9 step 4 — `Simulation` is the way to run MD from Python.
 
 | Name | Backed by | Status |
 |------|-----------|--------|
@@ -16,7 +18,6 @@ raises `NotImplementedError` or shells out to a binary lives in sub-modules
 | `Simulation` | Rust | ✅ working |
 | `InputParameters` + factories, `AlgorithmSequence` | Rust | ⚠️ deprecated (one release): translated into a `Recipe`, warn |
 | `Vec3`, `Energy`, `Frame`, `rmsd`, `rdf` | Rust | ✅ working |
-| `md_runners.*` (MDSimulation, run_standard_md, …) | Python subprocess → `md` binary | ⚠️ legacy, requires binary in PATH |
 | `analysis.*` | Python subprocess → gromos++ programs | 🔜 programs not yet ported |
 | `system_builder.*` (ForceField, molecule, …) | Python stub | 🔜 design sketch, raises NotImplementedError |
 
@@ -27,7 +28,6 @@ py-gromos/
 ├── python/gromos/
 │   ├── __init__.py        ← re-exports working names; the module contract
 │   ├── gromos.pyi         ← type stubs for the Rust extension
-│   ├── md_runners.py      ← legacy subprocess wrappers (deprecated path)
 │   ├── analysis.py        ← future analysis wrappers (mostly stub)
 │   └── system_builder.py  ← future system-builder design sketch
 ├── tests/
@@ -46,7 +46,7 @@ The Rust side lives in `crates/pyo3-gromos/src/`:
 | `recipe.rs` | `Recipe`, `Term`, `Algorithm`, `Plan`, `terms`/`algorithms`/`build_info`, the exceptions |
 | `parameters.rs` | `InputParameters` + factories (deprecated shims) |
 | `simulation.rs` | `Simulation` |
-| `algorithm_sequence.rs` | `AlgorithmSequence` (deprecated descriptor path; removed in PLAN.md 3.9 step 4) |
+| `algorithm_sequence.rs` | `AlgorithmSequence` — deprecated shim whose presets return the `Plan` of the parameters |
 | `lib.rs` | `Vec3`, `Energy`, `Frame`, `rmsd`, `rdf`, module assembly |
 
 ## Running the test suite
@@ -97,9 +97,8 @@ Two gaps found while writing the P3.4 notebooks, both closed:
   mode and the fix side by side, live.
 - **Energy minimization via `Simulation`.** `InputParameters.steepest_descent(steps)`
   now actually minimizes when run through `Simulation` — previously it silently
-  fell back to plain leap-frog with `dt=0` (a no-op). Also available as
-  `AlgorithmSequence.minimize(topo, params)` / the `SteepestDescent` building
-  block for custom sequences.
+  fell back to plain leap-frog with `dt=0` (a no-op). Today: `Recipe.minimize(steps)`;
+  the plan it builds is `recipe.plan(system)`.
 
 ### FUTURE — System builder algebra
 

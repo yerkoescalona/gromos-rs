@@ -28,7 +28,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 # SIMD and math
-glam = { workspace = true }
 
 # Parallelism
 rayon = { workspace = true }

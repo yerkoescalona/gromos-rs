@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use gromos_io::imd::read_imd_file;
+use gromos_io::imd::{read_imd_file, ImdParameters};
 
 use crate::recipe::{Diagnostics, PassthroughPolicy};
 use crate::{RunError, RunInputs, RunRecipe};
@@ -93,6 +93,16 @@ pub fn read_bundle<P: AsRef<Path>>(path: P) -> Result<RunBundle, RunError> {
 
 /// The recipe a bundle describes: its recipe file if present, else its parameter file through
 /// `RunRecipe::from_imd_with`. The bundle's auxiliary paths are written into `recipe.inputs`.
+/// Read a GROMOS `.imd` file — the one place a parameter file is opened outside `gromos-io`
+/// (G6): the `md` binary, `Recipe.from_imd` and the bundle loader all come through here.
+pub fn read_imd<P: AsRef<Path>>(path: P) -> Result<ImdParameters, RunError> {
+    let path = path.as_ref();
+    read_imd_file(path).map_err(|e| RunError::Io {
+        what: format!("parameters '{}'", path.display()),
+        source: e,
+    })
+}
+
 pub fn load_bundle<P: AsRef<Path>>(
     path: P,
     policy: &PassthroughPolicy,
@@ -105,11 +115,7 @@ pub fn load_bundle<P: AsRef<Path>>(
         })?;
         (RunRecipe::from_toml(&text)?, Diagnostics::default())
     } else if let Some(params) = &bundle.parameters {
-        let imd = read_imd_file(params).map_err(|e| RunError::Io {
-            what: format!("parameters '{}'", params.display()),
-            source: e,
-        })?;
-        RunRecipe::from_imd_with(&imd, policy)?
+        RunRecipe::from_imd_with(&read_imd(params)?, policy)?
     } else {
         return Err(RunError::Inconsistent(format!(
             "bundle '{}' names neither a recipe nor a parameter file",

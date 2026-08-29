@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use gromos_io::g96::write_g96;
 
 use crate::py_conf::PyConfiguration;
+use crate::recipe::RecipeError;
 use crate::topology::PyTopology;
 
 /// A molecular system: topology paired with a matching configuration.
@@ -41,7 +42,7 @@ impl PySystem {
         let topo_ref = topology.borrow();
         let conf_ref = configuration.borrow();
         validate_atom_count_match(&topo_ref.inner, conf_ref.pos_data.len())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+            .map_err(RecipeError::new_err)?;
         Ok(Self {
             topology: PyTopology {
                 inner: topo_ref.inner.clone(),
@@ -61,7 +62,7 @@ impl PySystem {
         let topo = PyTopology::from_file(topo_file)?;
         let conf = PyConfiguration::from_file(conf_file)?;
         validate_atom_count_match(&topo.inner, conf.pos_data.len())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+            .map_err(RecipeError::new_err)?;
         Ok(Self {
             topology: topo,
             configuration: conf,

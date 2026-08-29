@@ -60,12 +60,15 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   stubtest_allowlist_no_ml.txt` (pyo3 classes are `@final` and construct through `__new__`; slot
   methods take positional-only arguments). Deprecated forms warn (`pytest.warns`; the pytest config
   ignores `DeprecationWarning` otherwise). Suite: 308 passed, 16 skipped, 15 xfailed.
+- **PLAN.md 3.9 step 4 ✓ (2026-08-29)** — the descriptor path is gone from the package surface:
+  no `Forcefield`/`LeapFrog…`/`BerendsenThermostat`… classes, no `md_runners`, `analysis` only by
+  explicit import; `AlgorithmSequence.*` presets return a `Plan` (deprecated), `Simulation.from_sequence`
+  takes one. `test_front_end_parity.py`: paths A/B/D + the `from_sequence` shim, no xfail table.
+  `Vec3`/`Frame`/`rmsd`/`rdf` are f64. Suite: 300 passed, 8 skipped, 3 xfailed.
 - Remaining P3 items:
   - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
   - [ ] Rewrite `examples/` (17 scripts) on the new API
-  - [ ] Delete `test_basic.py`, `test_advanced_features.py` (placeholders; replaced by
-        `test_recipe.py`) and `md_runners.py` — PLAN.md 3.9 step 4
 
 ## Key files
 ```

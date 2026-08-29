@@ -40,6 +40,13 @@ matching gromosXX to reference tolerances.
   `mdout.mdp`). The absent-MULTIBATH hazard is fixed at the parser defaults: `water_216_nve_nobath`
   is a regular passing reference (38/40, 2 ignored).
 
+- **PLAN.md 3.9 steps 2–4 ✓ (2026-08-29): the recipe is the only entry point.** `md.rs` reads the
+  `.imd` through `gromos_run::read_imd`, builds a `RunRecipe` (`GAMD`/`EDS` allowed through as
+  passthrough blocks, applied out-of-band), and runs `prepare_system → build_plan → validate_plan →
+  instantiate → start` — the same calls `py-gromos`'s `Simulation` makes. `md @dump` prints recipe
+  + plan; `<tre>.recipe.toml` is written next to the energies. `just lint` (G6) fails on any second
+  builder or reader.
+
 ## Key files
 ```
 src/bin/md.rs                               — main MD driver, CLI, simulation setup

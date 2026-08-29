@@ -51,13 +51,11 @@ Python-callable API for running simulations and analysing trajectories.
 - Remaining P3 items:
   - [ ] Expose ForceField evaluation (single-point energy/force)
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
-  - [ ] PLAN.md 3.7 — ML potential binding (`PySchNetPotential`, `Simulation.add_ml_potential`,
-    selection-string zones). Blocked on `gromos-forces` P2.8-6 (no orchestrator-aware step path
-    exists to bind yet) and on `--features ml` needing `libtorch` (not available here).
-- Deferred (tech debt, not scheduled — full audit in `~/.claude/plans/golden-baking-liskov.md`):
-  unify the two imd→sequence builders (`build_simulation` vs `resolve_algorithm_sequence`),
-  consolidate scattered defaults, constraints-as-`System`-attribute, symmetric `InputParameters`
-  construction (kwargs ctor + setters + `write_imd_file`/`.save()`).
+  - [x] PLAN.md 3.7 — ML potential binding: `PySchNetPotential` (`--features ml`, libtorch via the
+    venv's torch — INSTALL.md §5); the ML term is `Term("schnet", ...)` on the recipe since 3.9 step 3.
+- The July 2026 "two builders / scattered defaults" audit is done by PLAN.md 3.9 (steps 0–4): one
+  builder in `gromos-run`, defaults derived from `ImdParameters::default()`, the recipe as the one
+  entry point.
 
 - **Composition audit + target model (2026-08-29): PLAN.md 3.8/3.9.** Three IMD→sequence builders
   existed (`md.rs`, `build_simulation`, `resolve_algorithm_sequence`), the descriptor enum is closed,
@@ -91,6 +89,15 @@ Python-callable API for running simulations and analysing trajectories.
   `recipe.plan(system)` rather than `AlgorithmSequence.from_recipe`; provenance (model checksum)
   and the per-term energy slot (G10) are not done. The descriptor path
   (`algorithm_sequence.rs`) is now dead weight — step 4 deletes it.
+- **PLAN.md 3.9 step 4 ✓ (2026-08-29).** The descriptor path is gone: `algorithm_sequence.rs`
+  (1473 → ~100 lines) keeps only the deprecated `AlgorithmSequence.nve/nvt/npt/minimize/
+  from_parameters` names, each returning the `Plan` of the parameters (`gromos_run::build_plan` on
+  the topology); `Simulation.from_sequence` takes that `Plan`. `Simulation.recipe`/`.plan` are
+  always present. `Vec3`/`Frame`/`rmsd`/`rdf` are f64 (`gromos_core::math::Vec3`). Recipe- and
+  atom-count errors are `gromos.exceptions.RecipeError`. The IMD is read through
+  `gromos_run::read_imd` only. **The recipe is the only entry point**: `simulation.rs` has one
+  constructor path (`build_from_recipe`), and `just lint` (G6) fails on any `AlgorithmSequence::new()`
+  / `.push(Box::new(` / `read_imd_file(` outside `gromos-run`.
 
 ## Crate-specific rules
 - **Thin wrapper only.** Zero physics, zero data structures that duplicate the Rust core.

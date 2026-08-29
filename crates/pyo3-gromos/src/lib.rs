@@ -16,7 +16,7 @@
 //! gromos-* crates (pure Rust)
 //! ```
 
-use glam::Vec3A as Vec3;
+use gromos_core::math::Vec3;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
 
@@ -47,32 +47,32 @@ pub struct PyVec3 {
 #[pymethods]
 impl PyVec3 {
     #[new]
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub fn new(x: f64, y: f64, z: f64) -> Self {
         Self {
             inner: Vec3::new(x, y, z),
         }
     }
 
     #[getter]
-    pub fn x(&self) -> f32 {
+    pub fn x(&self) -> f64 {
         self.inner.x
     }
 
     #[getter]
-    pub fn y(&self) -> f32 {
+    pub fn y(&self) -> f64 {
         self.inner.y
     }
 
     #[getter]
-    pub fn z(&self) -> f32 {
+    pub fn z(&self) -> f64 {
         self.inner.z
     }
 
-    pub fn length(&self) -> f32 {
+    pub fn length(&self) -> f64 {
         self.inner.length()
     }
 
-    pub fn dot(&self, other: &PyVec3) -> f32 {
+    pub fn dot(&self, other: &PyVec3) -> f64 {
         self.inner.dot(other.inner)
     }
 
@@ -104,7 +104,7 @@ impl PyVec3 {
         }
     }
 
-    pub fn __mul__(&self, scalar: f32) -> PyVec3 {
+    pub fn __mul__(&self, scalar: f64) -> PyVec3 {
         PyVec3 {
             inner: self.inner * scalar,
         }
@@ -236,9 +236,9 @@ impl PyFrame {
     }
 
     /// Get positions as numpy array (N x 3)
-    pub fn positions_array<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    pub fn positions_array<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         let _n_atoms = self.positions.len();
-        let data: Vec<f32> = self
+        let data: Vec<f64> = self
             .positions
             .iter()
             .flat_map(|v| [v.x, v.y, v.z])
@@ -263,8 +263,8 @@ impl PyFrame {
 /// Calculate RMSD between two sets of positions
 #[pyfunction]
 pub fn rmsd<'py>(
-    positions: PyReadonlyArray2<'py, f32>,
-    reference: PyReadonlyArray2<'py, f32>,
+    positions: PyReadonlyArray2<'py, f64>,
+    reference: PyReadonlyArray2<'py, f64>,
 ) -> PyResult<f64> {
     let pos = positions.as_array();
     let ref_arr = reference.as_array();
@@ -279,9 +279,9 @@ pub fn rmsd<'py>(
     let mut sum_sq = 0.0f64;
 
     for i in 0..n_atoms {
-        let dx = (pos[[i, 0]] - ref_arr[[i, 0]]) as f64;
-        let dy = (pos[[i, 1]] - ref_arr[[i, 1]]) as f64;
-        let dz = (pos[[i, 2]] - ref_arr[[i, 2]]) as f64;
+        let dx = pos[[i, 0]] - ref_arr[[i, 0]];
+        let dy = pos[[i, 1]] - ref_arr[[i, 1]];
+        let dz = pos[[i, 2]] - ref_arr[[i, 2]];
         sum_sq += dx * dx + dy * dy + dz * dz;
     }
 
@@ -292,7 +292,7 @@ pub fn rmsd<'py>(
 #[pyfunction]
 pub fn rdf<'py>(
     py: Python<'py>,
-    positions: PyReadonlyArray2<'py, f32>,
+    positions: PyReadonlyArray2<'py, f64>,
     group1: Vec<usize>,
     group2: Vec<usize>,
     n_bins: usize,
@@ -307,9 +307,9 @@ pub fn rdf<'py>(
     for &i in &group1 {
         for &j in &group2 {
             if i != j {
-                let dx = (pos[[i, 0]] - pos[[j, 0]]) as f64;
-                let dy = (pos[[i, 1]] - pos[[j, 1]]) as f64;
-                let dz = (pos[[i, 2]] - pos[[j, 2]]) as f64;
+                let dx = pos[[i, 0]] - pos[[j, 0]];
+                let dy = pos[[i, 1]] - pos[[j, 1]];
+                let dz = pos[[i, 2]] - pos[[j, 2]];
                 let r = (dx * dx + dy * dy + dz * dz).sqrt();
 
                 let bin = (r / dr) as usize;

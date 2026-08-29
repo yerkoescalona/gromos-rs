@@ -2,7 +2,9 @@
 
 use pyo3::prelude::*;
 
-use gromos_io::imd::{read_imd_file, ImdParameters};
+use gromos_io::imd::ImdParameters;
+
+use super::recipe::{run_err, RecipeError};
 
 /// Simulation parameters loaded from a GROMOS input file (.imd/.in).
 ///
@@ -76,8 +78,7 @@ impl PyInputParameters {
             "InputParameters.nve(...)",
             "Recipe.nve(dt, steps, constraints)",
         )?;
-        let inner = ImdParameters::nve(dt, steps, constraints)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+        let inner = ImdParameters::nve(dt, steps, constraints).map_err(RecipeError::new_err)?;
         Ok(Self { inner })
     }
 
@@ -99,7 +100,7 @@ impl PyInputParameters {
             "Recipe.nvt(dt, steps, temperature, constraints)",
         )?;
         let inner = ImdParameters::nvt(dt, steps, temperature, constraints)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+            .map_err(RecipeError::new_err)?;
         Ok(Self { inner })
     }
 
@@ -122,7 +123,7 @@ impl PyInputParameters {
             "Recipe.npt(dt, steps, temperature, pressure, constraints)",
         )?;
         let inner = ImdParameters::npt(dt, steps, temperature, pressure, constraints)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+            .map_err(RecipeError::new_err)?;
         Ok(Self { inner })
     }
 
@@ -237,12 +238,7 @@ impl PyInputParameters {
 
 impl PyInputParameters {
     fn read(input_file: &str) -> PyResult<Self> {
-        let imd = read_imd_file(input_file).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                "Failed to read input file '{}': {}",
-                input_file, e
-            ))
-        })?;
+        let imd = gromos_run::read_imd(input_file).map_err(run_err)?;
         Ok(Self { inner: imd })
     }
 }

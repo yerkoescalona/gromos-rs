@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.31] (2026-08-29)
+
+### Removed (PLAN.md 3.9 step 4 — delete the copies)
+
+- The Python **descriptor path**: `resolve_algorithm_sequence` (the second IMD→sequence builder),
+  `AlgorithmDescriptor`, and the twelve building-block classes (`Forcefield`, `LeapFrogIntegrator`,
+  `LeapFrogVelocity`, `LeapFrogPosition`, `BerendsenThermostat`, `BerendsenBarostat`,
+  `ShakeConstraints`, `SteepestDescent`, `TemperatureCalculation`, `PressureCalculation`,
+  `EnergyCalculation`, `RemoveCOMMotion`). The MD step is `gromos.Plan` from `recipe.plan(system)`;
+  `crates/pyo3-gromos/src/algorithm_sequence.rs` went from 1473 to ~100 lines and builds nothing.
+- `gromos.md_runners` (subprocess wrappers around the `md` binary) — `Simulation` is the way to run
+  MD from Python. `gromos.analysis` is no longer in the default namespace (`import gromos.analysis`
+  still works). The placeholder suites `test_basic.py` / `test_advanced_features.py` (eleven skipped
+  classes for a past API) — `test_recipe.py` covers the surface they described.
+- `py-gromos`'s `glam` dependency.
+
+### Changed
+
+- `AlgorithmSequence.nve/nvt/npt/minimize/from_parameters(topo, params)` (deprecated) now return the
+  `Plan` of `params` — the ensemble comes from the parameters, not from the preset name — and
+  `Simulation.from_sequence(topo, conf, params, plan)` takes that `Plan`; `AlgorithmSequence` itself
+  cannot be instantiated. `Simulation.recipe` / `.plan` / `.recipe_toml` / `.plan_json` are always
+  present (no `None` case left).
+- `Vec3`, `Frame`, `rmsd`, `rdf` are f64 (`gromos_core::math::Vec3`), not f32.
+- Atom-count and factory-argument errors are `gromos.exceptions.RecipeError` (still a `ValueError`).
+- One IMD reader: `gromos_run::read_imd` — the `md` binary, `Recipe.from_imd`, the deprecated
+  `InputParameters` and the bundle loader all open parameter files through it.
+- `just lint` runs the G6 drift gates after clippy: `AlgorithmSequence::new()` outside `gromos-run`,
+  `.push(Box::new(` in the binding, `read_imd_file(`/`parse_imd_str(` outside `gromos-run`/
+  `gromos-io`, `process::exit` in `gromos-run` — each grep must print nothing.
+- `test_front_end_parity.py`: path C and its `xfail` table are gone; the deprecated
+  `AlgorithmSequence`/`from_sequence` names are checked as a translation (`array_equal` against the
+  `Recipe` path) instead.
+
 ## [0.0.30] (2026-08-29)
 
 ### Added
