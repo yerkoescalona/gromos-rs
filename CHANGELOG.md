@@ -16,6 +16,10 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   now parses both layouts, the reference test compares the total and the LJ / CRF / bonded parts
   per frame (aligned by time), and the writer emits the native layout with the run's bath and
   energy-group counts (per-group derivatives as zeros).
+- Perturbed bonded energies (bonds, angles, impropers, dihedrals, and their soft variants) are
+  booked in their own `.tre` columns instead of all in `bond_total` — totals were right, columns
+  were not (`ForceEnergyLambda` carries the split). In the `aladip_vacuum_fep` bisection the
+  angle-, improper- and dihedral-only cases are now exact against gromosXX.
 - The perturbed nonbonded derivative is split into its LJ and CRF parts
   (`PertNBCorrection::dhdl_lj/dhdl_crf`, `Energy::dhdl_lj/dhdl_crf/dhdl_bonded`), so the `.trg`
   carries the same per-term derivatives gromosXX writes.

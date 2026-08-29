@@ -237,11 +237,13 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
   files ("Tried to read an integer for NUM_ENERGY_GROUPS"); `ext_ti_ana` (ours) reads both.
 - **`aladip_vacuum_fep` bisected (2026-08-29)** with single-block `.ptp` variants against the native
   gromosXX (scratch, not committed): unperturbed run exact; `PERTBONDSTRETCH` exact; perturbed angle /
-  improper / proper-dihedral **energies are booked into the bond slot** (angle case: angle −0.715, bond
-  +0.715 — totals right, `.tre` columns wrong); soft bond/angle/improper energies differ slightly (real
-  formula differences); `PERTATOMPARAM` (charged, λ-mixed masses) differs in LJ, CRF *and* kinetic
-  (mass mixing convention); `PERTATOMPAIR` differs in LJ. Fix order: energy slots → charged perturbed
-  RF (also closes `meoh_water_fep`) → atom pairs → soft bonded → masses.
+  improper / proper-dihedral energies were booked into the bond slot — **fixed the same day**
+  (`ForceEnergyLambda` per-term slots; the `angles`/`impropers`/`dihedrals` cases are now exact).
+  Still open: soft bond/angle/improper energies differ slightly (real formula differences — bond
+  19.35589 vs 19.35461, angle 12.63284 vs 12.37053, improper 1.46587 vs 1.32966); `PERTATOMPARAM`
+  (charged, λ-mixed masses) differs in LJ, CRF *and* kinetic (mass-mixing convention); `PERTATOMPAIR`
+  differs in LJ. Fix order: charged perturbed RF (also closes `meoh_water_fep`) → atom pairs → soft
+  bonded → masses.
 
 **1.8 — Virtual atoms** — skip for now; not blocking any common use case
 - [ ] Port `algorithm/virtualatoms/` (aromatic centroids, lone pairs, TIP4P site)

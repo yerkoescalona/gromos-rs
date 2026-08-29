@@ -586,60 +586,40 @@ pub fn calculate_perturbed_bonded_forces(
     let mut result = ForceEnergyLambda::new(n);
 
     if !topo.perturbed_solute.bonds.is_empty() {
-        result.add(&calculate_perturbed_bond_forces(
-            topo,
-            conf,
-            lambda,
-            lambda_derivative,
-        ));
+        let term = calculate_perturbed_bond_forces(topo, conf, lambda, lambda_derivative);
+        result.bond_energy += term.energy;
+        result.add(&term);
     }
     if !topo.perturbed_solute.angles.is_empty() {
-        result.add(&calculate_perturbed_angle_forces(
-            topo,
-            conf,
-            lambda,
-            lambda_derivative,
-        ));
+        let term = calculate_perturbed_angle_forces(topo, conf, lambda, lambda_derivative);
+        result.angle_energy += term.energy;
+        result.add(&term);
     }
     if !topo.perturbed_solute.improper_dihedrals.is_empty() {
-        result.add(&calculate_perturbed_improper_dihedral_forces(
-            topo,
-            conf,
-            lambda,
-            lambda_derivative,
-        ));
+        let term =
+            calculate_perturbed_improper_dihedral_forces(topo, conf, lambda, lambda_derivative);
+        result.improper_energy += term.energy;
+        result.add(&term);
     }
     if !topo.perturbed_solute.proper_dihedrals.is_empty() {
-        result.add(&calculate_perturbed_dihedral_forces(
-            topo,
-            conf,
-            lambda,
-            lambda_derivative,
-        ));
+        let term = calculate_perturbed_dihedral_forces(topo, conf, lambda, lambda_derivative);
+        result.dihedral_energy += term.energy;
+        result.add(&term);
     }
     if !topo.perturbed_solute.soft_bonds.is_empty() {
-        result.add(&calculate_soft_bond_forces(
-            topo,
-            conf,
-            lambda,
-            lambda_derivative,
-        ));
+        let term = calculate_soft_bond_forces(topo, conf, lambda, lambda_derivative);
+        result.bond_energy += term.energy;
+        result.add(&term);
     }
     if !topo.perturbed_solute.soft_angles.is_empty() {
-        result.add(&calculate_soft_angle_forces(
-            topo,
-            conf,
-            lambda,
-            lambda_derivative,
-        ));
+        let term = calculate_soft_angle_forces(topo, conf, lambda, lambda_derivative);
+        result.angle_energy += term.energy;
+        result.add(&term);
     }
     if !topo.perturbed_solute.soft_impropers.is_empty() {
-        result.add(&calculate_soft_improper_forces(
-            topo,
-            conf,
-            lambda,
-            lambda_derivative,
-        ));
+        let term = calculate_soft_improper_forces(topo, conf, lambda, lambda_derivative);
+        result.improper_energy += term.energy;
+        result.add(&term);
     }
 
     result

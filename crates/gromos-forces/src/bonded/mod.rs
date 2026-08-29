@@ -50,6 +50,13 @@ pub struct ForceEnergyLambda {
     pub energy: f64,
     pub forces: Vec<Vec3>,
     pub lambda_derivative: f64,
+    /// `energy` split by term kind, so the perturbed contributions land in the same `.tre`
+    /// columns as their unperturbed counterparts (bond/angle/improper/dihedral) — gromosXX
+    /// books them there; soft bonds/angles/impropers count as their kind.
+    pub bond_energy: f64,
+    pub angle_energy: f64,
+    pub improper_energy: f64,
+    pub dihedral_energy: f64,
 }
 
 impl ForceEnergy {
@@ -88,12 +95,20 @@ impl ForceEnergyLambda {
             energy: 0.0,
             forces: vec![Vec3::ZERO; num_atoms],
             lambda_derivative: 0.0,
+            bond_energy: 0.0,
+            angle_energy: 0.0,
+            improper_energy: 0.0,
+            dihedral_energy: 0.0,
         }
     }
 
     pub fn add(&mut self, other: &ForceEnergyLambda) {
         self.energy += other.energy;
         self.lambda_derivative += other.lambda_derivative;
+        self.bond_energy += other.bond_energy;
+        self.angle_energy += other.angle_energy;
+        self.improper_energy += other.improper_energy;
+        self.dihedral_energy += other.dihedral_energy;
         for i in 0..self.forces.len().min(other.forces.len()) {
             self.forces[i] += other.forces[i];
         }
