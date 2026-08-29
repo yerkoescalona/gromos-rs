@@ -70,8 +70,13 @@ Python-callable API for running simulations and analysing trajectories.
   and maps `RunError` onto the builtin exceptions the binding always raised (`run_err`). Python now
   honours the topology's `four_pi_eps_i`, takes NSM from the coordinate file, and uses the binary's
   parallel-kernel policy. FEP: `Topology.apply_perturbation(path)` (no `Simulation` kwarg).
-  `resolve_algorithm_sequence` (the descriptor path) survives until steps 2–4 with the same
+  `resolve_algorithm_sequence` (the descriptor path) survives until steps 3–4 with the same
   parallel policy/`four_pi_eps_i` so `test_front_end_parity.py` stays exact.
+- **PLAN.md 3.9 step 2 ✓ (2026-08-29).** `build_simulation` goes through the recipe path
+  (`gromos_run::build_sequence_from_imd`, strict passthrough policy: no unmodelled block reaches
+  Python silently); `Simulation.recipe_toml`, `.plan_json`, `.diagnostics` expose the effective
+  recipe, the resolved plan and the parser notes (`None`/empty on the descriptor path). Step 3 turns
+  the recipe into `gromos.Recipe`/`Term`/`Algorithm` and retires `InputParameters` + the kwargs.
 
 ## Crate-specific rules
 - **Thin wrapper only.** Zero physics, zero data structures that duplicate the Rust core.

@@ -540,15 +540,10 @@ ref_test!(water_1000_spc_gridcell, "water_1000_spc_gridcell");
 
 // ── Level 3: bulk water ──────────────────────────────────────────────────────
 ref_test!(water_216_box, "water_216_box");
-// Same system with the MULTIBATH block *absent*: gromosXX then runs no temperature coupling,
-// but `read_imd_file` keeps `TempBathParameters::default()` (Berendsen, 300 K, tau 0.1) and
-// the engine silently thermostats. Expected to fail until PLAN.md 3.9 step 2 makes the IMD
-// parser presence-aware (assumption A18); the reference itself is correct.
-ref_test!(
-    ignore: water_216_nve_nobath,
-    "water_216_nve_nobath",
-    "absent MULTIBATH silently enables a Berendsen bath — PLAN.md 3.9 A18, fixed by step 2"
-);
+// Same system with the MULTIBATH block *absent*: gromosXX runs no temperature coupling. Until
+// PLAN.md 3.9 step 2 the parser turned the absent block into a Berendsen bath (A18); the
+// defaults now mean "absent", and this guards that they keep meaning it.
+ref_test!(water_216_nve_nobath, "water_216_nve_nobath");
 ref_test!(water_216_box_com, "water_216_box_com");
 ref_test!(water_216_box_com_rot, "water_216_box_com_rot");
 

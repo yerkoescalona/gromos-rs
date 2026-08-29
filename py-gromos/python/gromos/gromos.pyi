@@ -217,6 +217,21 @@ class Simulation:
     @property
     def algorithm_names(self) -> list[str]: ...
     @property
+    def recipe_toml(self) -> str | None:
+        """Effective run recipe (TOML) — what the engine actually used; None for a
+        Simulation built from a hand-made AlgorithmSequence."""
+        ...
+    @property
+    def plan_json(self) -> str | None:
+        """The algorithm plan (JSON, one fully-resolved entry per algorithm); None for a
+        Simulation built from a hand-made AlgorithmSequence."""
+        ...
+    @property
+    def diagnostics(self) -> list[str]:
+        """Which optional parameter blocks were absent (and what that means) and which
+        blocks passed through; empty when nothing was defaulted."""
+        ...
+    @property
     def positions(self) -> npt.NDArray[np.float64]: ...
     @property
     def velocities(self) -> npt.NDArray[np.float64]: ...

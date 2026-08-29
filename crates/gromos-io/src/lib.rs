@@ -19,6 +19,7 @@ pub mod free_energy;
 pub mod g96;
 pub mod ifp;
 pub mod imd;
+pub mod imd_write;
 pub mod input;
 pub mod jobs;
 pub mod mk_script;
@@ -42,7 +43,10 @@ pub use energy_binary::{BinaryEnergyReader, BinaryEnergyWriter};
 pub use force::ForceWriter;
 pub use free_energy::{read_free_energy_trajectory, FreeEnergyFrame, FreeEnergyWriter};
 pub use g96::{write_por, write_rpr};
-pub use imd::{ImdParameters, PressureParameters, TempBathParameters};
+pub use imd::{
+    parse_imd_str, ImdParameters, NonbondedExtra, PressureParameters, TempBathParameters,
+};
+pub use imd_write::{write_imd, write_imd_file};
 pub use input::{EdsBlock, GamdBlock, ReplicaBlock};
 pub use output::{EdsStatsWriter, EdsVrWriter, GamdBoostWriter, GamdStatsWriter};
 pub use pdb::write_pdb_positions;

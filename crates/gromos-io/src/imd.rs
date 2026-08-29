@@ -40,7 +40,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 /// GROMOS simulation parameters from .imd file
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImdParameters {
     /// Simulation title
     pub title: String,
@@ -124,8 +124,8 @@ pub struct ImdParameters {
     // WRITETRAJ block
     pub ntwx: usize,        // Trajectory write frequency
     pub ntwe: usize,        // Energy write frequency
-    pub ntwv: bool,         // Write velocities
-    pub ntwf: bool,         // Write forces
+    pub ntwv: usize,        // Velocity-trajectory write frequency (0 = off)
+    pub ntwf: usize,        // Force-trajectory write frequency (0 = off)
     pub ntwe_special: bool, // Special energy format
 
     // PRINTOUT block
@@ -191,12 +191,79 @@ pub struct ImdParameters {
     /// Maximum force magnitude limit (0=unlimited)
     pub flim: f64,
 
+    // Fields earlier parser versions dropped — kept so a read → write round trip is lossless
+    // (the engine ignores most of them; gromosXX does not, and the writer must reproduce them).
+    /// INITIALISE line 2: NTIRTC (read COM rotation/translation from the configuration)
+    pub ntirtc: i32,
+    /// INITIALISE line 3: NTISTI (stochastic-dynamics integrals)
+    pub ntisti: i32,
+    /// WRITETRAJ: NTWSE (selection trajectory), NTWG (free-energy), NTWB (block averages)
+    pub ntwse: usize,
+    pub ntwg: usize,
+    pub ntwb: usize,
+    /// PRINTOUT: NTPP (dihedral-angle transition printing)
+    pub ntpp: usize,
+    /// ENERGYMIN: NCYC (conjugate-gradient reset cycles)
+    pub ncyc: usize,
+    /// CONSTRAINT: NTCS0 when the solvent algorithm is SHAKE (its tolerance)
+    pub ntcs0: f64,
+    /// NONBONDED lines 3–7: lattice-sum settings (reaction-field runs ignore them)
+    pub nonbonded_extra: NonbondedExtra,
+
     /// Raw blocks for custom parsing
     pub raw_blocks: HashMap<String, Vec<String>>,
 }
 
+/// NONBONDED block, lines 3–7 (NSHAPE … SLVDNS). Only relevant for lattice-sum
+/// electrostatics; carried so the block round-trips.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NonbondedExtra {
+    pub nshape: i32,
+    pub ashape: f64,
+    pub na2clc: i32,
+    pub tola2: f64,
+    pub epsls: f64,
+    /// NK2 (the NKX/NKY/NKZ grid lives in `grid_x`/`grid_y`/`grid_z`)
+    pub nk2: f64,
+    pub ng: [usize; 3],
+    pub nasord: i32,
+    pub nfdord: i32,
+    pub nalias: i32,
+    pub nspord: i32,
+    pub nqeval: i32,
+    pub faccur: f64,
+    pub nrdgrd: i32,
+    pub nwrgdr: i32,
+    pub nlrlj: i32,
+    pub slvdns: f64,
+}
+
+impl Default for NonbondedExtra {
+    fn default() -> Self {
+        Self {
+            nshape: -1,
+            ashape: 1.4,
+            na2clc: 2,
+            tola2: 1e-10,
+            epsls: 0.0,
+            nk2: 100.0,
+            ng: [32, 32, 32],
+            nasord: 3,
+            nfdord: 2,
+            nalias: 3,
+            nspord: 4,
+            nqeval: 100000,
+            faccur: 1.6,
+            nrdgrd: 0,
+            nwrgdr: 0,
+            nlrlj: 0,
+            slvdns: 33.3,
+        }
+    }
+}
+
 /// Temperature bath parameters (MULTIBATH block)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TempBathParameters {
     pub algorithm: i32, // Coupling algorithm: 0=Berendsen, 1=NHC single, N>=2=NHC chain length N
     pub nhc_chain: usize, // NHC chain length (only used when algorithm >= 2)
@@ -204,16 +271,22 @@ pub struct TempBathParameters {
     pub temp0: Vec<f64>, // Reference temperatures (K)
     pub tau: Vec<f64>,   // Coupling times (ps)
     pub dof: Vec<usize>, // Degrees of freedom per group
+    /// DOFSET lines: [LAST, COM-BATH, IR-BATH] per set (empty = synthesise one covering all atoms)
+    pub dof_sets: Vec<[usize; 3]>,
 }
 
 /// Pressure bath parameters (PRESSURESCALE block)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PressureParameters {
-    pub algorithm: i32, // Coupling algorithm (1=Berendsen, 2=Parrinello-Rahman)
+    /// COUPLE: 0=off, 1=calc (virial only), 2=scale (couple)
+    pub couple: i32,
+    pub algorithm: i32, // SCALE mode (0=off, 1=iso, 2=aniso, 3=full, 4=semianiso)
+    /// SEMI: semi-anisotropic coupling flags per axis
+    pub semi: [i32; 3],
     pub pressure0: [[f64; 3]; 3], // Reference pressure tensor (GPa/bar)
     pub compressibility: [[f64; 3]; 3], // Isothermal compressibility
-    pub tau_p: f64,     // Coupling time (ps)
-    pub virial: i32,    // Virial calculation method
+    pub tau_p: f64,               // Coupling time (ps)
+    pub virial: i32,              // Virial calculation method
 }
 
 impl Default for ImdParameters {
@@ -227,8 +300,9 @@ impl Default for ImdParameters {
             dt: 0.002,
             ntb: 1,
             ndfmin: 0,
-            num_temp_baths: 1,
-            temp_bath: vec![TempBathParameters::default()],
+            // No MULTIBATH block = no temperature coupling (gromosXX adds an uncoupled bath).
+            num_temp_baths: 0,
+            temp_bath: Vec::new(),
             couple_pressure: false,
             pressure_parameters: None,
             force_groups: Vec::new(),
@@ -252,7 +326,8 @@ impl Default for ImdParameters {
             ntf: [1, 1, 1, 1, 1, 1], // All force terms on by default
             negr: 1,
             nre: Vec::new(),
-            nscm: 100000,
+            // No COMTRANSROT block = no COM-motion removal (gromosXX parameter.h: skip_step 0).
+            nscm: 0,
             grid_x: 64,
             grid_y: 64,
             grid_z: 64,
@@ -268,8 +343,8 @@ impl Default for ImdParameters {
             tempi: 300.0,
             ntwx: 100,
             ntwe: 100,
-            ntwv: false,
-            ntwf: false,
+            ntwv: 0,
+            ntwf: 0,
             ntwe_special: false,
             ntpr: 100,
             ntpor: 0,
@@ -298,6 +373,15 @@ impl Default for ImdParameters {
             dx0: 0.01,
             dxm: 0.05,
             flim: 0.0,
+            ntirtc: 0,
+            ntisti: 0,
+            ntwse: 0,
+            ntwg: 0,
+            ntwb: 0,
+            ntpp: 0,
+            ncyc: 0,
+            ntcs0: 1e-4,
+            nonbonded_extra: NonbondedExtra::default(),
             raw_blocks: HashMap::new(),
         }
     }
@@ -312,6 +396,7 @@ impl Default for TempBathParameters {
             temp0: vec![300.0],
             tau: vec![0.1],
             dof: vec![0],
+            dof_sets: Vec::new(),
         }
     }
 }
@@ -324,8 +409,17 @@ impl Default for TempBathParameters {
 pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> {
     let file = File::open(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
+    parse_imd(BufReader::new(file))
+}
 
+/// Parse `.imd` text held in memory (same grammar as [`read_imd_file`]).
+pub fn parse_imd_str(text: &str) -> Result<ImdParameters, IoError> {
+    parse_imd(text.as_bytes())
+}
+
+/// Parse an `.imd` stream. A block whose numbers do not parse is an error naming the block
+/// and the offending token — never a silent zero.
+pub fn parse_imd<R: BufRead>(reader: R) -> Result<ImdParameters, IoError> {
     let mut params = ImdParameters::default();
     let mut current_block = String::new();
     let mut block_lines: Vec<String> = Vec::new();
@@ -347,7 +441,12 @@ pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> 
                     .filter(|l| !l.starts_with('#'))
                     .cloned()
                     .collect();
-                parse_block(&mut params, &current_block, &data_lines)?;
+                parse_block(&mut params, &current_block, &data_lines).map_err(|e| match e {
+                    IoError::ParseError(m) => {
+                        IoError::ParseError(format!("block {current_block}: {m}"))
+                    },
+                    other => other,
+                })?;
                 params
                     .raw_blocks
                     .insert(current_block.clone(), block_lines.clone());
@@ -378,17 +477,18 @@ fn parse_block(
 ) -> Result<(), IoError> {
     match block_name {
         "TITLE" => {
-            params.title = data_lines.join(" ");
+            // Keep the lines: the title is echoed verbatim into every output file.
+            params.title = data_lines.join("\n");
         },
         "SYSTEM" => {
             // Line 0: NPM NSM
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.npm = parse_usize(&v[0]);
+                    params.npm = parse_usize(&v[0])?;
                 }
                 if v.len() >= 2 {
-                    params.nsm = parse_usize(&v[1]);
+                    params.nsm = parse_usize(&v[1])?;
                 }
             }
         },
@@ -397,13 +497,13 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.nstlim = parse_usize(&v[0]);
+                    params.nstlim = parse_usize(&v[0])?;
                 }
                 if v.len() >= 2 {
-                    params.t0 = parse_f64(&v[1]);
+                    params.t0 = parse_f64(&v[1])?;
                 }
                 if v.len() >= 3 {
-                    params.dt = parse_f64(&v[2]);
+                    params.dt = parse_f64(&v[2])?;
                 }
             }
         },
@@ -412,10 +512,10 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.ntb = parse_i32(&v[0]);
+                    params.ntb = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
-                    params.ndfmin = parse_i32(&v[1]);
+                    params.ndfmin = parse_i32(&v[1])?;
                 }
             }
         },
@@ -450,13 +550,17 @@ fn parse_block(
                         },
                         "nose-hoover-chains" => {
                             // The chain length N follows on the same line, e.g. "nose-hoover-chains  3"
-                            let n = if v0.len() > 1 { parse_usize(&v0[1]) } else { 3 };
+                            let n = if v0.len() > 1 {
+                                parse_usize(&v0[1])?
+                            } else {
+                                3
+                            };
                             let n = n.max(2); // chain length must be >= 2
                             bath.algorithm = n as i32;
                             bath.nhc_chain = n;
                         },
                         _ => {
-                            bath.algorithm = parse_i32(first);
+                            bath.algorithm = parse_i32(first)?;
                         },
                     }
                 }
@@ -467,7 +571,7 @@ fn parse_block(
             if line_idx < data_lines.len() {
                 let v = parse_values(&data_lines[line_idx]);
                 if let Some(nb) = v.first() {
-                    bath.num_bath_groups = parse_usize(nb);
+                    bath.num_bath_groups = parse_usize(nb)?;
                 }
                 line_idx += 1;
             }
@@ -480,22 +584,36 @@ fn parse_block(
                 // Format: temp0_1 tau_1 [temp0_2 tau_2 ...]
                 let mut i = 0;
                 while i + 1 < v.len() {
-                    bath.temp0.push(parse_f64(&v[i]));
-                    bath.tau.push(parse_f64(&v[i + 1]));
+                    bath.temp0.push(parse_f64(&v[i])?);
+                    bath.tau.push(parse_f64(&v[i + 1])?);
                     i += 2;
                 }
                 line_idx += 1;
             }
 
-            // Line 3: DOFSET (number of DOF groups)
+            // Line 3: DOFSET (number of DOF sets), lines 4+: LAST COM-BATH IR-BATH per set.
             if line_idx < data_lines.len() {
-                // Just skip, we don't use it directly
+                let n_sets = parse_values(&data_lines[line_idx])
+                    .first()
+                    .map(|s| parse_usize(s))
+                    .transpose()?
+                    .unwrap_or(0);
                 line_idx += 1;
+                for _ in 0..n_sets {
+                    if line_idx >= data_lines.len() {
+                        break;
+                    }
+                    let v = parse_values(&data_lines[line_idx]);
+                    if v.len() >= 3 {
+                        bath.dof_sets.push([
+                            parse_usize(&v[0])?,
+                            parse_usize(&v[1])?,
+                            parse_usize(&v[2])?,
+                        ]);
+                    }
+                    line_idx += 1;
+                }
             }
-
-            // Lines 4+: LAST COM-BATH IR-BATH
-            // (skip, used internally by GROMOS)
-            let _ = line_idx;
 
             params.temp_bath = vec![bath];
         },
@@ -517,7 +635,7 @@ fn parse_block(
                         "off" => 0,
                         "calc" => 1,
                         "scale" => 2,
-                        other => parse_i32(other),
+                        other => parse_i32(other)?,
                     };
                     params.couple_pressure = couple > 0;
                     if couple > 0 {
@@ -529,42 +647,49 @@ fn parse_block(
                                 "aniso" | "anisotropic" => 2,
                                 "full" | "full_anisotropic" => 3,
                                 "semianiso" | "semi_anisotropic" => 4,
-                                other => parse_i32(other),
+                                other => parse_i32(other)?,
                             }
                         } else {
                             0
                         };
                         // Parse COMP (compressibility)
                         let comp = if v.len() >= 3 {
-                            parse_f64(&v[2])
+                            parse_f64(&v[2])?
                         } else {
                             4.575e-4
                         };
                         // Parse TAUP
-                        let tau_p = if v.len() >= 4 { parse_f64(&v[3]) } else { 0.5 };
+                        let tau_p = if v.len() >= 4 { parse_f64(&v[3])? } else { 0.5 };
                         // Parse VIRIAL keyword
                         let virial = if v.len() >= 5 {
                             match v[4].to_lowercase().as_str() {
                                 "none" => 0,
                                 "atomic" => 1,
                                 "molecular" => 2,
-                                other => parse_i32(other),
+                                other => parse_i32(other)?,
                             }
                         } else {
                             0
                         };
 
                         let mut pp = PressureParameters {
+                            couple,
                             algorithm: scale, // store SCALE mode (iso/aniso/etc.)
+                            semi: [1, 1, 1],
                             pressure0: [[0.0; 3]; 3],
                             compressibility: [[comp; 3]; 3],
                             tau_p,
                             virial,
                         };
 
-                        // Line 1: SEMI (semianisotropic couplings), skip
+                        // Line 1: SEMI (semianisotropic coupling flags)
                         let mut dl = 1;
                         if dl < data_lines.len() {
+                            let sv = parse_values(&data_lines[dl]);
+                            if sv.len() >= 3 {
+                                pp.semi =
+                                    [parse_i32(&sv[0])?, parse_i32(&sv[1])?, parse_i32(&sv[2])?];
+                            }
                             dl += 1;
                         }
 
@@ -573,7 +698,7 @@ fn parse_block(
                             if dl < data_lines.len() {
                                 let pv = parse_values(&data_lines[dl]);
                                 for col in 0..3.min(pv.len()) {
-                                    pp.pressure0[row][col] = parse_f64(&pv[col]);
+                                    pp.pressure0[row][col] = parse_f64(&pv[col])?;
                                 }
                                 dl += 1;
                             }
@@ -595,7 +720,7 @@ fn parse_block(
             }
             let mut idx = 0;
             if idx < data_lines.len() {
-                params.ntc = parse_i32(&parse_values(&data_lines[idx])[0]);
+                params.ntc = parse_i32(&parse_values(&data_lines[idx])[0])?;
                 idx += 1;
             }
             if idx < data_lines.len() {
@@ -605,7 +730,7 @@ fn parse_block(
                     "shake" => 1,
                     "lincs" => 2,
                     "settle" => 3,
-                    _ => parse_i32(&v[0]),
+                    _ => parse_i32(&v[0])?,
                 };
                 idx += 1;
             }
@@ -613,9 +738,9 @@ fn parse_block(
                 let v = parse_values(&data_lines[idx]);
                 // NTCP0: SHAKE tolerance, or LINCS expansion order when NTCP=lincs
                 if params.ntcp == 2 {
-                    params.lincs_order_solute = parse_i32(&v[0]) as usize;
+                    params.lincs_order_solute = parse_i32(&v[0])? as usize;
                 } else {
-                    params.shake_tol = parse_f64(&v[0]);
+                    params.shake_tol = parse_f64(&v[0])?;
                 }
                 idx += 1;
             }
@@ -625,7 +750,7 @@ fn parse_block(
                     "shake" => 1,
                     "lincs" => 2,
                     "settle" => 3,
-                    _ => parse_i32(&v[0]),
+                    _ => parse_i32(&v[0])?,
                 };
                 idx += 1;
             }
@@ -634,7 +759,9 @@ fn parse_block(
                 // NTCS0: SHAKE tolerance, or LINCS expansion order when NTCS=lincs
                 // (settle reads no NTCS0 parameter — line absent from .in for NTCS=settle)
                 if params.ntcs == 2 {
-                    params.lincs_order_solvent = parse_i32(&v[0]) as usize;
+                    params.lincs_order_solvent = parse_i32(&v[0])? as usize;
+                } else {
+                    params.ntcs0 = parse_f64(&v[0])?;
                 }
             }
         },
@@ -645,14 +772,17 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 for i in 0..6.min(v.len()) {
-                    params.ntf[i] = parse_i32(&v[i]);
+                    params.ntf[i] = parse_i32(&v[i])?;
                 }
             }
             if data_lines.len() >= 2 {
                 let v = parse_values(&data_lines[1]);
                 if !v.is_empty() {
-                    params.negr = parse_usize(&v[0]);
-                    params.nre = v[1..].iter().map(|s| parse_usize(s)).collect();
+                    params.negr = parse_usize(&v[0])?;
+                    params.nre = v[1..]
+                        .iter()
+                        .map(|s| parse_usize(s))
+                        .collect::<Result<Vec<_>, _>>()?;
                 }
             }
         },
@@ -670,30 +800,30 @@ fn parse_block(
                         "standard" => 0,
                         "grid" => 1,
                         "grid_cell" => 2,
-                        _ => parse_i32(&v[0]),
+                        _ => parse_i32(&v[0])?,
                     };
                 }
                 if v.len() >= 2 {
-                    params.nsnb = parse_usize(&v[1]);
+                    params.nsnb = parse_usize(&v[1])?;
                 }
                 if v.len() >= 3 {
-                    params.rcutp = parse_f64(&v[2]);
+                    params.rcutp = parse_f64(&v[2])?;
                 }
                 if v.len() >= 4 {
-                    params.rcutl = parse_f64(&v[3]);
+                    params.rcutl = parse_f64(&v[3])?;
                 }
                 if v.len() >= 5 {
                     // SIZE can be "auto" or a number
                     params.size = match v[4].as_str() {
                         "auto" => 0.0,
-                        _ => parse_f64(&v[4]),
+                        _ => parse_f64(&v[4])?,
                     };
                 }
                 if v.len() >= 6 {
                     params.type_ = match v[5].as_str() {
                         "chargegroup" => 0,
                         "atomic" => 1,
-                        _ => parse_i32(&v[5]),
+                        _ => parse_i32(&v[5])?,
                     };
                 }
             }
@@ -707,30 +837,75 @@ fn parse_block(
             //   Line 4: NGX NGY NGZ NASORD NFDORD NALIAS NSPORD (optional)
             //   ...
             if let Some(line) = data_lines.first() {
-                params.nlrele = parse_i32(&parse_values(line)[0]);
+                params.nlrele = parse_i32(&parse_values(line)[0])?;
             }
             if data_lines.len() >= 2 {
                 let v = parse_values(&data_lines[1]);
                 if v.len() >= 1 {
-                    params.appak = parse_f64(&v[0]);
+                    params.appak = parse_f64(&v[0])?;
                 }
                 if v.len() >= 2 {
-                    params.rcrf = parse_f64(&v[1]);
+                    params.rcrf = parse_f64(&v[1])?;
                 }
                 if v.len() >= 3 {
-                    params.epsrf = parse_f64(&v[2]);
+                    params.epsrf = parse_f64(&v[2])?;
                 }
                 if v.len() >= 4 {
-                    params.nslfexcl = parse_i32(&v[3]);
+                    params.nslfexcl = parse_i32(&v[3])?;
                 }
             }
-            // Line 3+ for PME parameters
+            // Lines 3-7: lattice-sum settings, carried for the round trip.
+            let x = &mut params.nonbonded_extra;
+            if data_lines.len() >= 3 {
+                let v = parse_values(&data_lines[2]);
+                if v.len() >= 5 {
+                    x.nshape = parse_i32(&v[0])?;
+                    x.ashape = parse_f64(&v[1])?;
+                    x.na2clc = parse_i32(&v[2])?;
+                    x.tola2 = parse_f64(&v[3])?;
+                    x.epsls = parse_f64(&v[4])?;
+                }
+            }
             if data_lines.len() >= 4 {
                 let v = parse_values(&data_lines[3]);
                 if v.len() >= 3 {
-                    params.grid_x = parse_usize(&v[0]);
-                    params.grid_y = parse_usize(&v[1]);
-                    params.grid_z = parse_usize(&v[2]);
+                    params.grid_x = parse_usize(&v[0])?;
+                    params.grid_y = parse_usize(&v[1])?;
+                    params.grid_z = parse_usize(&v[2])?;
+                }
+                if v.len() >= 4 {
+                    params.nonbonded_extra.nk2 = parse_f64(&v[3])?;
+                }
+            }
+            let x = &mut params.nonbonded_extra;
+            if data_lines.len() >= 5 {
+                let v = parse_values(&data_lines[4]);
+                if v.len() >= 7 {
+                    x.ng = [
+                        parse_usize(&v[0])?,
+                        parse_usize(&v[1])?,
+                        parse_usize(&v[2])?,
+                    ];
+                    x.nasord = parse_i32(&v[3])?;
+                    x.nfdord = parse_i32(&v[4])?;
+                    x.nalias = parse_i32(&v[5])?;
+                    x.nspord = parse_i32(&v[6])?;
+                }
+            }
+            if data_lines.len() >= 6 {
+                let v = parse_values(&data_lines[5]);
+                if v.len() >= 4 {
+                    x.nqeval = parse_i32(&v[0])?;
+                    x.faccur = parse_f64(&v[1])?;
+                    x.nrdgrd = parse_i32(&v[2])?;
+                    x.nwrgdr = parse_i32(&v[3])?;
+                }
+            }
+            if data_lines.len() >= 7 {
+                let v = parse_values(&data_lines[6]);
+                if v.len() >= 2 {
+                    x.nlrlj = parse_i32(&v[0])?;
+                    x.slvdns = parse_f64(&v[1])?;
                 }
             }
         },
@@ -743,35 +918,46 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.ntivel = parse_i32(&v[0]);
+                    params.ntivel = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
-                    params.ntishk = parse_i32(&v[1]);
+                    params.ntishk = parse_i32(&v[1])?;
                 }
                 if v.len() >= 3 {
-                    params.ntinht = parse_i32(&v[2]);
+                    params.ntinht = parse_i32(&v[2])?;
                 }
                 if v.len() >= 4 {
-                    params.ntinhb = parse_i32(&v[3]);
+                    params.ntinhb = parse_i32(&v[3])?;
                 }
             }
             if data_lines.len() >= 2 {
                 let v = parse_values(&data_lines[1]);
                 if v.len() >= 1 {
-                    params.ntishi = parse_i32(&v[0]);
+                    params.ntishi = parse_i32(&v[0])?;
+                }
+                if v.len() >= 2 {
+                    params.ntirtc = parse_i32(&v[1])?;
                 }
                 if v.len() >= 3 {
-                    params.nticom = parse_i32(&v[2]);
+                    params.nticom = parse_i32(&v[2])?;
                 }
             }
-            // Line 2: NTISTI (skip)
+            // Line 2: NTISTI
+            if data_lines.len() >= 3 {
+                let v = parse_values(&data_lines[2]);
+                if let Some(first) = v.first() {
+                    params.ntisti = parse_i32(first)?;
+                }
+            }
             if data_lines.len() >= 4 {
                 let v = parse_values(&data_lines[3]);
                 if v.len() >= 1 {
-                    params.ig = v[0].parse::<i64>().unwrap_or(12345);
+                    params.ig = v[0].parse::<i64>().map_err(|_| {
+                        IoError::ParseError(format!("expected an integer seed, found {:?}", v[0]))
+                    })?;
                 }
                 if v.len() >= 2 {
-                    params.tempi = parse_f64(&v[1]);
+                    params.tempi = parse_f64(&v[1])?;
                 }
             }
         },
@@ -781,17 +967,25 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.ntwx = parse_usize(&v[0]);
+                    params.ntwx = parse_usize(&v[0])?;
                 }
-                // NTWSE at v[1] - skip
+                if v.len() >= 2 {
+                    params.ntwse = parse_usize(&v[1])?;
+                }
                 if v.len() >= 3 {
-                    params.ntwv = parse_i32(&v[2]) != 0;
+                    params.ntwv = parse_usize(&v[2])?;
                 }
                 if v.len() >= 4 {
-                    params.ntwf = parse_i32(&v[3]) != 0;
+                    params.ntwf = parse_usize(&v[3])?;
                 }
                 if v.len() >= 5 {
-                    params.ntwe = parse_usize(&v[4]);
+                    params.ntwe = parse_usize(&v[4])?;
+                }
+                if v.len() >= 6 {
+                    params.ntwg = parse_usize(&v[5])?;
+                }
+                if v.len() >= 7 {
+                    params.ntwb = parse_usize(&v[6])?;
                 }
             }
         },
@@ -801,7 +995,10 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.ntpr = parse_usize(&v[0]);
+                    params.ntpr = parse_usize(&v[0])?;
+                }
+                if v.len() >= 2 {
+                    params.ntpp = parse_usize(&v[1])?;
                 }
             }
         },
@@ -810,7 +1007,7 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.nscm = parse_i32(&v[0]);
+                    params.nscm = parse_i32(&v[0])?;
                 }
             }
         },
@@ -820,16 +1017,16 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.ntpor = parse_i32(&v[0]);
+                    params.ntpor = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
-                    params.ntporb = parse_i32(&v[1]);
+                    params.ntporb = parse_i32(&v[1])?;
                 }
                 if v.len() >= 3 {
-                    params.ntpors = parse_i32(&v[2]);
+                    params.ntpors = parse_i32(&v[2])?;
                 }
                 if v.len() >= 4 {
-                    params.cpor = parse_f64(&v[3]);
+                    params.cpor = parse_f64(&v[3])?;
                 }
             }
         },
@@ -839,28 +1036,28 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.ntdir = parse_i32(&v[0]);
+                    params.ntdir = parse_i32(&v[0])?;
                 }
                 if v.len() >= 2 {
-                    params.ntdira = parse_i32(&v[1]);
+                    params.ntdira = parse_i32(&v[1])?;
                 }
                 if v.len() >= 3 {
-                    params.cdir = parse_f64(&v[2]);
+                    params.cdir = parse_f64(&v[2])?;
                 }
                 if v.len() >= 4 {
-                    params.dir0 = parse_f64(&v[3]);
+                    params.dir0 = parse_f64(&v[3])?;
                 }
                 if v.len() >= 5 {
-                    params.taudir = parse_f64(&v[4]);
+                    params.taudir = parse_f64(&v[4])?;
                 }
                 if v.len() >= 6 {
-                    params.forcescale = parse_i32(&v[5]);
+                    params.forcescale = parse_i32(&v[5])?;
                 }
                 if v.len() >= 7 {
-                    params.vdir = parse_i32(&v[6]);
+                    params.vdir = parse_i32(&v[6])?;
                 }
                 if v.len() >= 8 {
-                    params.ntwdir = parse_i32(&v[7]);
+                    params.ntwdir = parse_i32(&v[7])?;
                 }
             }
         },
@@ -871,28 +1068,28 @@ fn parse_block(
             let combined: Vec<String> = data_lines.iter().flat_map(|l| parse_values(l)).collect();
             let v = &combined[..];
             if v.len() >= 1 {
-                params.ntg = parse_i32(&v[0]);
+                params.ntg = parse_i32(&v[0])?;
             }
             if v.len() >= 2 {
-                params.nrdgl = parse_i32(&v[1]);
+                params.nrdgl = parse_i32(&v[1])?;
             }
             if v.len() >= 3 {
-                params.rlam = parse_f64(&v[2]);
+                params.rlam = parse_f64(&v[2])?;
             }
             if v.len() >= 4 {
-                params.dlamt = parse_f64(&v[3]);
+                params.dlamt = parse_f64(&v[3])?;
             }
             if v.len() >= 5 {
-                params.alphlj = parse_f64(&v[4]);
+                params.alphlj = parse_f64(&v[4])?;
             }
             if v.len() >= 6 {
-                params.alphc = parse_f64(&v[5]);
+                params.alphc = parse_f64(&v[5])?;
             }
             if v.len() >= 7 {
-                params.nlam = parse_i32(&v[6]);
+                params.nlam = parse_i32(&v[6])?;
             }
             if v.len() >= 8 {
-                params.nscale = parse_i32(&v[7]);
+                params.nscale = parse_i32(&v[7])?;
             }
         },
         "ENERGYMIN" => {
@@ -901,23 +1098,25 @@ fn parse_block(
             if let Some(line) = data_lines.first() {
                 let v = parse_values(line);
                 if v.len() >= 1 {
-                    params.ntem = parse_i32(&v[0]);
+                    params.ntem = parse_i32(&v[0])?;
                 }
-                // NCYC at v[1] - conjugate gradient cycles, skip
+                if v.len() >= 2 {
+                    params.ncyc = parse_usize(&v[1])?;
+                }
                 if v.len() >= 3 {
-                    params.dele = parse_f64(&v[2]);
+                    params.dele = parse_f64(&v[2])?;
                 }
                 if v.len() >= 4 {
-                    params.dx0 = parse_f64(&v[3]);
+                    params.dx0 = parse_f64(&v[3])?;
                 }
                 if v.len() >= 5 {
-                    params.dxm = parse_f64(&v[4]);
+                    params.dxm = parse_f64(&v[4])?;
                 }
                 if v.len() >= 6 {
-                    params.nmin = parse_usize(&v[5]);
+                    params.nmin = parse_usize(&v[5])?;
                 }
                 if v.len() >= 7 {
-                    params.flim = parse_f64(&v[6]);
+                    params.flim = parse_f64(&v[6])?;
                 }
             }
         },
@@ -1021,7 +1220,9 @@ impl ImdParameters {
             tempi: temperature,
             couple_pressure: true,
             pressure_parameters: Some(PressureParameters {
+                couple: 2,
                 algorithm: 1,
+                semi: [1, 1, 1],
                 pressure0: p_tensor,
                 compressibility: comp_tensor,
                 tau_p: 0.5,
@@ -1069,16 +1270,19 @@ fn parse_values(line: &str) -> Vec<String> {
     line.split_whitespace().map(|s| s.to_string()).collect()
 }
 
-fn parse_f64(s: &str) -> f64 {
-    s.parse::<f64>().unwrap_or(0.0)
+fn parse_f64(s: &str) -> Result<f64, IoError> {
+    s.parse::<f64>()
+        .map_err(|_| IoError::ParseError(format!("expected a number, found {s:?}")))
 }
 
-fn parse_i32(s: &str) -> i32 {
-    s.parse::<i32>().unwrap_or(0)
+fn parse_i32(s: &str) -> Result<i32, IoError> {
+    s.parse::<i32>()
+        .map_err(|_| IoError::ParseError(format!("expected an integer, found {s:?}")))
 }
 
-fn parse_usize(s: &str) -> usize {
-    s.parse::<usize>().unwrap_or(0)
+fn parse_usize(s: &str) -> Result<usize, IoError> {
+    s.parse::<usize>()
+        .map_err(|_| IoError::ParseError(format!("expected a non-negative integer, found {s:?}")))
 }
 
 #[cfg(test)]
@@ -1205,7 +1409,7 @@ END
         assert_eq!(params.shake_tol, 0.0001);
         assert_eq!(params.ntwx, 1);
         assert_eq!(params.ntwe, 1);
-        assert!(params.ntwf);
+        assert_ne!(params.ntwf, 0);
         assert_eq!(params.ntpr, 1);
         assert_eq!(params.temp_bath[0].temp0, vec![300.0]);
         assert_eq!(params.temp_bath[0].tau, vec![-1.0]);

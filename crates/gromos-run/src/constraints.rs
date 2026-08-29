@@ -23,13 +23,18 @@ impl ConstraintSelection {
     /// a topology directly with factory-built parameters that never set `nsm`, and relying on
     /// `nsm` alone silently disabled solvent constraints there (rigid water flying apart).
     pub fn from_imd(imd: &ImdParameters, has_solvent: bool) -> Self {
-        let solute_constrained = imd.ntc > 1;
-        let solute_lincs = solute_constrained && imd.ntcp == 2;
+        Self::from_codes(imd.ntc, imd.ntcp, imd.ntcs, has_solvent)
+    }
+
+    /// The same dispatch from the raw GROMOS codes (NTC, NTCP, NTCS) — used by the recipe plan.
+    pub fn from_codes(ntc: i32, ntcp: i32, ntcs: i32, has_solvent: bool) -> Self {
+        let solute_constrained = ntc > 1;
+        let solute_lincs = solute_constrained && ntcp == 2;
         let solute_shake = solute_constrained && !solute_lincs;
 
-        let solvent_constrained = imd.ntcs > 0 && has_solvent;
-        let solvent_settle = solvent_constrained && imd.ntcs == 3;
-        let solvent_lincs = solvent_constrained && imd.ntcs == 2;
+        let solvent_constrained = ntcs > 0 && has_solvent;
+        let solvent_settle = solvent_constrained && ntcs == 3;
+        let solvent_lincs = solvent_constrained && ntcs == 2;
         let solvent_shake = solvent_constrained && !solvent_settle && !solvent_lincs;
 
         ConstraintSelection {
@@ -61,7 +66,11 @@ impl ConstraintSelection {
 
     /// The solute constraint mode implied by `NTC`.
     pub fn ntc_mode(imd: &ImdParameters) -> NtcMode {
-        match imd.ntc {
+        Self::ntc_mode_of(imd.ntc)
+    }
+
+    pub fn ntc_mode_of(ntc: i32) -> NtcMode {
+        match ntc {
             3 => NtcMode::AllBonds,
             2 => NtcMode::HydrogenBonds,
             _ => NtcMode::SolventOnly,

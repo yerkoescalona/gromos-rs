@@ -12,6 +12,12 @@ gromos-forces = { workspace = true }
 gromos-integrators = { workspace = true }
 gromos-io = { workspace = true }
 
+# The recipe and the plan are plain data: serde is the Rust<->Python bridge (PLAN.md 3.9 A12),
+# TOML the human-readable echo (`<run>.recipe.toml`), JSON the machine dump (`md @dump`).
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
 [features]
 default = []
 ml = ["gromos-forces/ml"]

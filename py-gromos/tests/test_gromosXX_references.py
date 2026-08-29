@@ -293,7 +293,8 @@ POSITION_MISMATCH_SYSTEMS = {"aladip_trunc_oct", "aladip_vacuum_em"}
 # coupling, but `read_imd_file` keeps `TempBathParameters::default()` (Berendsen, 300 K,
 # tau 0.1) and every gromos-rs path silently thermostats (PLAN.md 3.9 A18, fixed by step 2).
 EXPECTED_ENGINE_FAILURES = {
-    "water_216_nve_nobath": "absent MULTIBATH silently enables a Berendsen bath — PLAN.md 3.9 A18",
+    # `water_216_nve_nobath` (absent MULTIBATH) passed here until PLAN.md 3.9 step 2 fixed the
+    # parser defaults; it now runs as a regular reference system.
     # Same known FEP mismatch the Rust suite `ignore`s (PLAN.md Reference Test Status).
     "aladip_vacuum_fep": "known FEP mismatch vs gromosXX (ignored in the Rust suite too)",
 }

@@ -30,6 +30,17 @@ pub enum RunError {
     },
     /// Inputs contradict each other (e.g. a perturbed topology with `NTG=0`).
     Inconsistent(String),
+    /// The parameter file carries a block the recipe does not model and the caller did not
+    /// allow to pass through (PLAN.md 3.9 A17: a physics-bearing block must never be ignored).
+    UnknownBlock { block: String },
+    /// A value the recipe cannot represent (e.g. an unknown NTB code, several temperature baths).
+    Recipe(String),
+    /// A plan violates the GROMOS step-order invariants (`validate_plan`).
+    InvalidPlan(String),
+    /// A term/algorithm needs a feature this build lacks (e.g. `schnet` without `--features ml`).
+    MissingFeature { term: String, feature: &'static str },
+    /// Recipe or plan text could not be (de)serialised.
+    Serde(String),
     /// `AlgorithmSequence::init` failed.
     Init(String),
     /// `AlgorithmSequence::run_step` failed at `step`.
@@ -65,6 +76,18 @@ impl fmt::Display for RunError {
                 report.errors.len()
             ),
             RunError::Inconsistent(msg) => write!(f, "inconsistent inputs: {msg}"),
+            RunError::UnknownBlock { block } => write!(
+                f,
+                "input block {block} is not modelled by gromos-rs and was not allowed to pass \
+                 through — it would be silently ignored (allow it explicitly if it is inert)"
+            ),
+            RunError::Recipe(msg) => write!(f, "cannot represent the run as a recipe: {msg}"),
+            RunError::InvalidPlan(msg) => write!(f, "invalid algorithm plan: {msg}"),
+            RunError::MissingFeature { term, feature } => write!(
+                f,
+                "{term} requires the `{feature}` feature, which this build does not include"
+            ),
+            RunError::Serde(msg) => write!(f, "recipe/plan (de)serialisation failed: {msg}"),
             RunError::Init(msg) => write!(f, "error initializing algorithm sequence: {msg}"),
             RunError::Step { step, message } => write!(f, "error at step {step}: {message}"),
         }

@@ -37,14 +37,20 @@ pub mod constraints;
 pub mod dof;
 pub mod error;
 pub mod inputs;
+#[cfg(test)]
+mod legacy_builder;
+pub mod plan;
 pub mod prepare;
+pub mod recipe;
 
 pub use build::{
-    build_sequence_from_imd, periodicity_of, start, BarostatSummary, BuildSummary, Built,
-    ThermostatSummary,
+    build_sequence_from_imd, build_sequence_from_recipe, instantiate, periodicity_of, start,
+    BarostatSummary, BuildSummary, Built, Instantiated, ThermostatSummary,
 };
 pub use constraints::ConstraintSelection;
 pub use dof::total_dof;
 pub use error::RunError;
 pub use inputs::{ParallelPolicy, RunInputs, RunOptions};
+pub use plan::{build_plan, plan_from_json, plan_to_json, validate_plan, AlgorithmSpec};
 pub use prepare::{prepare_system, Coordinates, PrepareNote, Prepared};
+pub use recipe::{Diagnostics, PassthroughPolicy, RunRecipe, TermSpec, RECIPE_VERSION};

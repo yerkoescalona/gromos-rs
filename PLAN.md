@@ -52,7 +52,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 2   | nacl_water_box   | 62    | ion-water RF in PBC                  | **PASS** |
 | 2   | nacl_water_box_shifted | 62 | nacl_water_box with perturbed positions | **PASS** |
 | 3   | water_216_box    | 648   | bulk NVE, pairlist, virial           | **PASS** |
-| 3   | water_216_nve_nobath | 648 | absent MULTIBATH block ⇒ no bath (IMD parser, 3.9 A18) | **IGNORED** — engine bug, fixed by 3.9 step 2 |
+| 3   | water_216_nve_nobath | 648 | absent MULTIBATH block ⇒ no bath (IMD parser defaults, 3.9 A18) | **PASS** |
 | 3   | water_216_box_com| 648   | bulk NVE + COM removal (NTICOM=1, NSCM=10) | **PASS** |
 | 3   | water_216_box_com_rot | 648 | COM translation+rotation removal (NTICOM=2, NSCM=-10) | **PASS** |
 | 3   | water_216_nvt    | 648   | Berendsen thermostat                 | **PASS** |
@@ -70,7 +70,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 2   | nacl_1water_distres | 5  | distance restraint on Na-Cl pair (NTDIR=2, CDIR*w0) | **PASS** |
 | 4   | ch4_water_fep | 2998 | CH4→dummy in 999 SPC water, λ=0.5, twin-range NB FEP | **PASS** |
 
-**37 of 40 tests pass.** (3 ignored: `aladip_vacuum_fep` — known FEP mismatch; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX; `water_216_nve_nobath` — a correct reference the engine fails: an absent MULTIBATH block is parsed as a Berendsen bath, PLAN.md 3.9 A18)
+**38 of 40 tests pass.** (2 ignored: `aladip_vacuum_fep` — known FEP mismatch; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
@@ -771,35 +771,92 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
       `cargo tree -p pyo3-gromos -i gromos-run` shows no cycle; no `process::exit`/`println!` in
       `gromos-run`; clippy clean on the new crate.
 
-- [ ] **Step 2 — `RunRecipe` + `AlgorithmSpec`, IMD both ways (L).**
-      - [ ] ▲ `ImdParameters` presence-aware (A18): optional blocks become `Option<…>`; `parse_f64`/
-            `parse_i32`/`parse_usize` return errors that become `Diagnostics`; `raw_blocks` becomes a
-            `BTreeMap` (deterministic order).
-      - [ ] `recipe.rs`: the struct above with `version`, `Default` *derived* from
-            `ImdParameters::default()`, serde (`deny_unknown_fields` on every variant; per-struct
-            `#[serde(default)]` decisions), `from_imd -> (RunRecipe, Diagnostics)`, `to_imd(&Topology)`
-            via a new `gromos_io::imd::write_imd` (shortest-round-trip float formatting so G3's `==`
-            holds), ▲ allowlisted `passthrough` (A17), `RunInputs` → `RunBundle` in `input.toml` shape +
-            provenance (A5); factories moved here from `imd.rs`.
-      - [ ] ▲ Field table in this section: every `ImdParameters` field (~90) classified
-            modelled / passthrough / rejected — including the multi-bath MULTIBATH and tensor
-            PRESSURESCALE forms every builder truncates today.
-      - [ ] `plan.rs`: `AlgorithmSpec` (one spec = one algorithm; fully resolved; serde + `PartialEq` +
-            `version`), `build_plan`, ▲ `validate_plan` with invariants as registry data (G9),
-            registries carrying `(name, parameters with types/defaults, available, constraints, runnable
-            example)` (G4); `build.rs`: `instantiate` **without** `&RunRecipe` (G8); `md.rs` prints the
-            plan from `AlgorithmSpec::name()`; ▲ `md @dump`.
-      - [ ] ▲ Per-term energy slot on `Contribution` + the orchestrator (G10) and `Barostat` + no-virial
-            provider rejection — **before** `TermSpec` gains a second variant; `md` writes
-            `<run>.recipe.toml`.
-      - [ ] Tests: G3 (incl. passthrough byte check), G7 (gromosXX on `to_imd(default())` and factory
-            outputs — `scripts/roundtrip_imd_gromosXX.py`, per-system pass/fail recorded in the table
-            below), G8, G9, G10; ▲ Rust-side A/B: `cargo test -p gromos-run` parity —
-            `instantiate(validate(build_plan(from_imd(x))))` vs step-1 `build_sequence_from_imd(x)`
-            bit-identical on all 37 (no maturin needed); `water_216_nve_nobath` now passes.
-      **Gate:** Rust 37/37 (+1) and Python suite unchanged; G3/G4/G7/G8/G9/G10 green; `ImdParameters`
-      is referenced under `crates/pyo3-gromos/src/` only from `parameters.rs`; `md` prints its
-      `Diagnostics`.
+- [x] **Step 2 — `RunRecipe` + `AlgorithmSpec`, IMD both ways (L).** ✓ 2026-08-29. Deviations from the
+      sketch are marked ✗ and carried, not hidden.
+      - [x] `ImdParameters` **lossless and strict** (gromos-io): every field of every modelled block
+            is now parsed — `ntirtc`, `ntisti`, `ntwse/ntwg/ntwb`, `ntpp`, `ncyc`, `ntcs0`, MULTIBATH
+            DOF sets, PRESSURESCALE `couple`/SEMI, NONBONDED lines 3–7, multi-line TITLE, NTWV/NTWF as
+            *frequencies* (they were `bool`s — a force-write frequency of 5 came back as 1); garbage
+            numbers are errors naming block and token (`imd.rs` used to coerce to 0); `parse_imd_str`
+            for in-memory text. **Absent means absent** (A18): `temp_bath` defaults to empty (no bath)
+            and `nscm` to 0 (gromosXX `parameter.h`: `skip_step 0`) — the second silent-default bug,
+            found the same way as the first. ✗ Presence is read from `raw_blocks` rather than
+            `Option<Block>` fields, and `raw_blocks` stays a `HashMap` (the writer sorts passthrough)
+            — same guarantees, no struct upheaval.
+      - [x] `gromos_io::imd_write::{write_imd, write_imd_file}` — every modelled block regenerated in
+            GROMOS layout, shortest-round-trip floats, passthrough verbatim. **Two defects only a real
+            gromosXX read caught (A7 earned its keep):** fixed-width columns fused `1e-10` with its
+            neighbour (`NA2CLC: 20.0000000001`), and an "off" DISTANCERES block invented for a run
+            without one is *validated* by gromosXX (`DIR0 > 0`, `TAUDIR > 0`) — optional blocks are now
+            written only when read or non-default.
+      - [x] `gromos-run/src/recipe.rs`: `RunRecipe` (`version = 1`; groups `system / control /
+            boundary / forcefield (+restraints, +terms) / constraints / ensemble / minimisation /
+            perturbation / outputs / execution / passthrough`), serde with `deny_unknown_fields`
+            everywhere and `default` on groups, `Default` *derived* from `ImdParameters::default()`
+            (G7), `from_imd_with(imd, &PassthroughPolicy) -> (RunRecipe, Diagnostics)`, `to_imd()`,
+            `to_imd_string(n_atoms)`, TOML/JSON, factories `nve/nvt/npt/minimize` delegating to
+            `gromos-io`'s. `Diagnostics` names every absent optional block and its meaning, every
+            passthrough, and required blocks gromosXX would refuse to run without. ✗ `to_imd` takes an
+            atom count, not a topology (MULTIBATH DOFSET / FORCE NRE are the only atom-dependent
+            lines). ✗ `RunBundle` + provenance (A5) not started — step 3, with the Python `Recipe`.
+      - [x] Field table: "What the recipe models" below — every field of the 18 modelled blocks is
+            carried; unknown blocks are rejected unless allowed (`md` allows GAMD/EDS, Python nothing).
+      - [x] `gromos-run/src/plan.rs`: `AlgorithmSpec` (14 kinds; one spec = one algorithm; fully
+            resolved — DOF, virial, `four_pi_eps_i`, `atoms_per_solvent`, restraint paths, `parallel`),
+            `TermSpec` (`schnet`, `coupling: delta | replace`), `build_plan`, `validate_plan` driven by
+            per-kind `KindRules` (G9), registries `KINDS` / `name()` / `examples()` with a completeness
+            test (G4). `build.rs`: `instantiate(plan, topo, conf, periodicity)` — **no recipe parameter**
+            (G8, compile-time); `build_sequence_from_recipe`; `build_sequence_from_imd` is a one-line
+            front-end. `md @dump` prints recipe + plan (JSON) and exits; `md` writes
+            `<tre>.recipe.toml` with the diagnostics as comments; `Simulation.recipe_toml` /
+            `.plan_json` / `.diagnostics` expose the same (`py-gromos/tests/test_recipe.py`).
+      - [~] `Barostat` + a provider without a virial is rejected by `validate_plan`; `coupling=replace`
+            is rejected with the 2.8 message. ✗ **The per-term energy slot on `Contribution` (G10) is
+            not done** — it changes `gromos-forces` and stays the precondition for a second `TermSpec`
+            variant (step 5 does it first).
+      - [x] Tests: `gromos-io/tests/imd_roundtrip.rs` (read → write → read exact on all 41 inputs,
+            write idempotent, absent-block defaults, garbage → error, passthrough verbatim, DOFSET/NRE
+            synthesis); `gromos-run/tests/recipe_roundtrip.rs` (imd → recipe → imd → recipe, text,
+            TOML, JSON, derived defaults, diagnostics, `UnknownBlock`, factories, unknown-field error);
+            `plan.rs` unit tests (registry complete, JSON round trip, typo → error, canonical plans
+            validate, five violations rejected by name). **Rust-side A/B:**
+            `build::tests::plan_matches_legacy_builder_bit_for_bit` — the frozen step-1 builder
+            (`legacy_builder.rs`, `cfg(test)`) vs the recipe path, energies/positions/forces compared
+            with `to_bits()` after up to 10 steps on all 41 references. **A7:**
+            `scripts/roundtrip_imd_gromosXX.py` — **40/40** rewritten inputs accepted by the real
+            gromosXX and reproducing a fresh run of the original to the digit (31 also match the
+            committed `expected/` exactly; the other 9 — vacuum, COM-removal, NPT, small boxes — differ
+            from `expected/` only in ~1e-32 COM-kinetic terms that a fresh run of the *original* input
+            shows too: environment noise, invisible at 1e-8). `water_216_nve_nobath` is a regular
+            passing reference again; its `ignore`/xfail are gone.
+      **Gate met 2026-08-29:** Rust reference 38 passed / 2 ignored; Python green (211 + `test_recipe.py`,
+      16 skipped, 15 xfailed); G3/G4/G7/G8/G9 green; A7 40/40. ✗ Not met: `ImdParameters` is still the
+      argument of `build_simulation` in `pyo3-gromos` — it becomes `Recipe` in step 3.
+
+**What the recipe models** (every `ImdParameters` field; "kept" = parsed only since step 2)
+
+| Block | Fields | Recipe group | Engine use |
+|---|---|---|---|
+| TITLE | multi-line title (kept as lines) | `title` | echoed |
+| SYSTEM | NPM, NSM | `system` | NSM is a hint; the coordinate file decides |
+| INITIALISE | NTIVEL NTISHK NTINHT NTINHB / NTISHI NTIRTC NTICOM / NTISTI / IG TEMPI (NTIRTC, NTISTI kept) | `control` | NTIVEL, NTISHK, NTICOM, IG, TEMPI |
+| STEP | NSTLIM T DT | `control` | all |
+| BOUNDCOND | NTB NDFMIN | `boundary` | all |
+| MULTIBATH | algorithm, NBATHS, TEMP0/TAU per bath, DOFSET, LAST/COM-BATH/IR-BATH (kept) | `ensemble.thermostat` (`None` when absent) | one bath; NBATHS > 1 is a named error, not a truncation |
+| PRESSURESCALE | COUPLE SCALE COMP TAUP VIRIAL, SEMI (kept), 3×3 pressure | `ensemble.barostat` | `[0][0]` of the tensors, VIRIAL |
+| COMTRANSROT | NSCM | `control.com_motion` | absent = 0 = off |
+| PRINTOUT | NTPR, NTPP (kept) | `outputs` | NTPR |
+| WRITETRAJ | NTWX NTWSE NTWV NTWF NTWE NTWG NTWB (NTWSE/NTWG/NTWB kept; NTWV/NTWF now frequencies) | `outputs` | NTWX, NTWE, NTWF ≠ 0 |
+| CONSTRAINT | NTC, NTCP, NTCP0, NTCS, NTCS0 (kept for SHAKE) | `constraints` | all |
+| FORCE | NTF×6, NEGR, NRE | `forcefield.{bonds,…}`, `energy_groups` | NTF; energy groups carried, not used |
+| PAIRLIST | ALGORITHM NSNB RCUTP RCUTL SIZE TYPE | `forcefield.pairlist` | all |
+| NONBONDED | NLRELE APPAK RCRF EPSRF NSLFEXCL + lines 3–7 (kept) | `forcefield.electrostatics` (+ `lattice_sum`) | APPAK, EPSRF, RCUTL; lattice-sum lines inert |
+| POSITIONRES | NTPOR NTPORB NTPORS CPOR | `forcefield.restraints.position` | all but NTPORS |
+| DISTANCERES | NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE VDIR NTWDIR | `forcefield.restraints.distance` | NTDIR, CDIR, DIR0, TAUDIR |
+| PERTURBATION | NTG NRDGL RLAM DLAMT ALPHLJ ALPHC NLAM NSCALE | `perturbation` | NTG, RLAM, ALPHLJ, ALPHC, NLAM (DLAMT parsed, never applied — open) |
+| ENERGYMIN | NTEM NCYC (kept) DELE DX0 DXM NMIN FLIM | `minimisation` | all but NCYC |
+| anything else | GAMD, EDS, QMMM, … | `passthrough` | **rejected** unless the caller allows it (`md`: GAMD/EDS, applied out-of-band; Python: none) |
+| — | `force_groups` (never populated), `pme_order`/`pme_alpha` (never in a file) | carried | none |
 
 - [ ] **Step 3 — Python `Recipe`, `Term`, `Algorithm`; migrate the kwargs (M).**
       - [ ] `crates/pyo3-gromos/src/recipe.rs`: `Recipe` (wraps `RunRecipe`; ▲ immutable `with_*`
@@ -863,8 +920,9 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
 
 | System | Paths | First differing quantity / step | Cause | Resolution | Closed in |
 |---|---|---|---|---|---|
-| `water_216_nve_nobath` (any `.imd` without MULTIBATH) | all gromos-rs paths vs gromosXX | E_total at frame 0: −4270.69 vs −4270.19 (Berendsen scaling already acts in step 0) | parser keeps `TempBathParameters::default()` (Berendsen 300 K, τ 0.1) — verified `imd.rs:306-317,329,422-500`; gromosXX: "Adding a bath, no temperature coupling" | C5 presence-aware parser (A18) | open → step 2 |
-| any `.imd` with > 1 bath | all gromos-rs paths vs gromosXX | thermostat scaling, step 1 | every builder reads `temp_bath[0]` (`simulation.rs:483-492`, `md.rs:357-367`) | `ensemble.thermostat` models all baths or `from_imd` rejects | open → step 2 |
+| `water_216_nve_nobath` (any `.imd` without MULTIBATH) | all gromos-rs paths vs gromosXX | E_total at frame 0: −4270.69 vs −4270.19 (Berendsen scaling already acts in step 0) | parser kept `TempBathParameters::default()` (Berendsen 300 K, τ 0.1) — verified `imd.rs:306-317,329,422-500`; gromosXX: "Adding a bath, no temperature coupling" | defaults now mean "absent" (A18); the reference passes in both suites | **closed, step 2** |
+| any `.imd` without COMTRANSROT | all gromos-rs paths vs gromosXX | COM velocity removed at step 0 | `nscm` defaulted to 100000 (removal at step 0); gromosXX `parameter.h`: `skip_step 0` | default `nscm = 0`; `imd_roundtrip.rs::absent_optional_blocks_mean_gromosxx_defaults` | **closed, step 2** |
+| any `.imd` with > 1 bath | all gromos-rs paths vs gromosXX | thermostat scaling, step 1 | every builder read `temp_bath[0]` (`simulation.rs:483-492`, `md.rs:357-367`) | `ensemble.thermostat` carries every bath; `build_plan` rejects NBATHS > 1 with a named error instead of truncating (one-bath thermostat) | **closed (rejected loudly), step 2** — multi-bath support itself is a physics item |
 | `nacl_1water_settle` | A vs C | kinetic, frame 0 (1.68259628e-3 vs 1.68252320e-3); positions ~7e-8 | C runs SHAKE where NTCS=3 asks SETTLE (only `ShakeConstraints` exists) | one builder (step 1); descriptor path deleted (step 4) | open → step 1 |
 | `nacl_1water_lincs` | A vs C | kinetic, frame 0 | C runs SHAKE where NTCS=2 asks LINCS (solvent) | as above | open → step 1 |
 | `aladip_vacuum_lincs` | A vs C | kinetic, frame 0 (32.6256 vs 32.6709) | C runs SHAKE where NTCP=2 asks LINCS (solute) | as above | open → step 1 |

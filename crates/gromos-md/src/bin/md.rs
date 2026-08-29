@@ -25,8 +25,8 @@ use gromos::{
     validation::validate_energy,
 };
 use gromos_run::{
-    build_sequence_from_imd, prepare_system, start, Built, PrepareNote, Prepared, RunError,
-    RunInputs, RunOptions,
+    build_sequence_from_imd, plan_to_json, prepare_system, start, Built, PassthroughPolicy,
+    PrepareNote, Prepared, RunError, RunInputs, RunOptions,
 };
 use std::env;
 use std::path::PathBuf;
@@ -102,6 +102,7 @@ fn print_usage() {
     eprintln!("  @print      Print additional information (pairlist, force)");
     eprintln!("  @version    Print version information");
     eprintln!("  @develop    Run untested development code");
+    eprintln!("  @dump       Print the run recipe and algorithm plan (JSON) and exit");
     eprintln!();
     eprintln!("All simulation parameters (timestep, cutoffs, thermostat, etc.)");
     eprintln!("are specified in the @input file, following GROMOS conventions.");
@@ -143,6 +144,8 @@ struct MDArgs {
     verbose: usize,
     print_flags: Vec<String>,
     develop: bool,
+    /// `@dump`: print the run recipe and the algorithm plan (JSON) and exit without running.
+    dump: bool,
 }
 
 impl Default for MDArgs {
@@ -170,6 +173,7 @@ impl Default for MDArgs {
             verbose: 0,
             print_flags: Vec::new(),
             develop: false,
+            dump: false,
         }
     }
 }
@@ -227,6 +231,9 @@ fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
             "@version" => {
                 println!("GROMOS-RS md {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
+            },
+            "@dump" => {
+                md_args.dump = true;
             },
             "@develop" => {
                 md_args.develop = true;
@@ -573,7 +580,13 @@ fn main() {
     println!("  RF kappa:    {:.3} nm^-1", imd.appak);
     println!();
 
-    let built = match build_sequence_from_imd(&imd, &prepared, &inputs, &RunOptions::default()) {
+    // The binary applies GAMD/EDS itself (out-of-band, after each step), so those blocks may
+    // pass through the recipe; anything else unmodelled is an error (PLAN.md 3.9 A17).
+    let options = RunOptions {
+        passthrough: PassthroughPolicy::allow(["GAMD", "EDS"]),
+        ..RunOptions::default()
+    };
+    let built = match build_sequence_from_imd(&imd, &prepared, &inputs, &options) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -582,8 +595,52 @@ fn main() {
     };
     let Built {
         sequence: mut md_sequence,
+        recipe,
+        plan,
+        diagnostics,
         summary,
     } = built;
+    for note in &diagnostics.notes {
+        println!("  NOTE: {}", note);
+    }
+
+    // @dump: the recipe and the plan as data, nothing else — the Rust-side A/B (PLAN.md 3.9).
+    if md_args.dump {
+        match (recipe.to_json(), plan_to_json(&plan)) {
+            (Ok(r), Ok(p)) => {
+                println!("RECIPE");
+                println!("{}", r);
+                println!("END");
+                println!("PLAN");
+                println!("{}", p);
+                println!("END");
+                process::exit(0);
+            },
+            (Err(e), _) | (_, Err(e)) => {
+                eprintln!("Error: {}", e);
+                process::exit(1);
+            },
+        }
+    }
+
+    // Echo the effective run next to the energy output (GROMACS's `mdout.mdp` lesson): what
+    // was defaulted, what passed through, and every value the engine actually used.
+    {
+        let echo_path = std::path::Path::new(&tre_file).with_extension("recipe.toml");
+        match recipe.to_toml() {
+            Ok(toml) => {
+                let mut text = String::from("# Effective run recipe written by gromos-rs md\n");
+                for note in &diagnostics.notes {
+                    text.push_str(&format!("# NOTE: {}\n", note));
+                }
+                text.push_str(&toml);
+                if let Err(e) = std::fs::write(&echo_path, text) {
+                    log::warn!("could not write {}: {}", echo_path.display(), e);
+                }
+            },
+            Err(e) => log::warn!("could not render the recipe: {}", e),
+        }
+    }
     let Prepared {
         topology: topo,
         configuration: mut conf,

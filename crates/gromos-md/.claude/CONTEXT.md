@@ -31,9 +31,14 @@ matching gromosXX to reference tolerances.
   `pyo3-gromos` calls — and only keeps CLI parsing, printing (from `PrepareNote`/`BuildSummary`),
   writers, and the GaMD/EDS in-loop application (still applied *after* `run_step`, still parsed
   out-of-band; PLAN.md 3.9 A6). Do not add algorithm construction back here, and do not add a
-  second IMD reader. Next (step 2): `RunRecipe` + `AlgorithmSpec` in `gromos-run`, presence-aware
-  IMD parsing (an `.imd` without MULTIBATH currently runs a Berendsen bath at τ = 0.1 in both
-  engines — `water_216_nve_nobath` is the ignored reference that proves it), `md @dump`.
+  second IMD reader.
+- **PLAN.md 3.9 step 2 ✓ (2026-08-29).** The binary now runs from a `RunRecipe`
+  (`gromos_run::build_sequence_from_imd` = `from_imd` → `build_plan` → `validate_plan` →
+  `instantiate`); it allows `GAMD`/`EDS` blocks to pass through the recipe because it applies them
+  itself, and rejects any other unmodelled block. `md @dump` prints recipe + plan as JSON and exits;
+  every run writes `<tre>.recipe.toml` (the effective run, diagnostics as comments — GROMACS's
+  `mdout.mdp`). The absent-MULTIBATH hazard is fixed at the parser defaults: `water_216_nve_nobath`
+  is a regular passing reference (38/40, 2 ignored).
 
 ## Key files
 ```

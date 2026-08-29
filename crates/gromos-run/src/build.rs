@@ -1,20 +1,21 @@
-//! The GROMOS algorithm sequence, assembled once.
+//! Stages 2 and 3 of the builder: `instantiate` turns a validated plan into runnable
+//! algorithms, `start` primes the run (PLAN.md 3.9).
 //!
-//! Lifted verbatim from `md.rs` (PLAN.md 3.9 step 1): restraint loading, nonbonded setup,
-//! the leap-frog / steepest-descent branches, constraints, thermostat, barostat. The Python
-//! binding's own copy of this logic is gone; it calls [`build_sequence_from_imd`].
+//! ```text
+//! RunRecipe ── build_plan ──▶ Vec<AlgorithmSpec> ── validate_plan ── instantiate ──▶ AlgorithmSequence ── start
+//! ```
 //!
-//! Step order (gromosXX `md.cc`):
-//! `RemoveCOMMotion → Forcefield → LeapFrogVelocity → thermostat → LeapFrogPosition →
-//! SHAKE/SETTLE/LINCS → TemperatureCalculation → PressureCalculation → Barostat →
-//! EnergyCalculation`; energy minimisation replaces the leap-frog pair with
-//! `SteepestDescent` and drops COM removal, thermostat, barostat and the kinetic-energy step
-//! (`E_total = E_pot`).
+//! `instantiate` reads **only** the plan (plus the prepared topology/configuration and the
+//! boundary conditions): every physical value it needs was resolved by `build_plan`, so an
+//! edited plan is exactly what runs (drift guard G8). The recipe-aware wrappers below add the
+//! reporting summary the binary prints.
+
+use std::path::Path;
 
 use gromos_core::{
     algorithm::{AlgorithmSequence, SimulationState},
     configuration::{BoxType, Configuration},
-    math::{Periodicity, Rectangular, Triclinic, Vacuum, Vec3},
+    math::{Periodicity, Rectangular, Triclinic, Vacuum},
     pairlist::{PairlistAlgorithm, PairlistContainer},
     Topology,
 };
@@ -32,7 +33,7 @@ use gromos_integrators::{
         PressureCalculation, RemoveCOMMotion, SettleAlgorithm, ShakeAlgorithm,
         SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
     },
-    constraints::{NtcMode, ShakeParameters},
+    constraints::ShakeParameters,
 };
 use gromos_io::{
     distanceres::read_distanceres,
@@ -40,6 +41,13 @@ use gromos_io::{
     posres::{build_posres_entries, read_posresspec, read_refpos},
 };
 
+use crate::plan::{
+    build_plan, validate_plan, AlgorithmSpec, DistanceRestraintsPlan, ForcefieldPlan,
+    PositionRestraintsPlan,
+};
+use crate::recipe::{
+    ConstraintAlgorithm, Diagnostics, RunRecipe, TermSpec, ThermostatAlgorithm, VirialKind,
+};
 use crate::{total_dof, ConstraintSelection, Prepared, RunError, RunInputs, RunOptions};
 
 /// What the thermostat was built as — for the binary's report and the Python getters.
@@ -82,158 +90,25 @@ pub struct BuildSummary {
     pub total_dof: f64,
 }
 
+/// The result of `instantiate`: the sequence plus the counts the caller may report.
+pub struct Instantiated {
+    pub sequence: AlgorithmSequence,
+    pub initial_pairs: usize,
+    pub position_restraints: usize,
+    pub distance_restraints: (usize, usize),
+}
+
+/// A built run: the sequence, the data it came from, and the report.
 pub struct Built {
     pub sequence: AlgorithmSequence,
+    pub recipe: RunRecipe,
+    pub plan: Vec<AlgorithmSpec>,
+    pub diagnostics: Diagnostics,
     pub summary: BuildSummary,
 }
 
-struct Restraints {
-    position: Option<PositionRestraints>,
-    distance: Option<(DistanceRestraints, PerturbedDistanceRestraints)>,
-}
-
-/// Load position/distance restraints exactly as the binary's `@posresspec`/`@refpos`/
-/// `@distrest` handling does (same file formats, same NTPOR/NTPORB/NTDIR dispatch).
-fn load_restraints(
-    imd: &ImdParameters,
-    inputs: &RunInputs,
-    positions: &[Vec3],
-) -> Result<Restraints, RunError> {
-    let position = if imd.ntpor > 0 {
-        let por_file = inputs
-            .posresspec
-            .as_ref()
-            .ok_or_else(|| RunError::MissingInput {
-                flag: "posresspec",
-                reason: format!("NTPOR={}", imd.ntpor),
-            })?;
-        let restrained_atoms = read_posresspec(por_file).map_err(|e| RunError::Io {
-            what: "position restraint spec".into(),
-            source: e,
-        })?;
-        // NTPORB=1: reference positions from @refpos; NTPORB=0: the startup configuration.
-        let ref_positions = if imd.ntporb >= 1 {
-            let rpr_file = inputs
-                .refpos
-                .as_ref()
-                .ok_or_else(|| RunError::MissingInput {
-                    flag: "refpos",
-                    reason: format!("NTPORB={}", imd.ntporb),
-                })?;
-            read_refpos(rpr_file).map_err(|e| RunError::Io {
-                what: "reference positions".into(),
-                source: e,
-            })?
-        } else {
-            positions.to_vec()
-        };
-        let entries = build_posres_entries(&restrained_atoms, &ref_positions);
-        let mut pr = PositionRestraints::new();
-        for entry in &entries {
-            pr.add_restraint(PositionRestraint::new(
-                entry.atom,
-                entry.reference_pos,
-                imd.cpor,
-            ));
-        }
-        Some(pr)
-    } else {
-        None
-    };
-
-    let distance = if imd.ntdir != 0 {
-        let dr_file = inputs
-            .distrest
-            .as_ref()
-            .ok_or_else(|| RunError::MissingInput {
-                flag: "distrest",
-                reason: format!("NTDIR={}", imd.ntdir),
-            })?;
-        let (unperturbed, perturbed) = read_distanceres(dr_file).map_err(|e| RunError::Io {
-            what: "distance restraint file".into(),
-            source: e,
-        })?;
-        let mode = imd.ntdir.abs();
-        let k = imd.cdir;
-        let r_linear = imd.dir0;
-
-        let mut dr = DistanceRestraints::new();
-        for spec in &unperturbed {
-            let mut r = DistanceRestraint::new(
-                spec.atom1, spec.atom2, spec.r0, spec.w0, spec.rah, k, r_linear, mode,
-            );
-            if imd.ntdir < 0 {
-                r = r.with_time_averaging(imd.taudir, imd.dt);
-            }
-            dr.add(r);
-        }
-        let mut pdr = PerturbedDistanceRestraints::new();
-        for spec in &perturbed {
-            pdr.add(PerturbedDistanceRestraint::new(
-                spec.atom1, spec.atom2, spec.n, spec.m, spec.a_r0, spec.b_r0, spec.a_w0, spec.b_w0,
-                spec.rah, k, r_linear, mode,
-            ));
-        }
-        Some((dr, pdr))
-    } else {
-        None
-    };
-
-    Ok(Restraints { position, distance })
-}
-
-fn shake_parameters(imd: &ImdParameters, sel: &ConstraintSelection) -> ShakeParameters {
-    let ntc = if sel.solute_shake {
-        ConstraintSelection::ntc_mode(imd)
-    } else {
-        NtcMode::SolventOnly
-    };
-    ShakeParameters {
-        tolerance: imd.shake_tol,
-        max_iterations: 1000,
-        ntc,
-    }
-}
-
-/// SHAKE → SETTLE → LINCS, in the binary's order.
-fn push_constraint_algorithms(
-    seq: &mut AlgorithmSequence,
-    imd: &ImdParameters,
-    sel: &ConstraintSelection,
-) -> Option<ShakeParameters> {
-    let mut shake = None;
-    if sel.shake_enabled() {
-        let params = shake_parameters(imd, sel);
-        let mut alg = ShakeAlgorithm::new(params.clone());
-        alg.include_solvent = sel.solvent_shake;
-        // NTISHK=1: shake initial positions; NTISHK=2: positions + velocities.
-        if imd.ntishk >= 1 {
-            alg.shake_initial_positions = true;
-        }
-        if imd.ntishk >= 2 {
-            alg.shake_initial_velocities = true;
-        }
-        seq.push(Box::new(alg));
-        shake = Some(params);
-    }
-    if sel.settle_enabled {
-        seq.push(Box::new(SettleAlgorithm::new()));
-    }
-    if sel.lincs_enabled {
-        seq.push(Box::new(LincsAlgorithm::new(
-            ConstraintSelection::ntc_mode(imd),
-            imd.lincs_order_solute,
-            imd.lincs_order_solvent,
-            sel.solute_lincs,
-            sel.solvent_lincs,
-        )));
-    }
-    shake
-}
-
 /// The periodicity a prepared system runs under: triclinic for a truncated-octahedron box,
-/// vacuum for an all-zero box, rectangular otherwise. Exposed for callers that attach extra
-/// algorithms needing the same boundary conditions as `Forcefield` (e.g. an ML term).
+/// vacuum for an all-zero box, rectangular otherwise.
 pub fn periodicity_of(prepared: &Prepared) -> Periodicity {
     let b = prepared.box_dims;
     if let Some(triclinic_box) = prepared.truncoct_box {
@@ -245,226 +120,485 @@ pub fn periodicity_of(prepared: &Prepared) -> Periodicity {
     }
 }
 
-fn virial_type(imd: &ImdParameters) -> VirialType {
-    match imd
-        .pressure_parameters
-        .as_ref()
-        .map(|p| p.virial)
-        .unwrap_or(0)
-    {
-        2 => VirialType::Molecular,
-        1 => VirialType::Atomic,
-        _ => VirialType::None,
+fn virial_type(kind: VirialKind) -> VirialType {
+    match kind {
+        VirialKind::Molecular => VirialType::Molecular,
+        VirialKind::Atomic => VirialType::Atomic,
+        VirialKind::None => VirialType::None,
     }
 }
 
-/// Build the algorithm sequence for `imd` on a prepared system.
+fn io_err(what: &str, path: &Path) -> impl FnOnce(gromos_io::IoError) -> RunError {
+    let what = format!("{what} '{}'", path.display());
+    move |source| RunError::Io { what, source }
+}
+
+fn load_position_restraints(
+    plan: &PositionRestraintsPlan,
+    startup_positions: &[gromos_core::math::Vec3],
+) -> Result<PositionRestraints, RunError> {
+    let restrained_atoms =
+        read_posresspec(&plan.spec).map_err(io_err("position restraint spec", &plan.spec))?;
+    // NTPORB=1: reference positions from a file; NTPORB=0: the start-up configuration.
+    let ref_positions = match &plan.reference {
+        Some(path) => read_refpos(path).map_err(io_err("reference positions", path))?,
+        None => startup_positions.to_vec(),
+    };
+    let entries = build_posres_entries(&restrained_atoms, &ref_positions);
+    let mut pr = PositionRestraints::new();
+    for entry in &entries {
+        pr.add_restraint(PositionRestraint::new(
+            entry.atom,
+            entry.reference_pos,
+            plan.k,
+        ));
+    }
+    Ok(pr)
+}
+
+fn load_distance_restraints(
+    plan: &DistanceRestraintsPlan,
+) -> Result<(DistanceRestraints, PerturbedDistanceRestraints), RunError> {
+    let (unperturbed, perturbed) =
+        read_distanceres(&plan.file).map_err(io_err("distance restraint file", &plan.file))?;
+    let mut dr = DistanceRestraints::new();
+    for spec in &unperturbed {
+        let mut r = DistanceRestraint::new(
+            spec.atom1,
+            spec.atom2,
+            spec.r0,
+            spec.w0,
+            spec.rah,
+            plan.k,
+            plan.r_linear,
+            plan.mode,
+        );
+        if let Some(tau) = plan.time_averaging {
+            r = r.with_time_averaging(tau, plan.dt);
+        }
+        dr.add(r);
+    }
+    let mut pdr = PerturbedDistanceRestraints::new();
+    for spec in &perturbed {
+        pdr.add(PerturbedDistanceRestraint::new(
+            spec.atom1,
+            spec.atom2,
+            spec.n,
+            spec.m,
+            spec.a_r0,
+            spec.b_r0,
+            spec.a_w0,
+            spec.b_w0,
+            spec.rah,
+            plan.k,
+            plan.r_linear,
+            plan.mode,
+        ));
+    }
+    Ok((dr, pdr))
+}
+
+/// GROMOS: individual λ = RLAM^NLAM, dλ/dRLAM = NLAM · RLAM^(NLAM−1)
+/// (same arithmetic as `ImdParameters::lambda_and_derivative`, bit for bit).
+fn lambda_and_derivative(lambda: f64, nlam: i32) -> (f64, f64) {
+    let n = nlam as f64;
+    let l = lambda.powf(n);
+    let dl = if nlam <= 0 {
+        0.0
+    } else {
+        n * lambda.powf(n - 1.0)
+    };
+    (l, dl)
+}
+
+struct ForcefieldBuilt {
+    forcefield: Forcefield,
+    initial_pairs: usize,
+    position_restraints: usize,
+    distance_restraints: (usize, usize),
+}
+
+fn instantiate_forcefield(
+    ff: &ForcefieldPlan,
+    topo: &Topology,
+    conf: &Configuration,
+    periodicity: &Periodicity,
+) -> Result<ForcefieldBuilt, RunError> {
+    let n_atoms = topo.num_atoms();
+    // CRF interior dielectric is always 1 in GROMOS.
+    let crf_params = CRFParameters::new(ff.cutoff_long, 1.0, ff.epsilon_rf, ff.kappa);
+    let lj_params = Forcefield::convert_lj_parameters(topo);
+
+    let mut pairlist = PairlistContainer::new(ff.cutoff_short, ff.cutoff_long, 0.0);
+    pairlist.update_frequency = ff.pairlist_every;
+    pairlist.grid_size = ff.grid_size;
+    let box_type = match periodicity {
+        Periodicity::Rectangular(_) => BoxType::Rectangular,
+        Periodicity::Triclinic(_) => BoxType::Triclinic,
+        Periodicity::Vacuum(_) => BoxType::Vacuum,
+    };
+    let pairlist_algorithm = PairlistAlgorithm::from_imd(
+        ff.pairlist_algorithm,
+        n_atoms,
+        box_type,
+        !topo.chargegroups.is_empty(),
+        ff.pairlist_type,
+    );
+    pairlist_algorithm.update(topo, conf, &mut pairlist, periodicity);
+    let initial_pairs = pairlist.total_pairs();
+
+    let mut forcefield = Forcefield::new(
+        lj_params,
+        crf_params,
+        periodicity.clone(),
+        pairlist,
+        pairlist_algorithm,
+    );
+    forcefield.four_pi_eps_i = ff.four_pi_eps_i;
+    forcefield.ntf_bond = ff.bonds;
+    forcefield.ntf_angle = ff.angles;
+    forcefield.ntf_improper = ff.impropers;
+    forcefield.ntf_dihedral = ff.dihedrals;
+    forcefield.parallel_nonbonded = ff.parallel;
+    forcefield.atoms_per_solvent = ff.atoms_per_solvent;
+    forcefield.virial_type = virial_type(ff.virial);
+
+    let mut position_restraints = 0;
+    if let Some(plan) = &ff.position_restraints {
+        let pr = load_position_restraints(plan, &conf.current().pos)?;
+        position_restraints = pr.restraints.len();
+        forcefield.position_restraints = pr;
+    }
+    let mut distance_restraints = (0, 0);
+    if let Some(plan) = &ff.distance_restraints {
+        let (dr, pdr) = load_distance_restraints(plan)?;
+        distance_restraints = (dr.restraints.len(), pdr.restraints.len());
+        forcefield.distance_restraints = dr;
+        forcefield.perturbed_distance_restraints = pdr;
+        forcefield.lambda = plan.lambda;
+    }
+    if let Some(p) = &ff.perturbation {
+        forcefield.lambda_and_derivative = lambda_and_derivative(p.lambda, p.nlam);
+        forcefield.lambda_exp = p.nlam;
+        forcefield.global_alphlj = p.alpha_lj;
+        forcefield.global_alphc = p.alpha_c;
+    }
+
+    Ok(ForcefieldBuilt {
+        forcefield,
+        initial_pairs,
+        position_restraints,
+        distance_restraints,
+    })
+}
+
+#[cfg(feature = "ml")]
+fn instantiate_orchestrator(
+    terms: &[TermSpec],
+    topo: &Topology,
+    periodicity: &Periodicity,
+) -> Result<Box<dyn gromos_core::algorithm::Algorithm>, RunError> {
+    use gromos_core::selection::AtomSelection;
+    use gromos_forces::nonbonded::schnet::SchNetInteraction;
+    use gromos_forces::orchestrator::ProviderOrchestrator;
+    use gromos_forces::orchestrator_algorithm::ProviderOrchestratorAlgorithm;
+    use gromos_forces::zones::{Zone, ZonePartition};
+
+    let n_atoms = topo.num_atoms();
+    let mut orchestrator = ProviderOrchestrator::new();
+    for term in terms {
+        match term {
+            TermSpec::Schnet {
+                model,
+                cutoff,
+                elements,
+                region,
+                buffer,
+                ..
+            } => {
+                let partition = ZonePartition::from_selections(topo, region, buffer.as_deref())
+                    .map_err(|e| RunError::Recipe(format!("schnet region: {e}")))?;
+                let inner = partition.atoms_in(Zone::Inner);
+                let selection = AtomSelection::from_indices(inner, n_atoms)
+                    .map_err(|e| RunError::Recipe(format!("schnet region: {e}")))?;
+                let provider = SchNetInteraction::load(model, *cutoff, elements.clone())
+                    .map_err(|e| RunError::Recipe(format!("schnet model '{model}': {e}")))?;
+                orchestrator.register(selection, Box::new(provider));
+            },
+        }
+    }
+    Ok(Box::new(ProviderOrchestratorAlgorithm::new(
+        orchestrator,
+        periodicity.clone(),
+    )))
+}
+
+#[cfg(not(feature = "ml"))]
+fn instantiate_orchestrator(
+    terms: &[TermSpec],
+    _topo: &Topology,
+    _periodicity: &Periodicity,
+) -> Result<Box<dyn gromos_core::algorithm::Algorithm>, RunError> {
+    for term in terms {
+        if let Some(feature) = term.feature() {
+            return Err(RunError::MissingFeature {
+                term: term.name().to_string(),
+                feature,
+            });
+        }
+    }
+    Err(RunError::InvalidPlan(
+        "orchestrator without terms".to_string(),
+    ))
+}
+
+/// Stage 3: construct the algorithms of a **validated** plan.
+///
+/// Reads only the plan, the prepared topology/configuration and the boundary conditions —
+/// no recipe, no parameter file (drift guard G8).
+pub fn instantiate(
+    plan: &[AlgorithmSpec],
+    topo: &Topology,
+    conf: &Configuration,
+    periodicity: &Periodicity,
+) -> Result<Instantiated, RunError> {
+    let n_atoms = topo.num_atoms();
+    let mut seq = AlgorithmSequence::new();
+    let mut initial_pairs = 0;
+    let mut position_restraints = 0;
+    let mut distance_restraints = (0, 0);
+
+    for spec in plan {
+        match spec {
+            AlgorithmSpec::RemoveCom { initial, every } => {
+                seq.push(Box::new(RemoveCOMMotion::new(*initial, *every)));
+            },
+            AlgorithmSpec::Forcefield(ff) => {
+                let built = instantiate_forcefield(ff, topo, conf, periodicity)?;
+                initial_pairs = built.initial_pairs;
+                position_restraints = built.position_restraints;
+                distance_restraints = built.distance_restraints;
+                seq.push(Box::new(built.forcefield));
+            },
+            AlgorithmSpec::Orchestrator { terms } => {
+                seq.push(instantiate_orchestrator(terms, topo, periodicity)?);
+            },
+            AlgorithmSpec::LeapFrogVelocity => seq.push(Box::new(LeapFrogVelocity::new())),
+            AlgorithmSpec::Thermostat {
+                algorithm,
+                temperature,
+                tau,
+                dof,
+            } => match algorithm {
+                ThermostatAlgorithm::Berendsen => seq.push(Box::new(
+                    BerendsenThermostat::new_single_bath(*temperature, *tau, *dof, n_atoms),
+                )),
+                ThermostatAlgorithm::NoseHoover => seq.push(Box::new(
+                    NoseHooverThermostat::new_single_bath(*temperature, *tau, *dof, n_atoms),
+                )),
+                ThermostatAlgorithm::NoseHooverChain(n) => {
+                    seq.push(Box::new(NoseHooverThermostat::new_chain_bath(
+                        *temperature,
+                        *tau,
+                        *dof,
+                        n_atoms,
+                        (*n).max(2),
+                    )))
+                },
+            },
+            AlgorithmSpec::LeapFrogPosition => seq.push(Box::new(LeapFrogPosition::new())),
+            AlgorithmSpec::Shake {
+                tolerance,
+                max_iterations,
+                solute,
+                include_solvent,
+                initial_positions,
+                initial_velocities,
+            } => {
+                let mut alg = ShakeAlgorithm::new(ShakeParameters {
+                    tolerance: *tolerance,
+                    max_iterations: *max_iterations,
+                    ntc: ConstraintSelection::ntc_mode_of(solute.ntc()),
+                });
+                alg.include_solvent = *include_solvent;
+                alg.shake_initial_positions = *initial_positions;
+                alg.shake_initial_velocities = *initial_velocities;
+                seq.push(Box::new(alg));
+            },
+            AlgorithmSpec::Settle => seq.push(Box::new(SettleAlgorithm::new())),
+            AlgorithmSpec::Lincs {
+                solute,
+                order_solute,
+                order_solvent,
+                constrain_solute,
+                constrain_solvent,
+            } => seq.push(Box::new(LincsAlgorithm::new(
+                ConstraintSelection::ntc_mode_of(solute.ntc()),
+                *order_solute,
+                *order_solvent,
+                *constrain_solute,
+                *constrain_solvent,
+            ))),
+            AlgorithmSpec::SteepestDescent {
+                tolerance,
+                step0,
+                step_max,
+                min_steps,
+                force_limit,
+            } => seq.push(Box::new(
+                SteepestDescentAlgorithm::new()
+                    .with_tolerance(*tolerance)
+                    .with_step_sizes(*step0, *step_max)
+                    .with_min_steps(*min_steps)
+                    .with_force_limit(*force_limit),
+            )),
+            AlgorithmSpec::TemperatureCalculation => {
+                seq.push(Box::new(TemperatureCalculation::new()))
+            },
+            AlgorithmSpec::PressureCalculation { virial } => {
+                seq.push(Box::new(PressureCalculation::new(virial_type(*virial))))
+            },
+            AlgorithmSpec::Barostat {
+                pressure0,
+                compressibility,
+                tau,
+            } => seq.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
+                pressure0: *pressure0,
+                compressibility: *compressibility,
+                tau: *tau,
+            }))),
+            AlgorithmSpec::EnergyCalculation => seq.push(Box::new(EnergyCalculation::new())),
+        }
+    }
+
+    Ok(Instantiated {
+        sequence: seq,
+        initial_pairs,
+        position_restraints,
+        distance_restraints,
+    })
+}
+
+fn summarize(
+    recipe: &RunRecipe,
+    plan: &[AlgorithmSpec],
+    topo: &Topology,
+    inst: &Instantiated,
+) -> BuildSummary {
+    let has_solvent = topo.num_atoms() > topo.num_solute_atoms();
+    let c = &recipe.constraints;
+    let sel = ConstraintSelection::from_codes(
+        c.solute.ntc(),
+        ConstraintAlgorithm::code(c.solute_algorithm),
+        ConstraintAlgorithm::code(c.solvent_algorithm),
+        has_solvent,
+    );
+    let mut summary = BuildSummary {
+        is_minimization: recipe.is_minimization(),
+        constraints: sel,
+        shake: None,
+        lincs_orders: (c.lincs_order_solute, c.lincs_order_solvent),
+        thermostat: None,
+        barostat: None,
+        position_restraints: inst.position_restraints,
+        distance_restraints: inst.distance_restraints,
+        initial_pairs: inst.initial_pairs,
+        parallel_nonbonded: false,
+        total_dof: total_dof(
+            topo,
+            &sel,
+            ConstraintSelection::ntc_mode_of(c.solute.ntc()),
+            recipe.boundary.ndfmin,
+        ),
+    };
+    for spec in plan {
+        match spec {
+            AlgorithmSpec::Forcefield(ff) => summary.parallel_nonbonded = ff.parallel,
+            AlgorithmSpec::Shake {
+                tolerance,
+                max_iterations,
+                solute,
+                ..
+            } => {
+                summary.shake = Some(ShakeParameters {
+                    tolerance: *tolerance,
+                    max_iterations: *max_iterations,
+                    ntc: ConstraintSelection::ntc_mode_of(solute.ntc()),
+                })
+            },
+            AlgorithmSpec::Thermostat {
+                algorithm,
+                temperature,
+                tau,
+                ..
+            } => {
+                summary.thermostat = Some(ThermostatSummary {
+                    label: match algorithm {
+                        ThermostatAlgorithm::Berendsen => "Berendsen".to_string(),
+                        ThermostatAlgorithm::NoseHoover => "Nose-Hoover".to_string(),
+                        ThermostatAlgorithm::NoseHooverChain(n) => {
+                            format!("Nose-Hoover-Chain({n})")
+                        },
+                    },
+                    temperature: *temperature,
+                    tau: *tau,
+                })
+            },
+            AlgorithmSpec::Barostat {
+                pressure0,
+                compressibility,
+                tau,
+            } => {
+                summary.barostat = Some(BarostatSummary {
+                    pressure0: *pressure0,
+                    tau: *tau,
+                    compressibility: *compressibility,
+                })
+            },
+            _ => {},
+        }
+    }
+    summary
+}
+
+/// Build a run from a recipe: plan → validate → instantiate, plus the report.
+pub fn build_sequence_from_recipe(
+    recipe: &RunRecipe,
+    prepared: &Prepared,
+    inputs: &RunInputs,
+) -> Result<Built, RunError> {
+    let topo = &prepared.topology;
+    let plan = build_plan(
+        recipe,
+        topo,
+        inputs,
+        prepared.physical_constants.four_pi_eps_i,
+    )?;
+    validate_plan(&plan)?;
+    let periodicity = periodicity_of(prepared);
+    let inst = instantiate(&plan, topo, &prepared.configuration, &periodicity)?;
+    let summary = summarize(recipe, &plan, topo, &inst);
+    Ok(Built {
+        sequence: inst.sequence,
+        recipe: recipe.clone(),
+        plan,
+        diagnostics: Diagnostics::default(),
+        summary,
+    })
+}
+
+/// Build a run from GROMOS parameters: the `.imd` front-end of [`build_sequence_from_recipe`].
 pub fn build_sequence_from_imd(
     imd: &ImdParameters,
     prepared: &Prepared,
     inputs: &RunInputs,
     options: &RunOptions,
 ) -> Result<Built, RunError> {
-    let topo = &prepared.topology;
-    let conf = &prepared.configuration;
-    let n_atoms = topo.num_atoms();
-
-    // Nonbonded interactions: CRF interior dielectric is always 1 in GROMOS.
-    let crf_params = CRFParameters::new(imd.rcutl, 1.0, imd.epsrf, imd.appak);
-    let lj_params = Forcefield::convert_lj_parameters(topo);
-
-    // Pairlist. PAIRLIST block SIZE; 0.0 means "auto" and is resolved by the cell-list
-    // algorithm to half the short cutoff, as gromosXX does.
-    let mut pairlist = PairlistContainer::new(imd.rcutp, imd.rcutl, 0.0);
-    pairlist.update_frequency = imd.nsnb;
-    pairlist.grid_size = imd.size;
-
-    let periodicity = periodicity_of(prepared);
-    let box_type = match &periodicity {
-        Periodicity::Rectangular(_) => BoxType::Rectangular,
-        Periodicity::Triclinic(_) => BoxType::Triclinic,
-        Periodicity::Vacuum(_) => BoxType::Vacuum,
-    };
-    let pairlist_algorithm = PairlistAlgorithm::from_imd(
-        imd.algorithm,
-        n_atoms,
-        box_type,
-        !topo.chargegroups.is_empty(),
-        imd.type_,
-    );
-    pairlist_algorithm.update(topo, conf, &mut pairlist, &periodicity);
-    let initial_pairs = pairlist.total_pairs();
-
-    let restraints = load_restraints(imd, inputs, &conf.current().pos)?;
-    let position_restraints = restraints
-        .position
-        .as_ref()
-        .map(|p| p.restraints.len())
-        .unwrap_or(0);
-    let distance_restraints = restraints
-        .distance
-        .as_ref()
-        .map(|(d, p)| (d.restraints.len(), p.restraints.len()))
-        .unwrap_or((0, 0));
-
-    let is_minimization = imd.ntem > 0;
-    let has_solvent = n_atoms > topo.num_solute_atoms();
-    let constraints = ConstraintSelection::from_imd(imd, has_solvent);
-    let ntc_mode = ConstraintSelection::ntc_mode(imd);
-    let dof = total_dof(topo, &constraints, ntc_mode, imd.ndfmin);
-    let parallel_nonbonded = options.parallel.resolve(n_atoms);
-
-    // Forcefield (bonded + nonbonded), shared by both branches.
-    let mut forcefield = Forcefield::new(
-        lj_params,
-        crf_params,
-        periodicity,
-        pairlist,
-        pairlist_algorithm,
-    );
-    // Constants from the topology's PHYSICALCONSTANTS block (mirrors gromosXX).
-    forcefield.four_pi_eps_i = prepared.physical_constants.four_pi_eps_i;
-    forcefield.ntf_bond = imd.ntf[0] != 0;
-    forcefield.ntf_angle = imd.ntf[1] != 0;
-    forcefield.ntf_improper = imd.ntf[2] != 0;
-    forcefield.ntf_dihedral = imd.ntf[3] != 0;
-    forcefield.parallel_nonbonded = parallel_nonbonded;
-    if !topo.solvent_atom_template.is_empty() {
-        forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
-    }
-    // The binary only configures the virial for dynamics with pressure coupling.
-    if !is_minimization && imd.couple_pressure {
-        forcefield.virial_type = virial_type(imd);
-    }
-    if let Some(pr) = restraints.position {
-        forcefield.position_restraints = pr;
-    }
-    if let Some((dr, pdr)) = restraints.distance {
-        forcefield.distance_restraints = dr;
-        forcefield.perturbed_distance_restraints = pdr;
-        forcefield.lambda = imd.rlam;
-    }
-    if imd.ntg != 0 {
-        forcefield.lambda_and_derivative = imd.lambda_and_derivative();
-        forcefield.lambda_exp = imd.nlam;
-        forcefield.global_alphlj = imd.alphlj;
-        forcefield.global_alphc = imd.alphc;
-    }
-
-    let mut seq = AlgorithmSequence::new();
-    let shake;
-    let mut thermostat = None;
-    let mut barostat = None;
-
-    if is_minimization {
-        // Forcefield → SteepestDescent → constraints → EnergyCalculation. GROMOS applies
-        // constraints during minimisation too; no TemperatureCalculation (E_total = E_pot).
-        seq.push(Box::new(forcefield));
-        seq.push(Box::new(
-            SteepestDescentAlgorithm::new()
-                .with_tolerance(imd.dele)
-                .with_step_sizes(imd.dx0, imd.dxm)
-                .with_min_steps(imd.nmin)
-                .with_force_limit(imd.flim),
-        ));
-        shake = push_constraint_algorithms(&mut seq, imd, &constraints);
-        seq.push(Box::new(EnergyCalculation::new()));
-    } else {
-        // 1. COM motion removal (GROMOS: first in sequence, before the forcefield).
-        if imd.nticom >= 1 || imd.nscm != 0 {
-            seq.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
-        }
-        // 2. Forcefield.
-        seq.push(Box::new(forcefield));
-        // 3. Leap-frog velocity step.
-        seq.push(Box::new(LeapFrogVelocity::new()));
-        // 3b. Thermostat between the velocity and position updates (GROMOS convention).
-        //     MULTIBATH algorithm: 0 → Berendsen, 1 → Nosé-Hoover, N ≥ 2 → NH chain of length N.
-        let bath = imd.temp_bath.first();
-        let temperature = bath.and_then(|b| b.temp0.first().copied()).unwrap_or(300.0);
-        let tau = bath.and_then(|b| b.tau.first().copied()).unwrap_or(-1.0);
-        if tau > 0.0 {
-            let algorithm = bath.map(|b| b.algorithm).unwrap_or(0);
-            let nhc_chain = bath.map(|b| b.nhc_chain).unwrap_or(1);
-            let label = match algorithm {
-                0 => {
-                    seq.push(Box::new(BerendsenThermostat::new_single_bath(
-                        temperature,
-                        tau,
-                        dof,
-                        n_atoms,
-                    )));
-                    "Berendsen".to_string()
-                },
-                1 => {
-                    seq.push(Box::new(NoseHooverThermostat::new_single_bath(
-                        temperature,
-                        tau,
-                        dof,
-                        n_atoms,
-                    )));
-                    "Nose-Hoover".to_string()
-                },
-                n => {
-                    let chain = (n as usize).max(nhc_chain).max(2);
-                    seq.push(Box::new(NoseHooverThermostat::new_chain_bath(
-                        temperature,
-                        tau,
-                        dof,
-                        n_atoms,
-                        chain,
-                    )));
-                    format!("Nose-Hoover-Chain({n})")
-                },
-            };
-            thermostat = Some(ThermostatSummary {
-                label,
-                temperature,
-                tau,
-            });
-        }
-        // 4. Leap-frog position step.
-        seq.push(Box::new(LeapFrogPosition::new()));
-        // 5. Constraints.
-        shake = push_constraint_algorithms(&mut seq, imd, &constraints);
-        // 6. Temperature / kinetic energy.
-        seq.push(Box::new(TemperatureCalculation::new()));
-        // 7. Pressure calculation and barostat (PRESSURESCALE).
-        if imd.couple_pressure {
-            seq.push(Box::new(PressureCalculation::new(virial_type(imd))));
-            let pp = imd.pressure_parameters.as_ref();
-            let params = BerendsenBarostatParams {
-                pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
-                compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
-                tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
-            };
-            barostat = Some(BarostatSummary {
-                pressure0: params.pressure0,
-                tau: params.tau,
-                compressibility: params.compressibility,
-            });
-            seq.push(Box::new(BerendsenBarostat::new(params)));
-        }
-        // 8. Energy finalisation.
-        seq.push(Box::new(EnergyCalculation::new()));
-    }
-
-    Ok(Built {
-        sequence: seq,
-        summary: BuildSummary {
-            is_minimization,
-            constraints,
-            shake,
-            lincs_orders: (imd.lincs_order_solute, imd.lincs_order_solvent),
-            thermostat,
-            barostat,
-            position_restraints,
-            distance_restraints,
-            initial_pairs,
-            parallel_nonbonded,
-            total_dof: dof,
-        },
-    })
+    let (mut recipe, diagnostics) = RunRecipe::from_imd_with(imd, &options.passthrough)?;
+    recipe.execution.parallel = options.parallel;
+    let mut built = build_sequence_from_recipe(&recipe, prepared, inputs)?;
+    built.diagnostics = diagnostics;
+    Ok(built)
 }
 
 /// Initialise the sequence and run step 0 (the initial force evaluation — GROMOS convention).
@@ -487,4 +621,143 @@ pub fn start(
             step: state.step,
             message: e.to_string(),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    //! The recipe path must be **bit-identical** to the step-1 builder it replaced, on every
+    //! reference system (the Rust-side A/B PLAN.md 3.9 step 2 promised).
+
+    use std::path::{Path, PathBuf};
+
+    use gromos_core::algorithm::SimulationState;
+    use gromos_io::{
+        coordinate::read_coordinates,
+        imd::read_imd_file,
+        topology::{build_topology, read_topology_file},
+    };
+
+    use super::*;
+    use crate::{legacy_builder::legacy_build_sequence, prepare_system, Coordinates};
+
+    fn refs() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../gromos-md/tests/gromosXX_references")
+    }
+
+    fn toml_str(text: &str, key: &str) -> Option<String> {
+        text.lines().find_map(|l| {
+            let l = l.trim();
+            l.strip_prefix(&format!("{key} = "))
+                .map(|v| v.trim().trim_matches('"').to_string())
+        })
+    }
+
+    struct Loaded {
+        imd: ImdParameters,
+        inputs: RunInputs,
+        prepare: Box<dyn Fn() -> Prepared>,
+    }
+
+    fn load(dir: &Path) -> Option<Loaded> {
+        let toml = std::fs::read_to_string(dir.join("input.toml")).ok()?;
+        let path = |key: &str| toml_str(&toml, key).map(|v| dir.join(v));
+        let topo_path = path("topology")?;
+        let conf_path = path("configuration")?;
+        let imd = read_imd_file(path("parameters")?).ok()?;
+        let inputs = RunInputs {
+            pttopo: path("pttopo"),
+            posresspec: path("posresspec"),
+            refpos: path("refpos"),
+            distrest: path("distrest"),
+        };
+        let imd2 = imd.clone();
+        let inputs2 = inputs.clone();
+        let prepare = Box::new(move || {
+            let parsed = read_topology_file(&topo_path).expect("topology");
+            let pc = parsed.physical_constants;
+            let topo = build_topology(parsed);
+            let coords: Coordinates = read_coordinates(&conf_path).expect("conf").into();
+            prepare_system(&imd2, topo, pc, coords, &inputs2).expect("prepare_system")
+        });
+        Some(Loaded {
+            imd,
+            inputs,
+            prepare,
+        })
+    }
+
+    /// Run `steps` steps and return every number a parity comparison cares about.
+    fn run(mut prepared: Prepared, mut seq: AlgorithmSequence, dt: f64, steps: usize) -> Vec<f64> {
+        let topo = prepared.topology;
+        let conf = &mut prepared.configuration;
+        let mut state = SimulationState::new(dt, steps);
+        start(&mut seq, &topo, conf, &state).expect("start");
+        state.advance();
+        for _ in 0..steps {
+            seq.run_step(&topo, conf, &state).expect("run_step");
+            state.advance();
+        }
+        let old = conf.old();
+        let mut out = vec![
+            old.energies.total(),
+            old.energies.kinetic_total,
+            old.energies.potential_total,
+        ];
+        out.extend(old.pos.iter().flat_map(|v| [v.x, v.y, v.z]));
+        out.extend(old.force.iter().flat_map(|v| [v.x, v.y, v.z]));
+        out
+    }
+
+    #[test]
+    fn plan_matches_legacy_builder_bit_for_bit() {
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(refs())
+            .expect("reference dir")
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir() && p.join("input.toml").exists())
+            .collect();
+        dirs.sort();
+        assert!(dirs.len() >= 40);
+        let options = RunOptions::default();
+        let mut compared = 0;
+        for dir in dirs {
+            let name = dir.file_name().unwrap().to_string_lossy().to_string();
+            let Some(loaded) = load(&dir) else { continue };
+            let steps = loaded.imd.nstlim.min(10);
+            let dt = loaded.imd.dt;
+
+            let p_legacy = (loaded.prepare)();
+            let legacy = legacy_build_sequence(&loaded.imd, &p_legacy, &loaded.inputs, &options)
+                .unwrap_or_else(|e| panic!("{name}: legacy builder: {e}"));
+            let legacy_names: Vec<String> = legacy
+                .sequence
+                .algorithm_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let a = run(p_legacy, legacy.sequence, dt, steps);
+
+            let p_new = (loaded.prepare)();
+            let built = build_sequence_from_imd(&loaded.imd, &p_new, &loaded.inputs, &options)
+                .unwrap_or_else(|e| panic!("{name}: recipe builder: {e}"));
+            let new_names: Vec<String> = built
+                .sequence
+                .algorithm_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_eq!(new_names, legacy_names, "{name}: sequences differ");
+            let b = run(p_new, built.sequence, dt, steps);
+
+            assert_eq!(a.len(), b.len(), "{name}");
+            for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+                assert!(
+                    x.to_bits() == y.to_bits(),
+                    "{name}: value {i} differs after {steps} steps: {x:e} vs {y:e}"
+                );
+            }
+            compared += 1;
+        }
+        assert!(compared >= 40, "only {compared} systems compared");
+    }
 }

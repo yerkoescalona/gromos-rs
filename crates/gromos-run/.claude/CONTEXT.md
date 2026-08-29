@@ -11,12 +11,19 @@ gromos-core, gromos-forces, gromos-integrators, gromos-io. No clap/log/env_logge
 
 ## Outputs
 ```
-prepare_system(imd, topology, physical_constants, coords, &RunInputs)  -> Prepared   (+ notes)
-build_sequence_from_imd(imd, &Prepared, &RunInputs, &RunOptions)       -> Built { sequence, summary }
-start(&mut sequence, &topo, &mut conf, &state)                         -> init + step 0
-total_dof(topo, &ConstraintSelection, ntc, ndfmin)                     -> the one DOF formula
-periodicity_of(&Prepared)                                              -> Periodicity
-RunError                                                                -> every failure, as data
+RunRecipe::from_imd(&ImdParameters)          -> (RunRecipe, Diagnostics)   the .imd front-end
+RunRecipe::to_imd() / to_imd_string(n_atoms) -> ImdParameters / .imd text  (gromosXX-readable)
+RunRecipe::{to_toml,from_toml,to_json,from_json}, ::{nve,nvt,npt,minimize}
+prepare_system(imd, topology, physical_constants, coords, &RunInputs)  -> Prepared (+ notes)
+build_plan(&RunRecipe, &Topology, &RunInputs, four_pi_eps_i)          -> Vec<AlgorithmSpec>  stage 1
+validate_plan(&[AlgorithmSpec])                                         -> ordering invariants  (G9)
+instantiate(&[AlgorithmSpec], &Topology, &Configuration, &Periodicity) -> Instantiated         stage 2
+                                                                           (reads ONLY the plan, G8)
+build_sequence_from_recipe / build_sequence_from_imd                    -> Built { sequence, recipe, plan, diagnostics, summary }
+start(&mut sequence, &topo, &mut conf, &state)                          -> init + step 0        stage 3
+total_dof(topo, &ConstraintSelection, ntc, ndfmin)                      -> the one DOF formula
+AlgorithmSpec::{KINDS, name, examples, rules}, TermSpec::{KINDS, name, examples, feature}
+RunError                                                                 -> every failure, as data
 ```
 
 ## Status
@@ -28,9 +35,19 @@ RunError                                                                -> every
   that now also counts solute constraints (no reference combines NTC>1 with a live thermostat, so
   no reference moved). FEP reaches Python through `Topology::apply_perturbation` (gromos-core) +
   `RunInputs.pttopo` (binary).
-- Step 2 (next): `RunRecipe` + `AlgorithmSpec` plan in front of this (`recipe.rs`, `plan.rs`),
-  `validate_plan`, `instantiate` that reads only the plan, presence-aware IMD parsing +
-  `Diagnostics`, `to_imd`. See PLAN.md 3.9 for the full checklist and gates.
+- **PLAN.md 3.9 step 2 ✓ (2026-08-29)** — the recipe is in front of the builder:
+  `recipe.rs` (`RunRecipe`, lossless for every modelled `.imd` block, serde with
+  `deny_unknown_fields`, `version`, `passthrough` allowlist, `Diagnostics`), `plan.rs`
+  (`AlgorithmSpec` fully resolved, `build_plan`, `validate_plan` with per-kind `KindRules`,
+  `TermSpec` with `coupling`), `build.rs` (`instantiate` takes no recipe; `start`). The
+  `.imd` parser (gromos-io) became lossless (`ntirtc`, `ntisti`, `ntwse/ntwg/ntwb`, `ntpp`,
+  `ncyc`, `ntcs0`, DOF sets, PRESSURESCALE couple/SEMI, NONBONDED lattice-sum lines) and strict
+  (garbage numbers are errors naming block and token), `write_imd` exists, and the defaults
+  mean "absent" (no MULTIBATH → no bath; no COMTRANSROT → `nscm = 0`, gromosXX `parameter.h`).
+  `legacy_builder.rs` (`cfg(test)`) is the frozen step-1 builder: `build::tests::
+  plan_matches_legacy_builder_bit_for_bit` proves the recipe path identical on all 41 references.
+- Step 3 (next): Python `Recipe`/`Term`/`Algorithm` over this data (pythonize), shims for the
+  factories/kwargs/presets, `gromos.exceptions`. See PLAN.md 3.9.
 
 ## Key files
 ```

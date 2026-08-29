@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.29] (2026-08-29)
+
+### Added
+
+- **`RunRecipe` — the run as plain data (PLAN.md 3.9 step 2).** `gromos-run` now builds every
+  run from a versioned, serde-serialisable recipe: `.imd` → `RunRecipe::from_imd` →
+  `build_plan` → `Vec<AlgorithmSpec>` (fully resolved) → `validate_plan` → `instantiate` (reads
+  only the plan) → `start`. The `md` binary and `Simulation` both go through it; a frozen copy of
+  the step-1 builder is the test oracle and the recipe path is bit-identical to it on all 41
+  reference systems. `md @dump` prints recipe + plan as JSON; `md` writes `<tre>.recipe.toml`
+  with the parser diagnostics; `Simulation.recipe_toml` / `.plan_json` / `.diagnostics`.
+- `.imd` **writer** (`gromos_io::imd_write::write_imd`) and a lossless, strict parser: every
+  field of every modelled block round-trips exactly (multi-line TITLE, NTIRTC/NTISTI, NTWSE/NTWG/
+  NTWB, NTPP, NCYC, NTCS0, DOF sets, PRESSURESCALE COUPLE/SEMI, NONBONDED lattice-sum lines;
+  NTWV/NTWF are frequencies, not booleans), and a malformed number is an error naming the block
+  and token instead of a silent 0. `parse_imd_str` for in-memory text.
+- `scripts/roundtrip_imd_gromosXX.py`: feeds every rewritten `.imd` to the real gromosXX —
+  **40/40** accepted and reproducing a fresh run of the original exactly. It caught two writer
+  defects a Rust round trip could not (fused columns; an invented "off" DISTANCERES block that
+  gromosXX validates).
+- `validate_plan`: GROMOS ordering invariants as per-kind rules (one `forcefield`, `orchestrator`
+  right after it, `energy_calculation` last, steepest descent excludes the dynamics kinds,
+  barostat requires the pressure calculation, a term without a virial cannot meet a barostat,
+  `coupling=replace` rejected until the zone-aware Forcefield exists).
+
+### Fixed
+
+- **An `.imd` without a MULTIBATH block no longer runs a Berendsen bath**: the parameter defaults
+  now mean "block absent" (no bath; `nscm = 0` for a missing COMTRANSROT, as gromosXX's
+  `parameter.h`), so `water_216_nve_nobath` passes in both suites and is no longer ignored.
+- More than one temperature bath is a named error (`build_plan`) instead of a silent truncation
+  to the first bath.
+
 ## [0.0.28] (2026-08-29)
 
 ### Added

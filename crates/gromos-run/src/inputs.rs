@@ -6,9 +6,12 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 /// Paths of the optional GROMOS input files — the `md` binary's `@pttopo`, `@posresspec`,
 /// `@refpos` and `@distrest` flags.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct RunInputs {
     /// Perturbation topology (`.ptp`); only read when `NTG != 0`.
     pub pttopo: Option<PathBuf>,
@@ -25,7 +28,8 @@ pub struct RunInputs {
 /// A platform concern, not physics: the parallel kernels are reference-verified at the suite
 /// tolerance (1e-8) and bit-identical run-to-run at a fixed thread count, but differ from the
 /// serial kernels in the last digit (BENCHMARKING.md, "Kernel determinism").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ParallelPolicy {
     /// What the `md` binary has always done: parallel above 100 atoms.
     #[default]
@@ -48,7 +52,11 @@ impl ParallelPolicy {
 }
 
 /// Execution options that are not part of the physics description.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct RunOptions {
     pub parallel: ParallelPolicy,
+    /// Unmodelled `.imd` blocks this caller accepts as passthrough (PLAN.md 3.9 A17). The
+    /// binary allows `GAMD`/`EDS` because it applies them itself; the Python binding allows none.
+    pub passthrough: crate::recipe::PassthroughPolicy,
 }

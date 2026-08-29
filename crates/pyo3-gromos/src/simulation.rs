@@ -69,10 +69,14 @@ pub(crate) fn run_err(e: RunError) -> PyErr {
         | RunError::AtomCountMismatch { .. }
         | RunError::SolventCount { .. }
         | RunError::Inconsistent(_)
-        | RunError::Validation { .. } => {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
-        },
-        RunError::Init(_) | RunError::Step { .. } => {
+        | RunError::Validation { .. }
+        | RunError::UnknownBlock { .. }
+        | RunError::Recipe(_)
+        | RunError::InvalidPlan(_)
+        | RunError::Serde(_) => PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()),
+        // A term needing a feature this build lacks — the same RuntimeError the
+        // `ml_potential=` kwarg raised on a non-`ml` build.
+        RunError::MissingFeature { .. } | RunError::Init(_) | RunError::Step { .. } => {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
         },
     }
@@ -166,6 +170,9 @@ fn build_simulation(
 
     let gromos_run::Built {
         sequence: mut md_sequence,
+        recipe,
+        plan,
+        diagnostics,
         summary,
     } = built;
     let gromos_run::Prepared {
@@ -220,6 +227,9 @@ fn build_simulation(
         dt: imd.dt,
         n_atoms,
         total_dof: summary.total_dof,
+        recipe: Some(recipe),
+        plan: Some(plan),
+        diagnostics: diagnostics.notes,
     })
 }
 
@@ -274,6 +284,9 @@ fn build_simulation_from_sequence(
         dt: imd.dt,
         n_atoms,
         total_dof,
+        recipe: None,
+        plan: None,
+        diagnostics: Vec::new(),
     })
 }
 
@@ -301,6 +314,12 @@ pub struct PySimulation {
     /// at build time by `gromos_run::total_dof` and reused for `temperature` —
     /// the same value the thermostat (if any) couples to.
     total_dof: f64,
+    /// The run recipe this simulation was built from (`None` on the descriptor path).
+    recipe: Option<gromos_run::RunRecipe>,
+    /// The algorithm plan (`None` on the descriptor path).
+    plan: Option<Vec<gromos_run::AlgorithmSpec>>,
+    /// What `from_imd` defaulted or passed through.
+    diagnostics: Vec<String>,
 }
 
 #[pymethods]
@@ -518,6 +537,34 @@ impl PySimulation {
             .iter()
             .map(|s| s.to_string())
             .collect()
+    }
+
+    /// The effective run recipe as TOML — every value the engine actually used, the same
+    /// text the `md` binary writes next to its `.tre` (PLAN.md 3.9). `None` for a simulation
+    /// built from a hand-made `AlgorithmSequence`.
+    #[getter]
+    fn recipe_toml(&self) -> PyResult<Option<String>> {
+        self.recipe
+            .as_ref()
+            .map(|r| r.to_toml().map_err(run_err))
+            .transpose()
+    }
+
+    /// The algorithm plan as JSON (one entry per algorithm, fully resolved). `None` for a
+    /// simulation built from a hand-made `AlgorithmSequence`.
+    #[getter]
+    fn plan_json(&self) -> PyResult<Option<String>> {
+        self.plan
+            .as_ref()
+            .map(|p| gromos_run::plan_to_json(p).map_err(run_err))
+            .transpose()
+    }
+
+    /// Notes from reading the parameters: which optional blocks were absent (and what that
+    /// means), which blocks passed through. Empty when nothing was defaulted.
+    #[getter]
+    fn diagnostics(&self) -> Vec<String> {
+        self.diagnostics.clone()
     }
 
     // -- Phase-space getters -------------------------------------------------
