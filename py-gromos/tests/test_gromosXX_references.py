@@ -242,6 +242,7 @@ REFERENCE_SYSTEMS = [
     "water_1000_spc_gridcell",
     # Level 3: Bulk
     "water_216_box",
+    "water_216_nve_nobath",
     "water_216_box_com",
     "water_216_box_com_rot",
     "water_216_nvt",
@@ -279,13 +280,35 @@ REFERENCE_SYSTEMS = [
 # rather than dropped from REFERENCE_SYSTEMS entirely.
 POSITION_MISMATCH_SYSTEMS = {"aladip_trunc_oct", "aladip_vacuum_em"}
 
+# Systems whose gromos-rs result is known to be WRONG against a correct reference — an engine
+# defect, not a binding gap. `strict=True` so the fix is noticed and the entry removed.
+# `water_216_nve_nobath`: the IMD has no MULTIBATH block; gromosXX then runs no temperature
+# coupling, but `read_imd_file` keeps `TempBathParameters::default()` (Berendsen, 300 K,
+# tau 0.1) and every gromos-rs path silently thermostats (PLAN.md 3.9 A18, fixed by step 2).
+EXPECTED_ENGINE_FAILURES = {
+    "water_216_nve_nobath": "absent MULTIBATH silently enables a Berendsen bath — PLAN.md 3.9 A18",
+}
+
+REFERENCE_PARAMS = [
+    pytest.param(
+        s,
+        id=s,
+        marks=(
+            [pytest.mark.xfail(strict=True, reason=EXPECTED_ENGINE_FAILURES[s])]
+            if s in EXPECTED_ENGINE_FAILURES
+            else []
+        ),
+    )
+    for s in REFERENCE_SYSTEMS
+]
+
 
 # ============================================================================
 # Energy tests — through Python Simulation API
 # ============================================================================
 
 
-@pytest.mark.parametrize("system_name", REFERENCE_SYSTEMS)
+@pytest.mark.parametrize("system_name", REFERENCE_PARAMS)
 def test_reference_energies(system_name):
     """Compare energies from gromos.Simulation against gromosXX reference."""
     system_dir = REF_DIR / system_name
@@ -351,7 +374,7 @@ def test_reference_energies(system_name):
 # ============================================================================
 
 
-@pytest.mark.parametrize("system_name", REFERENCE_SYSTEMS)
+@pytest.mark.parametrize("system_name", REFERENCE_PARAMS)
 def test_reference_positions(system_name):
     """Compare positions from gromos.Simulation against gromosXX reference."""
     if system_name in POSITION_MISMATCH_SYSTEMS:
@@ -409,7 +432,7 @@ def test_reference_positions(system_name):
 # ============================================================================
 
 
-@pytest.mark.parametrize("system_name", REFERENCE_SYSTEMS)
+@pytest.mark.parametrize("system_name", REFERENCE_PARAMS)
 def test_reference_forces(system_name):
     """Compare forces from gromos.Simulation against gromosXX reference."""
     system_dir = REF_DIR / system_name
@@ -602,6 +625,16 @@ def test_steepest_descent_via_algorithm_sequence():
     potential = frames[:, 2]
     assert np.all(np.isfinite(potential))
     assert potential[-1] < potential[0]
+
+    # Names agreeing is not parity (FUTURE.md's trap, PLAN.md 3.9 step 0): the composable
+    # path must produce the *same numbers* as the direct path, exactly.
+    sim_direct = Simulation(system, params)
+    frames_direct = sim_direct.run(30, ene_freq=1)
+    assert np.array_equal(frames_direct, frames), (
+        "AlgorithmSequence.from_parameters and Simulation(system, params) disagree on "
+        "aladip_vacuum EM energies"
+    )
+    assert np.array_equal(sim_direct.positions, sim.positions)
 
 
 def test_volume_and_pressure_getters():

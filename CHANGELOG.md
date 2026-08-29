@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.27] (2026-08-29)
+
+### Added
+
+- **PLAN.md 3.9 step 0 — front-end parity measured before any refactor.**
+  `py-gromos/tests/test_front_end_parity.py`: every reference system through `Simulation(...)` and
+  through `AlgorithmSequence.from_parameters(...)`, compared with `np.array_equal` (never a
+  tolerance) on per-step energies, final positions and forces, plus a `same_path_twice` determinism
+  baseline. Result: 27/37 systems bit-identical between the two builders; the 10 divergences
+  (SETTLE, LINCS ×2, Nosé-Hoover ×2, NTICOM=2 rotation removal, truncated-octahedron box,
+  restraints ×3) are `xfail(strict=True)` entries naming the missing feature, mirrored in PLAN.md
+  3.9's divergence table.
+- New gromosXX reference `water_216_nve_nobath` (generated with the CODATA-patched
+  `.local/gromosXX/md++/BUILD/program/md`, the only build that reproduces the committed references
+  bit-for-bit): `water_216_box` with the MULTIBATH block absent. gromosXX runs no temperature
+  coupling; gromos-rs's IMD parser keeps `TempBathParameters::default()` and silently thermostats.
+  Registered as an ignored test (Rust) / strict xfail (Python) until PLAN.md 3.9 step 2 makes the
+  parser presence-aware.
+- `scripts/kernel_determinism.py` — run-to-run and thread-count determinism of the `md` binary
+  (n = 3): bit-identical run-to-run at a fixed thread count; 1 vs 8 threads differ at ~1e-13
+  relative. Recorded in BENCHMARKING.md ("Kernel determinism").
+
+### Changed
+
+- `test_steepest_descent_via_algorithm_sequence` compares energies and positions between the two
+  builders, not only algorithm names.
+- PLAN.md: finished items condensed to their load-bearing decisions (full notes moved verbatim to
+  the new `PLAN_ARCHIVE.md`); 3.8 audit extended with verified engine divergences; 3.9 rewritten as
+  a checkable plan (assumptions A1–A19, drift guards G1–G10, steps 0–5 with gates) after a
+  five-perspective review — OpenMM, GROMACS, HOOMD-blue, ASE/i-PI/PLUMED, Polars/pyo3 — archived in
+  `PLAN_ARCHIVE.md` §3.9-review.
+
+### Known engine defects recorded (not yet fixed)
+
+- An `.imd` without a MULTIBATH block runs a Berendsen bath at 300 K, τ = 0.1, in both the `md`
+  binary and Python; every builder also reads only `temp_bath[0]`, so multi-bath inputs are
+  truncated. Fix scheduled in PLAN.md 3.9 step 2 (A18).
+
 ## [0.0.26] (2026-08-29)
 
 ### Performance

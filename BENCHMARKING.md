@@ -613,6 +613,31 @@ threads: 1.13× → 1.25× → 1.29× → 1.38×. 8-core speedup 4.1× (E = 0.52
 3.4× (E = 0.42) for gromosXX; the serial remainder in both is SHAKE, integration and the
 thermostat, plus per-step memory traffic on 24 000 atoms.
 
+### Kernel determinism (PLAN.md 3.9 step 0, 2026-08-29)
+
+Measured with `scripts/kernel_determinism.py` (release `md`, `RAYON_NUM_THREADS` = 1 and 8,
+**n = 3 runs per thread count**, every ENERTRJ column over every step compared exactly). Question
+(PLAN.md 3.9 A2/A3): the parallel nonbonded kernels reduce through rayon `fold/reduce`
+(`innerloops.rs`) — is the result reproducible run-to-run, and is it thread-count independent?
+
+| system | comparison | n pairs | bit-identical | worst column | max abs Δ (kJ/mol) | max rel Δ |
+|---|---|---|---|---|---|---|
+| water_216_box (100 steps) | 1 thr vs 1 thr, run-to-run | 3 | yes | — | 0 | 0 |
+| water_216_box (100 steps) | 8 thr vs 8 thr, run-to-run | 3 | yes | — | 0 | 0 |
+| water_216_box (100 steps) | 1 thr vs 8 thr | 9 | no | angle | 1.0e-10 | 1.6e-13 |
+| ch4_water_fep (50 steps) | 1 thr vs 1 thr, run-to-run | 3 | yes | — | 0 | 0 |
+| ch4_water_fep (50 steps) | 8 thr vs 8 thr, run-to-run | 3 | yes | — | 0 | 0 |
+| ch4_water_fep (50 steps) | 1 thr vs 8 thr | 9 | no | kinetic | 1.0e-9 | 2.7e-13 |
+
+Reading: at a fixed thread count the reduction tree is stable in practice (`par_chunks` with
+`len / threads` chunks merged by `reduce`), so results are reproducible; across thread counts the
+chunking — hence the summation order — changes, and the difference sits in the last printed digit
+(~1e-13 relative, five orders below the 1e-8 reference tolerance). Consequence for the front-end
+parity tests (PLAN.md 3.9 G2): pinning the thread count is sufficient for exact (`==`) same-build
+comparisons; `execution.parallel = Serial` remains the documented, stronger setting. The Python path
+is serial today (`build_simulation` never sets `parallel_nonbonded`); `same_path_twice` in
+`py-gromos/tests/test_front_end_parity.py` is bit-identical on all 37 reference systems.
+
 
 ## 6. Phase 4 — MPI: first make it exist, then make it correct, then time it
 
