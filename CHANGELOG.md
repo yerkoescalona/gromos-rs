@@ -20,6 +20,11 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   booked in their own `.tre` columns instead of all in `bond_total` — totals were right, columns
   were not (`ForceEnergyLambda` carries the split). In the `aladip_vacuum_fep` bisection the
   angle-, improper- and dihedral-only cases are now exact against gromosXX.
+- A perturbation topology whose only content is soft-core bonded terms (`PERTBONDSOFT`,
+  `PERTANGLESOFT`, `PERTIMPROPERDIHSOFT`) or perturbed atom pairs counted as *empty*
+  (`PerturbedSolute::is_empty` ignored those lists): the regular term was removed from the topology
+  and nothing replaced it. Every soft bonded case of the `aladip_vacuum_fep` bisection is now exact
+  against gromosXX (the soft-core formulas themselves were already right).
 - The perturbed nonbonded derivative is split into its LJ and CRF parts
   (`PertNBCorrection::dhdl_lj/dhdl_crf`, `Energy::dhdl_lj/dhdl_crf/dhdl_bonded`), so the `.trg`
   carries the same per-term derivatives gromosXX writes.

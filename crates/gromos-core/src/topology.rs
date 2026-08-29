@@ -557,12 +557,19 @@ impl PerturbedSolute {
     }
 
     /// Returns `true` if no perturbed atoms or bonded terms have been added.
+    /// No perturbation of any kind — every list, including the soft-core bonded terms and the
+    /// perturbed atom pairs (a `.ptp` with only `PERTBONDSOFT` used to count as empty, so its
+    /// soft bonds were never evaluated: the regular bond was removed and nothing replaced it).
     pub fn is_empty(&self) -> bool {
         self.atoms.is_empty()
+            && self.atom_pairs.is_empty()
             && self.bonds.is_empty()
             && self.angles.is_empty()
             && self.proper_dihedrals.is_empty()
             && self.improper_dihedrals.is_empty()
+            && self.soft_bonds.is_empty()
+            && self.soft_angles.is_empty()
+            && self.soft_impropers.is_empty()
     }
 }
 

@@ -239,11 +239,12 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
   gromosXX (scratch, not committed): unperturbed run exact; `PERTBONDSTRETCH` exact; perturbed angle /
   improper / proper-dihedral energies were booked into the bond slot — **fixed the same day**
   (`ForceEnergyLambda` per-term slots; the `angles`/`impropers`/`dihedrals` cases are now exact).
-  Still open: soft bond/angle/improper energies differ slightly (real formula differences — bond
-  19.35589 vs 19.35461, angle 12.63284 vs 12.37053, improper 1.46587 vs 1.32966); `PERTATOMPARAM`
-  (charged, λ-mixed masses) differs in LJ, CRF *and* kinetic (mass-mixing convention); `PERTATOMPAIR`
-  differs in LJ. Fix order: charged perturbed RF (also closes `meoh_water_fep`) → atom pairs → soft
-  bonded → masses.
+  Soft bond/angle/improper: **fixed the same day** — not a formula difference (a Python replica of
+  gromosXX's soft-core formulas reproduced its numbers to all digits) but `PerturbedSolute::is_empty`
+  ignoring the soft lists, so a soft-only `.ptp` removed the regular term and evaluated nothing; every
+  bonded case (regular and soft, absent or same B state) is now exact. Still open: `PERTATOMPARAM`
+  (charged, λ-mixed masses) differs in LJ, CRF *and* kinetic; `PERTATOMPAIR` differs in LJ. Fix order:
+  charged perturbed nonbonded (also closes `meoh_water_fep`) → atom pairs → masses.
 
 **1.8 — Virtual atoms** — skip for now; not blocking any common use case
 - [ ] Port `algorithm/virtualatoms/` (aromatic centroids, lone pairs, TIP4P site)
