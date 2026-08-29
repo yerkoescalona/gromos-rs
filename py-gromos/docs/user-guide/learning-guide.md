@@ -27,12 +27,16 @@ PLAN.md 3.9 step 4 — `Simulation` is the way to run MD from Python.
 py-gromos/
 ├── python/gromos/
 │   ├── __init__.py        ← re-exports working names; the module contract
-│   ├── gromos.pyi         ← type stubs for the Rust extension
-│   ├── analysis.py        ← future analysis wrappers (mostly stub)
+│   ├── gromos.pyi         ← type stubs for the Rust extension (stubtest-clean)
+│   ├── exceptions.py      ← RecipeError / PlanError / MissingFeatureError / RunError
+│   ├── timeseries.py      ← EnergyTimeseries over run()'s array
+│   ├── analysis.py        ← future analysis wrappers (mostly stub; explicit import)
 │   └── system_builder.py  ← future system-builder design sketch
 ├── tests/
-│   ├── test_basic.py                  ← unit tests for Vec3, Energy, Frame, rmsd, rdf
-│   └── test_gromosXX_references.py    ← 21-system reference validation suite
+│   ├── test_gromosXX_references.py    ← 40-system reference validation suite (the Recipe front-end)
+│   ├── test_front_end_parity.py       ← every front-end against every other, exact equality
+│   ├── test_recipe.py                 ← Recipe / Term / Plan / bundles / deprecation shims
+│   └── test_xtb_term.py               ← the QM term's physics oracle (skips without xtb)
 └── docs/                  ← this documentation
 ```
 

@@ -7,6 +7,11 @@
 //! The main GROMOS-RS molecular dynamics simulation program.
 //! Command-line interface matches GROMOS md++ conventions.
 //! All simulation parameters are read from the @input (.imd/.in) file.
+//!
+//! The run itself is assembled by the `gromos-run` crate (`read_imd` → `RunRecipe` → plan →
+//! algorithms → `start`), the same path `py-gromos`'s `Simulation` takes; this binary owns the
+//! CLI, the output files and the out-of-band GAMD/EDS blocks. `@dump` prints the recipe and the
+//! plan as JSON; the effective recipe is written next to the `.tre` as `<tre>.recipe.toml`.
 
 use gromos::{
     algorithm::SimulationState,

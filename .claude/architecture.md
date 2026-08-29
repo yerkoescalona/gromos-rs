@@ -27,8 +27,13 @@ Think in layers; keep them from leaking into each other.
 - **L3 — Orchestration.** A run is a composition. An MD step composes L0+L1+L2 and loops over *time*;
   an analysis composes L0+L1 and loops over *frames*. Default orchestration is an explicit, ordered
   sequence (GROMOS-faithful, debuggable). Don't foreclose a lazy compute-graph orchestration later.
+  The MD side of this layer is the `gromos-run` crate: a run is described once as data
+  (`RunRecipe`, the content of a `.imd` grouped by concern), turned into a plan (`Vec<AlgorithmSpec>`,
+  validated against the GROMOS step-order rules) and only then instantiated. There is exactly one
+  such builder; the `md` binary and py-gromos both call it (PLAN.md 3.9).
 - **L4 — Facade & bindings.** The gromos++-style analysis API and py-gromos are thin over L0–L3 and
-  contain **zero physics**.
+  contain **zero physics** — and, since 3.9, zero run assembly: `gromos.Recipe`/`Plan`/`Term` *are*
+  the L3 data types (serde ↔ Python), and `Simulation` hands them to `gromos-run`.
 
 The payoff: `ener` calls the same provider an MD step calls; `rmsd` calls shared geometry; gathering
 is one L0 service. The ~79k lines gromos++ spent re-implementing physics simply never get written.

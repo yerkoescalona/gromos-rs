@@ -15,6 +15,10 @@
 //!     ↓
 //! gromos-* crates (pure Rust)
 //! ```
+//!
+//! Every `Simulation` is built by `gromos-run` from a `Recipe` (`recipe.rs` binds the run-as-data
+//! types; `simulation.rs` has one constructor path). This crate assembles no run of its own
+//! (PLAN.md 3.9). `parameters.rs` and `algorithm_sequence.rs` are deprecation shims.
 
 use gromos_core::math::Vec3;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};

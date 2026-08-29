@@ -1,36 +1,45 @@
 //! gromos-run — the one place that turns "what to run" into a running `AlgorithmSequence`.
 //!
-//! L3 orchestration (see `.claude/architecture.md`). Before this crate existed, the `md`
-//! binary and the Python binding each carried their own copy of the IMD → algorithm-sequence
-//! assembly and had drifted (PLAN.md 3.8). Both now call the functions here, so the gromosXX
-//! reference suite (which drives the binary) and the Python suite (which drives the binding)
-//! exercise the same code from two sides — drift guard G1 of PLAN.md 3.9.
+//! L3 orchestration (see `.claude/architecture.md`). Before this crate existed, the `md` binary
+//! and the Python binding each carried their own copy of the IMD → algorithm-sequence assembly and
+//! had drifted (PLAN.md 3.8). Both now call the functions here, so the gromosXX reference suite
+//! (which drives the binary) and the Python suite (which drives the binding) exercise the same
+//! code from two sides — PLAN.md 3.9, complete 2026-08-29.
 //!
-//! Stage of the plan: **step 1** — the assembly is lifted verbatim from `md.rs` and still
-//! IMD-driven (`ImdParameters` in, `AlgorithmSequence` out). Step 2 introduces the plain-data
-//! `RunRecipe` → `Vec<AlgorithmSpec>` plan in front of it; nothing in the public surface here
-//! is meant to survive that unchanged except [`prepare_system`], [`start`] and [`RunError`].
+//! The description of a run is plain data, [`RunRecipe`]: the content of a GROMOS `.imd` grouped
+//! by concern, plus additive force [`TermSpec`]s and auxiliary [`RunInputs`]. A `.imd` file and a
+//! Python `Recipe` are two front-ends to it ([`RunRecipe::from_imd_with`] / [`RunRecipe::to_imd`]
+//! are lossless in both directions).
 //!
 //! Pipeline:
 //!
 //! ```text
-//! ImdParameters + Topology + Coordinates + RunInputs
-//!        │ prepare_system      (pttopo merge, truncated-octahedron transform, NSM from the
-//!        ▼                      coordinate file, initial velocities, validation)
-//!     Prepared { topology, configuration, physical_constants, … }
-//!        │ build_sequence_from_imd  (GROMOS step order, once)
-//!        ▼
-//!     Built { sequence: AlgorithmSequence, summary }
-//!        │ start               (init + step 0 — NTISHK moves positions here, so it is physics)
-//!        ▼
-//!     caller loops run_step / advance
+//! .imd ──read_imd──▶ ImdParameters ──RunRecipe::from_imd_with──▶ RunRecipe  ◀── TOML/JSON, Python
+//!                                                                    │
+//!   Topology + Coordinates + RunInputs ──prepare_system──▶ Prepared    │
+//!   (pttopo merge, truncated-octahedron transform, NSM from            │
+//!    the coordinate file, initial velocities, validation)              │
+//!                                                                      ▼
+//!                                   build_plan (recipe, topology) ──▶ Vec<AlgorithmSpec>   stage 1
+//!                                   validate_plan                      (GROMOS step order)  stage 2
+//!                                   instantiate (plan only, G8)   ──▶ AlgorithmSequence     stage 3
+//!                                   start (init + step 0)              then the caller loops
 //! ```
 //!
-//! Rules (crate contract):
+//! [`build_sequence_from_recipe`] / [`build_sequence_from_plan`] / [`build_sequence_from_imd`]
+//! run stages 1–3 in one call; [`load_bundle`] / [`write_bundle`] read and write a run directory
+//! (`input.toml`, `run.recipe.toml`, `run.imd`).
+//!
+//! Rules (crate contract, enforced by `just lint`'s G6 greps):
 //! - No `println!`, no `process::exit`: everything the binary prints comes back as data
-//!   ([`Prepared::notes`], [`BuildSummary`]) or as a [`RunError`].
-//! - No second builder: if a caller needs a different sequence, it edits the plan (step 2),
-//!   it does not assemble algorithms itself.
+//!   ([`Prepared::notes`], [`BuildSummary`], [`Diagnostics`]) or as a [`RunError`].
+//! - No second builder, no second IMD reader: a caller that needs a different sequence edits the
+//!   plan; it never pushes algorithms itself, and it opens parameter files only through
+//!   [`read_imd`].
+//! - Defaults come from `ImdParameters::default()` and mean "block absent" — what gromosXX does
+//!   without the block (G7/A18).
+//! - Adding a force term = a [`TermSpec`] variant, its registry arms in `plan.rs`, and one arm in
+//!   `build.rs::instantiate_orchestrator` (measured with `xtb`: three files).
 
 pub mod build;
 pub mod bundle;

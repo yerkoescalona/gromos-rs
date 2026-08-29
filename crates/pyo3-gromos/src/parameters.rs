@@ -1,4 +1,6 @@
-//! Python wrapper for GROMOS simulation input parameters.
+//! `InputParameters` — the deprecated, pre-recipe front-end (PLAN.md 3.9 step 3; removed next
+//! release). Every constructor warns and names its `Recipe` replacement; `Simulation` translates
+//! an `InputParameters` into a recipe (`RunRecipe::from_imd_with`), so it is not a second path.
 
 use pyo3::prelude::*;
 

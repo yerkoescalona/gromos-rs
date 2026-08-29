@@ -10,8 +10,8 @@ All Rust crates.
 Python-callable API for running simulations and analysing trajectories.
 
 ## Status
-- Compositional Simulation API ✓, AlgorithmSequence API ✓
-- `System` + `InputParameters` factories + 2-arg `Simulation(system, params)` ✓ (P3.1/3.2)
+- `System`, `Recipe`/`Term`/`Algorithm`/`Plan`, `Simulation(system, recipe[, plan=])` ✓ (PLAN.md 3.9,
+  2026-08-29); `InputParameters` and the `AlgorithmSequence.*` presets are deprecation shims
 - `sim.run(steps, ene_freq)` → numpy array; energy decomposition (bond/angle/dihedral/improper/lj/coulomb) ✓ (P3.3)
 - Python tests: 121 (118 passed, 2 documented position-mismatch skips) ✓ (`py-gromos/tests/`)
 - `.pyi` stubs ✓

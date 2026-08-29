@@ -77,13 +77,17 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
 
 ## Key files
 ```
-python/gromos/__init__.py        — top-level API
+python/gromos/__init__.py        — top-level API (the module contract; System/Recipe/Plan/Term/Simulation)
+python/gromos/gromos.pyi         — type stubs (stubtest-clean; `_AlgorithmKind`/`_TermKind` literals)
+python/gromos/exceptions.py      — RecipeError / PlanError / MissingFeatureError / RunError
+python/gromos/timeseries.py      — EnergyTimeseries over run()'s array
+python/gromos/analysis.py        — analysis helpers (explicit import only)
 python/gromos/system_builder.py  — P3 design sketch: ForceField→BuildingBlock→Topology algebra
-python/gromos/md_runners.py      — legacy subprocess runners (to be replaced)
-python/gromos/analysis.py        — analysis helpers
-python/gromos/gromos.pyi         — type stubs
-notebooks/                       — Jupyter notebooks
-examples/                        — standalone scripts
+stubtest_allowlist_no_ml.txt     — the ml-only names, for stubtest on a default build
+tests/test_gromosXX_references.py, test_front_end_parity.py, test_recipe.py, test_xtb_term.py
+docs/                            — mkdocs (user-guide/recipe.md is the concept page)
+notebooks/                       — 01 load & inspect, 02 short MD (on Recipe); 00 is a superseded mockup
+examples/                        — standalone scripts (older API; PLAN.md P3 item to rewrite)
 pyproject.toml                   — package metadata (maturin)
 ```
 

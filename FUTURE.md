@@ -490,6 +490,14 @@ re-implementations are a later, separate item. PLAN.md P3 deliberately starts wi
 
 ### Addendum (2026-07): ensemble ⟂ constraints, and why the composition refactor is parked
 
+> **Resolved 2026-08-29 (PLAN.md 3.9).** The second concrete caller this addendum waited for arrived
+> (the ML/QM/restraint terms), and the refactor landed as the `gromos-run` crate: one builder,
+> `RunRecipe` as the only description of a run, `Recipe`/`Plan`/`Term` in Python, the descriptor
+> path deleted, `Term("xtb")` as the proof (three files touched). The A/B discipline asked for
+> below is `py-gromos/tests/test_front_end_parity.py` (exact equality, every reference system).
+> The *ensemble ⟂ constraints* split is still a parked bet; the recipe carries both as separate
+> groups (`ensemble`, `constraints`) without deciding where a `System`-level constraint would live.
+
 Walking the `System.from_files → nvt → run` path (P3.3/3.4) surfaced a concrete design pull: the
 `InputParameters.nve/nvt/npt` factories can't express constraints, so a factory-built run of any
 constrained system silently runs unconstrained and blows up. A full **composition-pattern redesign**

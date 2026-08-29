@@ -634,9 +634,11 @@ Reading: at a fixed thread count the reduction tree is stable in practice (`par_
 chunking — hence the summation order — changes, and the difference sits in the last printed digit
 (~1e-13 relative, five orders below the 1e-8 reference tolerance). Consequence for the front-end
 parity tests (PLAN.md 3.9 G2): pinning the thread count is sufficient for exact (`==`) same-build
-comparisons; `execution.parallel = Serial` remains the documented, stronger setting. The Python path
-is serial today (`build_simulation` never sets `parallel_nonbonded`); `same_path_twice` in
-`py-gromos/tests/test_front_end_parity.py` is bit-identical on all 37 reference systems.
+comparisons; `execution.parallel = Serial` remains the documented, stronger setting. Since PLAN.md
+3.9 step 1 the Python path uses the binary's own policy (`execution.parallel = auto`: parallel
+above 100 atoms); `same_path_twice` in `py-gromos/tests/test_front_end_parity.py` is bit-identical
+on all 40 reference systems, and the front-ends (`InputParameters` shim, `Recipe`, `Recipe` + `Plan`)
+agree exactly under that same policy.
 
 
 ## 6. Phase 4 — MPI: first make it exist, then make it correct, then time it

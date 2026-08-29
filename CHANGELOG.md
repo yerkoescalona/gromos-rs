@@ -23,6 +23,12 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
   order; `Simulation.term_energies -> dict[str, float]`. Their sum is what the terms add to
   `total_energy`; `potential_energy` stays the classical force field alone. Not yet in the `.tre`
   file or in `run()`'s columns.
+- Documentation pass for the recipe model: root `README.md` (components, "How a run is described"),
+  `py-gromos/README.md` (rewritten), a new concept page `py-gromos/docs/user-guide/recipe.md`
+  (in the mkdocs nav), the API reference without the deleted building blocks, `gromos-run`'s crate
+  doc, the `md`/`pyo3-gromos`/`parameters` module docs, `.claude/overview.md`/`architecture.md`,
+  `FUTURE.md`'s 2026-07 addendum marked resolved, `BENCHMARKING.md`'s parity note, and the design
+  mockup notebook marked superseded.
 - `py-gromos/tests/test_xtb_term.py` — the physics oracle from the Python side: adding the term
   adds exactly `XtbPotential`'s direct energy and forces of the region (and nothing outside it),
   two terms report separately and add up, NVE through the real step loop holds the Rust oracle's

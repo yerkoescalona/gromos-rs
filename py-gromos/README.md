@@ -1,155 +1,100 @@
 # py-gromos
 
-Python bindings for GROMOS-RS molecular dynamics simulations.
+Python bindings for the GROMOS-RS molecular dynamics engine.
 
-⚠️ **Early Development** - This is an educational/research project in early alpha stage.
+⚠️ **Educational / research project, early alpha.** Bit-for-bit validated against double-precision
+gromosXX on 40 reference systems (`tests/test_gromosXX_references.py`), not a production MD
+package. See the repository README for the licensing and provenance disclaimer.
 
-## Features
+## Five lines to a running simulation
 
-- Zero-copy NumPy integration for molecular coordinates
-- SIMD-accelerated vector mathematics
-- Pythonic API for MD simulations
-- Advanced sampling methods (EDS, GaMD, REMD)
-- Trajectory analysis tools
-- Integration with GROMOS force field
-- Built on PyO3 for performance
+```python
+from gromos import System, Recipe, Simulation
 
-## Architecture
-
-Inspired by [Polars](https://github.com/pola-rs/polars):
-
+system = System.from_files("water_216.topo", "equilibrated.cnf")
+recipe = Recipe.nvt(dt=0.002, steps=5000, temperature=300.0)   # or Recipe.from_imd("run.imd")
+sim    = Simulation(system, recipe)
+sim.step(1000)
+print(sim.total_energy, sim.positions.shape)                     # kJ/mol, (648, 3)
 ```
-Python API (py-gromos)
-         ↓
-    PyO3 bindings
-         ↓
-   Rust Core (gromos-rs)
-```
+
+No `.imd` files to author, no temporary directories, no subprocess: the engine runs in-process
+and every quantity is a NumPy array or a float.
+
+## The model
+
+| Object | What it is |
+|---|---|
+| `System` | topology + coordinates (`.topo` + `.cnf`), atom counts checked |
+| `Recipe` | the run as data — the content of a GROMOS `.imd` grouped by concern (`.control`, `.ensemble`, `.constraints`, …), plus additive `terms` and auxiliary `inputs`. Immutable; `update(**groups)` / `with_*` return copies; a typo is a `RecipeError`. `to_imd()` is what gromosXX would run |
+| `Plan` | `recipe.plan(system)`: the MD step as an ordered, validated list of `Algorithm`s; edit it and run it with `Simulation(system, recipe, plan=plan)` |
+| `Term` | an additive energy/force provider over a region: `Term("xtb", ...)` (real GFN-xTB, needs `xtb` on PATH), `Term("schnet", ...)` (TorchScript SchNetPack, needs a `--features ml` build) |
+| `Simulation` | `step(n)`, `run(steps, ene_freq)` → `(n_frames, 12)` energies; `positions`, `velocities`, `forces`, `energies`, `term_energies`, `temperature`, `pressure`, `recipe`, `plan`, `diagnostics` |
+| `EnergyTimeseries` | wraps `run()`'s array: named columns, block averages, dataframes (polars/pandas), plots (plotly/matplotlib) |
+
+`gromos.terms()` / `gromos.algorithms()` / `gromos.build_info()` say what this build knows.
+`gromos.exceptions` has one class per failure kind (`RecipeError`, `PlanError`,
+`MissingFeatureError`, `RunError`), each a subclass of the builtin raised before.
+
+The `md` binary and `Simulation` are the same code path: both hand a recipe to the `gromos-run`
+crate (`prepare_system → build_plan → validate_plan → instantiate → start`). The Rust reference
+suite drives the binary, this package's suite drives the binding, and
+`tests/test_front_end_parity.py` checks every front-end against every other with exact equality.
+
+Deprecated for one release (they warn and are translated into a recipe): `InputParameters`, the
+`distrest=`/`posresspec=`/`refpos=`/`ml_*=` keywords, `AlgorithmSequence.*` presets and
+`Simulation.from_sequence`. Migration table: `docs/user-guide/quick-start.md`.
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.8+
-- Rust 1.70+ (install from https://rustup.rs)
-
-### Build
+Prerequisites: Python ≥ 3.13 (see `pyproject.toml`), a Rust toolchain (https://rustup.rs), `uv`.
+The full dependency list (QM engines, the ML stack) is in the repository's `INSTALL.md`.
 
 ```bash
-pip install maturin
-maturin develop --release
+cd py-gromos
+uv sync                          # creates .venv with the dev dependencies
+uv run maturin develop --release # builds crates/pyo3-gromos into the venv
+uv run pytest tests/ -q          # 306 passed / 8 skipped / 3 xfailed at 0.0.32
 ```
 
-## Quick Start
-
-### Basic Vector Operations
-
-```python
-import gromos
-import numpy as np
-
-# Create vectors
-v1 = gromos.Vec3(1.0, 0.0, 0.0)
-v2 = gromos.Vec3(0.0, 1.0, 0.0)
-
-# Vector operations
-v3 = v1 + v2
-dot_product = v1.dot(v2)
-cross_product = v1.cross(v2)
-length = v1.length()
-
-print(f"v1 + v2 = {v3}")
-print(f"v1 · v2 = {dot_product}")
-print(f"v1 × v2 = {cross_product}")
-print(f"|v1| = {length}")
-```
-
-### Running MD Simulations
-
-```python
-from gromos import run_standard_md
-
-# Run a standard MD simulation
-run_standard_md(
-    topology="system.top",
-    coordinates="initial.cnf",
-    parameters="md.imd",
-    output_prefix="production"
-)
-```
-
-### Working with Trajectories
-
-```python
-import gromos
-
-# Load trajectory
-traj = gromos.load_trajectory("trajectory.trc")
-
-# Compute RMSD
-rmsd = traj.rmsd(reference_frame=0)
-
-# Analyze geometry
-bonds = traj.compute_bond_lengths(atom_pairs=[(0, 1), (1, 2)])
-angles = traj.compute_angles(atom_triples=[(0, 1, 2)])
-```
-
-## Examples
-
-Comprehensive examples are available in the `examples/` directory:
-
-- `01_basic_vectors.py` - Vector math and operations
-- `02_system_setup.py` - Creating molecular systems
-- `03_integrators.py` - Time integration methods
-- `06_run_standard_md.py` - Running MD simulations
-- `07_run_gamd.py` - Gaussian accelerated MD
-- `08_run_eds.py` - Enveloping distribution sampling
-- `09_run_remd.py` - Replica exchange MD
-- `11_trajectory_analysis.py` - Analyzing trajectories
-- `16_free_energy_perturbation.py` - FEP calculations
-
-Run examples:
-
-```bash
-python examples/01_basic_vectors.py
-```
+Optional: `uv sync --group ml` + `uv run maturin develop --release --features ml` for
+`Term("schnet", ...)` (libtorch via the venv's torch — `INSTALL.md` §5).
 
 ## Documentation
 
-Full documentation is available in the `docs/` directory:
+- [User guide](docs/user-guide/): [installation](docs/user-guide/installation.md),
+  [quick start](docs/user-guide/quick-start.md) (with the migration table),
+  [the recipe model](docs/user-guide/recipe.md), [learning guide](docs/user-guide/learning-guide.md)
+- [API reference](docs/api/reference.md)
+- [Development](docs/development/): building, contributing, a PyO3 bindings tutorial
+- Notebooks: `notebooks/01_load_and_inspect.ipynb`, `notebooks/02_short_md.ipynb`
 
-- **[User Guide](docs/user-guide/)**: Installation, quick start, tutorials
-- **[API Reference](docs/api/)**: Complete API documentation
-- **[Development](docs/development/)**: Contributing and building guides
-
-Build documentation locally:
-
-```bash
-pip install mkdocs mkdocs-material pymdown-extensions
-mkdocs serve
-```
-
-Then open http://localhost:8000 in your browser.
+`uv run mkdocs serve` in this directory renders the site at http://localhost:8000.
 
 ## Testing
 
-Run the test suite:
-
 ```bash
-# Run Python tests
-pytest tests/
+uv run pytest tests/ -q                                   # Python suite (needs the built extension)
+MYPYPATH=python uv run python -m mypy.stubtest gromos.gromos \
+    --allowlist stubtest_allowlist_no_ml.txt              # the .pyi against the extension
+cargo test -p gromos-run -p pyo3-gromos                   # the crates behind the binding
+```
 
-# Run Rust tests
-cargo test
+`tests/test_xtb_term.py` (the QM term's physics oracle) and `tests/test_qm_vs_ml_comparison.py`
+skip without `xtb` on PATH; `tests/test_ml_potential.py` skips without a `--features ml` build.
+
+## Layout
+
+```
+python/gromos/          the package: __init__.py (the module contract), gromos.pyi (stubs),
+                        exceptions.py, timeseries.py, analysis.py (explicit import only),
+                        system_builder.py (design sketch)
+tests/                  test_gromosXX_references.py, test_front_end_parity.py, test_recipe.py,
+                        test_xtb_term.py, test_simulation*.py, ...
+docs/                   mkdocs site        notebooks/   Jupyter        examples/   scripts (older API)
+../crates/pyo3-gromos   the Rust binding   ../crates/gromos-run   the run builder both entry points use
 ```
 
 ## License
 
-GPL-2.0 - See LICENSE file for details
-
-## References
-
-- **GROMOS**: https://www.gromos.net
-- **gromos-rs**: Core Rust implementation (see `../gromos-rs`)
-- **PyO3**: https://pyo3.rs
-- **Maturin**: https://github.com/PyO3/maturin
+GPL-2.0 — see the repository LICENSE.

@@ -143,8 +143,37 @@ make ci
 
 #### Components
 
-- **gromos-rs**: High-performance Rust library implementing MD kernels
-- **py-gromos**: Python bindings for gromos-rs using PyO3/Maturin
+- **gromos-rs** (`crates/`): the Rust workspace — `gromos-core` (topology, configuration, math,
+  the `Algorithm` trait), `gromos-forces` (bonded/nonbonded kernels, restraints, the QM/ML
+  provider orchestrator), `gromos-integrators` (leap-frog, thermostats, barostats, SHAKE/SETTLE/
+  LINCS), `gromos-io` (GROMOS file formats, the lossless `.imd` reader/writer), `gromos-run` (the
+  one run builder: recipe → plan → algorithms), `gromos-md` (the `md` binary and the gromosXX
+  reference suite), `gromos-analysis` / `gromos-tools` (ports of gromos++ programs)
+- **py-gromos** (`py-gromos/`, `crates/pyo3-gromos`): Python bindings — `System`, `Recipe`, `Plan`,
+  `Term`, `Simulation`
+
+#### How a run is described
+
+One data structure — the **recipe** — describes a run for both entry points. A GROMOS `.imd`
+file *is* a recipe (read losslessly, written back in a form gromosXX runs identically), and so is
+a Python `Recipe`; both go through the same builder in `gromos-run` (`prepare_system → build_plan
+→ validate_plan → instantiate → start`), so the gromosXX reference suite (driving the `md`
+binary) and the Python suite (driving the binding) test one code path from two sides.
+
+```python
+from gromos import System, Recipe, Term, Simulation
+
+system = System.from_files("system.topo", "start.cnf")
+recipe = Recipe.from_imd("run.imd")          # or Recipe.nvt(dt=0.002, steps=5000, temperature=300.0)
+recipe = recipe.with_term(Term("xtb", region="1:a", elements=[8, 1, 1]))   # a QM term, additive
+sim = Simulation(system, recipe)
+energies = sim.run(5000, ene_freq=100)       # (n_frames, 12) numpy array
+print(sim.total_energy, sim.term_energies)
+```
+
+The plan — the ordered algorithms of one MD step — is data too: `recipe.plan(system)` returns it,
+editable and re-validated. Design and drift guards: [PLAN.md §3.9](PLAN.md); user guide:
+[py-gromos/docs/user-guide/recipe.md](py-gromos/docs/user-guide/recipe.md).
 
 #### CI/CD and Testing
 
@@ -170,20 +199,20 @@ This project uses comprehensive CI/CD inspired by [Polars](https://github.com/po
 **Developer Tools:**
 
 We use comprehensive developer tooling inspired by Polars:
-- **Pre-commit hooks**: Automatic code quality checks (see [PRE_COMMIT_GUIDE.md](PRE_COMMIT_GUIDE.md))
+- **Pre-commit hooks**: Automatic code quality checks (`.pre-commit-config.yaml`)
 - **rustfmt & clippy**: Rust formatting and linting (allows scientific notation like `kT`)
 - **black & ruff**: Python formatting and linting (naming flexibility for science)
 - **typos**: Spell checking across the codebase
 - **EditorConfig**: Consistent editor settings
-- **Scientific naming**: Respects domain conventions (see [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md))
+- **Scientific naming**: Respects domain conventions (`.typos.toml`, the clippy/ruff settings)
 
 See our documentation:
-- [CODING_STYLE_GUIDE.md](CODING_STYLE_GUIDE.md) - **Coding conventions and best practices**
-- [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md) - Scientific naming conventions (kT, pH, etc.)
-- [CI_CD_GUIDE.md](CI_CD_GUIDE.md) - CI/CD and testing infrastructure
-- [PRE_COMMIT_GUIDE.md](PRE_COMMIT_GUIDE.md) - Pre-commit hooks setup
+- [INSTALL.md](INSTALL.md) - **Full dependency list** (Rust/Python, C++ reference sources, QM engines, ML stack)
+- [PLAN.md](PLAN.md) - Roadmap, reference-test status, and the design record of the run/recipe model (§3.9)
+- [py-gromos/docs/](py-gromos/docs/) - Python user guide (quick start, the recipe model, API reference); `mkdocs serve` in `py-gromos/`
+- [BENCHMARKING.md](BENCHMARKING.md) - Engine-vs-gromosXX benchmarks, kernel determinism
+- [CONTRIBUTING.md](CONTRIBUTING.md) - How to build, test and contribute; [CHANGELOG.md](CHANGELOG.md) - What changed, per version
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
-- [DEVELOPER_TOOLS_SUMMARY.md](DEVELOPER_TOOLS_SUMMARY.md) - Developer tools reference
 
 ### References
 
@@ -196,7 +225,7 @@ See our documentation:
 7.  D. Poger, W.F. van Gunsteren, A.E. Mark, _A new force field for simulating phosphatidylcholine bilayers_, J. Comput. Chem. **31** (2010) 1117-1125, doi: [10.1002/jcc.21396](https://doi.org/10.1002/jcc.21396)
 8.  N. Schmid, A.P. Eichenberger, A. Choutko, S. Riniker, M. Winger, A.E. Mark, W.F. van Gunsteren, _Definition and testing of the GROMOS force-field versions: 54A7 and 54B7_, Eur. Biophys. J. **40** (2011) 843-856, doi: [10.1007/s00249-011-0700-9](https://doi.org/10.1007/s00249-011-0700-9)
 9.  M. M. Reif, P. H. Hünenberger, and C. Oostenbrink, _New interaction parameters for charged amino acid side chains in the GROMOS force field_, J. Chem. Theory Comput. **8** (2012) 3705-3723, doi: [10.1021/ct300156h](https://doi.org/10.1021/ct300156h)
-10.  W. F. van Gunsteren and H. J. C. Berendsen, [_Groningen Molecular Simulation (GROMOS) Library Manual_](./gromos87/GROMOS87_manual.pdf), Biomos, Groningen, The Netherlands, 1987, pp. 1-221.
+10.  W. F. van Gunsteren and H. J. C. Berendsen, _Groningen Molecular Simulation (GROMOS) Library Manual_, Biomos, Groningen, The Netherlands, 1987, pp. 1-221.
 11.  W. F. van Gunsteren, S. R. Billeter, A. A. Eising, P. H. Hünenberger, P. Krüger, A. E. Mark, W. R. P. Scott, and I. Tironi, _Biomolecular Simulation: The GROMOS96 Manual and User Guide_, Vdf Hochschulverlag an der ETH Zürich, Zürich, Switzerland, 1996, p. II-30.
 12.  W. R. P. Scott and W. F. van Gunsteren, _The GROMOS Software Package for Biomolecular Simulations_, In: _Methods and Techniques in Computational Chemistry: METECC-95,_ E. Clementi and G. Corongiu editors, STEF, Cagliari, Italy, 1995, pp. 397-434.
 13.  W. R. P. Scott, P. H. Hünenberger, I. G. Tironi, A. E. Mark, S. R. Billeter, J. Fennen, A. E. Torda, T. Huber, P. Krüger, and W. F. van Gunsteren, _The GROMOS Biomolecular Simulation Package,_ J. Phys. Chem. A **103** (1999) 3596-3607, doi: [10.1021/jp984217f](https://doi.org/10.1021/jp984217f)

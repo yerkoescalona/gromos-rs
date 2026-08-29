@@ -51,12 +51,23 @@ and crate-specific rules that extend the workspace-wide guides.
 `cargo build --release --bin md`, then `cargo test -p gromos-md --test test_gromosXX_references`.
 See `crates/gromos-md/.claude/CONTEXT.md` for how to add a reference test.
 
+The same behaviour from the Python side (both suites must stay green — they drive one builder):
+`cd py-gromos && uv run maturin develop --release && uv run pytest tests/ -q`, and the stubs
+against the extension: `MYPYPATH=python uv run python -m mypy.stubtest gromos.gromos --allowlist
+stubtest_allowlist_no_ml.txt`. `just lint` = clippy + the G6 drift greps (run the recipe body by
+hand if `just` is not installed).
+
 ## Global decisions
 
 - **f64 everywhere** (not f32)
 - **gromosXX `@` CLI convention:** `@topo @conf @input @fin @trc @tre @trf @trv @verb ...`
 - **Tolerances:** force_abs=1e-6, energy_rel=1e-8, position_abs=1e-9
 - **CLI arg parsing:** clap `#[derive(Parser)]` with `gromos_args()` pre-processor (`@key → --key`, `@f argfile` expansion). No custom arg parsers.
+- **One run description (PLAN.md 3.9, done 2026-08-29):** `gromos_run::RunRecipe` is the only
+  description of a run; `.imd` files and `py-gromos` objects are front-ends to it, both built by
+  `gromos-run` (`prepare_system → build_plan → validate_plan → instantiate → start`). No second
+  IMD→algorithm builder, no second IMD reader — `just lint` greps for both (G6). Adding a force term
+  = a `TermSpec` variant + its registry arms + one `instantiate` arm, nothing in the binding.
 - **Doc style:** Rust → KaTeX + `[^label]` footnotes; Python → NumPy docstrings + `.. math::`
 - **On commit:** update CHANGELOG.md and Cargo.toml version.
 
