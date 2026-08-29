@@ -1214,6 +1214,84 @@ impl Topology {
             .collect();
     }
 
+    /// Merge a perturbation topology (`.ptp`) into this topology, as gromosXX does when
+    /// `NTG != 0`: the perturbed solute terms are stored in `perturbed_solute`, and the bonds,
+    /// angles, improper and proper dihedrals they perturb are removed from the regular solute
+    /// so the two sets stay disjoint. `is_perturbed` is resized to the solute atom count.
+    ///
+    /// Call after `build_topology()` and before `solvate()`; applying twice replaces the
+    /// previous perturbation's terms but cannot restore bonds already removed.
+    pub fn apply_perturbation(
+        &mut self,
+        perturbed_solute: PerturbedSolute,
+        mut is_perturbed: Vec<bool>,
+    ) {
+        use std::collections::HashSet;
+
+        let n = self.num_solute_atoms();
+        is_perturbed.resize(n, false);
+        self.is_perturbed = is_perturbed;
+        self.perturbed_solute = perturbed_solute;
+
+        let pb: HashSet<(usize, usize)> = self
+            .perturbed_solute
+            .bonds
+            .iter()
+            .map(|b| (b.i.min(b.j), b.i.max(b.j)))
+            .chain(
+                self.perturbed_solute
+                    .soft_bonds
+                    .iter()
+                    .map(|b| (b.i.min(b.j), b.i.max(b.j))),
+            )
+            .collect();
+        self.moltypes[0]
+            .bonds
+            .retain(|b| !pb.contains(&(b.i.min(b.j), b.i.max(b.j))));
+
+        let pa: HashSet<(usize, usize, usize)> = self
+            .perturbed_solute
+            .angles
+            .iter()
+            .map(|a| (a.i, a.j, a.k))
+            .chain(
+                self.perturbed_solute
+                    .soft_angles
+                    .iter()
+                    .map(|a| (a.i, a.j, a.k)),
+            )
+            .collect();
+        self.moltypes[0]
+            .angles
+            .retain(|a| !pa.contains(&(a.i, a.j, a.k)));
+
+        let pi: HashSet<(usize, usize, usize, usize)> = self
+            .perturbed_solute
+            .improper_dihedrals
+            .iter()
+            .map(|d| (d.i, d.j, d.k, d.l))
+            .chain(
+                self.perturbed_solute
+                    .soft_impropers
+                    .iter()
+                    .map(|d| (d.i, d.j, d.k, d.l)),
+            )
+            .collect();
+        self.moltypes[0]
+            .improper_dihedrals
+            .retain(|d| !pi.contains(&(d.i, d.j, d.k, d.l)));
+
+        let pd: HashSet<(usize, usize, usize, usize)> = self
+            .perturbed_solute
+            .proper_dihedrals
+            .iter()
+            .map(|d| (d.i, d.j, d.k, d.l))
+            .collect();
+        self.moltypes[0]
+            .proper_dihedrals
+            .retain(|d| !pd.contains(&(d.i, d.j, d.k, d.l)));
+    }
+
     /// Expand solvent molecules (GROMOS: topo.solvate(0, nsm))
     ///
     /// Uses the solvent template stored on the topology to create `nsm` copies.

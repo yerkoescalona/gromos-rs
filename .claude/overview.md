@@ -15,6 +15,7 @@ working notes — traps, oracle numbers, rejected alternatives — are verbatim 
 | gromos-forces | L1 pure compute | `crates/gromos-forces/.claude/CONTEXT.md` |
 | gromos-integrators | L2 steppers | `crates/gromos-integrators/.claude/CONTEXT.md` |
 | gromos-md | L3 orchestration | `crates/gromos-md/.claude/CONTEXT.md` |
+| gromos-run | L3 orchestration (library) | `crates/gromos-run/.claude/CONTEXT.md` |
 | gromos-tools | L3 system builder | `crates/gromos-tools/.claude/CONTEXT.md` |
 | gromos-analysis | L4 analysis facade | `crates/gromos-analysis/.claude/CONTEXT.md` |
 | pyo3-gromos | L4 Python bindings | `crates/pyo3-gromos/.claude/CONTEXT.md` |

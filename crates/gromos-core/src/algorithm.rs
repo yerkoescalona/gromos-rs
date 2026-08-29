@@ -116,6 +116,16 @@ impl AlgorithmSequence {
         self.timings.push(std::time::Duration::ZERO);
     }
 
+    /// Insert an algorithm at `index` (0 = first), shifting the rest back.
+    ///
+    /// For callers that must place an algorithm at a specific point of an already-built
+    /// sequence — e.g. a provider-orchestrator term immediately after `Forcefield`, whose
+    /// forces it adds to. Panics if `index > len()`, like `Vec::insert`.
+    pub fn insert(&mut self, index: usize, alg: Box<dyn Algorithm>) {
+        self.algorithms.insert(index, alg);
+        self.timings.insert(index, std::time::Duration::ZERO);
+    }
+
     /// Enable per-algorithm wall-clock accumulation.
     ///
     /// Off by default: each timed algorithm costs two `Instant::now()` reads per

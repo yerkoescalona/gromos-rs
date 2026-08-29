@@ -1,0 +1,17 @@
+[package]
+name = "gromos-run"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Run assembly for GROMOS-RS: parameters + topology + coordinates -> AlgorithmSequence. The one builder shared by the md binary and py-gromos (PLAN.md 3.9)."
+
+[dependencies]
+gromos-core = { workspace = true }
+gromos-forces = { workspace = true }
+gromos-integrators = { workspace = true }
+gromos-io = { workspace = true }
+
+[features]
+default = []
+ml = ["gromos-forces/ml"]

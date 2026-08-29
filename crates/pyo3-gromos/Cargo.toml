@@ -16,6 +16,8 @@ gromos-forces = { workspace = true }
 gromos-integrators = { workspace = true }
 gromos-io = { workspace = true }
 gromos-analysis = { workspace = true }
+# The one run builder shared with the md binary (PLAN.md 3.9)
+gromos-run = { workspace = true }
 
 # Python bindings
 pyo3 = { workspace = true }
@@ -29,4 +31,4 @@ rayon = { workspace = true }
 
 [features]
 default = []
-ml = ["gromos-forces/ml"]
+ml = ["gromos-forces/ml", "gromos-run/ml"]

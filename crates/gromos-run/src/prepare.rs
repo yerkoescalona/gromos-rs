@@ -1,0 +1,244 @@
+//! Everything that happens *before* the algorithm sequence — lifted from `md.rs` so the
+//! Python binding does it the same way (it did not: NSM came from the parameter file instead
+//! of the coordinate file, validation was skipped, the topology's PHYSICALCONSTANTS were
+//! ignored — PLAN.md 3.8 §2).
+//!
+//! GROMOS order (`in_topology` → `in_configuration` → `check_configuration`), kept:
+//! perturbation topology → truncated-octahedron transform → NSM from the coordinates and
+//! `solvate` → topology validation → atom-count check → coordinate validation →
+//! configuration (initial velocities per `NTIVEL`) → configuration validation.
+
+use std::path::PathBuf;
+
+use gromos_core::{
+    configuration::{Box as SimBox, Configuration},
+    math::{truncoct_triclinic, truncoct_triclinic_box, Mat3, Vec3},
+    random::generate_velocities,
+    units::PhysicalConstants,
+    validation::{
+        validate_configuration, validate_coordinates, validate_topology, ValidationReport,
+    },
+    Topology,
+};
+use gromos_io::{coordinate::CoordinateData, imd::ImdParameters, ptp::read_pttopo};
+
+use crate::{RunError, RunInputs};
+
+/// Positions, velocities and box as read from a coordinate file (or built in memory).
+#[derive(Debug, Clone)]
+pub struct Coordinates {
+    pub positions: Vec<Vec3>,
+    /// May be empty or of the wrong length: then velocities start at zero (or are generated
+    /// when `NTIVEL=1`), exactly as the `md` binary does.
+    pub velocities: Vec<Vec3>,
+    /// Zero for a vacuum system.
+    pub box_dims: Vec3,
+}
+
+impl From<CoordinateData> for Coordinates {
+    fn from(c: CoordinateData) -> Self {
+        Self {
+            positions: c.positions,
+            velocities: c.velocities,
+            box_dims: c.box_dims,
+        }
+    }
+}
+
+/// Something the caller may want to report; never an error.
+pub enum PrepareNote {
+    /// A perturbation topology was given but `NTG=0`: ignored, as gromosXX does.
+    PerturbationIgnored { path: PathBuf },
+    /// A perturbation topology was merged (`NTG != 0`).
+    PerturbationLoaded {
+        atoms: usize,
+        bonds: usize,
+        angles: usize,
+        impropers: usize,
+        dihedrals: usize,
+        soft_bonds: usize,
+        soft_angles: usize,
+        soft_impropers: usize,
+    },
+    /// The number of solvent molecules in the coordinate file differs from `NSM`; the
+    /// coordinate file wins.
+    NsmAdjusted { imd: usize, coordinates: usize },
+    /// Non-fatal validation findings (errors or warnings) for `stage`.
+    Validation {
+        stage: &'static str,
+        report: ValidationReport,
+    },
+}
+
+/// The system, ready for [`crate::build_sequence_from_imd`].
+pub struct Prepared {
+    pub topology: Topology,
+    pub configuration: Configuration,
+    /// From the topology's PHYSICALCONSTANTS block (gromosXX honours it; so does `Forcefield`).
+    pub physical_constants: PhysicalConstants,
+    /// Box edge lengths as read (before any truncated-octahedron transform); zero for vacuum.
+    pub box_dims: Vec3,
+    /// The lower-triangular triclinic box when `NTB=-1`, else `None`.
+    pub truncoct_box: Option<Mat3>,
+    pub notes: Vec<PrepareNote>,
+}
+
+/// Prepare topology and configuration for a run.
+///
+/// `topology` is a built topology, solvated or not (the Python object path may already have
+/// called `solvate`; the binary never has). `inputs.pttopo` is merged only when `NTG != 0`.
+pub fn prepare_system(
+    imd: &ImdParameters,
+    mut topology: Topology,
+    physical_constants: PhysicalConstants,
+    coords: Coordinates,
+    inputs: &RunInputs,
+) -> Result<Prepared, RunError> {
+    let mut notes = Vec::new();
+
+    // 1. Perturbation topology (FEP), only when NTG != 0 — gromosXX ignores it otherwise.
+    if let Some(path) = &inputs.pttopo {
+        if imd.ntg != 0 {
+            let pt = read_pttopo(path).map_err(|e| RunError::Io {
+                what: format!("perturbation topology '{}'", path.display()),
+                source: e,
+            })?;
+            topology.apply_perturbation(pt.perturbed_solute, pt.is_perturbed);
+            let p = &topology.perturbed_solute;
+            notes.push(PrepareNote::PerturbationLoaded {
+                atoms: p.atoms.len(),
+                bonds: p.bonds.len(),
+                angles: p.angles.len(),
+                impropers: p.improper_dihedrals.len(),
+                dihedrals: p.proper_dihedrals.len(),
+                soft_bonds: p.soft_bonds.len(),
+                soft_angles: p.soft_angles.len(),
+                soft_impropers: p.soft_impropers.len(),
+            });
+        } else {
+            notes.push(PrepareNote::PerturbationIgnored { path: path.clone() });
+        }
+    }
+    if imd.ntg == 0 && !topology.perturbed_solute.atoms.is_empty() {
+        // Only reachable from the object path (`Topology.apply_perturbation` in Python): the
+        // regular solute already lost its perturbed terms, so running with NTG=0 would not be
+        // what the binary does with the same files (it ignores the .ptp entirely).
+        return Err(RunError::Inconsistent(
+            "the topology carries a perturbation but NTG=0; set NTG != 0 or use an \
+             unperturbed topology"
+                .to_string(),
+        ));
+    }
+
+    // 2. NTB=-1: truncated octahedron. GROMOS converts the legacy "cube edge length L" BOX
+    //    block into the lower-triangular triclinic box vectors and rotates positions and
+    //    velocities into that frame on read (io/configuration/in_configuration.cc).
+    let Coordinates {
+        mut positions,
+        mut velocities,
+        box_dims,
+    } = coords;
+    let truncoct_box = if imd.ntb == -1 {
+        let cubic = Mat3::from_diagonal(box_dims);
+        let triclinic_box = truncoct_triclinic_box(cubic, true);
+        truncoct_triclinic(&mut positions, true);
+        truncoct_triclinic(&mut velocities, true);
+        Some(triclinic_box)
+    } else {
+        None
+    };
+
+    // 3. NSM from the coordinate file (the binary's rule; the parameter file's NSM is only a
+    //    hint), then solvate — unless the caller already did.
+    let unsolvated = topology.num_atoms() == topology.num_solute_atoms();
+    if unsolvated {
+        let actual_nsm = if imd.nsm > 0 && !topology.solvent_atom_template.is_empty() {
+            let atoms_per_solvent = topology.solvent_atom_template.len();
+            let n_solute = topology.num_solute_atoms();
+            let remaining = positions.len().saturating_sub(n_solute);
+            if remaining % atoms_per_solvent != 0 {
+                return Err(RunError::SolventCount {
+                    coordinates: positions.len(),
+                    solute: n_solute,
+                    atoms_per_solvent,
+                });
+            }
+            let from_coords = remaining / atoms_per_solvent;
+            if from_coords != imd.nsm {
+                notes.push(PrepareNote::NsmAdjusted {
+                    imd: imd.nsm,
+                    coordinates: from_coords,
+                });
+            }
+            from_coords
+        } else {
+            imd.nsm
+        };
+        topology.solvate(actual_nsm);
+    }
+
+    // 4. Topology validation (fatal stops; errors and warnings are reported).
+    validate(&mut notes, "topology", validate_topology(&topology))?;
+
+    // 5. check_configuration: atom counts must match.
+    let n_atoms = topology.num_atoms();
+    if positions.len() != n_atoms {
+        return Err(RunError::AtomCountMismatch {
+            topology: n_atoms,
+            coordinates: positions.len(),
+        });
+    }
+
+    // 6. Coordinate validation.
+    validate(
+        &mut notes,
+        "coordinates",
+        validate_coordinates(&positions, Some(box_dims)),
+    )?;
+
+    // 7. Configuration (double-buffered state). Velocities: generated (NTIVEL=1), read, or zero.
+    let mut conf = Configuration::new(n_atoms, 1, 1);
+    conf.current_mut().pos = positions;
+    conf.current_mut().vel = if imd.ntivel == 1 {
+        generate_velocities(imd.tempi, imd.ig as u32, &topology.mass)
+    } else if velocities.len() == n_atoms {
+        velocities
+    } else {
+        vec![Vec3::ZERO; n_atoms]
+    };
+    conf.current_mut().box_config = match truncoct_box {
+        Some(triclinic_box) => SimBox::truncated_octahedral(triclinic_box),
+        None => SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z),
+    };
+    conf.copy_current_to_old();
+
+    // 8. Configuration validation (topology + coordinates together).
+    validate(
+        &mut notes,
+        "configuration",
+        validate_configuration(&topology, &conf),
+    )?;
+
+    Ok(Prepared {
+        topology,
+        configuration: conf,
+        physical_constants,
+        box_dims,
+        truncoct_box,
+        notes,
+    })
+}
+
+fn validate(
+    notes: &mut Vec<PrepareNote>,
+    stage: &'static str,
+    report: ValidationReport,
+) -> Result<(), RunError> {
+    if report.has_fatal() {
+        return Err(RunError::Validation { stage, report });
+    }
+    if report.has_errors() || !report.warnings.is_empty() {
+        notes.push(PrepareNote::Validation { stage, report });
+    }
+    Ok(())
+}

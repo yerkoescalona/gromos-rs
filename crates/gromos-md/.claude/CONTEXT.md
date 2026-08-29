@@ -26,15 +26,14 @@ matching gromosXX to reference tolerances.
   `schnet_nve_loop.rs` (feature `ml`) — real leapfrog loop driving `SchNetInteraction`;
   `xtb_orchestrator_sequence.rs` — `ProviderOrchestratorAlgorithm` inside a real `AlgorithmSequence`
   (PLAN.md P2.8-6 ✓). Neither is wired into the `md` CLI yet.
-- **PLAN.md 3.9 (next): `md.rs`'s run assembly moves out of this crate.** `src/lib.rs` exports
-  nothing, which is why `pyo3-gromos` re-implements `md.rs`'s IMD→`AlgorithmSequence` assembly (and
-  has drifted: `four_pi_eps_i`, `parallel_nonbonded`, NSM-from-coordinates, DOF, FEP). After a
-  five-framework review the target is a new library crate `crates/gromos-run` (no clap/env_logger/
-  mpi/cudarc; serde non-optional) with `RunRecipe` (+ `from_imd`/`to_imd`, `Diagnostics`),
-  `prepare_system`, `build_plan` → `Vec<AlgorithmSpec>`, `validate_plan`, `instantiate` (reads only
-  the plan), `start` (init + step 0); this crate's binaries and `pyo3-gromos` both call it. Do not add
-  a second sequence builder or a second IMD reader anywhere. Known parser hazard recorded there: an
-  `.imd` without MULTIBATH silently runs a Berendsen bath (τ = 0.1) — fixed by 3.9 step 2.
+- **PLAN.md 3.9 step 1 ✓ (2026-08-29): the run assembly left this crate.** `md.rs` (2060 → 1359
+  lines) now calls `gromos_run::{prepare_system, build_sequence_from_imd, start}` — the same functions
+  `pyo3-gromos` calls — and only keeps CLI parsing, printing (from `PrepareNote`/`BuildSummary`),
+  writers, and the GaMD/EDS in-loop application (still applied *after* `run_step`, still parsed
+  out-of-band; PLAN.md 3.9 A6). Do not add algorithm construction back here, and do not add a
+  second IMD reader. Next (step 2): `RunRecipe` + `AlgorithmSpec` in `gromos-run`, presence-aware
+  IMD parsing (an `.imd` without MULTIBATH currently runs a Berendsen bath at τ = 0.1 in both
+  engines — `water_216_nve_nobath` is the ignored reference that proves it), `md @dump`.
 
 ## Key files
 ```

@@ -11,7 +11,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.0.27"
+version = "0.0.28"
 edition = "2021"
 authors = ["Yerko Escalona"]
 license = "GPL-2.0-or-later"
@@ -28,6 +28,8 @@ gromos-integrators = { path = "crates/gromos-integrators" }
 gromos-io = { path = "crates/gromos-io" }
 gromos-analysis = { path = "crates/gromos-analysis" }
 gromos-md = { path = "crates/gromos-md" }
+# Run assembly shared by the md binary and py-gromos (PLAN.md 3.9)
+gromos-run = { path = "crates/gromos-run" }
 gromos-tools = { path = "crates/gromos-tools" }
 # Facade crate that re-exports everything
 gromos = { path = "crates/gromos" }

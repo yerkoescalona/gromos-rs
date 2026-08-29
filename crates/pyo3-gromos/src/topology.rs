@@ -100,6 +100,28 @@ impl PyTopology {
         self.inner.solvate(nsm);
     }
 
+    /// Merge a GROMOS perturbation topology (`.ptp`) for free-energy runs (FEP/TI).
+    ///
+    /// Exactly what the `md` binary does with `@pttopo` when `NTG != 0`: the perturbed
+    /// solute terms are stored and the bonds/angles/dihedrals they perturb are removed from
+    /// the regular solute. Call before `solvate()` and before building a `Simulation`; the
+    /// run's `InputParameters` must have `NTG != 0` (a perturbed topology with `NTG = 0`
+    /// is rejected at construction).
+    ///
+    /// Args:
+    ///     pttopo_file: Path to the perturbation topology (.ptp)
+    fn apply_perturbation(&mut self, pttopo_file: &str) -> PyResult<()> {
+        let pt = gromos_io::ptp::read_pttopo(pttopo_file).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Failed to read perturbation topology '{}': {}",
+                pttopo_file, e
+            ))
+        })?;
+        self.inner
+            .apply_perturbation(pt.perturbed_solute, pt.is_perturbed);
+        Ok(())
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Topology(n_atoms={}, n_solute={}, n_solvent={})",

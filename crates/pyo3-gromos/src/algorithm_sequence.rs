@@ -1134,31 +1134,18 @@ impl PyAlgorithmSequence {
 // Shared DOF calculation — single source of truth for both builders
 // ============================================================================
 
-/// Total kinetic degrees of freedom, accounting for solvent constraints and
-/// `NDFMIN`. Used both by the thermostat (to normalise T = 2*KE/(dof*kB)) and
-/// by `Simulation.temperature` — the two must agree, or the reported
-/// temperature and the temperature the thermostat is actually coupling to
-/// silently diverge.
+/// Total kinetic degrees of freedom — delegates to `gromos_run::total_dof`, the one
+/// formula the `md` binary, `Simulation` and this descriptor path all use (PLAN.md 3.9 A11).
+/// Constraint selection follows the topology's *actual* solvent, not `imd.nsm`.
 pub(crate) fn compute_total_dof(topo: &Topology, imd: &ImdParameters) -> f64 {
-    let n_atoms = topo.num_atoms();
-    let n_solute = topo.num_solute_atoms();
-    let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
-        topo.solvent_atom_template.len()
-    } else {
-        1
-    };
-    let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
-        (n_atoms - n_solute) / atoms_per_solvent
-    } else {
-        0
-    };
-    let shake_enabled = imd.ntc > 1 || (imd.ntcs > 0 && imd.nsm > 0);
-    let solvent_constraint_dof = if shake_enabled {
-        n_solvent_molecules * topo.solvent_constraint_template.len()
-    } else {
-        0
-    };
-    (3 * n_atoms - solvent_constraint_dof) as f64 - imd.ndfmin as f64
+    let has_solvent = topo.num_atoms() > topo.num_solute_atoms();
+    let sel = gromos_run::ConstraintSelection::from_imd(imd, has_solvent);
+    gromos_run::total_dof(
+        topo,
+        &sel,
+        gromos_run::ConstraintSelection::ntc_mode(imd),
+        imd.ndfmin,
+    )
 }
 
 // ============================================================================
@@ -1174,6 +1161,7 @@ pub(crate) fn resolve_algorithm_sequence(
     topo: &Topology,
     conf: &Configuration,
     imd: &ImdParameters,
+    physical_constants: gromos_core::units::PhysicalConstants,
     box_dims: Vec3,
 ) -> Result<AlgorithmSequence, String> {
     let n_atoms = topo.num_atoms();
@@ -1234,6 +1222,12 @@ pub(crate) fn resolve_algorithm_sequence(
                 if !topo.solvent_atom_template.is_empty() {
                     forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
                 }
+                // Same kernel policy and physical constants as the shared builder
+                // (`gromos_run::build_sequence_from_imd`), so this descriptor path stays
+                // bit-identical to `Simulation(system, params)` (PLAN.md 3.9 A2/A10).
+                forcefield.parallel_nonbonded =
+                    gromos_run::ParallelPolicy::Auto.resolve(topo.num_atoms());
+                forcefield.four_pi_eps_i = physical_constants.four_pi_eps_i;
 
                 // Virial type
                 let virial_type = match d.virial.as_deref() {

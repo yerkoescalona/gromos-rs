@@ -9,39 +9,27 @@
 //! All simulation parameters are read from the @input (.imd/.in) file.
 
 use gromos::{
-    algorithm::{
-        AlgorithmSequence, BerendsenBarostat, BerendsenBarostatParameters, BerendsenBarostatParams,
-        BerendsenThermostat, EnergyCalculation, Forcefield, LeapFrogPosition, LeapFrogVelocity,
-        LincsAlgorithm, NoseHooverThermostat, NtcMode, PressureCalculation, RemoveCOMMotion,
-        SettleAlgorithm, ShakeAlgorithm, ShakeParameters, SimulationState,
-        SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
-    },
-    configuration::{Box as SimBox, BoxType, Configuration},
-    interaction::nonbonded::CRFParameters,
+    algorithm::SimulationState,
+    configuration::BoxType,
     io::{
         coordinate::read_coordinates,
-        distanceres::read_distanceres,
         energy::{EnergyFrame, EnergyWriter},
         force::ForceWriter,
         free_energy::{FreeEnergyFrame, FreeEnergyWriter},
         imd::read_imd_file,
-        posres::{build_posres_entries, read_posresspec, read_refpos},
-        ptp::read_pttopo,
         topology::{build_topology, read_topology_file},
         trajectory::TrajectoryWriter,
         EdsBlock, EdsStatsWriter, EdsVrWriter, GamdBlock, GamdBoostWriter, GamdStatsWriter,
     },
-    math::{
-        truncoct_triclinic, truncoct_triclinic_box, truncoct_triclinic_rotmat, Mat3, Periodicity,
-        Rectangular, Triclinic, Vacuum, Vec3,
-    },
-    pairlist::{PairlistAlgorithm, PairlistContainer},
-    random::generate_velocities,
-    validation::{
-        validate_configuration, validate_coordinates, validate_energy, validate_topology,
-    },
+    math::{truncoct_triclinic_rotmat, Vec3},
+    validation::validate_energy,
+};
+use gromos_run::{
+    build_sequence_from_imd, prepare_system, start, Built, PrepareNote, Prepared, RunError,
+    RunInputs, RunOptions,
 };
 use std::env;
+use std::path::PathBuf;
 use std::process;
 use std::time::Instant;
 
@@ -320,61 +308,13 @@ fn main() {
         imd.ntb
     );
 
-    // Extract simulation parameters from IMD file
     let n_steps = imd.nstlim;
     let dt = imd.dt;
-    let cutoff = imd.rcutl;
-    let epsilon = 1.0; // CRF interior dielectric (always 1 in GROMOS)
-    let rf_epsilon = imd.epsrf;
-    let rf_kappa = imd.appak;
-    let pairlist_update = imd.nsnb;
-    let ntf = imd.ntf;
-    let ntf_bond = ntf[0] != 0;
-    let ntf_angle = ntf[1] != 0;
-    let ntf_improper = ntf[2] != 0;
-    let ntf_dihedral = ntf[3] != 0;
-    // Constraint algorithm selection: GROMOS dispatches the solute algorithm
-    // on NTCP (only relevant when NTC>1) and the solvent algorithm on NTCS
-    // (only relevant when solvent molecules exist), independently.
-    let solute_constrained = imd.ntc > 1;
-    let solute_lincs = solute_constrained && imd.ntcp == 2;
-    let solute_shake = solute_constrained && !solute_lincs;
-
-    let solvent_constrained = imd.ntcs > 0 && imd.nsm > 0;
-    let solvent_settle = solvent_constrained && imd.ntcs == 3;
-    let solvent_lincs = solvent_constrained && imd.ntcs == 2;
-    let solvent_shake = solvent_constrained && !solvent_settle && !solvent_lincs;
-
-    let shake_enabled = solute_shake || solvent_shake;
-    let settle_enabled = solvent_settle;
-    let lincs_enabled = solute_lincs || solvent_lincs;
-    let shake_tolerance = imd.shake_tol;
     let nstxout = imd.ntwx;
     let nstener = imd.ntwe;
     let nstlog = imd.ntpr;
     // GROMOS convention: a write/print frequency of 0 disables that output entirely.
     let due = |step: usize, freq: usize| freq > 0 && step % freq == 0;
-    let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
-        imd.temp_bath[0].temp0[0]
-    } else {
-        300.0
-    };
-    let thermostat_tau = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].tau.is_empty() {
-        imd.temp_bath[0].tau[0]
-    } else {
-        -1.0
-    };
-    let thermostat_on = thermostat_tau > 0.0;
-    let thermostat_algorithm = if !imd.temp_bath.is_empty() {
-        imd.temp_bath[0].algorithm
-    } else {
-        0
-    };
-    let thermostat_nhc_chain = if !imd.temp_bath.is_empty() {
-        imd.temp_bath[0].nhc_chain
-    } else {
-        1
-    };
 
     // Derive output file paths (from @args or defaults)
     let trc_file = md_args
@@ -402,116 +342,17 @@ fn main() {
         },
     };
 
-    // Extract physical constants from topo before build_topology consumes it.
-    // These override the defaults in Forcefield — same as gromosXX reading PHYSICALCONSTANTS.
+    // Physical constants from the topology PHYSICALCONSTANTS block override the
+    // Forcefield defaults — same as gromosXX. Carried through `prepare_system`.
     let physical_constants = topo_data.physical_constants;
     log::info!(
         "Physical constants from topo: four_pi_eps_i={}, kB={}",
         physical_constants.four_pi_eps_i,
         physical_constants.kB
     );
-
-    // GROMOS convention: read_topology() then topo.solvate(0, nsm)
-    let mut topo = build_topology(topo_data);
-
-    // Load perturbation topology if provided and FEP is on (NTG != 0)
-    if let Some(ref pt_file) = md_args.pttopo_file {
-        if imd.ntg != 0 {
-            match read_pttopo(pt_file) {
-                Ok(pt) => {
-                    topo.perturbed_solute = pt.perturbed_solute;
-                    let n = topo.num_solute_atoms();
-                    topo.is_perturbed = pt.is_perturbed;
-                    topo.is_perturbed.resize(n, false);
-
-                    // Remove from solute the bonds/angles/impropers/dihedrals that
-                    // are perturbed — GROMOS keeps them in disjoint sets.
-                    {
-                        use std::collections::HashSet;
-                        let pb: HashSet<(usize, usize)> = topo
-                            .perturbed_solute
-                            .bonds
-                            .iter()
-                            .map(|b| (b.i.min(b.j), b.i.max(b.j)))
-                            .chain(
-                                topo.perturbed_solute
-                                    .soft_bonds
-                                    .iter()
-                                    .map(|b| (b.i.min(b.j), b.i.max(b.j))),
-                            )
-                            .collect();
-                        topo.moltypes[0]
-                            .bonds
-                            .retain(|b| !pb.contains(&(b.i.min(b.j), b.i.max(b.j))));
-
-                        let pa: HashSet<(usize, usize, usize)> = topo
-                            .perturbed_solute
-                            .angles
-                            .iter()
-                            .map(|a| (a.i, a.j, a.k))
-                            .chain(
-                                topo.perturbed_solute
-                                    .soft_angles
-                                    .iter()
-                                    .map(|a| (a.i, a.j, a.k)),
-                            )
-                            .collect();
-                        topo.moltypes[0]
-                            .angles
-                            .retain(|a| !pa.contains(&(a.i, a.j, a.k)));
-
-                        let pi: HashSet<(usize, usize, usize, usize)> = topo
-                            .perturbed_solute
-                            .improper_dihedrals
-                            .iter()
-                            .map(|d| (d.i, d.j, d.k, d.l))
-                            .chain(
-                                topo.perturbed_solute
-                                    .soft_impropers
-                                    .iter()
-                                    .map(|d| (d.i, d.j, d.k, d.l)),
-                            )
-                            .collect();
-                        topo.moltypes[0]
-                            .improper_dihedrals
-                            .retain(|d| !pi.contains(&(d.i, d.j, d.k, d.l)));
-
-                        let pd: HashSet<(usize, usize, usize, usize)> = topo
-                            .perturbed_solute
-                            .proper_dihedrals
-                            .iter()
-                            .map(|d| (d.i, d.j, d.k, d.l))
-                            .collect();
-                        topo.moltypes[0]
-                            .proper_dihedrals
-                            .retain(|d| !pd.contains(&(d.i, d.j, d.k, d.l)));
-                    }
-
-                    println!(
-                        "  Perturbation topology: {} perturbed atoms, {} bonds, {} angles, \
-                         {} impropers, {} dihedrals, {} soft bonds, {} soft angles, {} soft impropers",
-                        topo.perturbed_solute.atoms.len(),
-                        topo.perturbed_solute.bonds.len(),
-                        topo.perturbed_solute.angles.len(),
-                        topo.perturbed_solute.improper_dihedrals.len(),
-                        topo.perturbed_solute.proper_dihedrals.len(),
-                        topo.perturbed_solute.soft_bonds.len(),
-                        topo.perturbed_solute.soft_angles.len(),
-                        topo.perturbed_solute.soft_impropers.len(),
-                    );
-                },
-                Err(e) => {
-                    eprintln!("Error reading perturbation topology: {}", e);
-                    process::exit(1);
-                },
-            }
-        } else {
-            log::warn!("@pttopo provided but NTG=0 — perturbation topology ignored");
-        }
-    }
+    let topo = build_topology(topo_data);
 
     // === 2. Load coordinates (read_configuration) ===
-    // Load coordinates BEFORE solvation so we can determine actual NSM
     println!("Loading coordinates: {}", md_args.conf_file);
     log::debug!("Reading coordinate file: {}", md_args.conf_file);
     let _timer = Timer::new("Coordinate loading");
@@ -524,123 +365,105 @@ fn main() {
             process::exit(1);
         },
     };
-
-    let mut positions = coord_data.positions;
-    let mut velocities = coord_data.velocities;
-    let box_dims = coord_data.box_dims;
-
-    // NTB=-1: truncated octahedron. GROMOS converts the legacy "cube edge
-    // length L" BOX block into the lower-triangular triclinic box vectors
-    // and rotates positions/velocities into that frame on read
-    // (io/configuration/in_configuration.cc, math::truncoct_triclinic_box /
-    // math::truncoct_triclinic). PLAN.md P1.4 / FUTURE.md Dim 11 #1.
-    let truncoct_box_matrix = if imd.ntb == -1 {
-        let cubic = Mat3::from_diagonal(box_dims);
-        let triclinic_box = truncoct_triclinic_box(cubic, true);
-        truncoct_triclinic(&mut positions, true);
-        truncoct_triclinic(&mut velocities, true);
-        Some(triclinic_box)
-    } else {
-        None
+    let n_positions = coord_data.positions.len();
+    let n_velocities = coord_data.velocities.len();
+    let box_type_label = match coord_data.box_type {
+        0 => "vacuum",
+        1 => "rectangular",
+        2 => "triclinic",
+        3 => "truncated octahedron",
+        _ => "unknown",
     };
 
-    // Determine actual NSM from coordinate file if solvent template exists
-    let actual_nsm = if imd.nsm > 0 && !topo.solvent_atom_template.is_empty() {
-        let atoms_per_solvent = topo.solvent_atom_template.len();
-        let n_solute = topo.num_solute_atoms();
-        let remaining = positions.len().saturating_sub(n_solute);
-        if remaining % atoms_per_solvent != 0 {
-            eprintln!(
-                "Error: ({} coords - {} solute) is not divisible by {} atoms/solvent",
-                positions.len(),
-                n_solute,
-                atoms_per_solvent
-            );
+    // === 3. Prepare the system: perturbation topology, truncated-octahedron transform,
+    //        NSM from the coordinate file, validation, initial velocities (gromos-run) ===
+    let inputs = RunInputs {
+        pttopo: md_args.pttopo_file.as_ref().map(PathBuf::from),
+        posresspec: md_args.posresspec_file.as_ref().map(PathBuf::from),
+        refpos: md_args.refpos_file.as_ref().map(PathBuf::from),
+        distrest: md_args.distrest_file.as_ref().map(PathBuf::from),
+    };
+    let prepared = match prepare_system(&imd, topo, physical_constants, coord_data.into(), &inputs)
+    {
+        Ok(p) => p,
+        Err(e) => {
+            if let RunError::Validation { stage, report } = &e {
+                report.print();
+                report.print_summary();
+                log::error!("Fatal errors in {} - cannot continue", stage);
+            }
+            eprintln!("Error: {}", e);
             process::exit(1);
+        },
+    };
+    for note in &prepared.notes {
+        match note {
+            PrepareNote::PerturbationLoaded {
+                atoms,
+                bonds,
+                angles,
+                impropers,
+                dihedrals,
+                soft_bonds,
+                soft_angles,
+                soft_impropers,
+            } => println!(
+                "  Perturbation topology: {} perturbed atoms, {} bonds, {} angles, \
+                 {} impropers, {} dihedrals, {} soft bonds, {} soft angles, {} soft impropers",
+                atoms, bonds, angles, impropers, dihedrals, soft_bonds, soft_angles, soft_impropers
+            ),
+            PrepareNote::PerturbationIgnored { .. } => {
+                log::warn!("@pttopo provided but NTG=0 — perturbation topology ignored");
+            },
+            PrepareNote::NsmAdjusted { imd, coordinates } => {
+                println!(
+                    "  Adjusting NSM: {} (imd) -> {} (from coordinates)",
+                    imd, coordinates
+                );
+            },
+            PrepareNote::Validation { stage, report } => {
+                report.print();
+                if report.has_errors() {
+                    report.print_summary();
+                    log::warn!("{} has errors, but continuing", stage);
+                } else {
+                    log::debug!("{} warnings in {}", report.warnings.len(), stage);
+                }
+            },
         }
-        let nsm_from_coords = remaining / atoms_per_solvent;
-        if nsm_from_coords != imd.nsm {
+    }
+
+    {
+        let topo = &prepared.topology;
+        println!("  Solute atoms: {}", topo.num_solute_atoms());
+        if topo.num_solvent_molecules() > 0 {
+            let nsm = topo.num_solvent_molecules();
+            let aps = topo.atoms_per_solvent();
             println!(
-                "  Adjusting NSM: {} (imd) -> {} (from coordinates)",
-                imd.nsm, nsm_from_coords
+                "  Solvent: {} molecules × {} atoms = {} atoms",
+                nsm,
+                aps,
+                nsm * aps
             );
         }
-        nsm_from_coords
-    } else {
-        imd.nsm
-    };
-    topo.solvate(actual_nsm);
-
-    println!("  Solute atoms: {}", topo.num_solute_atoms());
-    if topo.num_solvent_molecules() > 0 {
-        let nsm = topo.num_solvent_molecules();
-        let aps = topo.atoms_per_solvent();
+        println!("  Total atoms: {}", topo.num_atoms());
+        println!("  Bonds: {}", topo.moltypes[0].bonds.len());
+        println!("  Angles: {}", topo.moltypes[0].angles.len());
+        println!("  Dihedrals: {}", topo.moltypes[0].proper_dihedrals.len());
+        println!("  Impropers: {}", topo.moltypes[0].improper_dihedrals.len());
+        println!("  Chargegroups: {}", topo.chargegroups.len());
+        println!();
+        println!("  Positions loaded: {}", n_positions);
+        if n_velocities > 0 {
+            println!("  Velocities loaded: {}", n_velocities);
+        }
+        let box_dims = prepared.box_dims;
         println!(
-            "  Solvent: {} molecules × {} atoms = {} atoms",
-            nsm,
-            aps,
-            nsm * aps
+            "  Box: ({:.4}, {:.4}, {:.4}) nm",
+            box_dims.x, box_dims.y, box_dims.z
         );
-    }
-    println!("  Total atoms: {}", topo.num_atoms());
-    println!("  Bonds: {}", topo.moltypes[0].bonds.len());
-    println!("  Angles: {}", topo.moltypes[0].angles.len());
-    println!("  Dihedrals: {}", topo.moltypes[0].proper_dihedrals.len());
-    println!("  Impropers: {}", topo.moltypes[0].improper_dihedrals.len());
-    println!("  Chargegroups: {}", topo.chargegroups.len());
-    println!();
-
-    // Validate topology
-    log::debug!("Validating topology");
-    let topo_validation = validate_topology(&topo);
-    if topo_validation.has_errors() {
-        topo_validation.print();
-        topo_validation.print_summary();
-        if topo_validation.has_fatal() {
-            log::error!("Fatal errors in topology - cannot continue");
-            process::exit(1);
-        }
-        log::warn!("Topology has errors, but continuing");
-    } else if !topo_validation.warnings.is_empty() {
-        topo_validation.print();
-        log::debug!("{} warnings in topology", topo_validation.warnings.len());
-    } else {
-        log::debug!("Topology validation passed");
-    }
-
-    println!("  Positions loaded: {}", positions.len());
-    if !velocities.is_empty() {
-        println!("  Velocities loaded: {}", velocities.len());
-    }
-    println!(
-        "  Box: ({:.4}, {:.4}, {:.4}) nm",
-        box_dims.x, box_dims.y, box_dims.z
-    );
-    println!(
-        "  Box type: {}",
-        match coord_data.box_type {
-            0 => "vacuum",
-            1 => "rectangular",
-            2 => "triclinic",
-            3 => "truncated octahedron",
-            _ => "unknown",
-        }
-    );
-    println!();
-
-    // check_configuration: atom count must match
-    if positions.len() != topo.num_atoms() {
-        log::error!(
-            "Atom count mismatch: topology={}, coordinates={}",
-            topo.num_atoms(),
-            positions.len()
-        );
-        eprintln!(
-            "Error: Number of atoms in topology ({}) != coordinates ({})",
-            topo.num_atoms(),
-            positions.len()
-        );
-        process::exit(1);
+        println!("  Box type: {}", box_type_label);
+        println!();
     }
 
     // Parse input file for GAMD/EDS blocks
@@ -712,54 +535,12 @@ fn main() {
         block.to_parameters()
     });
 
-    // Validate coordinates
-    log::debug!("Validating coordinates");
-    let coord_validation = validate_coordinates(&positions, Some(box_dims));
-    if coord_validation.has_errors() {
-        coord_validation.print();
-        coord_validation.print_summary();
-        if coord_validation.has_fatal() {
-            log::error!("Fatal errors in coordinates - cannot continue");
-            process::exit(1);
-        }
-        log::warn!("Coordinates have errors, but continuing");
-    } else if !coord_validation.warnings.is_empty() {
-        coord_validation.print();
-        log::debug!(
-            "{} warnings in coordinates",
-            coord_validation.warnings.len()
-        );
-    } else {
-        log::debug!("Coordinate validation passed");
-    }
-
-    // Create configuration
-    log::debug!("Creating configuration");
-    let mut conf = Configuration::new(topo.num_atoms(), 1, 1);
-    conf.current_mut().pos = positions.clone();
-    conf.current_mut().vel = if imd.ntivel == 1 {
-        log::info!(
-            "Generating initial velocities (NTIVEL=1): T={:.2} K, seed={}",
-            imd.tempi,
-            imd.ig
-        );
-        generate_velocities(imd.tempi, imd.ig as u32, &topo.mass)
-    } else if velocities.len() == topo.num_atoms() {
-        velocities.clone()
-    } else {
-        vec![Vec3::ZERO; topo.num_atoms()]
-    };
-    conf.current_mut().box_config = match truncoct_box_matrix {
-        Some(triclinic_box) => SimBox::truncated_octahedral(triclinic_box),
-        None => SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z),
-    };
-    conf.copy_current_to_old();
-
-    // Create EDS parameters if enabled (now that we have num_atoms)
+    // Create EDS parameters if enabled (needs num_atoms)
     let mut eds_params = if let Some(ref block) = eds_block {
         log::info!("Creating EDS parameters from input block");
+        let num_atoms = prepared.topology.num_atoms();
         if block.search_enabled {
-            match block.to_aeds_parameters(topo.num_atoms()) {
+            match block.to_aeds_parameters(num_atoms) {
                 Ok(aeds) => Some(aeds),
                 Err(e) => {
                     log::error!("Failed to create AEDS parameters: {}", e);
@@ -768,7 +549,7 @@ fn main() {
                 },
             }
         } else {
-            match block.to_parameters(topo.num_atoms()) {
+            match block.to_parameters(num_atoms) {
                 Ok(eds) => {
                     // Wrap in AEDS for uniform handling
                     Some(gromos::eds::AEDSParameters::new(eds, 0.0, 0.0, false))
@@ -784,209 +565,51 @@ fn main() {
         None
     };
 
-    // Validate configuration
-    log::debug!("Validating configuration (topology + coordinates)");
-    let conf_validation = validate_configuration(&topo, &conf);
-    if conf_validation.has_errors() {
-        conf_validation.print();
-        conf_validation.print_summary();
-        if conf_validation.has_fatal() {
-            log::error!("Fatal errors in configuration - cannot continue");
+    // === 4. Build the algorithm sequence (gromos-run: the one builder) ===
+    println!("Setting up nonbonded interactions:");
+    println!("  Cutoff:      {:.3} nm", imd.rcutl);
+    println!("  Epsilon:     {:.2}", 1.0);
+    println!("  RF epsilon:  {:.2}", imd.epsrf);
+    println!("  RF kappa:    {:.3} nm^-1", imd.appak);
+    println!();
+
+    let built = match build_sequence_from_imd(&imd, &prepared, &inputs, &RunOptions::default()) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("Error: {}", e);
             process::exit(1);
-        }
-        log::warn!("Configuration has errors, but continuing");
-    } else if !conf_validation.warnings.is_empty() {
-        conf_validation.print();
-        log::debug!(
-            "{} warnings in configuration",
-            conf_validation.warnings.len()
+        },
+    };
+    let Built {
+        sequence: mut md_sequence,
+        summary,
+    } = built;
+    let Prepared {
+        topology: topo,
+        configuration: mut conf,
+        ..
+    } = prepared;
+
+    println!("  Initial pairlist: {} pairs", summary.initial_pairs);
+    println!();
+    if summary.position_restraints > 0 {
+        println!(
+            "  Position restraints: {} atoms, CPOR={:.1} kJ/(mol·nm²)",
+            summary.position_restraints, imd.cpor
         );
-    } else {
-        log::debug!("Configuration validation passed");
+    }
+    if imd.ntdir != 0 {
+        println!(
+            "  Distance restraints: {} unperturbed, {} perturbed, NTDIR={}, CDIR={:.1}, DIR0={:.3}",
+            summary.distance_restraints.0,
+            summary.distance_restraints.1,
+            imd.ntdir,
+            imd.cdir,
+            imd.dir0
+        );
     }
 
-    // Setup nonbonded interactions
-    println!("Setting up nonbonded interactions:");
-    println!("  Cutoff:      {:.3} nm", cutoff);
-    println!("  Epsilon:     {:.2}", epsilon);
-    println!("  RF epsilon:  {:.2}", rf_epsilon);
-    println!("  RF kappa:    {:.3} nm^-1", rf_kappa);
-    println!();
-
-    log::debug!("Calculating CRF parameters");
-    let crf_params = CRFParameters::new(cutoff, epsilon, rf_epsilon, rf_kappa);
-    log::debug!(
-        "CRF parameters: crf_cut={:.6}, crf_2cut3i={:.6}, crf_cut3i={:.6}",
-        crf_params.crf_cut,
-        crf_params.crf_2cut3i,
-        crf_params.crf_cut3i
-    );
-
-    log::debug!("Converting LJ parameter matrix");
-    let lj_params = Forcefield::convert_lj_parameters(&topo);
-    log::debug!(
-        "LJ parameter matrix: {}x{} atom types",
-        lj_params.len(),
-        if lj_params.is_empty() {
-            0
-        } else {
-            lj_params[0].len()
-        }
-    );
-
-    log::debug!("Initializing pairlist");
-    let mut pairlist = PairlistContainer::new(
-        imd.rcutp, // short range cutoff (RCUTP)
-        cutoff,    // long range cutoff (RCUTL)
-        0.0,       // skin (no extra distance)
-    );
-    pairlist.update_frequency = pairlist_update;
-    // PAIRLIST block SIZE; 0.0 means "auto" and is resolved by the cell-list
-    // algorithm to half the short cutoff, as gromosXX does.
-    pairlist.grid_size = imd.size;
-    log::debug!(
-        "Pairlist update frequency: {} steps, grid size: {}",
-        pairlist.update_frequency,
-        if pairlist.grid_size > 0.0 {
-            format!("{:.3} nm", pairlist.grid_size)
-        } else {
-            "auto".to_string()
-        }
-    );
-
-    let periodicity = if let Some(triclinic_box) = truncoct_box_matrix {
-        Periodicity::Triclinic(Triclinic::new(triclinic_box))
-    } else if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
-        Periodicity::Vacuum(Vacuum)
-    } else {
-        Periodicity::Rectangular(Rectangular::new(box_dims))
-    };
-    let box_type = match &periodicity {
-        Periodicity::Rectangular(_) => BoxType::Rectangular,
-        Periodicity::Triclinic(_) => BoxType::Triclinic,
-        Periodicity::Vacuum(_) => BoxType::Vacuum,
-    };
-    let pairlist_algorithm = PairlistAlgorithm::from_imd(
-        imd.algorithm,
-        topo.num_atoms(),
-        box_type,
-        !topo.chargegroups.is_empty(),
-        imd.type_,
-    );
-
-    // Initial pairlist generation
-    log::debug!("Generating initial pairlist");
-    pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
-    println!("  Initial pairlist: {} pairs", pairlist.total_pairs());
-    println!();
-
-    // Load position restraints if requested
-    let posres = if imd.ntpor > 0 {
-        if let Some(ref por_file) = md_args.posresspec_file {
-            use gromos::interaction::restraints::{PositionRestraint, PositionRestraints};
-
-            // Read restrained atom indices from POSRESSPEC
-            let restrained_atoms = read_posresspec(por_file).unwrap_or_else(|e| {
-                eprintln!("Error reading position restraint spec: {}", e);
-                process::exit(1);
-            });
-
-            // Get reference positions:
-            // NTPORB=1: from @refpos file
-            // NTPORB=0: from startup configuration (positions)
-            let ref_positions = if imd.ntporb >= 1 {
-                if let Some(ref rpr_file) = md_args.refpos_file {
-                    read_refpos(rpr_file).unwrap_or_else(|e| {
-                        eprintln!("Error reading reference positions: {}", e);
-                        process::exit(1);
-                    })
-                } else {
-                    eprintln!("NTPORB={} but no @refpos file specified", imd.ntporb);
-                    process::exit(1);
-                }
-            } else {
-                // Use startup positions as reference
-                positions.clone()
-            };
-
-            // Build entries combining atom indices with reference positions
-            let entries = build_posres_entries(&restrained_atoms, &ref_positions);
-
-            let mut pr = PositionRestraints::new();
-            for entry in &entries {
-                pr.add_restraint(PositionRestraint::new(
-                    entry.atom,
-                    entry.reference_pos,
-                    imd.cpor,
-                ));
-            }
-            println!(
-                "  Position restraints: {} atoms, CPOR={:.1} kJ/(mol·nm²)",
-                entries.len(),
-                imd.cpor
-            );
-            Some(pr)
-        } else {
-            eprintln!("NTPOR={} but no @posresspec file specified", imd.ntpor);
-            process::exit(1);
-        }
-    } else {
-        None
-    };
-
-    // Load distance restraints if requested (NTDIR != 0)
-    let distanceres_data = if imd.ntdir != 0 {
-        if let Some(ref dr_file) = md_args.distrest_file {
-            use gromos::interaction::restraints::{
-                DistanceRestraint, DistanceRestraints, PerturbedDistanceRestraint,
-                PerturbedDistanceRestraints,
-            };
-
-            let (unperturbed, perturbed) = read_distanceres(dr_file).unwrap_or_else(|e| {
-                eprintln!("Error reading distance restraint file: {}", e);
-                process::exit(1);
-            });
-
-            let mode = imd.ntdir.abs();
-            let k = imd.cdir;
-            let r_linear = imd.dir0;
-
-            let mut dr = DistanceRestraints::new();
-            for spec in &unperturbed {
-                let mut r = DistanceRestraint::new(
-                    spec.atom1, spec.atom2, spec.r0, spec.w0, spec.rah, k, r_linear, mode,
-                );
-                if imd.ntdir < 0 {
-                    r = r.with_time_averaging(imd.taudir, imd.dt);
-                }
-                dr.add(r);
-            }
-
-            let mut pdr = PerturbedDistanceRestraints::new();
-            for spec in &perturbed {
-                let r = PerturbedDistanceRestraint::new(
-                    spec.atom1, spec.atom2, spec.n, spec.m, spec.a_r0, spec.b_r0, spec.a_w0,
-                    spec.b_w0, spec.rah, k, r_linear, mode,
-                );
-                pdr.add(r);
-            }
-
-            println!(
-                "  Distance restraints: {} unperturbed, {} perturbed, NTDIR={}, CDIR={:.1}, DIR0={:.3}",
-                dr.restraints.len(), pdr.restraints.len(), imd.ntdir, k, r_linear
-            );
-            Some((dr, pdr))
-        } else {
-            eprintln!("NTDIR={} but no @distrest file specified", imd.ntdir);
-            process::exit(1);
-        }
-    } else {
-        None
-    };
-
-    // === Build Algorithm Sequence (GROMOS pattern) ===
-    let is_minimization = imd.ntem > 0;
-
+    let is_minimization = summary.is_minimization;
     if is_minimization {
         println!("Setting up algorithm sequence: Steepest Descent Energy Minimization");
         println!("  NTEM:  {} (steepest descent)", imd.ntem);
@@ -999,383 +622,52 @@ fn main() {
     } else {
         println!("Setting up algorithm sequence: Leap-Frog");
     }
-    let mut md_sequence = AlgorithmSequence::new();
-
-    if is_minimization {
-        // Energy minimization sequence:
-        //   1. Forcefield (compute forces)
-        //   2. SteepestDescent (exchange + position update along force direction)
-        //   3. EnergyCalculation (finalize energies)
-
-        // Forcefield (bonded + nonbonded forces)
-        let mut forcefield = Forcefield::new(
-            lj_params,
-            crf_params,
-            periodicity,
-            pairlist,
-            pairlist_algorithm,
-        );
-        // Use constants from topo PHYSICALCONSTANTS block (mirrors gromosXX behavior)
-        forcefield.four_pi_eps_i = physical_constants.four_pi_eps_i;
-        forcefield.ntf_bond = ntf_bond;
-        forcefield.ntf_angle = ntf_angle;
-        forcefield.ntf_improper = ntf_improper;
-        forcefield.ntf_dihedral = ntf_dihedral;
-        forcefield.parallel_nonbonded = topo.num_atoms() > 100;
-        if !topo.solvent_atom_template.is_empty() {
-            forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
-        }
-        if let Some(pr) = posres.clone() {
-            forcefield.position_restraints = pr;
-        }
-        if let Some((ref dr, ref pdr)) = distanceres_data {
-            forcefield.distance_restraints = dr.clone();
-            forcefield.perturbed_distance_restraints = pdr.clone();
-            forcefield.lambda = imd.rlam;
-        }
-        if imd.ntg != 0 {
-            forcefield.lambda_and_derivative = imd.lambda_and_derivative();
-            forcefield.lambda_exp = imd.nlam;
-            forcefield.global_alphlj = imd.alphlj;
-            forcefield.global_alphc = imd.alphc;
-        }
-        md_sequence.push(Box::new(forcefield));
-
-        // Steepest Descent minimizer
-        let sd = SteepestDescentAlgorithm::new()
-            .with_tolerance(imd.dele)
-            .with_step_sizes(imd.dx0, imd.dxm)
-            .with_min_steps(imd.nmin)
-            .with_force_limit(imd.flim);
-        md_sequence.push(Box::new(sd));
-
-        // SHAKE constraints (GROMOS applies constraints even during minimization)
-        if shake_enabled {
-            let ntc_mode = if solute_shake {
-                match imd.ntc {
-                    3 => NtcMode::AllBonds,
-                    2 => NtcMode::HydrogenBonds,
-                    _ => NtcMode::SolventOnly,
-                }
-            } else {
-                NtcMode::SolventOnly
-            };
-            let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
-                tolerance: shake_tolerance,
-                max_iterations: 1000,
-                ntc: ntc_mode,
-            });
-            shake_alg.include_solvent = solvent_shake;
-            if imd.ntishk >= 1 {
-                shake_alg.shake_initial_positions = true;
-            }
-            if imd.ntishk >= 2 {
-                shake_alg.shake_initial_velocities = true;
-            }
-            md_sequence.push(Box::new(shake_alg));
-        }
-
-        // SETTLE constraints (analytical rigid-water solver, NTCS=settle)
-        if settle_enabled {
-            md_sequence.push(Box::new(SettleAlgorithm::new()));
-        }
-
-        // LINCS constraints (linear constraint solver, NTCP/NTCS=lincs)
-        if lincs_enabled {
-            let ntc_mode = match imd.ntc {
-                3 => NtcMode::AllBonds,
-                2 => NtcMode::HydrogenBonds,
-                _ => NtcMode::SolventOnly,
-            };
-            md_sequence.push(Box::new(LincsAlgorithm::new(
-                ntc_mode,
-                imd.lincs_order_solute,
-                imd.lincs_order_solvent,
-                solute_lincs,
-                solvent_lincs,
-            )));
-        }
-
-        // Energy calculation (finalize totals)
-        // Note: TemperatureCalculation is NOT included for EM — GROMOS EM
-        // does not compute kinetic energy (E_total = E_pot).
-        md_sequence.push(Box::new(EnergyCalculation::new()));
-    } else {
-        // Standard MD sequence
-
-        // 1. COM motion removal (GROMOS: first in sequence, before forcefield)
-        if imd.nticom >= 1 || imd.nscm != 0 {
-            md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
-        }
-
-        // 2. Forcefield (bonded + nonbonded forces)
-        let mut forcefield = Forcefield::new(
-            lj_params,
-            crf_params,
-            periodicity,
-            pairlist,
-            pairlist_algorithm,
-        );
-        forcefield.four_pi_eps_i = physical_constants.four_pi_eps_i;
-        forcefield.ntf_bond = ntf_bond;
-        forcefield.ntf_angle = ntf_angle;
-        forcefield.ntf_improper = ntf_improper;
-        forcefield.ntf_dihedral = ntf_dihedral;
-        forcefield.parallel_nonbonded = topo.num_atoms() > 100;
-        if !topo.solvent_atom_template.is_empty() {
-            forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
-        }
-        if imd.couple_pressure {
-            forcefield.virial_type = match imd
-                .pressure_parameters
-                .as_ref()
-                .map(|p| p.virial)
-                .unwrap_or(0)
-            {
-                2 => VirialType::Molecular,
-                1 => VirialType::Atomic,
-                _ => VirialType::None,
-            };
-        }
-        if let Some(pr) = posres {
-            forcefield.position_restraints = pr;
-        }
-        if let Some((dr, pdr)) = distanceres_data {
-            forcefield.distance_restraints = dr;
-            forcefield.perturbed_distance_restraints = pdr;
-            forcefield.lambda = imd.rlam;
-        }
-        if imd.ntg != 0 {
-            forcefield.lambda_and_derivative = imd.lambda_and_derivative();
-            forcefield.lambda_exp = imd.nlam;
-            forcefield.global_alphlj = imd.alphlj;
-            forcefield.global_alphc = imd.alphc;
-        }
-        md_sequence.push(Box::new(forcefield));
-
-        // 3. Leap-Frog velocity step (exchange_state + v update)
-        md_sequence.push(Box::new(LeapFrogVelocity::new()));
-
-        // 3b. Thermostat (between velocity and position update, GROMOS convention)
-        // algorithm 0 → Berendsen, 1 → NHC single, N≥2 → NHC chain length N
-        if thermostat_on {
-            // Compute degrees of freedom: 3N - N_constraints - NDFMIN
-            let n_atoms = topo.num_atoms();
-            let n_solute = topo.num_solute_atoms();
-            let atoms_per_solvent = if !topo.solvent_atom_template.is_empty() {
-                topo.solvent_atom_template.len()
-            } else {
-                1
-            };
-            let n_solvent_molecules = if atoms_per_solvent > 0 && n_atoms > n_solute {
-                (n_atoms - n_solute) / atoms_per_solvent
-            } else {
-                0
-            };
-            let solvent_constraint_dof = if shake_enabled || settle_enabled || lincs_enabled {
-                n_solvent_molecules * topo.solvent_constraint_template.len()
-            } else {
-                0
-            };
-            // TODO: solute constraint DOF for NTC=2,3
-            let solute_constraint_dof = 0usize;
-            let total_dof = (3 * n_atoms - solvent_constraint_dof - solute_constraint_dof) as f64
-                - imd.ndfmin as f64;
-            println!(
-                "  Thermostat DOF: {:.0} (3*{} - {} solvent_constr - {} NDFMIN)",
-                total_dof, n_atoms, solvent_constraint_dof, imd.ndfmin
-            );
-            match thermostat_algorithm {
-                0 => {
-                    md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
-                        temperature,
-                        thermostat_tau,
-                        total_dof,
-                        n_atoms,
-                    )));
-                },
-                1 => {
-                    md_sequence.push(Box::new(NoseHooverThermostat::new_single_bath(
-                        temperature,
-                        thermostat_tau,
-                        total_dof,
-                        n_atoms,
-                    )));
-                },
-                n => {
-                    // n >= 2: NHC chain of length n (or thermostat_nhc_chain)
-                    let chain = (n as usize).max(thermostat_nhc_chain).max(2);
-                    md_sequence.push(Box::new(NoseHooverThermostat::new_chain_bath(
-                        temperature,
-                        thermostat_tau,
-                        total_dof,
-                        n_atoms,
-                        chain,
-                    )));
-                },
-            }
-        }
-
-        // 4. Leap-Frog position step (r update)
-        md_sequence.push(Box::new(LeapFrogPosition::new()));
-
-        // 5. SHAKE constraints (if enabled)
-        if shake_enabled {
-            let ntc_mode = if solute_shake {
-                match imd.ntc {
-                    3 => NtcMode::AllBonds,
-                    2 => NtcMode::HydrogenBonds,
-                    _ => NtcMode::SolventOnly,
-                }
-            } else {
-                NtcMode::SolventOnly
-            };
-            let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
-                tolerance: shake_tolerance,
-                max_iterations: 1000,
-                ntc: ntc_mode,
-            });
-            shake_alg.include_solvent = solvent_shake;
-            // GROMOS: NTISHK controls initial position/velocity shaking
-            // NTISHK=1: shake positions, NTISHK=2: shake positions + velocities
-            if imd.ntishk >= 1 {
-                shake_alg.shake_initial_positions = true;
-            }
-            if imd.ntishk >= 2 {
-                shake_alg.shake_initial_velocities = true;
-            }
-            md_sequence.push(Box::new(shake_alg));
-        }
-
-        // 5b. SETTLE constraints (analytical rigid-water solver, NTCS=settle)
-        if settle_enabled {
-            md_sequence.push(Box::new(SettleAlgorithm::new()));
-        }
-
-        // 5c. LINCS constraints (linear constraint solver, NTCP/NTCS=lincs)
-        if lincs_enabled {
-            let ntc_mode = match imd.ntc {
-                3 => NtcMode::AllBonds,
-                2 => NtcMode::HydrogenBonds,
-                _ => NtcMode::SolventOnly,
-            };
-            md_sequence.push(Box::new(LincsAlgorithm::new(
-                ntc_mode,
-                imd.lincs_order_solute,
-                imd.lincs_order_solvent,
-                solute_lincs,
-                solvent_lincs,
-            )));
-        }
-
-        // 6. Temperature/kinetic energy calculation
-        md_sequence.push(Box::new(TemperatureCalculation::new()));
-
-        // 7. Pressure calculation and barostat (if pressure coupling is on)
-        if imd.couple_pressure {
-            let virial_type = match imd
-                .pressure_parameters
-                .as_ref()
-                .map(|p| p.virial)
-                .unwrap_or(0)
-            {
-                2 => VirialType::Molecular,
-                1 => VirialType::Atomic,
-                _ => VirialType::None,
-            };
-            md_sequence.push(Box::new(PressureCalculation::new(virial_type)));
-
-            let pp = imd.pressure_parameters.as_ref();
-            md_sequence.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
-                pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
-                compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
-                tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
-            })));
-        }
-
-        // 8. Energy finalization
-        md_sequence.push(Box::new(EnergyCalculation::new()));
-    } // end of MD vs minimization branch
-
     println!("  Sequence: {}", md_sequence.algorithm_names().join(" → "));
     println!();
 
-    // Initialize the sequence
+    // `init()` and step 0 run through `gromos_run::start` at the top of the main loop.
     let mut sim_state = SimulationState::new(dt, n_steps);
-    md_sequence
-        .init(&topo, &mut conf, &sim_state)
-        .unwrap_or_else(|e| {
-            eprintln!("Error initializing algorithm sequence: {}", e);
-            process::exit(1);
-        });
 
-    // Thermostat is now wired into the algorithm sequence (above)
-    if thermostat_on {
-        let thermostat_label = match thermostat_algorithm {
-            0 => "Berendsen".to_string(),
-            1 => "Nose-Hoover".to_string(),
-            n => format!("Nose-Hoover-Chain({})", n),
-        };
-        println!("Setting up thermostat: {}", thermostat_label);
-        println!("  Target temp:   {:.1} K", temperature);
-        println!("  Coupling time: {:.3} ps", thermostat_tau);
+    if let Some(t) = &summary.thermostat {
+        println!("Setting up thermostat: {}", t.label);
+        println!("  Target temp:   {:.1} K", t.temperature);
+        println!("  Coupling time: {:.3} ps", t.tau);
+        println!("  Thermostat DOF: {:.0}", summary.total_dof);
         println!();
     }
-
-    // Setup barostat (from PRESSURESCALE block)
-    let barostat_params = if imd.couple_pressure {
-        let pp = imd.pressure_parameters.as_ref();
-        Some(BerendsenBarostatParameters {
-            target_pressure: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
-            coupling_time: pp.map(|p| p.tau_p).unwrap_or(0.5),
-            compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
-            isotropic: true,
-        })
-    } else {
-        None
-    };
-
-    if let Some(ref params) = barostat_params {
+    if let Some(b) = &summary.barostat {
         println!("Setting up barostat: Berendsen");
-        println!("  Target pres:   {:.1} bar", params.target_pressure);
-        println!("  Coupling time: {:.3} ps", params.coupling_time);
+        println!("  Target pres:   {:.1} bar", b.pressure0);
+        println!("  Coupling time: {:.3} ps", b.tau);
         println!();
     }
-
-    // Setup SHAKE constraints
-    let shake_params = if shake_enabled {
-        let ntc_mode = match imd.ntc {
-            3 => NtcMode::AllBonds,
-            2 => NtcMode::HydrogenBonds,
-            _ => NtcMode::SolventOnly,
-        };
-        Some(ShakeParameters {
-            tolerance: shake_tolerance,
-            max_iterations: 1000,
-            ntc: ntc_mode,
-        })
-    } else {
-        None
-    };
-
-    if let Some(ref params) = shake_params {
+    if let Some(s) = &summary.shake {
         println!("Setting up constraints: SHAKE");
-        println!("  NTC mode:      {:?}", params.ntc);
-        println!("  Tolerance:     {:.6}", params.tolerance);
-        println!("  Max iter:      {}", params.max_iterations);
+        println!("  NTC mode:      {:?}", s.ntc);
+        println!("  Tolerance:     {:.6}", s.tolerance);
+        println!("  Max iter:      {}", s.max_iterations);
         println!();
     }
-    if settle_enabled {
+    if summary.constraints.settle_enabled {
         println!("Setting up constraints: SETTLE (analytical rigid water)");
         println!();
     }
-    if lincs_enabled {
+    if summary.constraints.lincs_enabled {
         println!(
             "Setting up constraints: LINCS (solute={}, solvent={}, order={}/{})",
-            solute_lincs, solvent_lincs, imd.lincs_order_solute, imd.lincs_order_solvent
+            summary.constraints.solute_lincs,
+            summary.constraints.solvent_lincs,
+            summary.lincs_orders.0,
+            summary.lincs_orders.1
         );
         println!();
     }
+    let constraints_enabled = summary.constraints.any();
+    let temperature = summary
+        .thermostat
+        .as_ref()
+        .map(|t| t.temperature)
+        .unwrap_or(300.0);
 
     // Setup trajectory writer
     let mut traj_writer = match TrajectoryWriter::new(
@@ -1564,13 +856,20 @@ fn main() {
 
         log::debug!("Step {}: time = {:.6} ps", step, time);
 
-        // Run the algorithm sequence for this step
-        md_sequence
-            .run_step(&topo, &mut conf, &sim_state)
-            .unwrap_or_else(|e| {
-                eprintln!("Error at step {}: {}", step, e);
-                process::exit(1);
-            });
+        // Run the algorithm sequence for this step. Step 0 goes through
+        // `gromos_run::start` (init + initial force evaluation) — the same entry point the
+        // Python binding uses, so both start a run identically.
+        let step_result = if step == 0 {
+            start(&mut md_sequence, &topo, &mut conf, &sim_state)
+        } else {
+            md_sequence
+                .run_step(&topo, &mut conf, &sim_state)
+                .map_err(|e| RunError::Step { step, message: e })
+        };
+        if let Err(e) = step_result {
+            eprintln!("Error: {}", e);
+            process::exit(1);
+        }
 
         // Debug: dump forces at step 0
         if step == 0 && md_args.verbose >= 2 {
@@ -1820,7 +1119,7 @@ fn main() {
         if let Some(ref mut fw) = force_writer {
             if due(step, nstxout) {
                 let forces = &conf.old().force;
-                let constraint_forces = if shake_enabled || settle_enabled || lincs_enabled {
+                let constraint_forces = if constraints_enabled {
                     Some(conf.old().constraint_force.as_slice())
                 } else {
                     None

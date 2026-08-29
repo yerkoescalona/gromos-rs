@@ -3,6 +3,11 @@
 //! Supports both compositional and file-based construction, mirroring
 //! the internal md architecture with GROMOS naming conventions.
 //!
+//! Since PLAN.md 3.9 step 1 this file contains **no run assembly of its own**: a
+//! `Simulation` is built by the same `gromos-run` functions the `md` binary calls
+//! (`prepare_system` → `build_sequence_from_imd` → `start`), so the gromosXX reference suite
+//! (which drives the binary) and the Python suite guard one code path from two sides.
+//!
 //! # Example (Python)
 //!
 //! ```python
@@ -23,41 +28,27 @@
 //! print(sim.algorithm_names)  # inspect the MD sequence
 //! ```
 
+use std::path::PathBuf;
+
 use numpy::PyArray2;
 use pyo3::prelude::*;
 
 use gromos_core::{
     algorithm::{AlgorithmSequence, SimulationState},
-    configuration::BoxType,
-    configuration::{Box as SimBox, Configuration},
-    math::{
-        truncoct_triclinic, truncoct_triclinic_box, truncoct_triclinic_rotmat, Mat3, Periodicity,
-        Rectangular, Triclinic, Vacuum, Vec3,
-    },
-    pairlist::{PairlistAlgorithm, PairlistContainer},
-    random::generate_velocities,
+    configuration::{BoxType, Configuration},
+    math::{truncoct_triclinic_rotmat, Vec3},
+    units::PhysicalConstants,
     Topology,
-};
-use gromos_forces::nonbonded::CRFParameters;
-use gromos_forces::restraints::{
-    DistanceRestraint, DistanceRestraints, PerturbedDistanceRestraint, PerturbedDistanceRestraints,
-    PositionRestraint, PositionRestraints,
 };
 #[cfg(feature = "ml")]
 use gromos_forces::zones::ZonePartition;
-use gromos_integrators::algorithms::{
-    BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, EnergyCalculation, Forcefield,
-    LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm, NoseHooverThermostat, PressureCalculation,
-    RemoveCOMMotion, SettleAlgorithm, ShakeAlgorithm, SteepestDescentAlgorithm,
-    TemperatureCalculation, VirialType,
-};
-use gromos_integrators::constraints::{NtcMode, ShakeParameters};
 use gromos_io::{
     coordinate::read_coordinates,
-    distanceres::read_distanceres,
     imd::{read_imd_file, ImdParameters},
-    posres::{build_posres_entries, read_posresspec, read_refpos},
     topology::{build_topology, read_topology_file},
+};
+use gromos_run::{
+    build_sequence_from_imd, prepare_system, start, Coordinates, RunError, RunInputs, RunOptions,
 };
 
 use super::algorithm_sequence::{
@@ -69,203 +60,29 @@ use super::system::PySystem;
 use super::topology::PyTopology;
 use super::PyEnergy;
 
-// ============================================================================
-// Shared build logic — constructs a fully initialized simulation from parts
-// ============================================================================
-
-/// Build a `ShakeAlgorithm` from IMD constraint settings — the single place
-/// both the standard-MD and steepest-descent branches of `build_simulation`
-/// construct SHAKE from, so they can't silently drift apart.
-fn shake_algorithm_from_imd(
-    imd: &ImdParameters,
-    solute_shake: bool,
-    solvent_shake: bool,
-) -> ShakeAlgorithm {
-    let ntc_mode = if solute_shake {
-        match imd.ntc {
-            3 => NtcMode::AllBonds,
-            2 => NtcMode::HydrogenBonds,
-            _ => NtcMode::SolventOnly,
-        }
-    } else {
-        NtcMode::SolventOnly
-    };
-    let mut shake_alg = ShakeAlgorithm::new(ShakeParameters {
-        tolerance: imd.shake_tol,
-        max_iterations: 1000,
-        ntc: ntc_mode,
-    });
-    shake_alg.include_solvent = solvent_shake;
-    if imd.ntishk >= 1 {
-        shake_alg.shake_initial_positions = true;
-    }
-    if imd.ntishk >= 2 {
-        shake_alg.shake_initial_velocities = true;
-    }
-    shake_alg
-}
-
-/// Which constraint algorithm(s) GROMOS dispatches to, mirroring `md.rs`
-/// exactly: the solute algorithm is chosen by NTCP (only relevant when
-/// NTC>1) and the solvent algorithm by NTCS (only relevant when solvent
-/// molecules exist) — independently of each other.
-struct ConstraintSelection {
-    solute_shake: bool,
-    solvent_shake: bool,
-    settle_enabled: bool,
-    lincs_enabled: bool,
-    solute_lincs: bool,
-    solvent_lincs: bool,
-}
-
-impl ConstraintSelection {
-    /// `has_solvent` should reflect the topology's *actual* solvent atoms
-    /// (`num_atoms() > num_solute_atoms()`) rather than `imd.nsm` — the
-    /// compositional Python path often solvates the topology directly via
-    /// `Topology.solvate()` with factory-built `InputParameters` that never
-    /// set `nsm`, so relying on `nsm` alone would silently disable solvent
-    /// constraints (e.g. rigid water flying apart) whenever the two diverge.
-    fn from_imd(imd: &ImdParameters, has_solvent: bool) -> Self {
-        let solute_constrained = imd.ntc > 1;
-        let solute_lincs = solute_constrained && imd.ntcp == 2;
-        let solute_shake = solute_constrained && !solute_lincs;
-
-        let solvent_constrained = imd.ntcs > 0 && has_solvent;
-        let solvent_settle = solvent_constrained && imd.ntcs == 3;
-        let solvent_lincs = solvent_constrained && imd.ntcs == 2;
-        let solvent_shake = solvent_constrained && !solvent_settle && !solvent_lincs;
-
-        ConstraintSelection {
-            solute_shake,
-            solvent_shake,
-            settle_enabled: solvent_settle,
-            lincs_enabled: solute_lincs || solvent_lincs,
-            solute_lincs,
-            solvent_lincs,
-        }
-    }
-
-    fn shake_enabled(&self) -> bool {
-        self.solute_shake || self.solvent_shake
-    }
-}
-
-/// Push whichever constraint algorithm(s) `ConstraintSelection` selected
-/// onto the sequence, in the same SHAKE→SETTLE→LINCS order `md.rs` uses.
-fn push_constraint_algorithms(
-    md_sequence: &mut AlgorithmSequence,
-    imd: &ImdParameters,
-    sel: &ConstraintSelection,
-) {
-    if sel.shake_enabled() {
-        md_sequence.push(Box::new(shake_algorithm_from_imd(
-            imd,
-            sel.solute_shake,
-            sel.solvent_shake,
-        )));
-    }
-    if sel.settle_enabled {
-        md_sequence.push(Box::new(SettleAlgorithm::new()));
-    }
-    if sel.lincs_enabled {
-        let ntc_mode = match imd.ntc {
-            3 => NtcMode::AllBonds,
-            2 => NtcMode::HydrogenBonds,
-            _ => NtcMode::SolventOnly,
-        };
-        md_sequence.push(Box::new(LincsAlgorithm::new(
-            ntc_mode,
-            imd.lincs_order_solute,
-            imd.lincs_order_solvent,
-            sel.solute_lincs,
-            sel.solvent_lincs,
-        )));
-    }
-}
-
-/// Build the thermostat algorithm GROMOS's MULTIBATH algorithm selector
-/// picks: 0 = Berendsen, 1 = single-bath Nose-Hoover, n>=2 = Nose-Hoover
-/// chain of length n (or `nhc_chain`, whichever is larger) — mirrors
-/// `md.rs`'s `thermostat_algorithm` dispatch.
-fn push_thermostat(
-    md_sequence: &mut AlgorithmSequence,
-    imd: &ImdParameters,
-    temperature: f64,
-    tau: f64,
-    total_dof: f64,
-    n_atoms: usize,
-) {
-    let algorithm = imd.temp_bath.first().map(|b| b.algorithm).unwrap_or(0);
-    let nhc_chain = imd.temp_bath.first().map(|b| b.nhc_chain).unwrap_or(0);
-    match algorithm {
-        0 => {
-            md_sequence.push(Box::new(BerendsenThermostat::new_single_bath(
-                temperature,
-                tau,
-                total_dof,
-                n_atoms,
-            )));
+/// Map a `gromos_run::RunError` onto the builtin Python exception the binding raised for
+/// the same condition before the assembly was shared (no behaviour change for callers).
+pub(crate) fn run_err(e: RunError) -> PyErr {
+    match e {
+        RunError::Io { .. } => PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()),
+        RunError::MissingInput { .. }
+        | RunError::AtomCountMismatch { .. }
+        | RunError::SolventCount { .. }
+        | RunError::Inconsistent(_)
+        | RunError::Validation { .. } => {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
         },
-        1 => {
-            md_sequence.push(Box::new(NoseHooverThermostat::new_single_bath(
-                temperature,
-                tau,
-                total_dof,
-                n_atoms,
-            )));
-        },
-        n => {
-            let chain = (n as usize).max(nhc_chain).max(2);
-            md_sequence.push(Box::new(NoseHooverThermostat::new_chain_bath(
-                temperature,
-                tau,
-                total_dof,
-                n_atoms,
-                chain,
-            )));
+        RunError::Init(_) | RunError::Step { .. } => {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
         },
     }
-}
-
-/// NTB=-1 (truncated octahedron): GROMOS stores the legacy "cube edge length
-/// L" in the coordinate file and converts it to the lower-triangular
-/// triclinic box vectors on read, rotating positions/velocities into that
-/// frame — mirrors `md.rs`'s identical `truncoct_triclinic_box`/
-/// `truncoct_triclinic` calls. Returns the triclinic box matrix (`None` for
-/// any other NTB, i.e. rectangular or vacuum) and mutates `positions`/
-/// `velocities` in place when it applies.
-fn apply_truncoct_box(
-    imd: &ImdParameters,
-    box_dims: Vec3,
-    positions: &mut [Vec3],
-    velocities: &mut [Vec3],
-) -> Option<Mat3> {
-    if imd.ntb == -1 {
-        let cubic = Mat3::from_diagonal(box_dims);
-        let triclinic_box = truncoct_triclinic_box(cubic, true);
-        truncoct_triclinic(positions, true);
-        truncoct_triclinic(velocities, true);
-        Some(triclinic_box)
-    } else {
-        None
-    }
-}
-
-/// Optional restraint-input file paths, threaded through from the Python
-/// `Simulation`/`System` constructors down to `build_simulation` — mirrors
-/// the `md` binary's `@distrest`/`@posresspec`/`@refpos` CLI flags.
-#[derive(Default, Clone)]
-pub(crate) struct RestraintFiles {
-    pub distrest: Option<String>,
-    pub posresspec: Option<String>,
-    pub refpos: Option<String>,
 }
 
 /// Plain data extracted from a Python `SchNetPotential` + region/buffer selector strings,
-/// threaded from `Simulation::new` down to `build_simulation` — mirrors `RestraintFiles`'s own
-/// shape. Deliberately *not* itself a pyo3 type (no lifetime, always compiles) so
-/// `build_simulation`'s signature doesn't need to change based on the `ml` feature; only the
-/// code that actually *acts* on a `Some` value is feature-gated (see `build_simulation`).
+/// threaded from `Simulation::new` down to `build_simulation`. Deliberately *not* itself a
+/// pyo3 type (no lifetime, always compiles) so `build_simulation`'s signature doesn't need to
+/// change based on the `ml` feature; only the code that actually *acts* on a `Some` value is
+/// feature-gated (see `build_simulation`).
 #[derive(Clone)]
 #[cfg_attr(not(feature = "ml"), allow(dead_code))]
 pub(crate) struct MlPotentialSpec {
@@ -320,266 +137,49 @@ fn resolve_ml_spec(
     }
 }
 
-/// Load and apply position/distance restraints onto a `Forcefield`, mirroring
-/// `md.rs`'s `@posresspec`/`@refpos`/`@distrest` handling exactly (same file
-/// formats, same NTPOR/NTPORB/NTDIR dispatch) — the only gap being FEP's
-/// perturbed distance restraints' `lambda` still comes from `imd.rlam` same
-/// as `md.rs`.
-#[allow(clippy::too_many_arguments)]
-fn apply_restraints(
-    forcefield: &mut Forcefield,
-    imd: &ImdParameters,
-    positions: &[Vec3],
-    distrest_file: Option<&str>,
-    posresspec_file: Option<&str>,
-    refpos_file: Option<&str>,
-) -> PyResult<()> {
-    fn io_err(e: impl std::fmt::Display) -> PyErr {
-        PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string())
-    }
-
-    if imd.ntpor > 0 {
-        let por_file = posresspec_file.ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "NTPOR={} but no posresspec file was given",
-                imd.ntpor
-            ))
-        })?;
-        let restrained_atoms = read_posresspec(por_file).map_err(io_err)?;
-        let ref_positions = if imd.ntporb >= 1 {
-            let rpr_file = refpos_file.ok_or_else(|| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "NTPORB={} but no refpos file was given",
-                    imd.ntporb
-                ))
-            })?;
-            read_refpos(rpr_file).map_err(io_err)?
-        } else {
-            positions.to_vec()
-        };
-        let entries = build_posres_entries(&restrained_atoms, &ref_positions);
-        let mut pr = PositionRestraints::new();
-        for entry in &entries {
-            pr.add_restraint(PositionRestraint::new(
-                entry.atom,
-                entry.reference_pos,
-                imd.cpor,
-            ));
-        }
-        forcefield.position_restraints = pr;
-    }
-
-    if imd.ntdir != 0 {
-        let dr_file = distrest_file.ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "NTDIR={} but no distrest file was given",
-                imd.ntdir
-            ))
-        })?;
-        let (unperturbed, perturbed) = read_distanceres(dr_file).map_err(io_err)?;
-        let mode = imd.ntdir.abs();
-        let k = imd.cdir;
-        let r_linear = imd.dir0;
-
-        let mut dr = DistanceRestraints::new();
-        for spec in &unperturbed {
-            let mut r = DistanceRestraint::new(
-                spec.atom1, spec.atom2, spec.r0, spec.w0, spec.rah, k, r_linear, mode,
-            );
-            if imd.ntdir < 0 {
-                r = r.with_time_averaging(imd.taudir, imd.dt);
-            }
-            dr.add(r);
-        }
-
-        let mut pdr = PerturbedDistanceRestraints::new();
-        for spec in &perturbed {
-            let r = PerturbedDistanceRestraint::new(
-                spec.atom1, spec.atom2, spec.n, spec.m, spec.a_r0, spec.b_r0, spec.a_w0, spec.b_w0,
-                spec.rah, k, r_linear, mode,
-            );
-            pdr.add(r);
-        }
-
-        forcefield.distance_restraints = dr;
-        forcefield.perturbed_distance_restraints = pdr;
-        forcefield.lambda = imd.rlam;
-    }
-
-    Ok(())
-}
-
-/// Resolve initial velocities the same way `md.rs` does: generate a
-/// Maxwell-Boltzmann distribution at `imd.tempi` (seeded by `imd.ig`) when
-/// `NTIVEL=1`, otherwise use the coordinate-file velocities (or zero if
-/// absent/mismatched).
-fn initial_velocities(imd: &ImdParameters, velocities: &[Vec3], masses: &[f64]) -> Vec<Vec3> {
-    if imd.ntivel == 1 {
-        generate_velocities(imd.tempi, imd.ig as u32, masses)
-    } else if velocities.len() == masses.len() {
-        velocities.to_vec()
-    } else {
-        vec![Vec3::ZERO; masses.len()]
-    }
-}
-
-/// Build a simulation from raw components.
+/// Build a simulation from raw components — the shared core of every constructor.
 ///
-/// This is the shared core used by both the file-path and object constructors.
-/// It solvates the topology (if not already solvated), validates atom counts,
-/// builds the Configuration + AlgorithmSequence, and runs step 0.
+/// Prepares the system and builds the algorithm sequence through `gromos-run` (exactly what
+/// the `md` binary does), optionally inserts the ML orchestrator term right after
+/// `Forcefield`, then runs `init` + step 0.
 fn build_simulation(
-    mut topo: Topology,
-    mut positions: Vec<Vec3>,
-    mut velocities: Vec<Vec3>,
+    topo: Topology,
+    physical_constants: PhysicalConstants,
+    positions: Vec<Vec3>,
+    velocities: Vec<Vec3>,
     box_dims: Vec3,
     imd: &ImdParameters,
-    restraints: &RestraintFiles,
+    inputs: &RunInputs,
     ml_spec: Option<&MlPotentialSpec>,
 ) -> PyResult<PySimulation> {
-    // Solvate topology if not already solvated
-    if topo.num_atoms() == topo.num_solute_atoms() && imd.nsm > 0 {
-        topo.solvate(imd.nsm);
-    }
+    let coords = Coordinates {
+        positions,
+        velocities,
+        box_dims,
+    };
+    let prepared =
+        prepare_system(imd, topo, physical_constants, coords, inputs).map_err(run_err)?;
+    let built =
+        build_sequence_from_imd(imd, &prepared, inputs, &RunOptions::default()).map_err(run_err)?;
+    #[cfg(feature = "ml")]
+    let periodicity_for_ml = gromos_run::periodicity_of(&prepared);
 
+    let gromos_run::Built {
+        sequence: mut md_sequence,
+        summary,
+    } = built;
+    let gromos_run::Prepared {
+        topology: topo,
+        configuration: mut conf,
+        ..
+    } = prepared;
     let n_atoms = topo.num_atoms();
-    if positions.len() != n_atoms {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-            "Atom count mismatch: topology={}, coordinates={}",
-            n_atoms,
-            positions.len()
-        )));
-    }
 
-    let truncoct_box_matrix = apply_truncoct_box(imd, box_dims, &mut positions, &mut velocities);
-
-    // Build Configuration (double-buffered state)
-    let mut conf = Configuration::new(n_atoms, 1, 1);
-    conf.current_mut().pos = positions;
-    conf.current_mut().vel = initial_velocities(imd, &velocities, &topo.mass);
-    conf.current_mut().box_config = match truncoct_box_matrix {
-        Some(triclinic_box) => SimBox::truncated_octahedral(triclinic_box),
-        None => SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z),
-    };
-    conf.copy_current_to_old();
-
-    // Extract parameters
-    let dt = imd.dt;
-    let n_steps = imd.nstlim;
-    let cutoff = imd.rcutl;
-    let rf_epsilon = imd.epsrf;
-    let rf_kappa = imd.appak;
-    let pairlist_update = imd.nsnb;
-    let ntf = imd.ntf;
-
-    let has_solvent = topo.num_atoms() > topo.num_solute_atoms();
-    let constraints = ConstraintSelection::from_imd(imd, has_solvent);
-    let is_minimization = imd.ntem > 0;
-
-    // Computed once, used both by the thermostat (if present) and stored on
-    // PySimulation for the `temperature` getter — the two must agree.
-    let total_dof = compute_total_dof(&topo, imd);
-
-    let temperature = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].temp0.is_empty() {
-        imd.temp_bath[0].temp0[0]
-    } else {
-        300.0
-    };
-    let thermostat_tau = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].tau.is_empty() {
-        imd.temp_bath[0].tau[0]
-    } else {
-        -1.0
-    };
-    let thermostat_on = thermostat_tau > 0.0;
-
-    // Nonbonded interactions
-    let crf_params = CRFParameters::new(cutoff, 1.0, rf_epsilon, rf_kappa);
-    let lj_params = Forcefield::convert_lj_parameters(&topo);
-
-    // Pairlist
-    let mut pairlist = PairlistContainer::new(imd.rcutp, cutoff, 0.0);
-    pairlist.update_frequency = pairlist_update;
-    pairlist.grid_size = imd.size;
-
-    let periodicity = if let Some(triclinic_box) = truncoct_box_matrix {
-        Periodicity::Triclinic(Triclinic::new(triclinic_box))
-    } else if box_dims.x == 0.0 && box_dims.y == 0.0 && box_dims.z == 0.0 {
-        Periodicity::Vacuum(Vacuum)
-    } else {
-        Periodicity::Rectangular(Rectangular::new(box_dims))
-    };
-    let box_type = match &periodicity {
-        Periodicity::Rectangular(_) => BoxType::Rectangular,
-        Periodicity::Triclinic(_) => BoxType::Triclinic,
-        Periodicity::Vacuum(_) => BoxType::Vacuum,
-    };
-    // Cloned before `Forcefield::new` below moves `periodicity` — needed again for the ML
-    // orchestrator algorithm, if one is being attached.
-    let periodicity_for_ml = periodicity.clone();
-    let pairlist_algorithm = PairlistAlgorithm::from_imd(
-        imd.algorithm,
-        topo.num_atoms(),
-        box_type,
-        !topo.chargegroups.is_empty(),
-        imd.type_,
-    );
-
-    pairlist_algorithm.update(&topo, &conf, &mut pairlist, &periodicity);
-
-    // Build algorithm sequence — GROMOS Leap-Frog pattern, or Steepest-Descent
-    // energy minimization if NTEM > 0. EM replaces the leap-frog velocity+position
-    // steps and skips COM removal / thermostat / barostat / kinetic-energy
-    // calculation entirely (GROMOS convention: E_total = E_pot during EM),
-    // mirroring the `md` binary's own sequence construction.
-    let mut md_sequence = AlgorithmSequence::new();
-
-    // 1. COM motion removal (not applicable during EM — no velocities)
-    if !is_minimization && (imd.nticom >= 1 || imd.nscm != 0) {
-        md_sequence.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
-    }
-
-    // 2. Forcefield (bonded + nonbonded)
-    let mut forcefield = Forcefield::new(
-        lj_params,
-        crf_params,
-        periodicity,
-        pairlist,
-        pairlist_algorithm,
-    );
-    forcefield.ntf_bond = ntf[0] != 0;
-    forcefield.ntf_angle = ntf[1] != 0;
-    forcefield.ntf_improper = ntf[2] != 0;
-    forcefield.ntf_dihedral = ntf[3] != 0;
-    if !topo.solvent_atom_template.is_empty() {
-        forcefield.atoms_per_solvent = topo.solvent_atom_template.len();
-    }
-    if imd.couple_pressure {
-        forcefield.virial_type = match imd
-            .pressure_parameters
-            .as_ref()
-            .map(|p| p.virial)
-            .unwrap_or(0)
-        {
-            2 => VirialType::Molecular,
-            1 => VirialType::Atomic,
-            _ => VirialType::None,
-        };
-    }
-    apply_restraints(
-        &mut forcefield,
-        imd,
-        &conf.current().pos,
-        restraints.distrest.as_deref(),
-        restraints.posresspec.as_deref(),
-        restraints.refpos.as_deref(),
-    )?;
-    md_sequence.push(Box::new(forcefield));
-
-    // ML potential, if attached (PLAN.md P3.7) — pushed immediately after Forcefield, matching
-    // `orchestrator_algorithm.rs`'s own documented placement requirement (adds to Forcefield's
-    // already-computed force/virial). `ml_spec` is always `Option<MlPotentialSpec>` regardless
-    // of the `ml` feature (plain data, see its own docs); only the code that *acts* on `Some` is
-    // feature-gated, so `Simulation`'s constructor signature doesn't change across builds.
+    // ML potential, if attached (PLAN.md P3.7) — inserted immediately after Forcefield,
+    // matching `orchestrator_algorithm.rs`'s documented placement requirement (it adds to
+    // Forcefield's already-computed force/virial). `ml_spec` is always
+    // `Option<MlPotentialSpec>` regardless of the `ml` feature; only the code that *acts* on
+    // `Some` is feature-gated, so `Simulation`'s constructor signature doesn't change.
     #[cfg(feature = "ml")]
     if let Some(spec) = ml_spec {
         let partition = ZonePartition::from_selections(&topo, &spec.region, spec.buffer.as_deref())
@@ -591,95 +191,25 @@ fn build_simulation(
             n_atoms,
             periodicity_for_ml,
         )?;
-        md_sequence.push(Box::new(algorithm));
+        let after_forcefield = md_sequence
+            .algorithm_names()
+            .iter()
+            .position(|name| *name == "Forcefield")
+            .map(|i| i + 1)
+            .ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "built sequence has no Forcefield to attach the ML term to",
+                )
+            })?;
+        md_sequence.insert(after_forcefield, Box::new(algorithm));
     }
     #[cfg(not(feature = "ml"))]
     {
-        let _ = (&ml_spec, &periodicity_for_ml);
+        let _ = &ml_spec;
     }
 
-    if is_minimization {
-        // Steepest-descent minimization: replaces LeapFrogVelocity + LeapFrogPosition.
-        let sd = SteepestDescentAlgorithm::new()
-            .with_tolerance(imd.dele)
-            .with_step_sizes(imd.dx0, imd.dxm)
-            .with_min_steps(imd.nmin)
-            .with_force_limit(imd.flim);
-        md_sequence.push(Box::new(sd));
-
-        // GROMOS applies constraints even during minimization.
-        push_constraint_algorithms(&mut md_sequence, imd, &constraints);
-
-        // No TemperatureCalculation — EM has no velocities/kinetic energy.
-        md_sequence.push(Box::new(EnergyCalculation::new()));
-    } else {
-        // 3. Leap-Frog velocity
-        md_sequence.push(Box::new(LeapFrogVelocity::new()));
-
-        // 3b. Thermostat (Berendsen or Nose-Hoover/chain, per MULTIBATH algorithm)
-        if thermostat_on {
-            push_thermostat(
-                &mut md_sequence,
-                imd,
-                temperature,
-                thermostat_tau,
-                total_dof,
-                n_atoms,
-            );
-        }
-
-        // 4. Leap-Frog position
-        md_sequence.push(Box::new(LeapFrogPosition::new()));
-
-        // 5. Constraints (SHAKE / SETTLE / LINCS)
-        push_constraint_algorithms(&mut md_sequence, imd, &constraints);
-
-        // 6. Temperature calculation
-        md_sequence.push(Box::new(TemperatureCalculation::new()));
-
-        // 7. Pressure calculation and barostat
-        if imd.couple_pressure {
-            let virial_type = match imd
-                .pressure_parameters
-                .as_ref()
-                .map(|p| p.virial)
-                .unwrap_or(0)
-            {
-                2 => VirialType::Molecular,
-                1 => VirialType::Atomic,
-                _ => VirialType::None,
-            };
-            md_sequence.push(Box::new(PressureCalculation::new(virial_type)));
-
-            let pp = imd.pressure_parameters.as_ref();
-            md_sequence.push(Box::new(BerendsenBarostat::new(BerendsenBarostatParams {
-                pressure0: pp.map(|p| p.pressure0[0][0]).unwrap_or(1.0),
-                compressibility: pp.map(|p| p.compressibility[0][0]).unwrap_or(4.575e-4),
-                tau: pp.map(|p| p.tau_p).unwrap_or(0.5),
-            })));
-        }
-
-        // 8. Energy calculation
-        md_sequence.push(Box::new(EnergyCalculation::new()));
-    }
-
-    // Initialize sequence
-    let mut sim_state = SimulationState::new(dt, n_steps);
-    md_sequence
-        .init(&topo, &mut conf, &sim_state)
-        .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to initialize algorithm sequence: {}",
-                e
-            ))
-        })?;
-
-    // Run step 0 (initial force evaluation, GROMOS convention)
-    md_sequence
-        .run_step(&topo, &mut conf, &sim_state)
-        .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Error at step 0: {}", e))
-        })?;
+    let mut sim_state = SimulationState::new(imd.dt, imd.nstlim);
+    start(&mut md_sequence, &topo, &mut conf, &sim_state).map_err(run_err)?;
     sim_state.advance();
 
     Ok(PySimulation {
@@ -687,75 +217,53 @@ fn build_simulation(
         configuration: conf,
         md_sequence,
         sim_state,
-        dt,
+        dt: imd.dt,
         n_atoms,
-        total_dof,
+        total_dof: summary.total_dof,
     })
 }
 
 /// Build a simulation from a user-provided algorithm sequence.
 ///
-/// The sequence descriptors are resolved into real Rust algorithms using
-/// the topology, configuration, and IMD parameters for context.
+/// The system is prepared exactly as for `build_simulation`; the sequence descriptors are
+/// then resolved into real Rust algorithms (`resolve_algorithm_sequence`, the descriptor path
+/// slated for replacement by the recipe plan in PLAN.md 3.9 steps 2–4).
 fn build_simulation_from_sequence(
-    mut topo: Topology,
+    topo: Topology,
+    physical_constants: PhysicalConstants,
     positions: Vec<Vec3>,
     velocities: Vec<Vec3>,
     box_dims: Vec3,
     imd: &ImdParameters,
     sequence: &PyAlgorithmSequence,
 ) -> PyResult<PySimulation> {
-    // Solvate topology if not already solvated
-    if topo.num_atoms() == topo.num_solute_atoms() && imd.nsm > 0 {
-        topo.solvate(imd.nsm);
-    }
-
+    let coords = Coordinates {
+        positions,
+        velocities,
+        box_dims,
+    };
+    let prepared = prepare_system(imd, topo, physical_constants, coords, &RunInputs::default())
+        .map_err(run_err)?;
+    let gromos_run::Prepared {
+        topology: topo,
+        configuration: mut conf,
+        box_dims,
+        ..
+    } = prepared;
     let n_atoms = topo.num_atoms();
-    if positions.len() != n_atoms {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-            "Atom count mismatch: topology={}, coordinates={}",
-            n_atoms,
-            positions.len()
-        )));
-    }
-
-    // Build Configuration (double-buffered state)
-    let mut conf = Configuration::new(n_atoms, 1, 1);
-    conf.current_mut().pos = positions;
-    conf.current_mut().vel = initial_velocities(imd, &velocities, &topo.mass);
-    conf.current_mut().box_config = SimBox::rectangular(box_dims.x, box_dims.y, box_dims.z);
-    conf.copy_current_to_old();
-
-    let dt = imd.dt;
-    let n_steps = imd.nstlim;
     let total_dof = compute_total_dof(&topo, imd);
 
-    // Resolve descriptors into real algorithms
-    let mut md_sequence = resolve_algorithm_sequence(sequence, &topo, &conf, imd, box_dims)
-        .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to resolve algorithm sequence: {}",
-                e
-            ))
-        })?;
+    let mut md_sequence =
+        resolve_algorithm_sequence(sequence, &topo, &conf, imd, physical_constants, box_dims)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Failed to resolve algorithm sequence: {}",
+                    e
+                ))
+            })?;
 
-    // Initialize sequence
-    let mut sim_state = SimulationState::new(dt, n_steps);
-    md_sequence
-        .init(&topo, &mut conf, &sim_state)
-        .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to initialize algorithm sequence: {}",
-                e
-            ))
-        })?;
-
-    // Run step 0 (initial force evaluation, GROMOS convention)
-    md_sequence
-        .run_step(&topo, &mut conf, &sim_state)
-        .map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Error at step 0: {}", e))
-        })?;
+    let mut sim_state = SimulationState::new(imd.dt, imd.nstlim);
+    start(&mut md_sequence, &topo, &mut conf, &sim_state).map_err(run_err)?;
     sim_state.advance();
 
     Ok(PySimulation {
@@ -763,7 +271,7 @@ fn build_simulation_from_sequence(
         configuration: conf,
         md_sequence,
         sim_state,
-        dt,
+        dt: imd.dt,
         n_atoms,
         total_dof,
     })
@@ -790,8 +298,8 @@ pub struct PySimulation {
     dt: f64,
     n_atoms: usize,
     /// Kinetic degrees of freedom (constraint- and NDFMIN-aware), computed once
-    /// at build time and reused for `temperature` — must match what the
-    /// thermostat (if any) is coupling to. See `compute_total_dof`.
+    /// at build time by `gromos_run::total_dof` and reused for `temperature` —
+    /// the same value the thermostat (if any) couples to.
     total_dof: f64,
 }
 
@@ -808,6 +316,8 @@ impl PySimulation {
     ///
     /// Optional restraint file paths (mirror the `md` binary's `@distrest`/
     /// `@posresspec`/`@refpos` flags): `distrest`, `posresspec`, `refpos`.
+    /// A perturbation topology (FEP, `NTG != 0`) is applied to the `Topology`
+    /// beforehand with `Topology.apply_perturbation(path)`.
     #[new]
     #[pyo3(signature = (arg1, arg2, arg3=None, *, distrest=None, posresspec=None, refpos=None, ml_potential=None, ml_region=None, ml_buffer=None))]
     #[allow(clippy::too_many_arguments)]
@@ -822,10 +332,11 @@ impl PySimulation {
         ml_region: Option<String>,
         ml_buffer: Option<String>,
     ) -> PyResult<Self> {
-        let restraints = RestraintFiles {
-            distrest,
-            posresspec,
-            refpos,
+        let inputs = RunInputs {
+            pttopo: None,
+            posresspec: posresspec.map(PathBuf::from),
+            refpos: refpos.map(PathBuf::from),
+            distrest: distrest.map(PathBuf::from),
         };
         let ml_spec = resolve_ml_spec(ml_potential, ml_region, ml_buffer)?;
         match arg3 {
@@ -843,11 +354,12 @@ impl PySimulation {
                 })?;
                 build_simulation(
                     system.topology.inner.clone(),
+                    system.topology.physical_constants,
                     system.configuration.pos_data.clone(),
                     system.configuration.vel_data.clone(),
                     system.configuration.box_dims,
                     &params.inner,
-                    &restraints,
+                    &inputs,
                     ml_spec.as_ref(),
                 )
             },
@@ -858,11 +370,11 @@ impl PySimulation {
                     arg2.extract::<String>(),
                     arg3.extract::<String>(),
                 ) {
-                    return Self::_from_files_with_restraints(
+                    return Self::_from_files_with_inputs(
                         &topo_file,
                         &conf_file,
                         &input_file,
-                        &restraints,
+                        &inputs,
                         ml_spec.as_ref(),
                     );
                 }
@@ -885,11 +397,12 @@ impl PySimulation {
 
                 build_simulation(
                     topo.inner.clone(),
+                    topo.physical_constants,
                     conf.pos_data.clone(),
                     conf.vel_data.clone(),
                     conf.box_dims,
                     &params.inner,
-                    &restraints,
+                    &inputs,
                     ml_spec.as_ref(),
                 )
             },
@@ -902,7 +415,13 @@ impl PySimulation {
     ///     sim = Simulation.from_files("system.topo", "initial.cnf", "run.imd")
     #[staticmethod]
     fn from_files(topo_file: &str, conf_file: &str, input_file: &str) -> PyResult<Self> {
-        Self::_from_files(topo_file, conf_file, input_file)
+        Self::_from_files_with_inputs(
+            topo_file,
+            conf_file,
+            input_file,
+            &RunInputs::default(),
+            None,
+        )
     }
 
     /// Run the simulation for `n_steps` MD steps.
@@ -1156,6 +675,7 @@ impl PySimulation {
     ) -> PyResult<Self> {
         build_simulation_from_sequence(
             topo.inner.clone(),
+            topo.physical_constants,
             conf.pos_data.clone(),
             conf.vel_data.clone(),
             conf.box_dims,
@@ -1180,9 +700,8 @@ impl PySimulation {
     /// `[time, kinetic, potential, total, volume, pressure, bond, angle, improper, dihedral, lj, coulomb]`
     /// for the current state — same layout as `EnergyFrame`, used by `run()` to
     /// build the energy timeseries. Temperature is left at 0.0: unlike volume
-    /// and pressure it needs the degrees-of-freedom count, which `PySimulation`
-    /// does not currently track (see `BerendsenThermostat` construction in
-    /// `build_simulation` for that computation).
+    /// and pressure it needs the degrees-of-freedom count, which this row does
+    /// not carry (use the `temperature` getter).
     fn energy_row(&self) -> Vec<f64> {
         let state = self.configuration.old();
         let volume = state.box_config.volume();
@@ -1210,21 +729,11 @@ impl PySimulation {
         ]
     }
 
-    fn _from_files(topo_file: &str, conf_file: &str, input_file: &str) -> PyResult<Self> {
-        Self::_from_files_with_restraints(
-            topo_file,
-            conf_file,
-            input_file,
-            &RestraintFiles::default(),
-            None,
-        )
-    }
-
-    fn _from_files_with_restraints(
+    fn _from_files_with_inputs(
         topo_file: &str,
         conf_file: &str,
         input_file: &str,
-        restraints: &RestraintFiles,
+        inputs: &RunInputs,
         ml_spec: Option<&MlPotentialSpec>,
     ) -> PyResult<Self> {
         let imd = read_imd_file(input_file).map_err(|e| {
@@ -1234,13 +743,14 @@ impl PySimulation {
             ))
         })?;
 
-        let topo_data = read_topology_file(topo_file).map_err(|e| {
+        let parsed = read_topology_file(topo_file).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                 "Failed to read topology '{}': {}",
                 topo_file, e
             ))
         })?;
-        let topo = build_topology(topo_data);
+        let physical_constants = parsed.physical_constants;
+        let topo = build_topology(parsed);
 
         let coord_data = read_coordinates(conf_file).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
@@ -1251,11 +761,12 @@ impl PySimulation {
 
         build_simulation(
             topo,
+            physical_constants,
             coord_data.positions,
             coord_data.velocities,
             coord_data.box_dims,
             &imd,
-            restraints,
+            inputs,
             ml_spec,
         )
     }

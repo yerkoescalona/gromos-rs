@@ -736,25 +736,40 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
       a strict xfail with a named feature and a table row; `water_216_nve_nobath` fails for the
       documented reason in both suites.
 
-- [ ] **Step 1 — Lift, zero behaviour change (M).** ▲ New crate `crates/gromos-run` (A4) with
-      `run::prepare_system`, `run::build_sequence_from_imd(&ImdParameters, &Topology, &Configuration,
-      &RunInputs)`, ▲ `run::start`, `run::RunInputs {pttopo, posresspec, refpos, distrest}`, ▲
-      `RunError`. Bodies = `md.rs:414-572` + `md.rs:987-1298` moved verbatim except that ▲ the 19
-      `println!`/`process::exit` sites become `RunError` returns (the reporting stays in `md.rs`, fed by
-      a returned summary + `Diagnostics`). `md.rs` and `build_simulation` both call it; `pyo3-gromos`
-      gains the `gromos-run` dependency, ▲ `ml` forwarded through `gromos-run`, `pyo3-gromos`,
-      `py-gromos`.
-      - [ ] Resolve the 3.8 §2 divergences *toward `md.rs`* (A10/A11), each with a test:
-            `four_pi_eps_i` from PHYSICALCONSTANTS; NSM from coordinates; `parallel` policy explicit
-            (`Auto` = `n_atoms > 100`); one DOF function (`compute_total_dof` moves into `gromos-run`,
-            gains solute-constraint DOF, `md.rs`'s TODO closed).
-      - [ ] `build_simulation_from_sequence` gains vacuum/triclinic boxes via `prepare_system`.
-      - [ ] FEP reaches Python for free through `RunInputs.pttopo`: add `ch4_water_fep` and
-            `aladip_vacuum_fep` to `REFERENCE_SYSTEMS` (the latter `xfail` for the known Rust-side mismatch).
-      - [ ] ▲ `gromos.exceptions` with one `From<RunError> for PyErr` (C10).
-      **Gate:** Rust 37/37; Python suite green (121 + the FEP additions); step-0 `xfail`s that now pass
-      removed; `grep -c 'md_sequence.push' crates/pyo3-gromos/src/simulation.rs` = 0; `cargo tree`
-      shows no cycle (A4); no `process::exit` in `gromos-run`.
+- [x] **Step 1 — Lift, zero behaviour change (M).** ✓ 2026-08-29. New crate `crates/gromos-run`
+      (A4): `prepare_system`, `build_sequence_from_imd(&ImdParameters, &Prepared, &RunInputs,
+      &RunOptions)`, `start`, `RunInputs {pttopo, posresspec, refpos, distrest}`, `RunOptions
+      {parallel}`, `RunError`, `total_dof`, `periodicity_of`. Bodies moved from `md.rs:414-572` +
+      `987-1298`; the binary's `println!`/`process::exit` sites became `RunError` variants and
+      `PrepareNote`/`BuildSummary` data that `md.rs` prints (`md.rs` 2060 → 1359 lines). `md.rs` and
+      `build_simulation` both call it; `ml` forwarded through `gromos-run` → `pyo3-gromos` → `py-gromos`.
+      - [x] Divergences resolved *toward `md.rs`* (A10/A11): `four_pi_eps_i` from PHYSICALCONSTANTS
+            (no oracle — every reference topology carries the default; propagation is by inspection);
+            NSM from coordinates (`nsm_comes_from_the_coordinate_file`); `ParallelPolicy::Auto`
+            (`parallel_policy_resolves_like_the_binary`); one DOF formula with solute constraints
+            (`total_dof_counts_solute_constraints`; the survey found no reference with NTC>1 *and* a
+            live thermostat, so no reference moved). Tests: `crates/gromos-run/tests/prepare_and_build.rs`.
+      - [x] `build_simulation_from_sequence` goes through `prepare_system` (vacuum/triclinic
+            preparation; its `Forcefield` still comes from the descriptor resolver, so
+            `aladip_trunc_oct` stays an xfail until step 2).
+      - [x] FEP reaches Python — not through a kwarg but through `Topology.apply_perturbation(path)`
+            (the `.ptp` merge became `Topology::apply_perturbation` in gromos-core, shared with
+            `md @pttopo`). `ch4_water_fep` added and **passes** from Python; `aladip_vacuum_fep` strict
+            xfail (the Rust suite's known mismatch); `perturbation_topology_follows_ntg` covers the
+            NTG=0 rules.
+      - [~] `gromos.exceptions` **deferred to step 3**: step 1 keeps the builtin exception types the
+            binding raised before (`run_err` maps `RunError` variants onto IOError/ValueError/
+            RuntimeError) — zero behaviour change was the point of this step; the typed hierarchy
+            arrives with the recipe's new error kinds.
+      - [x] Found and fixed on the way: the descriptor path built a *serial* `Forcefield` while the
+            binary is parallel above 100 atoms — the six >100-atom systems lost exact A/C parity the
+            moment path A inherited the binary's policy (A2, exactly as predicted). The resolver now
+            applies `ParallelPolicy::Auto` and the topology's `four_pi_eps_i` too.
+      **Gate met 2026-08-29:** Rust 37 passed / 3 ignored; Python 208 passed / 16 skipped / 18 xfailed
+      (no XPASS: the step-0 xfails name features the *descriptor* path still lacks — they close in
+      steps 2–4, not here); `grep -c 'md_sequence.push' crates/pyo3-gromos/src/simulation.rs` = 0;
+      `cargo tree -p pyo3-gromos -i gromos-run` shows no cycle; no `process::exit`/`println!` in
+      `gromos-run`; clippy clean on the new crate.
 
 - [ ] **Step 2 — `RunRecipe` + `AlgorithmSpec`, IMD both ways (L).**
       - [ ] ▲ `ImdParameters` presence-aware (A18): optional blocks become `Option<…>`; `parse_f64`/
@@ -860,6 +875,9 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
 | `nacl_1water_distres` | A vs C | not runnable on C | restraints are `Simulation` kwargs; `from_sequence` has none | `RunInputs` (step 1) → `forcefield.restraints` (step 2) | open → step 1 |
 | `aladip_solvated_em_posres` | A vs C | not runnable on C | same (posresspec/refpos) | as above | open → step 1 |
 | `aladip_solvated_em` | A vs C | not runnable on C | same (posresspec/refpos) | as above | open → step 1 |
+| `ch4_water_fep`, `aladip_vacuum_fep` | A vs C | kinetic, frame 0 | C never resolves the PERTURBATION block onto `Forcefield` (λ, soft-core, NLAM) | recipe `perturbation` group (step 2) | open → step 2 |
+| six >100-atom systems (`water_216_*`, `water_1000_spc_gridcell`) | A vs C, after step 1 | last-digit energies from frame 0 | A inherited the binary's `ParallelPolicy::Auto`; C's resolver built a serial `Forcefield` (A2) | resolver applies the same policy + `four_pi_eps_i` | **closed, step 1** |
+| (rows above marked "open → step 1") | | | | the binary and `Simulation` now share one builder; C is still the descriptor resolver | still open → steps 2–4 |
 
 **Explicitly out of scope here** (tracked elsewhere): the `System` building algebra (FUTURE.md,
 D1–D8); zone-aware `Forcefield` and `coupling: Replace` (2.8); GaMD/EDS/REMD as algorithms (1.9); PME

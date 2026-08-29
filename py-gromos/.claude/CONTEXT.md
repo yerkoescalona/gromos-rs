@@ -41,8 +41,11 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   between the two builders; the 10 divergences are `xfail(strict=True)` entries in
   `EXPECTED_DIVERGENCE`, each naming the feature path C lacks — they must be *deleted* when the shared
   builder lands, never left to rot. `test_gromosXX_references.py` gained `EXPECTED_ENGINE_FAILURES`
-  (`water_216_nve_nobath`, the absent-MULTIBATH parser bug) and `REFERENCE_PARAMS`. Suite: 185 passed,
-  2 skipped, 13 xfailed.
+  (`water_216_nve_nobath`, the absent-MULTIBATH parser bug) and `REFERENCE_PARAMS`.
+- **PLAN.md 3.9 step 1 ✓ (2026-08-29)** — `Simulation` is built by the `md` binary's own code
+  (`gromos-run`); `Topology.apply_perturbation(path)` brings FEP to Python (`ch4_water_fep` in
+  `REFERENCE_SYSTEMS`, passing; `aladip_vacuum_fep` strict xfail). Full suite: 208 passed, 16 skipped,
+  18 xfailed (10 descriptor-path divergences + 2 FEP-on-path-C + nobath ×3 + aladip_vacuum_fep ×3).
 - Remaining P3 items:
   - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)

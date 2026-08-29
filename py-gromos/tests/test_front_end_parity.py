@@ -65,6 +65,11 @@ EXPECTED_DIVERGENCE: dict[str, str] = {
     "nacl_1water_distres": "restraints are Simulation kwargs; Simulation.from_sequence has none (distrest)",
     "aladip_solvated_em_posres": "restraints are Simulation kwargs; Simulation.from_sequence has none (posresspec/refpos)",
     "aladip_solvated_em": "restraints are Simulation kwargs; Simulation.from_sequence has none (posresspec/refpos)",
+    # FEP: path A sets lambda / soft-core / NLAM on Forcefield from the PERTURBATION block;
+    # the Forcefield descriptor has no such fields, so path C runs the perturbed topology
+    # with lambda = 0 and no soft-core.
+    "ch4_water_fep": "path C lacks FEP (PERTURBATION block not resolved onto Forcefield)",
+    "aladip_vacuum_fep": "path C lacks FEP (PERTURBATION block not resolved onto Forcefield)",
 }
 
 
@@ -72,6 +77,8 @@ def _load(system_name: str):
     system_dir = REF_DIR / system_name
     inputs = _parse_input_toml(system_dir)
     topo = Topology(str((system_dir / inputs["topology"]).resolve()))
+    if inputs.get("pttopo"):
+        topo.apply_perturbation(str((system_dir / inputs["pttopo"]).resolve()))
     conf = Configuration(str((system_dir / inputs["configuration"]).resolve()))
     params = InputParameters(str((system_dir / inputs["parameters"]).resolve()))
     kwargs = {}

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.28] (2026-08-29)
+
+### Added
+
+- **`gromos-run` crate — the one run builder (PLAN.md 3.9 step 1).** The IMD → algorithm-
+  sequence assembly that the `md` binary and the Python binding each carried (and had let
+  drift) now lives once, as a library: `prepare_system` (perturbation topology, truncated-
+  octahedron transform, NSM from the coordinate file, validation, initial velocities),
+  `build_sequence_from_imd` (the GROMOS step order), `start` (init + step 0), `total_dof`, and a
+  `RunError` in place of the binary's `println!`/`process::exit` sites. `md.rs` shrank from 2060
+  to 1359 lines; `pyo3-gromos`'s `build_simulation` contains no algorithm construction at all.
+- Divergences resolved toward the binary: Python now honours the topology's PHYSICALCONSTANTS
+  (`four_pi_eps_i`), takes NSM from the coordinate file, uses the same parallel-kernel policy
+  (`ParallelPolicy::Auto` = parallel above 100 atoms), and one DOF formula that also counts
+  solute constraints (the binary's old `TODO`; no reference combines NTC>1 with a live
+  thermostat, so no reference result moved).
+- FEP from Python: `Topology.apply_perturbation(path)` (the `.ptp` merge is now a
+  `Topology` method in gromos-core, shared with `md @pttopo`); `ch4_water_fep` joins the Python
+  reference suite and passes; `aladip_vacuum_fep` is a strict xfail like the Rust `ignore`.
+- `AlgorithmSequence::insert` (gromos-core) so the ML term can be placed after `Forcefield`
+  without a second builder.
+- `crates/gromos-run/tests/prepare_and_build.rs`: NSM-from-coordinates, solute-constraint DOF,
+  perturbation/NTG consistency, named errors.
+
+### Changed
+
+- The descriptor path (`AlgorithmSequence.from_parameters` → `resolve_algorithm_sequence`) uses
+  the same parallel policy and physical constants as the shared builder, so the front-end parity
+  test stays exact on >100-atom systems; its other gaps (SETTLE, LINCS, Nosé-Hoover, NTICOM=2,
+  truncated octahedron, restraints, FEP) remain strict xfails until the recipe plan replaces it
+  (PLAN.md 3.9 steps 2–4).
+- Suites after the lift: Rust reference 37 passed / 3 ignored; Python 208 passed, 16 skipped,
+  18 xfailed.
+
 ## [0.0.27] (2026-08-29)
 
 ### Added

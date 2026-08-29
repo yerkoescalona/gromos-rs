@@ -1,0 +1,58 @@
+# gromos-run — stage contract
+
+## Job
+L3 orchestration, as a library: the **one** place that turns "what to run" (today: an
+`ImdParameters` + topology + coordinates + auxiliary inputs) into a running `AlgorithmSequence`.
+The `md` binary (`gromos-md`) and the Python binding (`pyo3-gromos`) both call it — that is the
+structural fix for the three drifting builders PLAN.md 3.8 found (drift guard G1 of PLAN.md 3.9).
+
+## Inputs (consumes from)
+gromos-core, gromos-forces, gromos-integrators, gromos-io. No clap/log/env_logger, no MPI/CUDA.
+
+## Outputs
+```
+prepare_system(imd, topology, physical_constants, coords, &RunInputs)  -> Prepared   (+ notes)
+build_sequence_from_imd(imd, &Prepared, &RunInputs, &RunOptions)       -> Built { sequence, summary }
+start(&mut sequence, &topo, &mut conf, &state)                         -> init + step 0
+total_dof(topo, &ConstraintSelection, ntc, ndfmin)                     -> the one DOF formula
+periodicity_of(&Prepared)                                              -> Periodicity
+RunError                                                                -> every failure, as data
+```
+
+## Status
+- **PLAN.md 3.9 step 1 ✓ (2026-08-29)** — assembly lifted verbatim from `md.rs:414-572` and
+  `md.rs:987-1298`; the binary's `println!`/`process::exit` sites became `RunError` variants and
+  `PrepareNote`s / `BuildSummary` that the binary prints. Divergences resolved *toward the binary*
+  (PLAN.md 3.9 A10/A11): `four_pi_eps_i` from the topology's PHYSICALCONSTANTS, NSM from the
+  coordinate file, `ParallelPolicy::Auto` (= `n_atoms > 100`) for both callers, one DOF formula
+  that now also counts solute constraints (no reference combines NTC>1 with a live thermostat, so
+  no reference moved). FEP reaches Python through `Topology::apply_perturbation` (gromos-core) +
+  `RunInputs.pttopo` (binary).
+- Step 2 (next): `RunRecipe` + `AlgorithmSpec` plan in front of this (`recipe.rs`, `plan.rs`),
+  `validate_plan`, `instantiate` that reads only the plan, presence-aware IMD parsing +
+  `Diagnostics`, `to_imd`. See PLAN.md 3.9 for the full checklist and gates.
+
+## Key files
+```
+src/lib.rs          — pipeline doc + re-exports
+src/prepare.rs      — prepare_system: pttopo merge, truncated-octahedron transform, NSM from
+                      coordinates, validation, initial velocities
+src/build.rs        — build_sequence_from_imd (the GROMOS step order), start, periodicity_of
+src/constraints.rs  — ConstraintSelection::from_imd (NTC/NTCP/NTCS dispatch)
+src/dof.rs          — total_dof
+src/inputs.rs       — RunInputs (aux file paths), RunOptions / ParallelPolicy (not physics)
+src/error.rs        — RunError
+```
+
+## Crate-specific rules
+- **No `println!`, no `process::exit`, no logging.** Everything the binary prints comes back as
+  data or as a `RunError`.
+- **No second builder, no second IMD reader.** Callers that need a different sequence edit the
+  plan (step 2); they never push algorithms themselves. `pyo3-gromos` may *insert* an extra
+  algorithm (the ML term) into a built sequence via `AlgorithmSequence::insert`, nothing more.
+- **Behaviour is defined by the reference suite from both sides:** `cargo test -p gromos-md
+  --test test_gromosXX_references` (drives the binary) and `py-gromos/tests/` (drives the binding)
+  must both stay green; `py-gromos/tests/test_front_end_parity.py` compares the Python front-ends
+  with `np.array_equal`.
+- Defaults (`300.0`, `-1.0`, `1.0`, `4.575e-4`, `0.5`, `1000`) still live here as literals until
+  step 2 derives them from `ImdParameters::default()` (PLAN.md 3.9 G7).

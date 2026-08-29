@@ -61,6 +61,7 @@ def _parse_input_toml(system_dir):
         "distrest": get_val("distrest"),
         "posresspec": get_val("posresspec"),
         "refpos": get_val("refpos"),
+        "pttopo": get_val("pttopo"),
     }
 
 
@@ -165,6 +166,9 @@ def _create_simulation(system_dir):
     """Create a Simulation from a reference system directory using compositional API."""
     inputs = _parse_input_toml(system_dir)
     topo = Topology(str((system_dir / inputs["topology"]).resolve()))
+    if inputs["pttopo"]:
+        # FEP: the perturbation topology is a Topology property (what `md @pttopo` does).
+        topo.apply_perturbation(str((system_dir / inputs["pttopo"]).resolve()))
     conf = Configuration(str((system_dir / inputs["configuration"]).resolve()))
     params = InputParameters(str((system_dir / inputs["parameters"]).resolve()))
     kwargs = {}
@@ -261,6 +265,9 @@ REFERENCE_SYSTEMS = [
     "aladip_solvated_em_shake",
     "aladip_solvated_em_posres",
     "aladip_solvated_em",
+    # Free-energy perturbation (Topology.apply_perturbation + NTG != 0), PLAN.md 3.9 step 1
+    "ch4_water_fep",
+    "aladip_vacuum_fep",
 ]
 
 # Systems with a known, pre-existing position-output mismatch that is not a
@@ -287,6 +294,8 @@ POSITION_MISMATCH_SYSTEMS = {"aladip_trunc_oct", "aladip_vacuum_em"}
 # tau 0.1) and every gromos-rs path silently thermostats (PLAN.md 3.9 A18, fixed by step 2).
 EXPECTED_ENGINE_FAILURES = {
     "water_216_nve_nobath": "absent MULTIBATH silently enables a Berendsen bath — PLAN.md 3.9 A18",
+    # Same known FEP mismatch the Rust suite `ignore`s (PLAN.md Reference Test Status).
+    "aladip_vacuum_fep": "known FEP mismatch vs gromosXX (ignored in the Rust suite too)",
 }
 
 REFERENCE_PARAMS = [

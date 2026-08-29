@@ -60,10 +60,18 @@ Python-callable API for running simulations and analysing trajectories.
   construction (kwargs ctor + setters + `write_imd_file`/`.save()`).
 
 - **Composition audit + target model (2026-08-29): PLAN.md 3.8/3.9.** Three IMD→sequence builders
-  exist (`md.rs`, `build_simulation`, `resolve_algorithm_sequence`), the descriptor enum is closed,
-  and force terms arrive as `Simulation` kwargs. Target: one `RunRecipe` in a `gromos-md` library,
-  one builder, IMD and Python objects as front-ends, providers as `terms`. Do not add new kwargs to
+  existed (`md.rs`, `build_simulation`, `resolve_algorithm_sequence`), the descriptor enum is closed,
+  and force terms arrive as `Simulation` kwargs. Target: one `RunRecipe` in `gromos-run`, one
+  builder, IMD and Python objects as front-ends, providers as `terms`. Do not add new kwargs to
   `Simulation` or new `AlgorithmDescriptor` variants without reading 3.9 first.
+- **PLAN.md 3.9 step 1 ✓ (2026-08-29).** `simulation.rs::build_simulation` contains no algorithm
+  construction: it calls `gromos_run::{prepare_system, build_sequence_from_imd, start}` (the `md`
+  binary's code), inserts the optional ML term after `Forcefield` via `AlgorithmSequence::insert`,
+  and maps `RunError` onto the builtin exceptions the binding always raised (`run_err`). Python now
+  honours the topology's `four_pi_eps_i`, takes NSM from the coordinate file, and uses the binary's
+  parallel-kernel policy. FEP: `Topology.apply_perturbation(path)` (no `Simulation` kwarg).
+  `resolve_algorithm_sequence` (the descriptor path) survives until steps 2–4 with the same
+  parallel policy/`four_pi_eps_i` so `test_front_end_parity.py` stays exact.
 
 ## Crate-specific rules
 - **Thin wrapper only.** Zero physics, zero data structures that duplicate the Rust core.

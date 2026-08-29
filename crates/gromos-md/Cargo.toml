@@ -12,6 +12,8 @@ gromos-core = { workspace = true }
 gromos-forces = { workspace = true }
 gromos-integrators = { workspace = true }
 gromos-io = { workspace = true }
+# The one run builder (PLAN.md 3.9): prepare_system / build_sequence_from_imd / start
+gromos-run = { workspace = true }
 
 # Logging
 log = { workspace = true }
@@ -37,7 +39,7 @@ cudarc = { workspace = true, optional = true }
 default = []
 use-mpi = ["mpi", "gromos-forces/use-mpi"]
 use-cuda = ["cudarc"]
-ml = ["gromos-forces/ml"]
+ml = ["gromos-forces/ml", "gromos-run/ml"]
 
 [dev-dependencies]
 criterion = { workspace = true }
