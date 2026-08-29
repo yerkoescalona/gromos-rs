@@ -5,11 +5,11 @@ Python bindings for the GROMOS-RS molecular dynamics engine.
 ## Five lines to a running simulation
 
 ```python
-from gromos import System, InputParameters, Simulation
+from gromos import System, Recipe, Simulation
 
 system = System.from_files("water_216.topo", "equilibrated.cnf")
-params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0)
-sim    = Simulation(system, params)
+recipe = Recipe.nvt(dt=0.002, steps=5000, temperature=300.0)   # or Recipe.from_imd("run.imd")
+sim    = Simulation(system, recipe)
 sim.step(1000)
 
 print(sim.total_energy)     # kJ/mol
@@ -25,9 +25,10 @@ No `.imd` files to author. No temporary directories. All in memory.
 | `System` | Paired topology + coordinates, atom-count validated |
 | `Topology` | Load `.topo` — atoms, masses, charges, bonds; `.solvate(nsm)` |
 | `Configuration` | Load `.cnf` / `.g96` — positions, velocities, box |
-| `InputParameters` | Load `.imd` or build via `nve / nvt / npt / steepest_descent` factories, with a `constraints=` knob for SHAKE |
-| `Simulation` | Algorithm sequence + `step(n)` / `run(steps, ene_freq)` + full energy/position/force access |
-| `AlgorithmSequence` | Inspect and modify the MD pipeline at the step level, incl. `SteepestDescent` for energy minimization |
+| `Recipe` | The run as data: load `.imd` (`from_imd`) or build via `nve / nvt / npt / minimize` factories (with a `constraints=` knob for SHAKE); immutable `update(**groups)`; `to_imd` / `to_toml` / `to_bundle`; `terms` (`Term("schnet", ...)`) and `inputs` (restraint files) |
+| `Simulation` | `Simulation(system, recipe)` + `step(n)` / `run(steps, ene_freq)` + full energy/position/force access; `sim.recipe`, `sim.plan`, `sim.diagnostics` |
+| `Plan` | `recipe.plan(system)`: the MD step as an editable, validated list of `Algorithm`s (`remove("remove_com")`, `insert_after(...)`); run it with `Simulation(system, recipe, plan=plan)` |
+| `gromos.terms()`, `gromos.algorithms()`, `gromos.build_info()` | What this build knows: term and algorithm kinds, their parameters and ordering rules, cargo features |
 | `EnergyTimeseries` | Wraps `sim.run()`'s output — `block_average()`, `to_dataframe()` (polars/pandas/dict), `plot()` (plotly/matplotlib) |
 | `Vec3`, `Energy`, `Frame` | Utility types |
 | `rmsd`, `rdf` | Analysis functions |

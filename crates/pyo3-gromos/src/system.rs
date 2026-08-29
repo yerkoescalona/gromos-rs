@@ -40,7 +40,7 @@ impl PySystem {
     ) -> PyResult<Self> {
         let topo_ref = topology.borrow();
         let conf_ref = configuration.borrow();
-        validate_atom_count_match(topo_ref.inner.num_atoms(), conf_ref.pos_data.len())
+        validate_atom_count_match(&topo_ref.inner, conf_ref.pos_data.len())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
         Ok(Self {
             topology: PyTopology {
@@ -60,7 +60,7 @@ impl PySystem {
     fn from_files(topo_file: &str, conf_file: &str) -> PyResult<Self> {
         let topo = PyTopology::from_file(topo_file)?;
         let conf = PyConfiguration::from_file(conf_file)?;
-        validate_atom_count_match(topo.inner.num_atoms(), conf.pos_data.len())
+        validate_atom_count_match(&topo.inner, conf.pos_data.len())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
         Ok(Self {
             topology: topo,
@@ -162,15 +162,43 @@ pub fn register_system(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 /// Rust-only validation logic extracted for unit testing without pyo3 linker symbols.
-pub(crate) fn validate_atom_count_match(n_topo: usize, n_conf: usize) -> Result<(), String> {
-    if n_topo != n_conf {
-        Err(format!(
-            "Topology has {} atoms but configuration has {} — they must match",
-            n_topo, n_conf
-        ))
-    } else {
-        Ok(())
+/// The configuration must hold the topology's atoms — or, for a topology that is not yet
+/// solvated, the solute plus a whole number of solvent molecules: `prepare_system` solvates
+/// from the coordinate count (the `md` binary's rule; the recipe's NSM is only a hint), so a
+/// `System` of a solute topology and a solvated coordinate file is a valid one.
+pub(crate) fn validate_atom_count_match(
+    topo: &gromos_core::Topology,
+    n_conf: usize,
+) -> Result<(), String> {
+    atom_count_ok(
+        topo.num_atoms(),
+        topo.num_solute_atoms(),
+        topo.solvent_atom_template.len(),
+        n_conf,
+    )
+}
+
+fn atom_count_ok(
+    n_topo: usize,
+    n_solute: usize,
+    per_solvent: usize,
+    n_conf: usize,
+) -> Result<(), String> {
+    if n_topo == n_conf {
+        return Ok(());
     }
+    let unsolvated = n_topo == n_solute && per_solvent > 0;
+    if unsolvated && n_conf >= n_solute && (n_conf - n_solute) % per_solvent == 0 {
+        return Ok(());
+    }
+    Err(if unsolvated {
+        format!(
+            "Topology has {n_solute} solute atoms and {per_solvent}-atom solvent molecules, but \
+             the configuration has {n_conf} atoms — not solute plus whole solvent molecules"
+        )
+    } else {
+        format!("Topology has {n_topo} atoms but configuration has {n_conf} — they must match")
+    })
 }
 
 #[cfg(test)]
@@ -179,12 +207,23 @@ mod tests {
 
     #[test]
     fn atom_count_match_ok() {
-        assert!(validate_atom_count_match(648, 648).is_ok());
+        assert!(atom_count_ok(648, 0, 3, 648).is_ok());
     }
 
     #[test]
     fn atom_count_mismatch_error() {
-        let err = validate_atom_count_match(648, 3).unwrap_err();
+        let err = atom_count_ok(648, 0, 3, 3).unwrap_err();
         assert!(err.contains("must match"), "message: {err}");
+    }
+
+    #[test]
+    fn unsolvated_topology_accepts_solute_plus_whole_solvent_molecules() {
+        // nacl_1water_box: 2 solute atoms, 3-atom SPC solvent, 5 atoms in the coordinates.
+        assert!(atom_count_ok(2, 2, 3, 5).is_ok());
+        assert!(atom_count_ok(2, 2, 3, 2).is_ok());
+        let err = atom_count_ok(2, 2, 3, 6).unwrap_err();
+        assert!(err.contains("whole solvent molecules"), "message: {err}");
+        // A solvated topology (all 648 atoms present) is still an exact match only.
+        assert!(atom_count_ok(648, 0, 3, 651).is_err());
     }
 }

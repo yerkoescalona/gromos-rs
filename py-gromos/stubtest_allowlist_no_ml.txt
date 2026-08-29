@@ -1,0 +1,4 @@
+# Present only in a `--features ml` build; run stubtest without this allowlist on one.
+gromos.gromos.SchNetPotential
+gromos.gromos.resolve_zone_partition
+gromos.gromos.__all__

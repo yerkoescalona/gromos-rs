@@ -22,6 +22,10 @@ gromos-run = { workspace = true }
 # Python bindings
 pyo3 = { workspace = true }
 numpy = { workspace = true }
+# serde <-> Python objects: Recipe / Term / Algorithm are the Rust data types, not copies
+pythonize = "0.21"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # SIMD and math
 glam = { workspace = true }

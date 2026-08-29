@@ -858,31 +858,50 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
 | anything else | GAMD, EDS, QMMM, … | `passthrough` | **rejected** unless the caller allows it (`md`: GAMD/EDS, applied out-of-band; Python: none) |
 | — | `force_groups` (never populated), `pme_order`/`pme_alpha` (never in a file) | carried | none |
 
-- [ ] **Step 3 — Python `Recipe`, `Term`, `Algorithm`; migrate the kwargs (M).**
-      - [ ] `crates/pyo3-gromos/src/recipe.rs`: `Recipe` (wraps `RunRecipe`; ▲ immutable `with_*`
-            builders; factories forwarded from the library; `from_imd/to_imd/to_bundle`; `from_dict/
-            to_dict` via ▲ `pythonize`; pickling), `Term(kind, **params)` and `Algorithm(kind,
-            **params)` (validated by serde against the tagged enums — unknown kind or parameter →
-            `gromos.exceptions.UnknownParameter` naming kind and field), `gromos.terms()`,
-            `gromos.algorithms()` returning `(name, type, default, available)`, ▲ `gromos.build_info()`.
-      - [ ] `Simulation(system, recipe)`; `Simulation(system, recipe, sequence=seq)` (validated);
-            `AlgorithmSequence.from_recipe(system, recipe)` returns the plan, editable ▲ by index/identity
-            and by name; `Simulation.plan` (frozen), `.recipe`, `.diagnostics`; the twelve descriptor
-            pyclasses become thin constructors of `Algorithm(kind, …)` (names kept one release).
-      - [ ] ▲ Engine terms carry `coupling`/`units`; `coupling="replace"` is rejected with the 2.8
-            message (A8); provenance written to the bundle.
-      - [ ] Shims (A9) ▲ in Python (`py-gromos/python/gromos/_deprecation.py`), each printing its
-            `Recipe(...)` equivalent: `InputParameters` → `Recipe.from_imd`; the six `Simulation` kwargs →
-            `recipe.with_term(...)` / `with_restraints(...)`; `AlgorithmSequence.nve/nvt/npt/minimize/
-            from_parameters` → `from_recipe`; ▲ migration table in the same PR; `__version__` from
-            package metadata.
-      - [ ] `gromos.pyi` (▲ `stubtest` clean, `#[pyo3(signature = …)]` everywhere), `py-gromos/docs/`,
-            notebooks `01`/`02`, `examples/06` on the new surface; G5 tests.
-      - [ ] Non-`ml` build: `Term("schnet", …)` constructs with `available=False`; `Simulation` raises
-            `MissingFeature` (A14).
-      **Gate:** G2 parity (three front-ends, `array_equal`, `Serial` pinned) green on every reference
-      system; `maturin develop` with and without `--features ml`; `stubtest` clean; Python suite count
-      ≥ before.
+- [x] **Step 3 — Python `Recipe`, `Term`, `Algorithm`; migrate the kwargs (M).** ✓ 2026-08-29.
+      - [x] `crates/pyo3-gromos/src/recipe.rs`: `Recipe` (wraps `RunRecipe`; immutable — `update(**groups)`
+            deep-merges and returns a copy, `with_term/without_terms/with_inputs/with_execution`; factories
+            forwarded from the library; `from_imd/to_imd/save_imd/to_bundle/from_bundle`; `from_dict/
+            to_dict/to_toml/to_json` via `pythonize`; `==`; pickling), `Term(kind, **params)` and
+            `Algorithm(kind, **params)` validated by serde against the tagged enums — unknown kind or
+            field → `gromos.exceptions.RecipeError` (not a dedicated `UnknownParameter`: one class per
+            failure kind, four in all, each subclassing the builtin the binding raised before);
+            `gromos.terms()` → `{"kind", "params" (example), "feature", "available"}`,
+            `gromos.algorithms()` → `{"kind", "params", "rules"}`, `gromos.build_info()`.
+      - [x] `Simulation(system, recipe)`; `Simulation(system, recipe, plan=plan)` (re-validated);
+            `recipe.plan(system)` returns the plan as a `Plan` (by index and by kind: `insert/insert_after/
+            insert_before/remove/replace/validate`, JSON) — a `Plan` class instead of
+            `AlgorithmSequence.from_recipe`, so the descriptor type can go in step 4; `Simulation.plan`,
+            `.recipe`, `.diagnostics`. The twelve descriptor pyclasses were *not* rewritten as `Algorithm`
+            constructors: they die with the descriptor path in step 4.
+      - [~] `coupling: "replace"` rejected with the 2.8 message (A8, since step 2). `units` and provenance
+            (model checksum in the bundle): ✗ not done — folded into step 5 with the first engine term.
+      - [x] Shims (A9) — in Rust (`parameters::deprecated`: one `DeprecationWarning` naming the
+            replacement), not in a `_deprecation.py`: `InputParameters` → `Recipe.from_imd`/factories; the
+            six `Simulation` kwargs → `recipe.with_inputs(...)` / `with_term(Term("schnet", …))`;
+            `AlgorithmSequence.nve/nvt/npt/minimize/from_parameters` + `Simulation.from_sequence` →
+            `recipe.plan(system)` + `plan=`. Every shim *translates into a recipe* — no second path
+            (`test_recipe.py::test_deprecated_forms_warn_and_are_translations`, parity A vs B below).
+            Migration table: `py-gromos/docs/user-guide/quick-start.md`; `__version__` from package
+            metadata.
+      - [x] `gromos.pyi` `stubtest`-clean (`MYPYPATH=python python -m mypy.stubtest gromos.gromos
+            --allowlist stubtest_allowlist_no_ml.txt`; no allowlist on an `ml` build): pyo3 classes are
+            `@final` and construct through `__new__`, slot methods are positional-only, `_AlgorithmKind`/
+            `_TermKind` literals; docs and notebooks `01`/`02` on `Recipe` (`examples/06` drives the
+            binaries and never used `InputParameters` — untouched); G5 tests `test_pyi_lists_every_kind`
+            and `test_every_kind_has_a_parity_case` (`orchestrator` exempt until step 5, by name).
+      - [x] Non-`ml` build: `Term("schnet", …)` constructs with `available=False`; `Simulation` raises
+            `MissingFeatureError` (A14) — `test_terms_registry_and_the_schnet_term`.
+      **Gate met 2026-08-29:** parity A (`InputParameters` + kwargs) vs B (`Recipe`) vs D (`Recipe` + its
+      own `Plan`) exact (`array_equal`) on all 40 systems in `REFERENCE_SYSTEMS`, no xfail. `Serial`
+      was not needed: all three go through one builder with `ParallelPolicy::Auto`, i.e. the same kernels
+      at the same thread count (run-to-run determinism at fixed thread count: BENCHMARKING.md). `maturin
+      develop` with and without `--features ml` (ml: build, full suite 311 passed / 13 skipped / 15
+      xfailed, strict stubtest). Python suite 308 passed / 16 skipped / 15 xfailed (was 215). Rust:
+      `gromos-run`/`gromos-io` tests and the 38/40 reference suite unchanged; `pyo3-gromos` gains three
+      unit tests. Found on the way: `System.from_files` rejected a solute
+      topology with a solvated coordinate file (the reference suite never hit it — it passed `Topology`
+      and `Configuration` separately); fixed (`system::atom_count_ok`, unit-tested).
 
 - [ ] **Step 4 — Delete the copies (S).** Remove `resolve_algorithm_sequence`, `AlgorithmDescriptor`,
       the preset bodies, `RestraintFiles`/`MlPotentialSpec`, the ad-hoc `PyErr::new` sites replaced by
@@ -935,7 +954,8 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
 | `aladip_solvated_em` | A vs C | not runnable on C | same (posresspec/refpos) | as above | open → step 1 |
 | `ch4_water_fep`, `aladip_vacuum_fep` | A vs C | kinetic, frame 0 | C never resolves the PERTURBATION block onto `Forcefield` (λ, soft-core, NLAM) | recipe `perturbation` group (step 2) | open → step 2 |
 | six >100-atom systems (`water_216_*`, `water_1000_spc_gridcell`) | A vs C, after step 1 | last-digit energies from frame 0 | A inherited the binary's `ParallelPolicy::Auto`; C's resolver built a serial `Forcefield` (A2) | resolver applies the same policy + `four_pi_eps_i` | **closed, step 1** |
-| (rows above marked "open → step 1") | | | | the binary and `Simulation` now share one builder; C is still the descriptor resolver | still open → steps 2–4 |
+| every reference system | A vs B vs D (`InputParameters` vs `Recipe` vs `Recipe` + `Plan`) | none — `array_equal` on energies, positions, forces | — | the shims translate into the recipe; `plan=` is stage 1 of the same builder | **closed, step 3** |
+| (rows above marked "open → step 1/2") | | | | the binary and `Simulation` share one builder; C is still the descriptor resolver, kept only so the A-vs-C xfails stay honest | still open → step 4 (C is deleted, not fixed) |
 
 **Explicitly out of scope here** (tracked elsewhere): the `System` building algebra (FUTURE.md,
 D1–D8); zone-aware `Forcefield` and `coupling: Replace` (2.8); GaMD/EDS/REMD as algorithms (1.9); PME

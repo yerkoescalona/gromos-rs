@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.30] (2026-08-29)
+
+### Added
+
+- **`gromos.Recipe`, `Term`, `Algorithm`, `Plan` — the run as data, in Python (PLAN.md 3.9
+  step 3).** They *are* the `gromos-run` types (serde ↔ Python through `pythonize`; no Python-side
+  copy to drift). `Recipe.from_imd/from_toml/from_json/from_dict/from_bundle`, `Recipe.nve/nvt/npt/
+  minimize`, one getter per group (`.control`, `.ensemble`, `.constraints`, …), immutable
+  `update(**groups)` (deep merge), `with_term/without_terms/with_inputs/with_execution`,
+  `to_imd/save_imd/to_bundle`, `==`, pickling. `recipe.plan(system)` is the validated MD step as an
+  editable `Plan` (addressed by index or kind; `insert/insert_after/insert_before/remove/replace/
+  validate`; JSON) and `Simulation(system, recipe, plan=plan)` runs it — stage 1 of the same builder,
+  not a second one. `Simulation.recipe`/`.plan` objects, `Simulation.from_bundle`. Registries:
+  `gromos.terms()`, `gromos.algorithms()` (with the ordering rules), `gromos.build_info()`.
+- `gromos.exceptions`: `RecipeError`, `PlanError` (⊂ `ValueError`), `MissingFeatureError`,
+  `RunError` (⊂ `RuntimeError`). A typo'd field or an unknown kind is a `RecipeError`, never a
+  silent default. `Term("schnet", …)` constructs on a non-`ml` build with `available=False`;
+  `Simulation` then raises `MissingFeatureError` (A14).
+- Drift guards (G2/G5/G6): `test_front_end_parity.py` compares the `Recipe` front-end and the `Plan`
+  front-end against the deprecated `InputParameters` path with `np.array_equal` on every reference
+  system (no divergences); `test_every_kind_has_a_parity_case` / `test_pyi_lists_every_kind` fail
+  when an algorithm kind is added without a reference case or a stub; `mypy.stubtest` is clean
+  against `gromos.pyi` (`MYPYPATH=python python -m mypy.stubtest gromos.gromos --allowlist
+  stubtest_allowlist_no_ml.txt`; without the allowlist on an `ml` build).
+
+### Changed
+
+- `test_gromosXX_references.py` builds every reference run as `Simulation(system,
+  Recipe.from_imd(...).with_inputs(...))`: the recipe front-end is the gromosXX-guarded one.
+- `System(topology, configuration)` / `System.from_files` accept a solute topology with a solvated
+  coordinate file (solute plus whole solvent molecules); `prepare_system` solvates from the
+  coordinate count, as the `md` binary does.
+- `Recipe.__repr__` says NVE when no bath couples (TAU < 0 is gromosXX's "no coupling"; the bath is
+  kept so the `.imd` round-trips).
+- `gromos.__version__` comes from the installed distribution metadata; notebooks `01`/`02` and the
+  Python docs use `Recipe`.
+
+### Deprecated (one release; each emits a `DeprecationWarning` naming its replacement)
+
+- `InputParameters(path)` / `.from_file` / `.nve` / `.nvt` / `.npt` / `.steepest_descent` →
+  `Recipe.from_imd` / `Recipe.nve|nvt|npt|minimize`; `Simulation(system, InputParameters)` →
+  `Simulation(system, recipe)`.
+- `Simulation(..., distrest=, posresspec=, refpos=)` → `recipe.with_inputs(...)`;
+  `Simulation(..., ml_potential=, ml_region=, ml_buffer=)` → `recipe.with_term(Term("schnet", ...))`.
+- `AlgorithmSequence.nve|nvt|npt|minimize|from_parameters` and `Simulation.from_sequence` →
+  `recipe.plan(system)` + `Simulation(system, recipe, plan=plan)`.
+
 ## [0.0.29] (2026-08-29)
 
 ### Added

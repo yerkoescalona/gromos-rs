@@ -25,6 +25,7 @@ from gromos import (
     Configuration,
     EnergyTimeseries,
     InputParameters,
+    Recipe,
     Simulation,
     System,
     Topology,
@@ -162,55 +163,45 @@ def _parse_expected_forces(trf_path):
     return frames
 
 
-def _create_simulation(system_dir):
-    """Create a Simulation from a reference system directory using compositional API."""
+def _recipe_for(system_dir):
+    """The reference run as a `Recipe`: its `.imd`, with the auxiliary files (`pttopo`,
+    `distrest`, `posresspec`, `refpos`) as `inputs` — what `md @pttopo …` receives."""
     inputs = _parse_input_toml(system_dir)
-    topo = Topology(str((system_dir / inputs["topology"]).resolve()))
-    if inputs["pttopo"]:
-        # FEP: the perturbation topology is a Topology property (what `md @pttopo` does).
-        topo.apply_perturbation(str((system_dir / inputs["pttopo"]).resolve()))
-    conf = Configuration(str((system_dir / inputs["configuration"]).resolve()))
-    params = InputParameters(str((system_dir / inputs["parameters"]).resolve()))
-    kwargs = {}
-    if inputs["distrest"]:
-        kwargs["distrest"] = str((system_dir / inputs["distrest"]).resolve())
-    if inputs["posresspec"]:
-        kwargs["posresspec"] = str((system_dir / inputs["posresspec"]).resolve())
-    if inputs["refpos"]:
-        kwargs["refpos"] = str((system_dir / inputs["refpos"]).resolve())
-    return Simulation(topo, conf, params, **kwargs)
+    aux = {
+        key: str((system_dir / inputs[key]).resolve())
+        for key in ("pttopo", "distrest", "posresspec", "refpos")
+        if inputs.get(key)
+    }
+    return Recipe.from_imd(str((system_dir / inputs["parameters"]).resolve())).with_inputs(**aux)
+
+
+def _create_simulation(system_dir):
+    """Create a Simulation from a reference system directory: `Simulation(system, recipe)`,
+    the front-end PLAN.md 3.9 step 3 makes canonical (the same `gromos-run` path the `md`
+    binary takes)."""
+    inputs = _parse_input_toml(system_dir)
+    system = System.from_files(
+        str((system_dir / inputs["topology"]).resolve()),
+        str((system_dir / inputs["configuration"]).resolve()),
+    )
+    return Simulation(system, _recipe_for(system_dir))
 
 
 def _get_n_steps(system_dir):
-    """Read NSTLIM from InputParameters."""
-    inputs = _parse_input_toml(system_dir)
-    params = InputParameters(str((system_dir / inputs["parameters"]).resolve()))
-    return params.nstlim
+    """NSTLIM, read from the recipe."""
+    return _recipe_for(system_dir).control["steps"]
 
 
 def _get_write_frequencies(system_dir):
-    """Read write frequencies from InputParameters.
-
-    Returns (ntwe, ntwx, ntwf) — energy, trajectory, and force write intervals.
-    For ntwf, falls back to parsing the WRITETRAJ block since InputParameters
-    doesn't expose it directly yet.
-    """
-    inputs = _parse_input_toml(system_dir)
-    params = InputParameters(str((system_dir / inputs["parameters"]).resolve()))
-    ntwe = params.ntwe if params.ntwe > 0 else 1
-    ntwx = params.ntwx if params.ntwx > 0 else 1
-
-    # ntwf not yet exposed on InputParameters — parse from raw file
-    param_file = system_dir / inputs["parameters"]
-    text = param_file.read_text()
-    m = re.search(
-        r"WRITETRAJ\n#[^\n]*\n\s*(\d+)\s+\d+\s+\d+\s+(\d+)\s+(\d+)",
-        text,
+    """(ntwe, ntwx, ntwf) — energy, trajectory and force write intervals, from the recipe
+    (0 means "never" in GROMOS; treated as every step here so a reference that writes nothing
+    still compares every frame it does have)."""
+    outputs = _recipe_for(system_dir).outputs
+    return (
+        outputs["energy_every"] or 1,
+        outputs["trajectory_every"] or 1,
+        outputs["forces_every"] or 1,
     )
-    ntwf = int(m.group(2)) if m else ntwx
-    if ntwf == 0:
-        ntwf = 1
-    return ntwe, ntwx, ntwf
 
 
 # ============================================================================

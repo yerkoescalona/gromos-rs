@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::recipe::{ConstraintAlgorithm, Coupling, SoluteConstraints, ThermostatAlgorithm};
 use crate::recipe::{RunRecipe, TermSpec, VirialKind};
-use crate::{total_dof, ConstraintSelection, RunError, RunInputs};
+use crate::{total_dof, ConstraintSelection, RunError};
 
 /// Position restraints as the plan carries them: the input files, the force constant, and
 /// whether the reference positions are the start-up configuration (`reference: None`).
@@ -429,14 +429,14 @@ impl TermSpec {
 
 /// Stage 1: the recipe as an ordered, fully resolved list of algorithms.
 ///
-/// Needs the topology (constraint counts → degrees of freedom, solvent shape) and the
-/// auxiliary input paths (restraint files become plan values).
+/// Needs the topology (constraint counts → degrees of freedom, solvent shape); the restraint
+/// file paths come from `recipe.inputs` and become plan values.
 pub fn build_plan(
     recipe: &RunRecipe,
     topo: &Topology,
-    inputs: &RunInputs,
     four_pi_eps_i: f64,
 ) -> Result<Vec<AlgorithmSpec>, RunError> {
+    let inputs = &recipe.inputs;
     let n_atoms = topo.num_atoms();
     let has_solvent = n_atoms > topo.num_solute_atoms();
     let c = &recipe.constraints;

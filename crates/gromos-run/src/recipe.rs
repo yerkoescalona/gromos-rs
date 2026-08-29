@@ -22,7 +22,7 @@ use gromos_io::imd::{ImdParameters, NonbondedExtra, PressureParameters, TempBath
 use gromos_io::imd_write::{write_imd, MODELLED_BLOCKS};
 use serde::{Deserialize, Serialize};
 
-use crate::{inputs::ParallelPolicy, RunError};
+use crate::{inputs::ParallelPolicy, RunError, RunInputs};
 
 /// Schema version written into every recipe (`to_dict`/TOML/JSON); bump on any renaming.
 pub const RECIPE_VERSION: u32 = 1;
@@ -534,6 +534,9 @@ pub struct RunRecipe {
     pub perturbation: Perturbation,
     pub outputs: Outputs,
     pub execution: Execution,
+    /// Auxiliary input files (perturbation topology, restraint specifications) — part of the run
+    /// description, so a recipe built in memory is self-describing (PLAN.md 3.9 A5).
+    pub inputs: RunInputs,
     /// Unmodelled blocks the caller allowed through, verbatim.
     pub passthrough: BTreeMap<String, Vec<String>>,
 }
@@ -880,6 +883,7 @@ impl RunRecipe {
                 energy_special: imd.ntwe_special,
             },
             execution: Execution::default(),
+            inputs: RunInputs::default(),
             passthrough,
         };
         Ok((recipe, diag))

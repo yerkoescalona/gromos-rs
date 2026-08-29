@@ -26,6 +26,7 @@ pub mod ml_potential;
 pub mod parameters;
 pub mod py_conf;
 pub mod qm_potential;
+pub mod recipe;
 mod simulation;
 pub mod system;
 pub mod topology;
@@ -361,8 +362,10 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     parameters::register_parameters(m)?;
     // System (topology + configuration pair)
     system::register_system(m)?;
-    // Algorithm sequence API
+    // Algorithm sequence API (descriptor path — deprecated in favour of Recipe/Plan)
     algorithm_sequence::register_algorithm_sequence(m)?;
+    // The recipe model: Recipe / Term / Algorithm / Plan, registries, exceptions (PLAN.md 3.9)
+    recipe::register_recipe(m)?;
     // ML potential API (feature-gated)
     #[cfg(feature = "ml")]
     ml_potential::register_ml_potential(m)?;

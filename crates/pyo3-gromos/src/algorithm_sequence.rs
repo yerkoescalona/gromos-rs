@@ -63,7 +63,7 @@ use gromos_integrators::algorithms::{
 use gromos_integrators::constraints::{NtcMode, ShakeParameters};
 use gromos_io::imd::ImdParameters;
 
-use super::parameters::PyInputParameters;
+use super::parameters::{deprecated, PyInputParameters};
 use super::topology::PyTopology;
 
 // ============================================================================
@@ -834,7 +834,13 @@ impl PyAlgorithmSequence {
     /// Example:
     ///     seq = AlgorithmSequence.nve(topo, params)
     #[staticmethod]
-    fn nve(_topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+    fn nve(py: Python<'_>, topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+        let _ = topo; // the presets read only the parameters (deprecated; removed in step 4)
+        deprecated(
+            py,
+            "AlgorithmSequence.nve(topo, params)",
+            "Recipe.nve(...) and recipe.plan(system)",
+        )?;
         let imd = &params.inner;
         let mut seq = Self::new();
 
@@ -890,7 +896,13 @@ impl PyAlgorithmSequence {
     /// Example:
     ///     seq = AlgorithmSequence.minimize(topo, params)
     #[staticmethod]
-    fn minimize(_topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+    fn minimize(py: Python<'_>, topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+        let _ = topo; // the presets read only the parameters (deprecated; removed in step 4)
+        deprecated(
+            py,
+            "AlgorithmSequence.minimize(topo, params)",
+            "Recipe.minimize(steps) and recipe.plan(system)",
+        )?;
         let imd = &params.inner;
         let mut seq = Self::new();
 
@@ -931,7 +943,13 @@ impl PyAlgorithmSequence {
     /// Example:
     ///     seq = AlgorithmSequence.nvt(topo, params)
     #[staticmethod]
-    fn nvt(_topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+    fn nvt(py: Python<'_>, topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+        let _ = topo; // the presets read only the parameters (deprecated; removed in step 4)
+        deprecated(
+            py,
+            "AlgorithmSequence.nvt(topo, params)",
+            "Recipe.nvt(...) and recipe.plan(system)",
+        )?;
         let imd = &params.inner;
         let mut seq = Self::new();
 
@@ -1001,7 +1019,13 @@ impl PyAlgorithmSequence {
     /// Example:
     ///     seq = AlgorithmSequence.npt(topo, params)
     #[staticmethod]
-    fn npt(_topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+    fn npt(py: Python<'_>, topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+        let _ = topo; // the presets read only the parameters (deprecated; removed in step 4)
+        deprecated(
+            py,
+            "AlgorithmSequence.npt(topo, params)",
+            "Recipe.npt(...) and recipe.plan(system)",
+        )?;
         let imd = &params.inner;
         let mut seq = Self::new();
 
@@ -1099,12 +1123,21 @@ impl PyAlgorithmSequence {
     /// Example:
     ///     seq = AlgorithmSequence.from_parameters(topo, params)
     #[staticmethod]
-    fn from_parameters(_topo: &PyTopology, params: &PyInputParameters) -> PyResult<Self> {
+    fn from_parameters(
+        py: Python<'_>,
+        topo: &PyTopology,
+        params: &PyInputParameters,
+    ) -> PyResult<Self> {
+        deprecated(
+            py,
+            "AlgorithmSequence.from_parameters(topo, params)",
+            "Recipe.from_imd(path) and recipe.plan(system)",
+        )?;
         let imd = &params.inner;
         if imd.ntem > 0 {
-            Self::minimize(_topo, params)
+            Self::minimize(py, topo, params)
         } else if imd.couple_pressure {
-            Self::npt(_topo, params)
+            Self::npt(py, topo, params)
         } else {
             let thermostat_on = if !imd.temp_bath.is_empty() && !imd.temp_bath[0].tau.is_empty() {
                 imd.temp_bath[0].tau[0] > 0.0
@@ -1112,9 +1145,9 @@ impl PyAlgorithmSequence {
                 false
             };
             if thermostat_on {
-                Self::nvt(_topo, params)
+                Self::nvt(py, topo, params)
             } else {
-                Self::nve(_topo, params)
+                Self::nve(py, topo, params)
             }
         }
     }

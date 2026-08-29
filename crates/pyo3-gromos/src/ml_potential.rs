@@ -114,58 +114,11 @@ impl PySchNetPotential {
 }
 
 impl PySchNetPotential {
-    /// Rebuild from the plain-data `MlPotentialSpec` `simulation.rs` threads through
-    /// `build_simulation` (see that struct's own docs for why it isn't a pyo3 type).
-    pub(crate) fn from_spec(spec: &crate::simulation::MlPotentialSpec) -> Self {
-        Self {
-            model_path: spec.model_path.clone(),
-            cutoff: spec.cutoff,
-            elements: spec.elements.clone(),
-        }
-    }
-
     /// Build the real, loaded `SchNetInteraction` this recipe describes.
     pub(crate) fn load(&self) -> PyResult<SchNetInteraction> {
         SchNetInteraction::load(&self.model_path, self.cutoff, self.elements.clone())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
     }
-}
-
-/// Build a `ProviderOrchestratorAlgorithm` registering the given ML potential over the inner
-/// zone — the shared construction logic `Simulation`'s `ml_potential=` kwargs use.
-///
-/// **Scope limit, load-bearing, not an oversight:** this does *not* also register a
-/// zone-partitioned classical `LjCrfInteraction` to remove the inner zone's own classical
-/// contribution. `Forcefield` — the real classical algorithm already in every `Simulation`'s
-/// `AlgorithmSequence` — has no `ZonePartition` awareness at all (unlike the provider-pattern
-/// `LjCrfInteraction`); it computes classical LJ+CRF for the whole system unconditionally.
-/// Registering a second, zone-aware classical term through the orchestrator on top of that would
-/// double-count every inner-zone pair `Forcefield` already covers — exactly the double-counting
-/// `zones.rs` (assumption A5) exists to prevent, and it would be silent unless caught here.
-///
-/// So today this is an **additive ML correction term**, not a rigorous "replace classical with
-/// ML for the inner zone" QM/MM scheme: the inner zone's atoms are treated both classically (via
-/// `Forcefield`, unconditionally) *and* by the ML potential (via this orchestrator entry). Giving
-/// `Forcefield` itself zone-partition awareness (to properly subtract/skip the inner zone's own
-/// classical treatment) is real, separate follow-up work — a change to the production classical
-/// algorithm, not a Python-binding task — not attempted here.
-pub(crate) fn build_ml_orchestrator_algorithm(
-    potential: &PySchNetPotential,
-    partition: &ZonePartition,
-    n_atoms: usize,
-    periodicity: Periodicity,
-) -> PyResult<ProviderOrchestratorAlgorithm> {
-    let inner = partition.atoms_in(gromos_forces::zones::Zone::Inner);
-    let inner_selection = AtomSelection::from_indices(inner, n_atoms)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
-
-    let mut orchestrator = ProviderOrchestrator::new();
-    orchestrator.register(inner_selection, Box::new(potential.load()?));
-
-    Ok(ProviderOrchestratorAlgorithm::new(
-        orchestrator,
-        periodicity,
-    ))
 }
 
 /// Resolve an inner/buffer zone split by selector string against a real topology, for testing

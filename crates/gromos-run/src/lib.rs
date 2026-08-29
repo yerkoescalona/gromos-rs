@@ -33,6 +33,7 @@
 //!   it does not assemble algorithms itself.
 
 pub mod build;
+pub mod bundle;
 pub mod constraints;
 pub mod dof;
 pub mod error;
@@ -44,9 +45,10 @@ pub mod prepare;
 pub mod recipe;
 
 pub use build::{
-    build_sequence_from_imd, build_sequence_from_recipe, instantiate, periodicity_of, start,
-    BarostatSummary, BuildSummary, Built, Instantiated, ThermostatSummary,
+    build_sequence_from_imd, build_sequence_from_plan, build_sequence_from_recipe, instantiate,
+    periodicity_of, start, BarostatSummary, BuildSummary, Built, Instantiated, ThermostatSummary,
 };
+pub use bundle::{load_bundle, write_bundle, RunBundle};
 pub use constraints::ConstraintSelection;
 pub use dof::total_dof;
 pub use error::RunError;

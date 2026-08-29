@@ -77,6 +77,20 @@ Python-callable API for running simulations and analysing trajectories.
   Python silently); `Simulation.recipe_toml`, `.plan_json`, `.diagnostics` expose the effective
   recipe, the resolved plan and the parser notes (`None`/empty on the descriptor path). Step 3 turns
   the recipe into `gromos.Recipe`/`Term`/`Algorithm` and retires `InputParameters` + the kwargs.
+- **PLAN.md 3.9 step 3 ✓ (2026-08-29).** `src/recipe.rs` binds the `gromos-run` types as
+  `Recipe`/`Term`/`Algorithm`/`Plan` through `pythonize` (serde ↔ Python; dict/TOML/JSON/pickle
+  round trips, `update(**groups)` deep-merges through `serde_json::Value` and re-deserialises with
+  `deny_unknown_fields`, so a typo is a `RecipeError`). `simulation.rs` has one entry
+  (`build_from_recipe`: `prepare_system` → `build_sequence_from_recipe|from_plan` → `start`);
+  every other constructor form (`InputParameters`, the restraint/ML kwargs, `from_sequence`) is a
+  deprecation shim in Rust (`parameters::deprecated`) that *translates into a recipe* — not a
+  second path (`test_front_end_parity.py` proves it with `array_equal`). Exceptions are
+  `create_exception!` classes re-exported by `gromos.exceptions`. `System` accepts a solute
+  topology with a solvated coordinate file (`system::atom_count_ok`). Deviations from the plan
+  text: shims live in Rust, not `_deprecation.py`; the plan is a `Plan` class from
+  `recipe.plan(system)` rather than `AlgorithmSequence.from_recipe`; provenance (model checksum)
+  and the per-term energy slot (G10) are not done. The descriptor path
+  (`algorithm_sequence.rs`) is now dead weight — step 4 deletes it.
 
 ## Crate-specific rules
 - **Thin wrapper only.** Zero physics, zero data structures that duplicate the Rust core.

@@ -49,11 +49,23 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
 - **PLAN.md 3.9 step 2 ✓ (2026-08-29)** — `water_216_nve_nobath` passes (parser defaults fixed; xfail
   removed); `tests/test_recipe.py` pins `Simulation.recipe_toml` / `.plan_json` / `.diagnostics`.
   Suite: 211 + 4 passed, 16 skipped, 15 xfailed.
+- **PLAN.md 3.9 step 3 ✓ (2026-08-29)** — `Recipe`/`Term`/`Algorithm`/`Plan`, `gromos.terms()`/
+  `algorithms()`/`build_info()`, `gromos.exceptions`. `test_gromosXX_references.py` builds every
+  reference through `Simulation(system, Recipe.from_imd(...).with_inputs(...))`;
+  `test_front_end_parity.py` adds path B (Recipe) and path D (Recipe + its own Plan) against path A,
+  no divergences, plus the registry guards `test_every_kind_has_a_parity_case` (exemptions in
+  `UNCOVERED_KINDS` must name the step that removes them) and `test_pyi_lists_every_kind`
+  (`_AlgorithmKind`/`_TermKind` literals in `gromos.pyi`). `gromos.pyi` is `stubtest`-clean:
+  `MYPYPATH=python uv run python -m mypy.stubtest gromos.gromos --allowlist
+  stubtest_allowlist_no_ml.txt` (pyo3 classes are `@final` and construct through `__new__`; slot
+  methods take positional-only arguments). Deprecated forms warn (`pytest.warns`; the pytest config
+  ignores `DeprecationWarning` otherwise). Suite: 308 passed, 16 skipped, 15 xfailed.
 - Remaining P3 items:
   - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
   - [ ] Rewrite `examples/` (17 scripts) on the new API
-  - [ ] Fix `test_basic.py`, `test_advanced_features.py`
+  - [ ] Delete `test_basic.py`, `test_advanced_features.py` (placeholders; replaced by
+        `test_recipe.py`) and `md_runners.py` — PLAN.md 3.9 step 4
 
 ## Key files
 ```

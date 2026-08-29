@@ -565,19 +565,38 @@ fn summarize(
 pub fn build_sequence_from_recipe(
     recipe: &RunRecipe,
     prepared: &Prepared,
-    inputs: &RunInputs,
 ) -> Result<Built, RunError> {
     let topo = &prepared.topology;
-    let plan = build_plan(
-        recipe,
-        topo,
-        inputs,
-        prepared.physical_constants.four_pi_eps_i,
-    )?;
+    let plan = build_plan(recipe, topo, prepared.physical_constants.four_pi_eps_i)?;
     validate_plan(&plan)?;
     let periodicity = periodicity_of(prepared);
     let inst = instantiate(&plan, topo, &prepared.configuration, &periodicity)?;
     let summary = summarize(recipe, &plan, topo, &inst);
+    Ok(Built {
+        sequence: inst.sequence,
+        recipe: recipe.clone(),
+        plan,
+        diagnostics: Diagnostics::default(),
+        summary,
+    })
+}
+
+/// Build a run from a recipe and an already-built (possibly edited) plan: validate →
+/// instantiate, plus the report. `Simulation(system, recipe, plan=...)` goes through here.
+pub fn build_sequence_from_plan(
+    recipe: &RunRecipe,
+    plan: Vec<AlgorithmSpec>,
+    prepared: &Prepared,
+) -> Result<Built, RunError> {
+    validate_plan(&plan)?;
+    let periodicity = periodicity_of(prepared);
+    let inst = instantiate(
+        &plan,
+        &prepared.topology,
+        &prepared.configuration,
+        &periodicity,
+    )?;
+    let summary = summarize(recipe, &plan, &prepared.topology, &inst);
     Ok(Built {
         sequence: inst.sequence,
         recipe: recipe.clone(),
@@ -596,7 +615,8 @@ pub fn build_sequence_from_imd(
 ) -> Result<Built, RunError> {
     let (mut recipe, diagnostics) = RunRecipe::from_imd_with(imd, &options.passthrough)?;
     recipe.execution.parallel = options.parallel;
-    let mut built = build_sequence_from_recipe(&recipe, prepared, inputs)?;
+    recipe.inputs = inputs.clone();
+    let mut built = build_sequence_from_recipe(&recipe, prepared)?;
     built.diagnostics = diagnostics;
     Ok(built)
 }

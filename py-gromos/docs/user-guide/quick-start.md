@@ -60,30 +60,49 @@ print(conf.box_dimensions)    # (Lx, Ly, Lz) nm
 
 ---
 
-## Creating simulation parameters
+## Creating a recipe
 
-Use a factory — no `.imd` file authoring required.
+A `Recipe` is the one description of a run — the data of a GROMOS `.imd` grouped by
+concern (`recipe.control`, `.boundary`, `.forcefield`, `.constraints`, `.ensemble`,
+`.outputs`, …), plus additive `terms` and auxiliary `inputs`. Use a factory — no `.imd`
+file authoring required.
 
 ```python
-from gromos import InputParameters
+from gromos import Recipe
 
 # NVT — Berendsen thermostat, τ = 0.1 ps
-params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0)
+recipe = Recipe.nvt(dt=0.002, steps=5000, temperature=300.0)
 
 # NVE — microcanonical, no thermostat
-params = InputParameters.nve(dt=0.002, steps=5000)
+recipe = Recipe.nve(dt=0.002, steps=5000)
 
 # NPT — Berendsen thermostat + barostat, water compressibility by default
-params = InputParameters.npt(dt=0.002, steps=5000, temperature=300.0, pressure=1.0)
+recipe = Recipe.npt(dt=0.002, steps=5000, temperature=300.0, pressure=1.0)
 
 # Energy minimisation — steepest descent
-params = InputParameters.steepest_descent(steps=500)
+recipe = Recipe.minimize(steps=500)
 
-# Or load an existing GROMOS input file
-params = InputParameters.from_file("run.imd")
-params = InputParameters("run.imd")   # identical
+# Or load an existing GROMOS input file. A block the engine does not model is an
+# error (pass allow_passthrough=[...] to accept it); an absent optional block is
+# reported in recipe.diagnostics with what gromosXX does without it.
+recipe = Recipe.from_imd("run.imd")
 
-print(params.dt, params.nstlim, params.temperature, params.cutoff)
+print(recipe.control["dt"], recipe.control["steps"])
+print(recipe.ensemble)           # {"thermostat": {...} | None, "barostat": {...} | None}
+print(recipe.diagnostics)
+```
+
+A recipe is immutable: `update(**groups)` deep-merges and returns a new one, and a
+typo is a `RecipeError`, never a silent default.
+
+```python
+longer = recipe.update(control={"steps": 20000})     # everything else unchanged
+recipe.update(control={"stepz": 1})                  # RecipeError: unknown field `stepz`
+
+recipe.to_toml()                                     # the run, as text
+recipe.to_imd(n_atoms=system.n_atoms)                # what gromosXX would run
+recipe.save_imd("run.imd", n_atoms=system.n_atoms)
+Recipe.from_toml(recipe.to_toml()) == recipe         # True — lossless
 ```
 
 ### Constraints (SHAKE)
@@ -95,15 +114,16 @@ diverge — this is a real trap, not a hypothetical one:
 
 ```python
 # Diverges within ~50-100 steps: solute H-bonds are unconstrained.
-params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0)
+recipe = Recipe.nvt(dt=0.002, steps=5000, temperature=300.0)
 
 # Stable: SHAKE constrains solute H-bonds.
-params = InputParameters.nvt(dt=0.002, steps=5000, temperature=300.0, constraints="hbonds")
+recipe = Recipe.nvt(dt=0.002, steps=5000, temperature=300.0, constraints="hbonds")
+print(recipe.constraints)   # {"solute": "hbonds", "solute_algorithm": "shake", ...}
 ```
 
 This only sets solute constraints (`NTC`). Solvent rigidity (SETTLE) isn't yet
-exposed on the factories — load a validated `.in` file via `from_file()` if you
-need it.
+exposed on the factories — `recipe.update(constraints={...})` or load a validated
+`.in` file via `Recipe.from_imd()` if you need it.
 
 ---
 
@@ -170,17 +190,17 @@ globally via `gromos.timeseries.config`.
 
 ### Energy minimization
 
-`InputParameters.steepest_descent(steps)` runs real minimization through
-`Simulation` — the sequence swaps in `SteepestDescent` for the leap-frog
-integrator and has no thermostat/barostat/kinetic energy (GROMOS convention:
-`total_energy == potential_energy` during EM).
+`Recipe.minimize(steps)` runs real minimization through `Simulation` — the plan
+swaps in `steepest_descent` for the leap-frog integrator and has no
+thermostat/barostat/kinetic energy (GROMOS convention: `total_energy ==
+potential_energy` during EM).
 
 ```python
-params = InputParameters.steepest_descent(steps=500)
-sim = Simulation(system, params)
+recipe = Recipe.minimize(steps=500)
+sim = Simulation(system, recipe)
 energies = sim.run(500, ene_freq=10)
-print(sim.algorithm_names)
-# ['Forcefield', 'Steepest-Descent', 'Energy_Calculation']
+print(sim.plan.kinds)
+# ['forcefield', 'steepest_descent', 'energy_calculation']
 ```
 
 The minimizer converges once the energy change between steps drops below its
@@ -189,28 +209,51 @@ trace is expected, not a bug.
 
 ---
 
-## Inspecting the algorithm sequence
+## Inspecting and editing the plan
 
-Every `Simulation` runs a fixed sequence of algorithms each step. You can read
-it out and even build a custom sequence before constructing the simulation.
+Every `Simulation` runs a fixed, ordered list of algorithms each step — the
+*plan*. `recipe.plan(system)` returns it as data (one fully resolved `Algorithm`
+per entry, already validated against the GROMOS ordering rules); edit it and hand
+it back with `plan=`.
 
 ```python
-# Inspect what's running
-print(sim.algorithm_names)
-# ['RemoveCOMMotion', 'Forcefield', 'LeapFrogVelocity', 'BerendsenThermostat',
-#  'LeapFrogPosition', 'TemperatureCalculation', 'EnergyCalculation']
+# What is running
+print(sim.plan.kinds)
+# ['remove_com', 'forcefield', 'leap_frog_velocity', 'thermostat',
+#  'leap_frog_position', 'temperature_calculation', 'energy_calculation']
+print(sim.plan["forcefield"])          # every parameter, resolved
 
-# Build and modify a sequence before constructing the simulation
-from gromos import AlgorithmSequence
+# Edit before constructing the simulation
+plan = recipe.plan(system)
+plan.remove("remove_com")              # disable COM motion removal
+print("remove_com" in plan, len(plan))
 
-seq = AlgorithmSequence.nvt(topo, params)
-seq.remove("RemoveCOMMotion")   # disable COM motion removal
-print(seq.names)
-print("Forcefield" in seq)      # True
-
-sim = Simulation.from_sequence(topo, conf, params, seq)
+sim = Simulation(system, recipe, plan=plan)   # re-validated: a broken order is a PlanError
 sim.step(100)
 ```
+
+`gromos.algorithms()` lists every kind this build knows with its parameters and
+ordering rules; `gromos.terms()` lists the additive terms (`Term("schnet", ...)`
+needs a `--features ml` build — `Term(...).available` says whether this one has it).
+
+## Migrating from `InputParameters`
+
+The pre-recipe forms still work for one release and emit a `DeprecationWarning`
+naming the replacement. They are translations into a recipe, not a second code
+path — `tests/test_front_end_parity.py` checks the two are bit-identical.
+
+| Before (deprecated) | Now |
+|---|---|
+| `InputParameters("run.imd")`, `InputParameters.from_file(...)` | `Recipe.from_imd("run.imd")` |
+| `InputParameters.nve/nvt/npt(...)` | `Recipe.nve/nvt/npt(...)` — same arguments |
+| `InputParameters.steepest_descent(steps)` | `Recipe.minimize(steps)` |
+| `params.dt`, `params.nstlim` | `recipe.control["dt"]`, `recipe.control["steps"]` |
+| `params.temperature`, `params.constraints` | `recipe.ensemble["thermostat"]`, `recipe.constraints["solute"]` |
+| `Simulation(system, params)` | `Simulation(system, recipe)` |
+| `Simulation(..., distrest=, posresspec=, refpos=)` | `Simulation(system, recipe.with_inputs(distrest=..., posresspec=..., refpos=...))` |
+| `Simulation(..., ml_potential=p, ml_region=r, ml_buffer=b)` | `Simulation(system, recipe.with_term(Term("schnet", model=..., cutoff=..., elements=[...], region=r, buffer=b)))` |
+| `AlgorithmSequence.nvt(topo, params)` … `Simulation.from_sequence(topo, conf, params, seq)` | `plan = recipe.plan(system)`; edit it; `Simulation(system, recipe, plan=plan)` |
+| `sim.recipe_toml`, `sim.plan_json` | still there; `sim.recipe` / `sim.plan` are the objects |
 
 ---
 

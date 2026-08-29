@@ -22,30 +22,47 @@ pub struct PyInputParameters {
     pub(crate) inner: ImdParameters,
 }
 
+/// `InputParameters` is the pre-recipe front-end (PLAN.md 3.9 step 3): every constructor
+/// warns once per call and names its `Recipe` replacement. One deprecation cycle (A9).
+pub(crate) fn deprecated(py: Python<'_>, what: &str, instead: &str) -> PyResult<()> {
+    PyErr::warn_bound(
+        py,
+        &py.get_type_bound::<pyo3::exceptions::PyDeprecationWarning>(),
+        &format!("{what} is deprecated and will be removed; use {instead}"),
+        1,
+    )
+}
+
 #[pymethods]
 impl PyInputParameters {
     /// Load parameters from a GROMOS input file.
     ///
+    /// Deprecated: use `Recipe.from_imd(path)`.
+    ///
     /// Args:
     ///     input_file: Path to input file (.imd, .in)
     #[new]
-    fn new(input_file: &str) -> PyResult<Self> {
-        Self::from_file(input_file)
+    fn new(py: Python<'_>, input_file: &str) -> PyResult<Self> {
+        deprecated(py, "InputParameters(path)", "Recipe.from_imd(path)")?;
+        Self::read(input_file)
     }
 
     /// Load parameters from a GROMOS input file (alias of constructor).
+    ///
+    /// Deprecated: use `Recipe.from_imd(path)`.
     #[staticmethod]
-    fn from_file(input_file: &str) -> PyResult<Self> {
-        let imd = read_imd_file(input_file).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                "Failed to read input file '{}': {}",
-                input_file, e
-            ))
-        })?;
-        Ok(Self { inner: imd })
+    fn from_file(py: Python<'_>, input_file: &str) -> PyResult<Self> {
+        deprecated(
+            py,
+            "InputParameters.from_file(path)",
+            "Recipe.from_imd(path)",
+        )?;
+        Self::read(input_file)
     }
 
     /// NVE (microcanonical) parameters: no thermostat or barostat.
+    ///
+    /// Deprecated: use `Recipe.nve(dt, steps, constraints)`.
     ///
     /// `constraints`: `"none"` (default) | `"hbonds"` | `"allbonds"` — SHAKE-constrain
     /// solute bonds. A constrained system (e.g. one with solute H-bonds) run with
@@ -53,7 +70,12 @@ impl PyInputParameters {
     /// `.in` file needs `"hbonds"`/`"allbonds"` here.
     #[staticmethod]
     #[pyo3(signature = (dt, steps, constraints="none"))]
-    fn nve(dt: f64, steps: usize, constraints: &str) -> PyResult<Self> {
+    fn nve(py: Python<'_>, dt: f64, steps: usize, constraints: &str) -> PyResult<Self> {
+        deprecated(
+            py,
+            "InputParameters.nve(...)",
+            "Recipe.nve(dt, steps, constraints)",
+        )?;
         let inner = ImdParameters::nve(dt, steps, constraints)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
         Ok(Self { inner })
@@ -61,10 +83,21 @@ impl PyInputParameters {
 
     /// NVT (canonical) parameters: Berendsen thermostat at `temperature` K.
     ///
-    /// `constraints`: `"none"` (default) | `"hbonds"` | `"allbonds"` — see `nve`.
+    /// Deprecated: use `Recipe.nvt(dt, steps, temperature, constraints)`.
     #[staticmethod]
     #[pyo3(signature = (dt, steps, temperature, constraints="none"))]
-    fn nvt(dt: f64, steps: usize, temperature: f64, constraints: &str) -> PyResult<Self> {
+    fn nvt(
+        py: Python<'_>,
+        dt: f64,
+        steps: usize,
+        temperature: f64,
+        constraints: &str,
+    ) -> PyResult<Self> {
+        deprecated(
+            py,
+            "InputParameters.nvt(...)",
+            "Recipe.nvt(dt, steps, temperature, constraints)",
+        )?;
         let inner = ImdParameters::nvt(dt, steps, temperature, constraints)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
         Ok(Self { inner })
@@ -72,27 +105,40 @@ impl PyInputParameters {
 
     /// NPT (isothermal-isobaric) parameters: Berendsen thermostat + barostat.
     ///
-    /// `pressure` in bar. `constraints`: `"none"` (default) | `"hbonds"` | `"allbonds"` — see `nve`.
+    /// Deprecated: use `Recipe.npt(dt, steps, temperature, pressure, constraints)`.
     #[staticmethod]
     #[pyo3(signature = (dt, steps, temperature, pressure, constraints="none"))]
     fn npt(
+        py: Python<'_>,
         dt: f64,
         steps: usize,
         temperature: f64,
         pressure: f64,
         constraints: &str,
     ) -> PyResult<Self> {
+        deprecated(
+            py,
+            "InputParameters.npt(...)",
+            "Recipe.npt(dt, steps, temperature, pressure, constraints)",
+        )?;
         let inner = ImdParameters::npt(dt, steps, temperature, pressure, constraints)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
         Ok(Self { inner })
     }
 
     /// Steepest-descent energy minimization parameters.
+    ///
+    /// Deprecated: use `Recipe.minimize(steps)`.
     #[staticmethod]
-    fn steepest_descent(steps: usize) -> Self {
-        Self {
+    fn steepest_descent(py: Python<'_>, steps: usize) -> PyResult<Self> {
+        deprecated(
+            py,
+            "InputParameters.steepest_descent(steps)",
+            "Recipe.minimize(steps)",
+        )?;
+        Ok(Self {
             inner: ImdParameters::steepest_descent(steps),
-        }
+        })
     }
 
     /// Time step in picoseconds.
@@ -186,6 +232,18 @@ impl PyInputParameters {
             self.inner.rcutl,
             self.temperature(),
         )
+    }
+}
+
+impl PyInputParameters {
+    fn read(input_file: &str) -> PyResult<Self> {
+        let imd = read_imd_file(input_file).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Failed to read input file '{}': {}",
+                input_file, e
+            ))
+        })?;
+        Ok(Self { inner: imd })
     }
 }
 

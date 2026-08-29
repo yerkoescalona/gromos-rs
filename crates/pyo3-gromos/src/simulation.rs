@@ -1,34 +1,30 @@
 //! Interactive Simulation API for Python
 //!
-//! Supports both compositional and file-based construction, mirroring
-//! the internal md architecture with GROMOS naming conventions.
-//!
-//! Since PLAN.md 3.9 step 1 this file contains **no run assembly of its own**: a
-//! `Simulation` is built by the same `gromos-run` functions the `md` binary calls
-//! (`prepare_system` → `build_sequence_from_imd` → `start`), so the gromosXX reference suite
-//! (which drives the binary) and the Python suite guard one code path from two sides.
+//! A `Simulation` is built from a `System` (topology + coordinates) and a `Recipe` (what to run)
+//! through the same `gromos-run` functions the `md` binary calls (`prepare_system` →
+//! `build_plan` → `validate_plan` → `instantiate` → `start`), so the gromosXX reference suite
+//! (which drives the binary) and the Python suite guard one code path from two sides
+//! (PLAN.md 3.9). This file contains **no run assembly of its own**.
 //!
 //! # Example (Python)
 //!
 //! ```python
-//! from gromos import Simulation, Topology, Configuration, InputParameters
+//! from gromos import Recipe, Simulation, System
 //!
-//! # Compositional — mirrors md internals
-//! topo = Topology("system.topo")
-//! conf = Configuration("initial.cnf")
-//! params = InputParameters("run.imd")
-//! sim = Simulation(topo, conf, params)
-//!
-//! # File-based (convenience, backward-compatible)
-//! sim = Simulation("system.topo", "initial.cnf", "run.imd")
-//!
-//! # Both work identically
+//! system = System.from_files("system.topo", "initial.cnf")
+//! recipe = Recipe.from_imd("run.imd")                     # or Recipe.nvt(0.002, 1000, 300.0)
+//! sim = Simulation(system, recipe)
 //! sim.step(100)
 //! print(sim.energies, sim.positions)
-//! print(sim.algorithm_names)  # inspect the MD sequence
+//!
+//! plan = recipe.plan(system)                              # the MD step as data
+//! plan.remove("remove_com")
+//! sim = Simulation(system, recipe, plan=plan)
 //! ```
-
-use std::path::PathBuf;
+//!
+//! The pre-recipe forms — `Simulation(topo, conf, InputParameters(...))`, the `distrest=`/
+//! `posresspec=`/`refpos=`/`ml_*=` keyword arguments and `Simulation.from_sequence` — still
+//! work for one deprecation cycle, warn, and are translated into a recipe.
 
 use numpy::PyArray2;
 use pyo3::prelude::*;
@@ -40,80 +36,150 @@ use gromos_core::{
     units::PhysicalConstants,
     Topology,
 };
-#[cfg(feature = "ml")]
-use gromos_forces::zones::ZonePartition;
 use gromos_io::{
     coordinate::read_coordinates,
-    imd::{read_imd_file, ImdParameters},
     topology::{build_topology, read_topology_file},
 };
+use gromos_run::plan::AlgorithmSpec;
+use gromos_run::recipe::{PassthroughPolicy, RunRecipe};
 use gromos_run::{
-    build_sequence_from_imd, prepare_system, start, Coordinates, RunError, RunInputs, RunOptions,
+    build_sequence_from_plan, build_sequence_from_recipe, load_bundle, prepare_system, start,
+    Coordinates,
 };
 
 use super::algorithm_sequence::{
     compute_total_dof, resolve_algorithm_sequence, PyAlgorithmSequence,
 };
-use super::parameters::PyInputParameters;
+use super::parameters::{deprecated, PyInputParameters};
 use super::py_conf::PyConfiguration;
+use super::recipe::{run_err, MissingFeatureError, PyPlan, PyRecipe};
 use super::system::PySystem;
 use super::topology::PyTopology;
 use super::PyEnergy;
 
-/// Map a `gromos_run::RunError` onto the builtin Python exception the binding raised for
-/// the same condition before the assembly was shared (no behaviour change for callers).
-pub(crate) fn run_err(e: RunError) -> PyErr {
-    match e {
-        RunError::Io { .. } => PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()),
-        RunError::MissingInput { .. }
-        | RunError::AtomCountMismatch { .. }
-        | RunError::SolventCount { .. }
-        | RunError::Inconsistent(_)
-        | RunError::Validation { .. }
-        | RunError::UnknownBlock { .. }
-        | RunError::Recipe(_)
-        | RunError::InvalidPlan(_)
-        | RunError::Serde(_) => PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()),
-        // A term needing a feature this build lacks — the same RuntimeError the
-        // `ml_potential=` kwarg raised on a non-`ml` build.
-        RunError::MissingFeature { .. } | RunError::Init(_) | RunError::Step { .. } => {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
-        },
+/// The raw pieces every constructor reduces to.
+struct Parts {
+    topo: Topology,
+    physical_constants: PhysicalConstants,
+    positions: Vec<Vec3>,
+    velocities: Vec<Vec3>,
+    box_dims: Vec3,
+}
+
+impl Parts {
+    fn from_objects(topo: &PyTopology, conf: &PyConfiguration) -> Self {
+        Self {
+            topo: topo.inner.clone(),
+            physical_constants: topo.physical_constants,
+            positions: conf.pos_data.clone(),
+            velocities: conf.vel_data.clone(),
+            box_dims: conf.box_dims,
+        }
+    }
+
+    fn from_system(system: &PySystem) -> Self {
+        Self::from_objects(&system.topology, &system.configuration)
+    }
+
+    fn from_files(topo_file: &str, conf_file: &str) -> PyResult<Self> {
+        let parsed = read_topology_file(topo_file).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Failed to read topology '{}': {}",
+                topo_file, e
+            ))
+        })?;
+        let physical_constants = parsed.physical_constants;
+        let topo = build_topology(parsed);
+        let coord_data = read_coordinates(conf_file).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Failed to read coordinates '{}': {}",
+                conf_file, e
+            ))
+        })?;
+        Ok(Self {
+            topo,
+            physical_constants,
+            positions: coord_data.positions,
+            velocities: coord_data.velocities,
+            box_dims: coord_data.box_dims,
+        })
+    }
+
+    fn into_pieces(self) -> (Topology, PhysicalConstants, Coordinates) {
+        let coords = Coordinates {
+            positions: self.positions,
+            velocities: self.velocities,
+            box_dims: self.box_dims,
+        };
+        (self.topo, self.physical_constants, coords)
     }
 }
 
-/// Plain data extracted from a Python `SchNetPotential` + region/buffer selector strings,
-/// threaded from `Simulation::new` down to `build_simulation`. Deliberately *not* itself a
-/// pyo3 type (no lifetime, always compiles) so `build_simulation`'s signature doesn't need to
-/// change based on the `ml` feature; only the code that actually *acts* on a `Some` value is
-/// feature-gated (see `build_simulation`).
-#[derive(Clone)]
-#[cfg_attr(not(feature = "ml"), allow(dead_code))]
-pub(crate) struct MlPotentialSpec {
-    pub model_path: String,
-    pub cutoff: f64,
-    pub elements: Vec<i64>,
-    pub region: String,
-    pub buffer: Option<String>,
+/// A recipe as a constructor argument: a `Recipe`, or (deprecated) an `InputParameters`.
+fn recipe_arg(arg: &Bound<'_, PyAny>) -> PyResult<(RunRecipe, Vec<String>)> {
+    if let Ok(r) = arg.extract::<PyRef<PyRecipe>>() {
+        return Ok((r.inner.clone(), r.diagnostics.clone()));
+    }
+    if let Ok(p) = arg.extract::<PyRef<PyInputParameters>>() {
+        deprecated(
+            arg.py(),
+            "Simulation(..., InputParameters)",
+            "Simulation(system, Recipe.from_imd(path))",
+        )?;
+        let (recipe, diag) =
+            RunRecipe::from_imd_with(&p.inner, &PassthroughPolicy::default()).map_err(run_err)?;
+        return Ok((recipe, diag.notes));
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "expected a Recipe (or a deprecated InputParameters)",
+    ))
 }
 
-/// Extract a `MlPotentialSpec` from `Simulation.__init__`'s `ml_potential=`/`ml_region=`/
-/// `ml_buffer=` kwargs. `ml_potential` is a `SchNetPotential` (a `#[cfg(feature = "ml")]`
-/// pyclass) — takes `&Bound<'_, PyAny>` rather than that concrete type so this function's own
-/// signature doesn't need to change across builds; the actual downcast is feature-gated inside.
-fn resolve_ml_spec(
+/// Deprecated keyword arguments, translated into the recipe (one deprecation cycle, A9).
+#[allow(clippy::too_many_arguments)]
+fn apply_legacy_kwargs(
+    py: Python<'_>,
+    recipe: &mut RunRecipe,
+    distrest: Option<String>,
+    posresspec: Option<String>,
+    refpos: Option<String>,
     ml_potential: Option<&Bound<'_, PyAny>>,
     ml_region: Option<String>,
     ml_buffer: Option<String>,
-) -> PyResult<Option<MlPotentialSpec>> {
+) -> PyResult<()> {
+    if distrest.is_some() || posresspec.is_some() || refpos.is_some() {
+        deprecated(
+            py,
+            "Simulation(..., distrest=/posresspec=/refpos=)",
+            "recipe.with_inputs(distrest=..., posresspec=..., refpos=...)",
+        )?;
+        if let Some(p) = distrest {
+            recipe.inputs.distrest = Some(p.into());
+        }
+        if let Some(p) = posresspec {
+            recipe.inputs.posresspec = Some(p.into());
+        }
+        if let Some(p) = refpos {
+            recipe.inputs.refpos = Some(p.into());
+        }
+    }
     match (ml_potential, ml_region) {
-        (None, None) => Ok(None),
-        (Some(_), None) | (None, Some(_)) => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "ml_potential and ml_region must be given together",
-        )),
+        (None, None) => {},
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "ml_potential and ml_region must be given together",
+            ))
+        },
         (Some(potential), Some(region)) => {
+            deprecated(
+                py,
+                "Simulation(..., ml_potential=, ml_region=, ml_buffer=)",
+                "recipe.with_term(Term(\"schnet\", model=..., cutoff=..., elements=..., \
+                 region=..., buffer=...))",
+            )?;
             #[cfg(feature = "ml")]
             {
+                use gromos_run::recipe::{Coupling, TermSpec};
                 let potential = potential
                     .extract::<PyRef<crate::ml_potential::PySchNetPotential>>()
                     .map_err(|_| {
@@ -121,59 +187,51 @@ fn resolve_ml_spec(
                             "ml_potential must be a SchNetPotential",
                         )
                     })?;
-                Ok(Some(MlPotentialSpec {
-                    model_path: potential.model_path.clone(),
+                recipe.forcefield.terms.push(TermSpec::Schnet {
+                    model: potential.model_path.clone(),
                     cutoff: potential.cutoff,
                     elements: potential.elements.clone(),
                     region,
                     buffer: ml_buffer,
-                }))
+                    coupling: Coupling::Delta,
+                });
             }
             #[cfg(not(feature = "ml"))]
             {
                 let _ = (potential, region, ml_buffer);
-                Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                return Err(MissingFeatureError::new_err(
                     "ML support was not compiled into this build (rebuild pyo3-gromos/py-gromos \
                      with --features ml)",
-                ))
+                ));
             }
         },
     }
+    Ok(())
 }
 
-/// Build a simulation from raw components — the shared core of every constructor.
-///
-/// Prepares the system and builds the algorithm sequence through `gromos-run` (exactly what
-/// the `md` binary does), optionally inserts the ML orchestrator term right after
-/// `Forcefield`, then runs `init` + step 0.
-fn build_simulation(
-    topo: Topology,
-    physical_constants: PhysicalConstants,
-    positions: Vec<Vec3>,
-    velocities: Vec<Vec3>,
-    box_dims: Vec3,
-    imd: &ImdParameters,
-    inputs: &RunInputs,
-    ml_spec: Option<&MlPotentialSpec>,
+/// The one way a `Simulation` comes into being: prepare the system, build (or take) the
+/// plan, instantiate it, run `init` + step 0.
+fn build_from_recipe(
+    parts: Parts,
+    recipe: RunRecipe,
+    plan: Option<Vec<AlgorithmSpec>>,
+    diagnostics: Vec<String>,
 ) -> PyResult<PySimulation> {
-    let coords = Coordinates {
-        positions,
-        velocities,
-        box_dims,
-    };
+    let imd = recipe.to_imd();
+    let (topo, physical_constants, coords) = parts.into_pieces();
     let prepared =
-        prepare_system(imd, topo, physical_constants, coords, inputs).map_err(run_err)?;
-    let built =
-        build_sequence_from_imd(imd, &prepared, inputs, &RunOptions::default()).map_err(run_err)?;
-    #[cfg(feature = "ml")]
-    let periodicity_for_ml = gromos_run::periodicity_of(&prepared);
-
+        prepare_system(&imd, topo, physical_constants, coords, &recipe.inputs).map_err(run_err)?;
+    let built = match plan {
+        Some(plan) => build_sequence_from_plan(&recipe, plan, &prepared),
+        None => build_sequence_from_recipe(&recipe, &prepared),
+    }
+    .map_err(run_err)?;
     let gromos_run::Built {
         sequence: mut md_sequence,
         recipe,
         plan,
-        diagnostics,
         summary,
+        ..
     } = built;
     let gromos_run::Prepared {
         topology: topo,
@@ -181,41 +239,9 @@ fn build_simulation(
         ..
     } = prepared;
     let n_atoms = topo.num_atoms();
+    let dt = recipe.control.dt;
 
-    // ML potential, if attached (PLAN.md P3.7) — inserted immediately after Forcefield,
-    // matching `orchestrator_algorithm.rs`'s documented placement requirement (it adds to
-    // Forcefield's already-computed force/virial). `ml_spec` is always
-    // `Option<MlPotentialSpec>` regardless of the `ml` feature; only the code that *acts* on
-    // `Some` is feature-gated, so `Simulation`'s constructor signature doesn't change.
-    #[cfg(feature = "ml")]
-    if let Some(spec) = ml_spec {
-        let partition = ZonePartition::from_selections(&topo, &spec.region, spec.buffer.as_deref())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
-        let potential = crate::ml_potential::PySchNetPotential::from_spec(spec);
-        let algorithm = crate::ml_potential::build_ml_orchestrator_algorithm(
-            &potential,
-            &partition,
-            n_atoms,
-            periodicity_for_ml,
-        )?;
-        let after_forcefield = md_sequence
-            .algorithm_names()
-            .iter()
-            .position(|name| *name == "Forcefield")
-            .map(|i| i + 1)
-            .ok_or_else(|| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    "built sequence has no Forcefield to attach the ML term to",
-                )
-            })?;
-        md_sequence.insert(after_forcefield, Box::new(algorithm));
-    }
-    #[cfg(not(feature = "ml"))]
-    {
-        let _ = &ml_spec;
-    }
-
-    let mut sim_state = SimulationState::new(imd.dt, imd.nstlim);
+    let mut sim_state = SimulationState::new(dt, recipe.control.steps);
     start(&mut md_sequence, &topo, &mut conf, &sim_state).map_err(run_err)?;
     sim_state.advance();
 
@@ -224,40 +250,37 @@ fn build_simulation(
         configuration: conf,
         md_sequence,
         sim_state,
-        dt: imd.dt,
+        dt,
         n_atoms,
         total_dof: summary.total_dof,
         recipe: Some(recipe),
         plan: Some(plan),
-        diagnostics: diagnostics.notes,
+        diagnostics,
     })
 }
 
-/// Build a simulation from a user-provided algorithm sequence.
-///
-/// The system is prepared exactly as for `build_simulation`; the sequence descriptors are
-/// then resolved into real Rust algorithms (`resolve_algorithm_sequence`, the descriptor path
-/// slated for replacement by the recipe plan in PLAN.md 3.9 steps 2–4).
+/// Build a simulation from a user-provided *descriptor* sequence (the pre-recipe path,
+/// deprecated: use `recipe.plan(system)` + `Simulation(system, recipe, plan=...)`).
 fn build_simulation_from_sequence(
-    topo: Topology,
-    physical_constants: PhysicalConstants,
-    positions: Vec<Vec3>,
-    velocities: Vec<Vec3>,
-    box_dims: Vec3,
-    imd: &ImdParameters,
+    parts: Parts,
+    params: &PyInputParameters,
     sequence: &PyAlgorithmSequence,
 ) -> PyResult<PySimulation> {
-    let coords = Coordinates {
-        positions,
-        velocities,
-        box_dims,
-    };
-    let prepared = prepare_system(imd, topo, physical_constants, coords, &RunInputs::default())
-        .map_err(run_err)?;
+    let imd = &params.inner;
+    let (topo, physical_constants, coords) = parts.into_pieces();
+    let prepared = prepare_system(
+        imd,
+        topo,
+        physical_constants,
+        coords,
+        &gromos_run::RunInputs::default(),
+    )
+    .map_err(run_err)?;
     let gromos_run::Prepared {
         topology: topo,
         configuration: mut conf,
         box_dims,
+        physical_constants,
         ..
     } = prepared;
     let n_atoms = topo.num_atoms();
@@ -299,9 +322,8 @@ fn build_simulation_from_sequence(
 /// Interactive simulation object inspired by OpenMM's Simulation class,
 /// using GROMOS naming conventions and file formats.
 ///
-/// Create from Topology + Configuration + InputParameters objects,
-/// or directly from file paths. Call `step(n)` to advance and access
-/// properties like `positions`, `forces`, `energies`, `temperature`.
+/// Create from a `System` and a `Recipe` (or from file paths). Call `step(n)` to advance and
+/// access properties like `positions`, `forces`, `energies`, `temperature`.
 #[pyclass(name = "Simulation", unsendable)]
 pub struct PySimulation {
     topology: Topology,
@@ -315,9 +337,9 @@ pub struct PySimulation {
     /// the same value the thermostat (if any) couples to.
     total_dof: f64,
     /// The run recipe this simulation was built from (`None` on the descriptor path).
-    recipe: Option<gromos_run::RunRecipe>,
+    recipe: Option<RunRecipe>,
     /// The algorithm plan (`None` on the descriptor path).
-    plan: Option<Vec<gromos_run::AlgorithmSpec>>,
+    plan: Option<Vec<AlgorithmSpec>>,
     /// What `from_imd` defaulted or passed through.
     diagnostics: Vec<String>,
 }
@@ -326,24 +348,25 @@ pub struct PySimulation {
 impl PySimulation {
     /// Create a new simulation.
     ///
-    /// Three-argument forms (backward-compatible):
-    ///   - `Simulation(topology, configuration, parameters)` — pre-loaded objects
+    /// Forms:
+    ///   - `Simulation(system, recipe)` — `System` + `Recipe`
+    ///   - `Simulation(topology, configuration, recipe)` — pre-loaded objects
     ///   - `Simulation("system.topo", "initial.cnf", "run.imd")` — file paths
+    ///   - `plan=` — an edited `Plan` from `recipe.plan(system)` (validated, then run)
     ///
-    /// Two-argument form (new):
-    ///   - `Simulation(system, parameters)` — System object + InputParameters
-    ///
-    /// Optional restraint file paths (mirror the `md` binary's `@distrest`/
-    /// `@posresspec`/`@refpos` flags): `distrest`, `posresspec`, `refpos`.
-    /// A perturbation topology (FEP, `NTG != 0`) is applied to the `Topology`
-    /// beforehand with `Topology.apply_perturbation(path)`.
+    /// Deprecated (one release, with a warning): an `InputParameters` in place of the
+    /// recipe; the `distrest`/`posresspec`/`refpos` restraint-file keywords (use
+    /// `recipe.with_inputs(...)`); the `ml_potential`/`ml_region`/`ml_buffer` keywords (use
+    /// `recipe.with_term(Term("schnet", ...))`).
     #[new]
-    #[pyo3(signature = (arg1, arg2, arg3=None, *, distrest=None, posresspec=None, refpos=None, ml_potential=None, ml_region=None, ml_buffer=None))]
+    #[pyo3(signature = (arg1, arg2, arg3=None, *, plan=None, distrest=None, posresspec=None, refpos=None, ml_potential=None, ml_region=None, ml_buffer=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
+        py: Python<'_>,
         arg1: &Bound<'_, PyAny>,
         arg2: &Bound<'_, PyAny>,
         arg3: Option<&Bound<'_, PyAny>>,
+        plan: Option<PyRef<'_, PyPlan>>,
         distrest: Option<String>,
         posresspec: Option<String>,
         refpos: Option<String>,
@@ -351,81 +374,62 @@ impl PySimulation {
         ml_region: Option<String>,
         ml_buffer: Option<String>,
     ) -> PyResult<Self> {
-        let inputs = RunInputs {
-            pttopo: None,
-            posresspec: posresspec.map(PathBuf::from),
-            refpos: refpos.map(PathBuf::from),
-            distrest: distrest.map(PathBuf::from),
-        };
-        let ml_spec = resolve_ml_spec(ml_potential, ml_region, ml_buffer)?;
-        match arg3 {
+        let (parts, mut recipe, diagnostics) = match arg3 {
             None => {
-                // Two-arg form: Simulation(system, params)
                 let system = arg1.extract::<PyRef<PySystem>>().map_err(|_| {
                     PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                         "With two arguments, first must be a System object",
                     )
                 })?;
-                let params = arg2.extract::<PyRef<PyInputParameters>>().map_err(|_| {
+                let (recipe, diagnostics) = recipe_arg(arg2).map_err(|_| {
                     PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "With two arguments, second must be an InputParameters object",
+                        "With two arguments, second must be a Recipe (or InputParameters)",
                     )
                 })?;
-                build_simulation(
-                    system.topology.inner.clone(),
-                    system.topology.physical_constants,
-                    system.configuration.pos_data.clone(),
-                    system.configuration.vel_data.clone(),
-                    system.configuration.box_dims,
-                    &params.inner,
-                    &inputs,
-                    ml_spec.as_ref(),
-                )
+                (Parts::from_system(&system), recipe, diagnostics)
             },
             Some(arg3) => {
-                // Three-arg forms: file paths or (Topology, Configuration, InputParameters)
                 if let (Ok(topo_file), Ok(conf_file), Ok(input_file)) = (
                     arg1.extract::<String>(),
                     arg2.extract::<String>(),
                     arg3.extract::<String>(),
                 ) {
-                    return Self::_from_files_with_inputs(
-                        &topo_file,
-                        &conf_file,
-                        &input_file,
-                        &inputs,
-                        ml_spec.as_ref(),
-                    );
+                    let parts = Parts::from_files(&topo_file, &conf_file)?;
+                    let recipe = PyRecipe::from_imd(&input_file, None)?;
+                    (parts, recipe.inner, recipe.diagnostics)
+                } else {
+                    let topo = arg1.extract::<PyRef<PyTopology>>().map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "First argument must be a file path (str) or Topology object",
+                        )
+                    })?;
+                    let conf = arg2.extract::<PyRef<PyConfiguration>>().map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "Second argument must be a file path (str) or Configuration object",
+                        )
+                    })?;
+                    let (recipe, diagnostics) = recipe_arg(arg3).map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "Third argument must be a file path (str), a Recipe, or \
+                             InputParameters",
+                        )
+                    })?;
+                    (Parts::from_objects(&topo, &conf), recipe, diagnostics)
                 }
-
-                let topo = arg1.extract::<PyRef<PyTopology>>().map_err(|_| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "First argument must be a file path (str) or Topology object",
-                    )
-                })?;
-                let conf = arg2.extract::<PyRef<PyConfiguration>>().map_err(|_| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "Second argument must be a file path (str) or Configuration object",
-                    )
-                })?;
-                let params = arg3.extract::<PyRef<PyInputParameters>>().map_err(|_| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "Third argument must be a file path (str) or InputParameters object",
-                    )
-                })?;
-
-                build_simulation(
-                    topo.inner.clone(),
-                    topo.physical_constants,
-                    conf.pos_data.clone(),
-                    conf.vel_data.clone(),
-                    conf.box_dims,
-                    &params.inner,
-                    &inputs,
-                    ml_spec.as_ref(),
-                )
             },
-        }
+        };
+        apply_legacy_kwargs(
+            py,
+            &mut recipe,
+            distrest,
+            posresspec,
+            refpos,
+            ml_potential,
+            ml_region,
+            ml_buffer,
+        )?;
+        let plan = plan.map(|p| p.specs.clone());
+        build_from_recipe(parts, recipe, plan, diagnostics)
     }
 
     /// Create a simulation from file paths (alternative to constructor).
@@ -434,13 +438,23 @@ impl PySimulation {
     ///     sim = Simulation.from_files("system.topo", "initial.cnf", "run.imd")
     #[staticmethod]
     fn from_files(topo_file: &str, conf_file: &str, input_file: &str) -> PyResult<Self> {
-        Self::_from_files_with_inputs(
-            topo_file,
-            conf_file,
-            input_file,
-            &RunInputs::default(),
-            None,
-        )
+        let parts = Parts::from_files(topo_file, conf_file)?;
+        let recipe = PyRecipe::from_imd(input_file, None)?;
+        build_from_recipe(parts, recipe.inner, None, recipe.diagnostics)
+    }
+
+    /// Create a simulation from a run bundle (`input.toml` naming topology, coordinates and
+    /// a recipe or parameter file — the reference systems' layout).
+    #[staticmethod]
+    #[pyo3(signature = (path, allow_passthrough=None))]
+    fn from_bundle(path: &str, allow_passthrough: Option<Vec<String>>) -> PyResult<Self> {
+        let policy = PassthroughPolicy::allow(allow_passthrough.unwrap_or_default());
+        let (bundle, recipe, diag) = load_bundle(path, &policy).map_err(run_err)?;
+        let parts = Parts::from_files(
+            &bundle.topology.to_string_lossy(),
+            &bundle.configuration.to_string_lossy(),
+        )?;
+        build_from_recipe(parts, recipe, None, diag.notes)
     }
 
     /// Run the simulation for `n_steps` MD steps.
@@ -539,9 +553,24 @@ impl PySimulation {
             .collect()
     }
 
+    /// The recipe this simulation was built from (`None` for the deprecated descriptor path).
+    #[getter]
+    fn recipe(&self) -> Option<PyRecipe> {
+        self.recipe.as_ref().map(|r| PyRecipe {
+            inner: r.clone(),
+            diagnostics: self.diagnostics.clone(),
+        })
+    }
+
+    /// The plan that was instantiated — a frozen snapshot, editing it does not change this
+    /// simulation (`None` for the deprecated descriptor path).
+    #[getter]
+    fn plan(&self) -> Option<PyPlan> {
+        self.plan.as_ref().map(|p| PyPlan { specs: p.clone() })
+    }
+
     /// The effective run recipe as TOML — every value the engine actually used, the same
-    /// text the `md` binary writes next to its `.tre` (PLAN.md 3.9). `None` for a simulation
-    /// built from a hand-made `AlgorithmSequence`.
+    /// text the `md` binary writes next to its `.tre`.
     #[getter]
     fn recipe_toml(&self) -> PyResult<Option<String>> {
         self.recipe
@@ -550,8 +579,7 @@ impl PySimulation {
             .transpose()
     }
 
-    /// The algorithm plan as JSON (one entry per algorithm, fully resolved). `None` for a
-    /// simulation built from a hand-made `AlgorithmSequence`.
+    /// The algorithm plan as JSON (one entry per algorithm, fully resolved).
     #[getter]
     fn plan_json(&self) -> PyResult<Option<String>> {
         self.plan
@@ -673,10 +701,9 @@ impl PySimulation {
     /// Current instantaneous pressure (bar): `P = (2*KE - virial) / (3*V)`.
     ///
     /// The virial term is only populated by `PressureCalculation` in the
-    /// algorithm sequence — automatic for NPT (`InputParameters.npt()`/
-    /// `AlgorithmSequence.npt()`), absent for NVE/NVT. Without it this returns
-    /// the *kinetic-only* term (`2*KE / (3*V)`, not zero) — a physically
-    /// incomplete, misleadingly large number, not "no pressure to report".
+    /// algorithm sequence — automatic for NPT (`Recipe.npt(...)`), absent for NVE/NVT.
+    /// Without it this returns the *kinetic-only* term (`2*KE / (3*V)`, not zero) — a
+    /// physically incomplete, misleadingly large number, not "no pressure to report".
     /// Only trust this getter under NPT.
     #[getter]
     fn pressure(&self) -> f64 {
@@ -697,38 +724,24 @@ impl PySimulation {
         self.n_atoms - self.topology.num_solute_atoms()
     }
 
-    /// Create a simulation with a custom algorithm sequence.
+    /// Create a simulation with a custom *descriptor* sequence.
     ///
-    /// This is the most flexible constructor — full control over the MD step.
-    /// The sequence determines exactly what happens each step and in what order.
-    ///
-    /// Args:
-    ///     topo: Topology object
-    ///     conf: Configuration object
-    ///     params: InputParameters (still needed for dt, nstlim, and defaults)
-    ///     sequence: AlgorithmSequence defining the MD step
-    ///
-    /// Example:
-    ///     seq = AlgorithmSequence.nvt(topo, params)
-    ///     seq.remove("RemoveCOMMotion")  # customize
-    ///     sim = Simulation.from_sequence(topo, conf, params, seq)
-    ///     sim.step(1000)
+    /// Deprecated: use `plan = recipe.plan(system)`, edit it, and
+    /// `Simulation(system, recipe, plan=plan)`.
     #[staticmethod]
     fn from_sequence(
+        py: Python<'_>,
         topo: &PyTopology,
         conf: &PyConfiguration,
         params: &PyInputParameters,
         sequence: &PyAlgorithmSequence,
     ) -> PyResult<Self> {
-        build_simulation_from_sequence(
-            topo.inner.clone(),
-            topo.physical_constants,
-            conf.pos_data.clone(),
-            conf.vel_data.clone(),
-            conf.box_dims,
-            &params.inner,
-            sequence,
-        )
+        deprecated(
+            py,
+            "Simulation.from_sequence(topo, conf, params, sequence)",
+            "Simulation(system, recipe, plan=recipe.plan(system))",
+        )?;
+        build_simulation_from_sequence(Parts::from_objects(topo, conf), params, sequence)
     }
 
     fn __repr__(&self) -> String {
@@ -774,48 +787,6 @@ impl PySimulation {
             frame.lj,
             frame.coul_real,
         ]
-    }
-
-    fn _from_files_with_inputs(
-        topo_file: &str,
-        conf_file: &str,
-        input_file: &str,
-        inputs: &RunInputs,
-        ml_spec: Option<&MlPotentialSpec>,
-    ) -> PyResult<Self> {
-        let imd = read_imd_file(input_file).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                "Failed to read input file '{}': {}",
-                input_file, e
-            ))
-        })?;
-
-        let parsed = read_topology_file(topo_file).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                "Failed to read topology '{}': {}",
-                topo_file, e
-            ))
-        })?;
-        let physical_constants = parsed.physical_constants;
-        let topo = build_topology(parsed);
-
-        let coord_data = read_coordinates(conf_file).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                "Failed to read coordinates '{}': {}",
-                conf_file, e
-            ))
-        })?;
-
-        build_simulation(
-            topo,
-            physical_constants,
-            coord_data.positions,
-            coord_data.velocities,
-            coord_data.box_dims,
-            &imd,
-            inputs,
-            ml_spec,
-        )
     }
 }
 

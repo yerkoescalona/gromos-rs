@@ -12,8 +12,9 @@ raises `NotImplementedError` or shells out to a binary lives in sub-modules
 | Name | Backed by | Status |
 |------|-----------|--------|
 | `System`, `Topology`, `Configuration` | Rust | ✅ working |
-| `InputParameters` + factories | Rust | ✅ working |
-| `Simulation`, `AlgorithmSequence` | Rust | ✅ working |
+| `Recipe`, `Term`, `Algorithm`, `Plan` + `terms()`/`algorithms()`/`build_info()` | Rust (`gromos-run` types via pythonize) | ✅ working |
+| `Simulation` | Rust | ✅ working |
+| `InputParameters` + factories, `AlgorithmSequence` | Rust | ⚠️ deprecated (one release): translated into a `Recipe`, warn |
 | `Vec3`, `Energy`, `Frame`, `rmsd`, `rdf` | Rust | ✅ working |
 | `md_runners.*` (MDSimulation, run_standard_md, …) | Python subprocess → `md` binary | ⚠️ legacy, requires binary in PATH |
 | `analysis.*` | Python subprocess → gromos++ programs | 🔜 programs not yet ported |
@@ -42,9 +43,10 @@ The Rust side lives in `crates/pyo3-gromos/src/`:
 | `system.rs` | `System` |
 | `topology.rs` | `Topology` |
 | `py_conf.rs` | `Configuration` |
-| `parameters.rs` | `InputParameters` + factories |
+| `recipe.rs` | `Recipe`, `Term`, `Algorithm`, `Plan`, `terms`/`algorithms`/`build_info`, the exceptions |
+| `parameters.rs` | `InputParameters` + factories (deprecated shims) |
 | `simulation.rs` | `Simulation` |
-| `algorithm_sequence.rs` | `AlgorithmSequence` |
+| `algorithm_sequence.rs` | `AlgorithmSequence` (deprecated descriptor path; removed in PLAN.md 3.9 step 4) |
 | `lib.rs` | `Vec3`, `Energy`, `Frame`, `rmsd`, `rdf`, module assembly |
 
 ## Running the test suite
