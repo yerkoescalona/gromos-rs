@@ -13,7 +13,7 @@ Quick start
 
 The recipe is the one description of a run — the same data a GROMOS ``.imd`` file carries,
 grouped by concern (``recipe.control``, ``.ensemble``, ``.constraints`` …), plus additive
-``terms`` (``Term("schnet", ...)``) and auxiliary ``inputs``. ``recipe.plan(system)`` is the MD
+``terms`` (``Term("xtb", ...)``, ``Term("schnet", ...)``) and auxiliary ``inputs``. ``recipe.plan(system)`` is the MD
 step as editable data; ``recipe.to_imd(n_atoms=...)`` is what gromosXX would run.
 ``gromos.terms()`` / ``gromos.algorithms()`` list what this build knows.
 

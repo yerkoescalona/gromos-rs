@@ -203,7 +203,7 @@ class InputParameters:
     def ntwe(self) -> int: ...
     def __repr__(self) -> str: ...
 
-_TermKind = Literal["schnet"]
+_TermKind = Literal["schnet", "xtb"]
 """The term kinds this build knows (``gromos.terms()``)."""
 
 _AlgorithmKind = Literal[
@@ -530,6 +530,13 @@ class Simulation:
     def potential_energy(self) -> float: ...
     @property
     def kinetic_energy(self) -> float: ...
+    @property
+    def term_energies(self) -> dict[str, float]:
+        """Energy of every additive term (``Term("xtb", ...)``) at the last step, keyed by the
+        term's registry name (``"xtb"``, ``"xtb:1"`` for a repeated kind), in plan order. Their
+        sum is what the terms add to ``total_energy``; ``potential_energy`` is the classical
+        force field alone."""
+        ...
     @property
     def temperature(self) -> float: ...
     @property

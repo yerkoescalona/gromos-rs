@@ -73,6 +73,11 @@ src/error.rs        — RunError
   must both stay green; `py-gromos/tests/test_front_end_parity.py` compares the Python front-ends
   with `np.array_equal`.
 - Defaults are derived from `ImdParameters::default()` (PLAN.md 3.9 G7, step 2) — no second table.
+- **Adding a term** (PLAN.md 3.9 step 5, measured with `xtb`): a `TermSpec` variant in `recipe.rs`,
+  its registry arms in `plan.rs` (`KINDS`, `name`, `examples`, `feature`, `provides_virial`,
+  `coupling`) and one arm in `build.rs::instantiate_orchestrator`, registered with
+  `register_labelled(<registry name>, …)` so `Energy.term_energies` reports it by name (G10).
+  Nothing else — no binding change, no `md.rs` change.
 - **This crate is the only entry point** for building a run: the `md` binary and `py-gromos`'s
   `Simulation` both call `prepare_system` → `build_plan` → `validate_plan` → `instantiate` → `start`
   (steps 1–4). Every `.imd`/Python front-end is a translation into a `RunRecipe`.

@@ -292,22 +292,47 @@ fn instantiate_forcefield(
     })
 }
 
-#[cfg(feature = "ml")]
+/// The `orchestrator` entry: one provider per term, each over its own region. Adding a term
+/// kind = a `TermSpec` variant (recipe.rs), its registry lines (plan.rs) and one arm here
+/// (PLAN.md 3.9 step 5).
 fn instantiate_orchestrator(
     terms: &[TermSpec],
     topo: &Topology,
     periodicity: &Periodicity,
 ) -> Result<Box<dyn gromos_core::algorithm::Algorithm>, RunError> {
     use gromos_core::selection::AtomSelection;
-    use gromos_forces::nonbonded::schnet::SchNetInteraction;
     use gromos_forces::orchestrator::ProviderOrchestrator;
     use gromos_forces::orchestrator_algorithm::ProviderOrchestratorAlgorithm;
     use gromos_forces::zones::{Zone, ZonePartition};
 
+    if terms.is_empty() {
+        return Err(RunError::InvalidPlan(
+            "orchestrator without terms".to_string(),
+        ));
+    }
     let n_atoms = topo.num_atoms();
+    let region_of = |name: &str, region: &str, buffer: Option<&str>| {
+        let partition = ZonePartition::from_selections(topo, region, buffer)
+            .map_err(|e| RunError::Recipe(format!("{name} region: {e}")))?;
+        AtomSelection::from_indices(partition.atoms_in(Zone::Inner), n_atoms)
+            .map_err(|e| RunError::Recipe(format!("{name} region: {e}")))
+    };
+
+    // Energies are reported per term under the registry name; a repeated kind is indexed
+    // (`xtb`, `xtb:1`) so two terms of one kind stay distinguishable (G10).
+    let label_of = |index: usize| {
+        let name = terms[index].name();
+        if terms.iter().filter(|t| t.name() == name).count() > 1 {
+            format!("{name}:{index}")
+        } else {
+            name.to_string()
+        }
+    };
+
     let mut orchestrator = ProviderOrchestrator::new();
-    for term in terms {
+    for (index, term) in terms.iter().enumerate() {
         match term {
+            #[cfg(feature = "ml")]
             TermSpec::Schnet {
                 model,
                 cutoff,
@@ -316,14 +341,48 @@ fn instantiate_orchestrator(
                 buffer,
                 ..
             } => {
-                let partition = ZonePartition::from_selections(topo, region, buffer.as_deref())
-                    .map_err(|e| RunError::Recipe(format!("schnet region: {e}")))?;
-                let inner = partition.atoms_in(Zone::Inner);
-                let selection = AtomSelection::from_indices(inner, n_atoms)
-                    .map_err(|e| RunError::Recipe(format!("schnet region: {e}")))?;
+                use gromos_forces::nonbonded::schnet::SchNetInteraction;
+                let selection = region_of("schnet", region, buffer.as_deref())?;
                 let provider = SchNetInteraction::load(model, *cutoff, elements.clone())
                     .map_err(|e| RunError::Recipe(format!("schnet model '{model}': {e}")))?;
-                orchestrator.register(selection, Box::new(provider));
+                orchestrator.register_labelled(label_of(index), selection, Box::new(provider));
+            },
+            #[cfg(not(feature = "ml"))]
+            TermSpec::Schnet { .. } => {
+                return Err(RunError::MissingFeature {
+                    term: term.name().to_string(),
+                    feature: "ml",
+                })
+            },
+            TermSpec::Xtb {
+                region,
+                elements,
+                gfn,
+                charge,
+                multiplicity,
+                work_dir,
+                timeout_s,
+                ..
+            } => {
+                use gromos_forces::nonbonded::xtb::XtbInteraction;
+                let selection = region_of("xtb", region, None)?;
+                if let Some(&beyond) = selection.indices().iter().find(|&&i| i >= elements.len()) {
+                    return Err(RunError::Recipe(format!(
+                        "xtb term: `elements` has {} entries but the region includes atom {} \
+                         (one atomic number per global atom index)",
+                        elements.len(),
+                        beyond + 1
+                    )));
+                }
+                let dir = match work_dir {
+                    Some(dir) => std::path::PathBuf::from(dir),
+                    None => std::env::temp_dir().join(format!("gromos-rs-xtb-term-{index}")),
+                };
+                let provider =
+                    XtbInteraction::new(dir, *gfn, *charge, *multiplicity, elements.clone())
+                        .map_err(|e| RunError::Recipe(format!("xtb term: {e}")))?
+                        .with_timeout(std::time::Duration::from_secs(*timeout_s));
+                orchestrator.register_labelled(label_of(index), selection, Box::new(provider));
             },
         }
     }
@@ -331,25 +390,6 @@ fn instantiate_orchestrator(
         orchestrator,
         periodicity.clone(),
     )))
-}
-
-#[cfg(not(feature = "ml"))]
-fn instantiate_orchestrator(
-    terms: &[TermSpec],
-    _topo: &Topology,
-    _periodicity: &Periodicity,
-) -> Result<Box<dyn gromos_core::algorithm::Algorithm>, RunError> {
-    for term in terms {
-        if let Some(feature) = term.feature() {
-            return Err(RunError::MissingFeature {
-                term: term.name().to_string(),
-                feature,
-            });
-        }
-    }
-    Err(RunError::InvalidPlan(
-        "orchestrator without terms".to_string(),
-    ))
 }
 
 /// Stage 3: construct the algorithms of a **validated** plan.

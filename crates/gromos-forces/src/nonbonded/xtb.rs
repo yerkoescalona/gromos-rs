@@ -60,6 +60,8 @@ pub struct XtbInteraction {
     /// `Electrostatic`. Unused otherwise. Must be set via `with_cutoff` before an `Electrostatic`
     /// call; `contribute()` errors clearly rather than silently using a zero cutoff.
     cutoff: f64,
+    /// Wall-clock bound per `xtb` call (`with_timeout`); `None` waits forever.
+    timeout: Option<std::time::Duration>,
 }
 
 impl XtbInteraction {
@@ -82,7 +84,15 @@ impl XtbInteraction {
             work_dir,
             embedding: Embedding::None,
             cutoff: 0.0,
+            timeout: None,
         })
+    }
+
+    /// Bound every `xtb` call: past `timeout` the subprocess is killed and `contribute()` fails
+    /// with a clear error instead of stalling the MD step.
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
     }
 
     /// Override the `xtb` executable (default: `"xtb"`, resolved via `PATH`).
@@ -317,7 +327,7 @@ impl PotentialProvider for XtbInteraction {
         let gfn_arg = self.gfn.to_string();
         let chrg_arg = self.charge.to_string();
         let uhf_arg = (self.multiplicity - 1).to_string();
-        qm_subprocess::run_subprocess(
+        qm_subprocess::run_subprocess_with_timeout(
             &self.binary,
             &self.work_dir,
             &[
@@ -330,6 +340,7 @@ impl PotentialProvider for XtbInteraction {
                 "--uhf",
                 &uhf_arg,
             ],
+            self.timeout,
         )?;
 
         let (energy_eh, gradient_eh_bohr) = parse_engrad(&engrad_path, n)?;

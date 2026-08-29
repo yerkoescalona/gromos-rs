@@ -132,6 +132,11 @@ pub struct Energy {
 
     /// Sum of special interaction energies (position restraints, etc.).
     pub special_total: f64,
+    /// Energy of each additive term of the run (`Term("xtb", …)`, `Term("schnet", …)`), keyed by
+    /// the term's registry name (`xtb`, or `xtb:1` when a kind occurs more than once), in plan
+    /// order. Their sum is booked in `special_total`; this keeps them visible one by one
+    /// (PLAN.md 3.9 G10) so a compensating error between two terms cannot hide.
+    pub term_energies: Vec<(String, f64)>,
     /// Sum of distance-restraint energies.
     pub distanceres_total: f64,
     /// Solvent-accessible surface-area (SASA) solvation energy.
@@ -174,6 +179,7 @@ impl Energy {
             ls_realspace_total: 0.0,
             ls_kspace_total: 0.0,
             special_total: 0.0,
+            term_energies: Vec::new(),
             distanceres_total: 0.0,
             sasa_total: 0.0,
             constraint_total: 0.0,
@@ -221,6 +227,7 @@ impl Energy {
         self.ls_realspace_total = 0.0;
         self.ls_kspace_total = 0.0;
         self.special_total = 0.0;
+        self.term_energies.clear();
         self.distanceres_total = 0.0;
         self.sasa_total = 0.0;
         self.constraint_total = 0.0;

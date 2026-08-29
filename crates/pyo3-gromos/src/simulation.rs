@@ -613,6 +613,19 @@ impl PySimulation {
         self.configuration.old().energies.potential_total
     }
 
+    /// The energy of every additive term of the recipe (`Term("xtb", …)`, …) at the last
+    /// step, keyed by the term's registry name (`"xtb"`, or `"xtb:1"` when a kind occurs more
+    /// than once), in plan order. Their sum is what the terms add to `total_energy`;
+    /// `potential_energy` is the classical force field alone. Empty without terms.
+    #[getter]
+    fn term_energies<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let d = pyo3::types::PyDict::new_bound(py);
+        for (name, energy) in &self.configuration.old().energies.term_energies {
+            d.set_item(name, energy)?;
+        }
+        Ok(d)
+    }
+
     /// Kinetic energy (kJ/mol).
     #[getter]
     fn kinetic_energy(&self) -> f64 {

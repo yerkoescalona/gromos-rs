@@ -98,6 +98,9 @@ Python-callable API for running simulations and analysing trajectories.
   `gromos_run::read_imd` only. **The recipe is the only entry point**: `simulation.rs` has one
   constructor path (`build_from_recipe`), and `just lint` (G6) fails on any `AlgorithmSequence::new()`
   / `.push(Box::new(` / `read_imd_file(` outside `gromos-run`.
+- **PLAN.md 3.9 step 5 ✓ (2026-08-29).** `Term("xtb", …)` needed **no change in this crate** — the
+  proof of the door. `Simulation.term_energies` (dict, registry name → kJ/mol, from
+  `Energy.term_energies`) is the G10 slot; `potential_energy` stays the classical force field.
 
 ## Crate-specific rules
 - **Thin wrapper only.** Zero physics, zero data structures that duplicate the Rust core.

@@ -77,9 +77,9 @@ impl Algorithm for ProviderOrchestratorAlgorithm {
         }
 
         let index = ConfigurationSpatialIndex::new(conf, &self.periodicity);
-        let contribution = self
+        let (contribution, per_term) = self
             .orchestrator
-            .evaluate(topo, conf, &index)
+            .evaluate_with_terms(topo, conf, &index)
             .map_err(|e| e.to_string())?;
 
         let state = conf.current_mut();
@@ -87,6 +87,7 @@ impl Algorithm for ProviderOrchestratorAlgorithm {
             state.force[i] += f;
         }
         state.energies.special_total = contribution.energy;
+        state.energies.term_energies = per_term;
         state.virial_tensor += contribution.virial;
 
         Ok(())

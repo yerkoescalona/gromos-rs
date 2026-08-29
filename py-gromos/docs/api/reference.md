@@ -173,6 +173,18 @@ alg)`, `remove(target)`, `replace(target, alg)`; `plan.validate()` raises `PlanE
 GROMOS step order; `to_json()` / `Plan.from_json(text)` / `to_dicts()`. Run it with
 `Simulation(system, recipe, plan=plan)` (re-validated).
 
+### Terms
+
+```python
+Term("xtb", region: str, elements: list[int], gfn: int = 2, charge: int = 0, multiplicity: int = 1,
+     work_dir: str | None = None, timeout_s: int = 600, coupling: str = "delta")   # real xtb, no feature
+Term("schnet", model: str, cutoff: float, elements: list[int], region: str,
+     buffer: str | None = None, coupling: str = "delta")                          # --features ml
+```
+`elements` is one atomic number per global atom index (it must cover the region). A term is
+additive over the classical force field; its energy is reported under its kind in
+`Simulation.term_energies`.
+
 ### Registries
 
 ```python
@@ -266,6 +278,7 @@ ts.plot("bond", "angle")
 | `n_solute_atoms` | `int` | Solute atom count |
 | `n_solvent_atoms` | `int` | Solvent atom count |
 | `algorithm_names` | `list[str]` | Names of algorithms in the sequence |
+| `term_energies` | `dict[str, float]` | Energy of each additive term at the last step, keyed by registry name (`xtb`, `xtb:1` for a repeated kind); their sum is what the terms add to `total_energy` |
 | `recipe` | `Recipe` | The effective recipe the engine ran (`recipe_toml`: as TOML) |
 | `plan` | `Plan` | The plan the engine instantiated, a frozen snapshot (`plan_json`: as JSON) |
 | `diagnostics` | `list[str]` | Absent optional blocks (and what that means), passed-through blocks |

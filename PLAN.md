@@ -925,26 +925,49 @@ gate before it holds. Sizes are estimates of focused work (S ≈ ½ day, M ≈ 1
       `test_front_end_parity.py` lost path C and its twelve `xfail` rows; the deprecated names are now
       checked as a translation (`from_sequence` shim vs `Recipe`, exact) on every non-restraint system.
 
-- [ ] **Step 5 — First new term through the new door (S), as the proof.** `Term("xtb", coupling=
-      "delta", …)` over `XtbInteraction` (no feature gate). Two measures, ▲ both required:
-      (i) wiring — touched files: target **two** (`TermSpec` variant + `instantiate` arm) plus a
-      registry entry and a test; if it is more, fix the leak, not the count; (ii) physics — the
-      `xtb_orchestrator_sequence.rs` configuration (classical `Forcefield` contributing exactly zero),
-      built from Python through the recipe, reproduces `XtbInteraction`'s direct energy and the 0.0032 %
-      NVE drift; `coupling="replace"` is rejected with the 2.8 message. ▲ Also: `work_dir` derived from
-      the term index + a subprocess timeout (two xtb terms must not collide); `Barostat` + xtb rejected
-      (no virial).
+- [x] **Step 5 — First new term through the new door (S), as the proof.** ✓ 2026-08-29.
+      `Term("xtb", region=…, elements=[…], gfn=2, charge=0, multiplicity=1, work_dir=None, timeout_s=600,
+      coupling="delta")` over `XtbInteraction`, no feature gate.
+      (i) wiring, measured: **three files in `gromos-run`** — the `TermSpec::Xtb` variant (`recipe.rs`),
+      five registry match arms (`plan.rs`: `KINDS`/`name`/`examples`/`feature`/`provides_virial`/
+      `coupling`) and one `instantiate` arm (`build.rs`) — plus the `_TermKind` literal in `gromos.pyi`
+      and the test. One more than the target of two: the registry is a separate file from the
+      variant by design (G5's exhaustive matches), not a leak — nothing else knew about the term
+      (no binding change, no md.rs change, no `.pyi` class). The orchestrator is no longer behind
+      `--features ml`; only the SchNet arm is.
+      (ii) physics — `py-gromos/tests/test_xtb_term.py` on the water-dimer fixture (solute water
+      carrying the term, unconstrained, classical bonded terms off; rigid SPC solvent water): adding
+      the term adds exactly `XtbPotential`'s direct energy (`rel 1e-9`) and forces of the region and
+      nothing outside it; two terms report separately and add up; NVE through the real step loop
+      within the Rust oracle's thresholds (fluctuation < 0.5 %, half drift < 0.2 %; measured
+      4 × 10⁻⁵ % and 1 × 10⁻⁶ % over 120 steps at dt = 0.1 fs, T ≈ 297 K); `coupling="replace"` rejected with the 2.8 message (`PlanError`); `Barostat` + xtb
+      rejected (no virial); an `elements` table not covering the region → `RecipeError`.
+      ▲ `work_dir` per term index (`<tmp>/gromos-rs-xtb-term-<i>` unless given) and a subprocess
+      timeout (`XtbInteraction::with_timeout`; `qm_subprocess::run_subprocess_with_timeout` kills the
+      child) — `timeout_s=0` is a `RunError`, not a hang.
+      **G10, in memory:** `Energy.term_energies` (registry name → energy, `xtb:0`/`xtb:1` for a
+      repeated kind) filled by `ProviderOrchestrator::evaluate_with_terms`; `Simulation.term_energies`.
+      ✗ not in the `.tre` file nor in `run()`'s columns yet — the `.tre` format and the 12-column
+      array are gromosXX-shaped; a per-term block/column set is a separate decision (FUTURE.md).
+      ✗ provenance (model checksum in the bundle) still not done; `units` on terms not modelled.
 
 **Definition of done for 3.9**
-- [ ] `AlgorithmSequence::new()` appears in exactly one non-test file, `crates/gromos-run/src/build.rs`,
-      and `instantiate` has no `&RunRecipe` parameter.
+- [x] `AlgorithmSequence::new()` appears in exactly one non-test file, `crates/gromos-run/src/build.rs`,
+      and `instantiate` has no `&RunRecipe` parameter. ✓ step 4 (G6 gate in `just lint`).
 - [ ] `Simulation`'s constructor has no per-feature kwargs; `gromos-run` has no `process::exit`.
-- [ ] Every reference system passes through all three front-ends bit-identically (G2, `Serial`), every
+      `process::exit` ✓ (G6). The `distrest`/`posresspec`/`refpos`/`ml_*` kwargs survive as deprecation
+      shims (warn, translate into the recipe) until the next release — remove them then.
+- [~] Every reference system passes through all three front-ends bit-identically (G2, `Serial`), every
       `to_imd` output and every factory output is accepted by gromosXX (G3/G7/A7), and every plan an
       `insert_after`/`remove` can produce is either valid or rejected with a named reason (G9).
-- [ ] Adding a term = one variant + one arm (step 5 measured, number recorded here) **and** a physics
-      oracle passed.
-- [ ] `water_216_nve_nobath` passes; the divergence table has no open rows.
+      G2 ✓ (steps 3–4, with `Auto` on every path rather than `Serial`); A7 ✓ for the 40 reference
+      `.imd` files (step 2); factory outputs through gromosXX: not re-verified since step 2; G9 ✓
+      (`validate_plan` rules, step 2; every `Plan` edit is re-validated, step 3).
+- [x] Adding a term = one variant + one arm (step 5 measured, number recorded here) **and** a physics
+      oracle passed. ✓ step 5: variant + registry arms + `instantiate` arm (three `gromos-run` files),
+      `test_xtb_term.py` as the oracle.
+- [x] `water_216_nve_nobath` passes; the divergence table has no open rows. ✓ (step 2; the A-vs-C rows
+      closed by deletion in step 4).
 
 **Divergence table** (rows open as they are found; close as steps land — keep the closed ones)
 

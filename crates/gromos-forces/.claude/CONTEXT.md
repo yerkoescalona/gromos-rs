@@ -69,6 +69,12 @@ Bonded + nonbonded force/energy; pairlist; restraint forces; `single_point_energ
     not apt-installable here); everything else in that dataset needing dynamic QM charges stays
     out of reach for the same reason `xtb`/`libtorch` do.
 
+- **PLAN.md 3.9 step 5 (2026-08-29).** `ProviderOrchestrator::register_labelled` /
+  `evaluate_with_terms` report every provider's energy under a label (the run's registry name for
+  the term) into `Energy.term_energies` — the per-term view the summed `Contribution` erases (G10).
+  `XtbInteraction::with_timeout` + `qm_subprocess::run_subprocess_with_timeout` bound every xtb
+  call (child killed, clear error). The `gromos-run` `xtb` term is built on these.
+
 ## Key files
 ```
 src/bonded/          — bonded force calculations (split from bonded.rs)

@@ -37,6 +37,9 @@ use gromos_core::topology::Topology;
 #[derive(Default)]
 pub struct ProviderOrchestrator {
     entries: Vec<(AtomSelection, Box<dyn PotentialProvider>)>,
+    /// One label per entry — the name each provider's energy is reported under
+    /// (`evaluate_with_terms`); defaults to the provider's own `name()`.
+    labels: Vec<String>,
 }
 
 impl ProviderOrchestrator {
@@ -46,7 +49,25 @@ impl ProviderOrchestrator {
 
     /// Add a provider scoped to `region`. Evaluated in registration order.
     pub fn register(&mut self, region: AtomSelection, provider: Box<dyn PotentialProvider>) {
+        let label = provider.name().to_string();
+        self.register_labelled(label, region, provider);
+    }
+
+    /// `register`, reporting the provider's energy under `label` (a run's registry name for the
+    /// term — PLAN.md 3.9 G10) instead of the provider's own `name()`.
+    pub fn register_labelled(
+        &mut self,
+        label: impl Into<String>,
+        region: AtomSelection,
+        provider: Box<dyn PotentialProvider>,
+    ) {
+        self.labels.push(label.into());
         self.entries.push((region, provider));
+    }
+
+    /// The labels, in evaluation order.
+    pub fn labels(&self) -> &[String] {
+        &self.labels
     }
 
     pub fn len(&self) -> usize {
@@ -67,14 +88,27 @@ impl ProviderOrchestrator {
         conf: &Configuration,
         neigh: &dyn SpatialIndex,
     ) -> Result<Contribution, ProviderError> {
+        self.evaluate_with_terms(topo, conf, neigh).map(|(c, _)| c)
+    }
+
+    /// `evaluate`, also returning every provider's own energy under its label, in evaluation
+    /// order — the per-term view the summed `Contribution` erases (PLAN.md 3.9 G10).
+    pub fn evaluate_with_terms(
+        &mut self,
+        topo: &Topology,
+        conf: &Configuration,
+        neigh: &dyn SpatialIndex,
+    ) -> Result<(Contribution, Vec<(String, f64)>), ProviderError> {
         let n_atoms = topo.num_atoms();
         let mut energy = 0.0;
         let mut force_acc = vec![Vec3::ZERO; n_atoms];
         let mut touched = vec![false; n_atoms];
         let mut virial = Mat3::ZERO;
+        let mut per_term = Vec::with_capacity(self.entries.len());
 
-        for (region, provider) in &mut self.entries {
+        for ((region, provider), label) in self.entries.iter_mut().zip(&self.labels) {
             let contribution = provider.contribute(region, topo, conf, neigh)?;
+            per_term.push((label.clone(), contribution.energy));
 
             if provider.embedding() == Embedding::None {
                 let mut in_region = vec![false; n_atoms];
@@ -106,12 +140,15 @@ impl ProviderOrchestrator {
             .map(|i| (i, force_acc[i]))
             .collect();
 
-        Ok(Contribution {
-            energy,
-            forces,
-            virial,
-            extra: ProviderExtra::default(),
-        })
+        Ok((
+            Contribution {
+                energy,
+                forces,
+                virial,
+                extra: ProviderExtra::default(),
+            },
+            per_term,
+        ))
     }
 }
 

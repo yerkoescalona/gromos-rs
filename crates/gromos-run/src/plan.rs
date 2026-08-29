@@ -387,29 +387,43 @@ impl AlgorithmSpec {
 }
 
 impl TermSpec {
-    pub const KINDS: &'static [&'static str] = &["schnet"];
+    pub const KINDS: &'static [&'static str] = &["schnet", "xtb"];
 
     pub fn name(&self) -> &'static str {
         match self {
             TermSpec::Schnet { .. } => "schnet",
+            TermSpec::Xtb { .. } => "xtb",
         }
     }
 
     pub fn examples() -> Vec<TermSpec> {
-        vec![TermSpec::Schnet {
-            model: "model.pt".into(),
-            cutoff: 0.5,
-            elements: vec![8, 1, 1],
-            region: "1:res(SOL:a)".into(),
-            buffer: None,
-            coupling: Coupling::Delta,
-        }]
+        vec![
+            TermSpec::Schnet {
+                model: "model.pt".into(),
+                cutoff: 0.5,
+                elements: vec![8, 1, 1],
+                region: "1:res(SOL:a)".into(),
+                buffer: None,
+                coupling: Coupling::Delta,
+            },
+            TermSpec::Xtb {
+                region: "1:a".into(),
+                elements: vec![8, 1, 1],
+                gfn: 2,
+                charge: 0,
+                multiplicity: 1,
+                work_dir: None,
+                timeout_s: 600,
+                coupling: Coupling::Delta,
+            },
+        ]
     }
 
     /// The cargo feature this term needs, if any.
     pub fn feature(&self) -> Option<&'static str> {
         match self {
             TermSpec::Schnet { .. } => Some("ml"),
+            TermSpec::Xtb { .. } => None,
         }
     }
 
@@ -417,12 +431,13 @@ impl TermSpec {
     pub fn provides_virial(&self) -> bool {
         match self {
             TermSpec::Schnet { .. } => false,
+            TermSpec::Xtb { .. } => false,
         }
     }
 
     pub fn coupling(&self) -> Coupling {
         match self {
-            TermSpec::Schnet { coupling, .. } => *coupling,
+            TermSpec::Schnet { coupling, .. } | TermSpec::Xtb { coupling, .. } => *coupling,
         }
     }
 }
@@ -753,6 +768,84 @@ mod tests {
     fn unknown_term_parameter_is_an_error() {
         let text = r#"{"kind":"schnet","model":"m.pt","cutof":0.5,"elements":[8],"region":"a"}"#;
         assert!(serde_json::from_str::<TermSpec>(text).is_err());
+        let text = r#"{"kind":"xtb","region":"1:a","elements":[8,1,1],"gfn2":true}"#;
+        assert!(serde_json::from_str::<TermSpec>(text).is_err());
+    }
+
+    #[test]
+    fn xtb_term_defaults_and_kinds() {
+        let term: TermSpec =
+            serde_json::from_str(r#"{"kind":"xtb","region":"1:a","elements":[8,1,1]}"#).unwrap();
+        assert_eq!(
+            term,
+            TermSpec::Xtb {
+                region: "1:a".into(),
+                elements: vec![8, 1, 1],
+                gfn: 2,
+                charge: 0,
+                multiplicity: 1,
+                work_dir: None,
+                timeout_s: 600,
+                coupling: Coupling::Delta,
+            }
+        );
+        assert_eq!(term.feature(), None, "xtb needs no cargo feature");
+        assert!(!term.provides_virial());
+    }
+
+    fn xtb_term(coupling: Coupling) -> TermSpec {
+        TermSpec::Xtb {
+            region: "1:a".into(),
+            elements: vec![8, 1, 1],
+            gfn: 2,
+            charge: 0,
+            multiplicity: 1,
+            work_dir: None,
+            timeout_s: 600,
+            coupling,
+        }
+    }
+
+    fn nve_plan_with(term: TermSpec) -> Vec<AlgorithmSpec> {
+        let ex = AlgorithmSpec::examples();
+        let pick = |kind: &str| ex.iter().find(|a| a.name() == kind).unwrap().clone();
+        vec![
+            pick("forcefield"),
+            AlgorithmSpec::Orchestrator { terms: vec![term] },
+            pick("leap_frog_velocity"),
+            pick("leap_frog_position"),
+            pick("temperature_calculation"),
+            pick("energy_calculation"),
+        ]
+    }
+
+    #[test]
+    fn xtb_delta_coupling_is_a_valid_plan() {
+        validate_plan(&nve_plan_with(xtb_term(Coupling::Delta))).unwrap();
+    }
+
+    #[test]
+    fn xtb_replace_coupling_is_rejected_with_the_2_8_message() {
+        let err = validate_plan(&nve_plan_with(xtb_term(Coupling::Replace))).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("coupling=replace") && msg.contains("2.8"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn xtb_with_a_barostat_is_rejected_no_virial() {
+        let mut plan = dynamics_plan();
+        let after_ff = plan.iter().position(|a| a.name() == "forcefield").unwrap() + 1;
+        plan.insert(
+            after_ff,
+            AlgorithmSpec::Orchestrator {
+                terms: vec![xtb_term(Coupling::Delta)],
+            },
+        );
+        let msg = validate_plan(&plan).unwrap_err().to_string();
+        assert!(msg.contains("xtb") && msg.contains("virial"), "{msg}");
     }
 
     fn dynamics_plan() -> Vec<AlgorithmSpec> {

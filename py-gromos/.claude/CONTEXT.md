@@ -65,6 +65,11 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   explicit import; `AlgorithmSequence.*` presets return a `Plan` (deprecated), `Simulation.from_sequence`
   takes one. `test_front_end_parity.py`: paths A/B/D + the `from_sequence` shim, no xfail table.
   `Vec3`/`Frame`/`rmsd`/`rdf` are f64. Suite: 300 passed, 8 skipped, 3 xfailed.
+- **PLAN.md 3.9 step 5 ✓ (2026-08-29)** — `tests/test_xtb_term.py` is the physics oracle for
+  `Term("xtb", …)` (water-dimer fixture from `gromos-forces/tests/gromosXX_qmmm_references`; skips
+  without `xtb`): exact additivity against `XtbPotential`, per-term visibility
+  (`sim.term_energies`), NVE drift, and the named rejections. Pattern for the next term: no Python
+  change beyond the `_TermKind` literal and a test. Suite: 306 passed, 8 skipped, 3 xfailed.
 - Remaining P3 items:
   - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)

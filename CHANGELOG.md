@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.32] (2026-08-29)
+
+### Added (PLAN.md 3.9 step 5 — the first new term through the new door)
+
+- **`Term("xtb", region=..., elements=[...], gfn=2, charge=0, multiplicity=1, work_dir=None,
+  timeout_s=600, coupling="delta")`** — a real GFN-xTB subprocess (`XtbInteraction`) over a region,
+  additive on top of the classical force field, no cargo feature. Wiring: the `TermSpec::Xtb`
+  variant (`recipe.rs`), its registry lines (`plan.rs`) and one `instantiate` arm (`build.rs`);
+  `gromos.terms()` lists it, `_TermKind` in the stubs names it. Each xtb term gets its own
+  `work_dir` (`<tmp>/gromos-rs-xtb-term-<index>` unless given) and every xtb call is bounded by
+  `timeout_s` (`XtbInteraction::with_timeout`, `qm_subprocess::run_subprocess_with_timeout`: the
+  child is killed and the step fails with a clear error instead of hanging).
+- **Per-term energies (G10, in memory).** `Energy.term_energies: Vec<(String, f64)>` is filled by
+  the orchestrator every step (`ProviderOrchestrator::register_labelled` / `evaluate_with_terms`),
+  keyed by the term's registry name (`xtb`, or `xtb:0`/`xtb:1` for a repeated kind), in plan
+  order; `Simulation.term_energies -> dict[str, float]`. Their sum is what the terms add to
+  `total_energy`; `potential_energy` stays the classical force field alone. Not yet in the `.tre`
+  file or in `run()`'s columns.
+- `py-gromos/tests/test_xtb_term.py` — the physics oracle from the Python side: adding the term
+  adds exactly `XtbPotential`'s direct energy and forces of the region (and nothing outside it),
+  two terms report separately and add up, NVE through the real step loop holds the Rust oracle's
+  thresholds, `coupling="replace"` / a barostat / an `elements` table that does not cover the
+  region / a `timeout_s` that expires are each a named error. Skips without `xtb` on PATH.
+
 ## [0.0.31] (2026-08-29)
 
 ### Removed (PLAN.md 3.9 step 4 — delete the copies)

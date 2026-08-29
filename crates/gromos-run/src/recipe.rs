@@ -280,6 +280,39 @@ pub enum TermSpec {
         #[serde(default)]
         coupling: Coupling,
     },
+    /// A real `xtb` (GFN-xTB) subprocess over `region`, additive on top of the classical terms
+    /// (`coupling: Delta`; no cargo feature). `elements`: atomic number per global atom index
+    /// (the `XtbInteraction` convention — it must cover every atom of `region`). `work_dir`
+    /// defaults to a per-term directory under the system temp dir, so two xtb terms never
+    /// collide; `timeout_s` bounds every xtb call.
+    Xtb {
+        region: String,
+        elements: Vec<i64>,
+        #[serde(default = "default_gfn")]
+        gfn: u8,
+        #[serde(default)]
+        charge: i32,
+        #[serde(default = "default_multiplicity")]
+        multiplicity: i32,
+        #[serde(default)]
+        work_dir: Option<String>,
+        #[serde(default = "default_xtb_timeout_s")]
+        timeout_s: u64,
+        #[serde(default)]
+        coupling: Coupling,
+    },
+}
+
+fn default_gfn() -> u8 {
+    2
+}
+
+fn default_multiplicity() -> i32 {
+    1
+}
+
+fn default_xtb_timeout_s() -> u64 {
+    600
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -233,8 +233,35 @@ sim.step(100)
 ```
 
 `gromos.algorithms()` lists every kind this build knows with its parameters and
-ordering rules; `gromos.terms()` lists the additive terms (`Term("schnet", ...)`
-needs a `--features ml` build — `Term(...).available` says whether this one has it).
+ordering rules; `gromos.terms()` lists the additive terms.
+
+## Additive terms: QM and ML potentials
+
+A `Term` is an energy/force provider added on top of the classical force field
+(`coupling="delta"`) over a region of the system. `Term("xtb", ...)` runs a real
+GFN-xTB subprocess (needs `xtb` on PATH); `Term("schnet", ...)` a TorchScript
+SchNetPack model (needs a `--features ml` build — `Term(...).available` says
+whether this build has it).
+
+```python
+from gromos import Term
+
+qm = Term(
+    "xtb",
+    region="1:a",                 # molecule 1, all atoms (gromos-rs atom-specifier syntax)
+    elements=[8, 1, 1, 8, 1, 1],  # atomic number per global atom index
+    gfn=2, charge=0, multiplicity=1,
+    timeout_s=600,                # every xtb call is bounded; expiry is a RunError, not a hang
+)
+sim = Simulation(system, recipe.with_term(qm))
+sim.step(10)
+print(sim.term_energies)          # {"xtb": -13307.5}  — each term on its own, kJ/mol
+print(sim.total_energy)           # classical potential + terms + kinetic
+```
+
+Rules the plan enforces before anything runs: `coupling="replace"` is not available
+yet (`PlanError` naming PLAN.md 2.8), a term without a virial cannot meet a barostat,
+and two terms of one kind report as `xtb:0` / `xtb:1` (each with its own work directory).
 
 ## Migrating from `InputParameters`
 
