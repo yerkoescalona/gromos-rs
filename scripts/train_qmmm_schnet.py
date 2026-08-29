@@ -26,7 +26,8 @@ machinery.
 
 Run in the same venv `--features ml` needs (see `schnet.rs` module docs):
 
-    source /tmp/torch_venv/bin/activate
+    cd py-gromos && uv sync --group ml && cd ..
+    source py-gromos/.venv/bin/activate
     python3 scripts/train_qmmm_schnet.py [dataset_path] [output_path]
 """
 

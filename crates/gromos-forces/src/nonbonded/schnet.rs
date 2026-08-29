@@ -11,17 +11,19 @@
 //! this repo's sandbox: a conda-forge MKL-linked libtorch failed to even load in Python
 //! with an unrelated "cannot enable executable stack" restriction, and the official PyPI
 //! CPU wheel works *only* at the exact pinned version — anything else and `torch-sys`
-//! refuses to build rather than link something ABI-incompatible. To build with
-//! `--features ml`:
+//! refuses to build rather than link something ABI-incompatible. `torch==2.11.0` (CPU wheel)
+//! and `schnetpack` (for `scripts/export_toy_schnet.py` only) are declared as the `ml`
+//! dependency-group in `py-gromos/pyproject.toml`, pinned to the official PyTorch CPU index —
+//! reproducible via `uv`, no hand-built throwaway venv. To build with `--features ml`:
 //! ```text
-//! python3 -m venv /tmp/torch_venv
-//! /tmp/torch_venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch==2.11.0
-//! /tmp/torch_venv/bin/pip install schnetpack   # for scripts/export_toy_schnet.py only
+//! cd py-gromos && uv sync --group ml && cd ..
+//! source py-gromos/.venv/bin/activate
 //! export LIBTORCH_USE_PYTORCH=1
-//! source /tmp/torch_venv/bin/activate
 //! export LD_LIBRARY_PATH="$(python3 -c 'import torch,os;print(os.path.dirname(torch.__file__))')/lib:$LD_LIBRARY_PATH"
 //! cargo test -p gromos-forces --features ml schnet::
 //! ```
+//! (`uv sync --group ml` alone drops `dev`/`notebooks` from the venv — use
+//! `uv sync --all-groups --group ml` to keep everything installed together.)
 //!
 //! **A real SchNetPack model, not a reimplementation — this changed mid-session.** The
 //! first version of this file hand-rolled a single cfconv block to prove *something*

@@ -44,6 +44,22 @@ notebooks = [
     "polars>=1.0",
     "nbstripout>=0.7",
 ]
+# Real ML potential (--features ml on the Rust side): SchNetPack via TorchScript/`tch`.
+# Version-pinned exactly — tch 0.24.0 links only against libtorch 2.11.0 (see
+# crates/gromos-forces/src/nonbonded/schnet.rs). `uv sync --group ml` gives a reproducible
+# CPU-wheel venv in place of hand-building a throwaway /tmp/torch_venv.
+ml = [
+    "torch==2.11.0",
+    "schnetpack>=2.0",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [project.urls]
 Homepage = "https://github.com/gromos/gromosXX"

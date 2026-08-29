@@ -75,7 +75,8 @@ fn trained_schnet_tracks_real_xtb_on_held_out_water_configurations() {
         eprintln!(
             "skipping: no trained model at {MODEL_PATH} — run first:\n\
              \x20 cargo run -p gromos-md --example generate_qm_training_data\n\
-             \x20 source /tmp/torch_venv/bin/activate && python3 scripts/train_qmmm_schnet.py"
+             \x20 (cd py-gromos && uv sync --group ml) && source py-gromos/.venv/bin/activate && \\\n\
+             \x20 python3 scripts/train_qmmm_schnet.py"
         );
         return;
     }
@@ -129,25 +130,26 @@ fn trained_schnet_tracks_real_xtb_on_held_out_water_configurations() {
     let mut force_count = 0usize;
     let mut n_frames = 0usize;
 
-    let mut compare = |conf: &Configuration, xtb: &mut XtbInteraction, ml: &mut SchNetInteraction| {
-        let (e_qm, f_qm) = xtb_energy_forces(conf, xtb);
-        let index = ConfigurationSpatialIndex::new(conf, &periodicity);
-        let ml_contribution = ml
-            .contribute(&region, &topo, conf, &index)
-            .expect("trained model forward pass should succeed");
-        let mut f_ml = vec![Vec3::ZERO; n_atoms];
-        for (i, f) in ml_contribution.forces {
-            f_ml[i] = f;
-        }
+    let mut compare =
+        |conf: &Configuration, xtb: &mut XtbInteraction, ml: &mut SchNetInteraction| {
+            let (e_qm, f_qm) = xtb_energy_forces(conf, xtb);
+            let index = ConfigurationSpatialIndex::new(conf, &periodicity);
+            let ml_contribution = ml
+                .contribute(&region, &topo, conf, &index)
+                .expect("trained model forward pass should succeed");
+            let mut f_ml = vec![Vec3::ZERO; n_atoms];
+            for (i, f) in ml_contribution.forces {
+                f_ml[i] = f;
+            }
 
-        energy_sq_err += (e_qm - ml_contribution.energy).powi(2);
-        for i in 0..n_atoms {
-            force_sq_err += (f_qm[i] - f_ml[i]).length_squared();
-            force_count += 3;
-        }
-        n_frames += 1;
-        (e_qm, f_qm)
-    };
+            energy_sq_err += (e_qm - ml_contribution.energy).powi(2);
+            for i in 0..n_atoms {
+                force_sq_err += (f_qm[i] - f_ml[i]).length_squared();
+                force_count += 3;
+            }
+            n_frames += 1;
+            (e_qm, f_qm)
+        };
 
     let (_, f0_qm) = compare(&conf, &mut xtb, &mut ml);
     conf.current_mut().force = f0_qm;

@@ -15,32 +15,32 @@ Thank you for your interest in contributing to gromosXX! This document provides 
 
 ### Prerequisites
 
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
-- Python 3.8+
+- Rust 1.91+ via [rustup](https://rustup.rs/) — the pinned distro `rustc`/`cargo` is too old
+- Python 3.9+ and [uv](https://docs.astral.sh/uv/) (py-gromos is managed by `uv`, not raw pip)
 - Git
+- (Optional) C/C++ toolchain + GSL/FFTW to build the gromosXX/gromos++ reference sources
+- (Optional) `xtb`/`mopac` for real QM/MM tests, libtorch 2.11.0 for the real ML potential
 - (Optional) MPI runtime for parallel features
 - (Optional) CUDA toolkit for GPU features
+
+See **[INSTALL.md](INSTALL.md)** for the full dependency list, including exact package names
+and version pins for every optional layer above.
 
 ### Setup Development Environment
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/gromosXX.git
-cd gromosXX
+git clone https://github.com/yerkoescalona/gromos-rs.git
+cd gromos-rs
 
 # Run the setup script
 ./scripts/setup-dev.sh
 
 # Or manually:
-# Build Rust library
-cd gromos-rs
-cargo build
-cd ..
+cargo build --workspace
 
-# Setup Python environment
 cd py-gromos
-make venv
-make install-dev
+uv sync --all-groups
 cd ..
 ```
 
