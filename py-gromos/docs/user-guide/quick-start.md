@@ -165,14 +165,14 @@ print(sim.temperature)   # K
 
 ### Collecting energies over a run
 
-`sim.run(steps, ene_freq)` streams energies as one `(n_frames, 12)` NumPy array —
+`sim.run(steps, ene_freq)` streams energies as one `(n_frames, 13)` NumPy array —
 no Python-side per-step loop, no `.tre` file. Wrap it in `EnergyTimeseries` for
 named-column access, block-averaging, dataframes, and plots.
 
 ```python
 from gromos import EnergyTimeseries
 
-energies = sim.run(5000, ene_freq=100)   # (51, 12) array
+energies = sim.run(5000, ene_freq=100)   # (51, 13) array
 ts = EnergyTimeseries(energies)
 
 print(f"Mean: {ts.total.mean():.1f} kJ/mol")
@@ -262,6 +262,26 @@ print(sim.total_energy)           # classical potential + terms + kinetic
 Rules the plan enforces before anything runs: `coupling="replace"` is not available
 yet (`PlanError` naming PLAN.md 2.8), a term without a virial cannot meet a barostat,
 and two terms of one kind report as `xtb:0` / `xtb:1` (each with its own work directory).
+
+## Free-energy perturbation from Python
+
+A recipe with a perturbation topology in its `inputs` and `perturbation.enabled = 1` runs FEP;
+`sim.dhdl` is the thermodynamic-integration integrand ∂H/∂λ at the current step, `sim.dhdl_terms`
+its LJ / CRF / bonded split, and `run()`'s last column is `dhdl`:
+
+```python
+recipe = Recipe.from_imd("run.imd").with_inputs(pttopo="solute_dummy.ptp")
+means = {}
+for lam in (0.0, 0.25, 0.5, 0.75, 1.0):
+    sim = Simulation(system, recipe.update(perturbation={"lambda": lam}))
+    frames = sim.run(5000, ene_freq=10)                  # (501, 13)
+    means[lam] = EnergyTimeseries(frames).dhdl[100:].mean()   # drop the first 1 ps
+# ΔG = ∫ <∂H/∂λ> dλ — numpy.trapz(list(means.values()), list(means)) or the `ext_ti_ana` binary
+```
+
+The `md` binary writes the same quantity to a `.trg` file (`@trg`, every `NTWG` steps) that
+gromos++ `ene_ana` / `ext_ti_ana` and the project's `ext_ti_ana` read; `scripts/ti_ch4.py` is a
+complete two-engine TI study.
 
 ## Migrating from `InputParameters`
 

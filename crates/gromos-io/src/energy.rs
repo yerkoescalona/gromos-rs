@@ -1,56 +1,26 @@
-//! GROMOS energy file writer (.tre)
+//! GROMOS energy trajectory (.tre) — gromosXX's `TIMESTEP` + `ENERGY03` + `VOLUMEPRESSURE03` layout.
 //!
-//! Writes energy time series with ENE (energy) and ENA (energy analysis) blocks.
+//! The writer emits what the native binary emits (`out_configuration.cc::_print_energyred` via
+//! `_print_energyred_helper`, and `_print_volumepressurered`), so gromos++ `ene_ana` reads the file
+//! with the current `ene_ana.md++.lib` (`totene`, `totkin`, `totpot`, `totlj`, `totcrf`, …):
 //!
-//! # Format
-//! ```text
-//! TITLE
-//!   Energy trajectory
-//! END
-//! ENERTRJ
-//! # block 0 = time
-//! # block 1 = kinetic energy
-//! # block 2 = potential energy
-//! # block 3 = total energy
-//! # block 4 = temperature
-//! # ...
-//!      0.000    123.456    -567.890    -444.434    300.00 ...
-//!      0.002    124.567    -568.901    -444.334    301.00 ...
-//! END
-//! ```
+//! * `ENERGY03`: the 52 `# totals` in gromosXX order (total, kinetic, potential, covalent, bond,
+//!   angle, improper, dihedral, cross-dihedral, nonbonded, LJ, CRF, lattice-sum slots, …, special,
+//!   SASA, constraints, distance restraints, …), then `# baths` (kinetic energy per temperature
+//!   bath — the engine tracks the total per bath, so the COM / internal-rotation split is written
+//!   as zeros), `# bonded` per energy group (the engine tracks bonded totals, not per group: group
+//!   1 carries them), `# nonbonded` per group pair (LJ and CRF from the engine's own per-group
+//!   accumulators; lattice-sum slots zero), `# special` per group (zeros — restraint energies are
+//!   in the totals), and the empty EDS / GaMD / precalculated-λ / AB-dihedral sections.
+//! * `VOLUMEPRESSURE03`: total mass, temperature per bath (total; COM / internal split and the
+//!   scaling factor are not tracked: 0, 0, 1), volume, the box vectors, the pressure (the two
+//!   scalars gromosXX prints after it — virial and kinetic contributions — are not tracked: 0),
+//!   the pressure tensor (not tracked: zeros), the virial tensor and the molecular kinetic-energy
+//!   tensor.
 //!
-//! # Energy Blocks (GROMOS convention)
-//! The GROMOS .tre format uses specific block numbers for different energy components:
-//!
-//! ## ENE blocks (standard energies):
-//! - Block 0: Time (ps)
-//! - Block 1: Kinetic energy (kJ/mol)
-//! - Block 2: Potential energy (kJ/mol)
-//! - Block 3: Total energy (kJ/mol)
-//! - Block 4: Temperature (K)
-//! - Block 5: Volume (nm³)
-//! - Block 6: Pressure (bar/GPa)
-//!
-//! ## Bonded energies:
-//! - Block 7: Bond energy
-//! - Block 8: Angle energy
-//! - Block 9: Improper dihedral energy
-//! - Block 10: Proper dihedral energy
-//!
-//! ## Nonbonded energies:
-//! - Block 11: Lennard-Jones energy
-//! - Block 12: Electrostatic energy (real space)
-//! - Block 13: Electrostatic energy (reciprocal space, PME)
-//! - Block 14: Self-energy correction
-//!
-//! ## Constraint energies:
-//! - Block 15: SHAKE energy
-//! - Block 16: Distance restraint energy
-//!
-//! ## Special energies:
-//! - Block 17: Kinetic energy (translational)
-//! - Block 18: Kinetic energy (rotational)
-//! - Block 19: Kinetic energy (internal)
+//! Numbers use Rust's `e` exponent (`1.5e-2`, not `1.500000000e-02`); every GROMOS reader parses it.
+//! [`read_energy_trajectory_native`] reads this layout (and gromosXX's own files); [`EnergyReader`]
+//! still reads the one-block `ENERTRJ` layout this crate wrote before 0.0.34.
 
 use crate::IoError;
 use gromos_core::configuration::Energy;
@@ -120,6 +90,26 @@ pub struct EnergyFrame {
 
     // Additional components (optional)
     pub extra: Vec<f64>,
+    /// MD step number (`TIMESTEP` block).
+    pub step: usize,
+    /// Special-interaction total (position restraints etc.; `ENERGY03` slot 18).
+    pub special: f64,
+    /// SASA solvation energy (slot 19).
+    pub sasa: f64,
+    /// Kinetic energy per temperature bath (`# baths`).
+    pub bath_kinetic: Vec<f64>,
+    /// LJ energy per energy-group pair, `group_lj[i][j]` (`# nonbonded`).
+    pub group_lj: Vec<Vec<f64>>,
+    /// CRF energy per energy-group pair, `group_crf[i][j]`.
+    pub group_crf: Vec<Vec<f64>>,
+    /// Total mass of the system (`VOLUMEPRESSURE03`).
+    pub mass: f64,
+    /// Box vectors K, L, M as rows.
+    pub box_vectors: [[f64; 3]; 3],
+    /// Virial tensor, `[a][b]`.
+    pub virial_tensor: [[f64; 3]; 3],
+    /// Molecular kinetic-energy tensor, `[a][b]`.
+    pub kinetic_tensor: [[f64; 3]; 3],
 }
 
 impl Default for EnergyFrame {
@@ -143,6 +133,16 @@ impl Default for EnergyFrame {
             shake: 0.0,
             restraint: 0.0,
             extra: Vec::new(),
+            step: 0,
+            special: 0.0,
+            sasa: 0.0,
+            bath_kinetic: Vec::new(),
+            group_lj: Vec::new(),
+            group_crf: Vec::new(),
+            mass: 0.0,
+            box_vectors: [[0.0; 3]; 3],
+            virial_tensor: [[0.0; 3]; 3],
+            kinetic_tensor: [[0.0; 3]; 3],
         }
     }
 }
@@ -211,146 +211,317 @@ impl EnergyFrame {
             coul_self: 0.0,
             shake: energy.constraint_total,
             restraint: energy.distanceres_total,
-            extra: Vec::new(),
+            special: energy.special_total,
+            sasa: energy.sasa_total,
+            bath_kinetic: energy.kinetic_energy.clone(),
+            group_lj: energy.lj_energy.clone(),
+            group_crf: energy.crf_energy.clone(),
+            ..Default::default()
         }
     }
 }
 
-/// GROMOS energy file writer
+/// Writer for gromosXX-layout energy trajectories (`.tre`).
 pub struct EnergyWriter {
     writer: BufWriter<File>,
     frame_count: usize,
-    write_header: bool,
+    n_baths: usize,
+    n_groups: usize,
 }
 
+/// Number of entries in an `ENERGY03` `# totals` section (gromosXX `Energy`, 2023-04-15 layout).
+const N_TOTALS: usize = 52;
+
 impl EnergyWriter {
-    /// Create a new energy writer
+    /// Create the file with its `TITLE` and `ENEVERSION` blocks. Per-bath / per-group sections
+    /// default to one bath and one energy group; set the run's counts with
+    /// [`with_layout`](Self::with_layout).
     pub fn new<P: AsRef<Path>>(path: P, title: &str) -> Result<Self, IoError> {
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
-
-        // Write TITLE block
         writeln!(writer, "TITLE")?;
-        writeln!(writer, "  {}", title)?;
+        writeln!(writer, "\t{}", title)?;
+        writeln!(writer, "\n\tenergy trajectory")?;
         writeln!(writer, "END")?;
-
-        // Start ENERTRJ block
-        writeln!(writer, "ENERTRJ")?;
-
+        writeln!(writer, "ENEVERSION")?;
+        writeln!(writer, "\t2023-04-15")?;
+        writeln!(writer, "END")?;
         Ok(Self {
             writer,
             frame_count: 0,
-            write_header: true,
+            n_baths: 1,
+            n_groups: 1,
         })
     }
 
-    /// Write energy frame in ENE format (standard GROMOS)
+    /// The number of temperature baths and energy groups of the run.
+    pub fn with_layout(mut self, n_baths: usize, n_groups: usize) -> Self {
+        self.n_baths = n_baths.max(1);
+        self.n_groups = n_groups.max(1);
+        self
+    }
+
+    /// Append one frame: `TIMESTEP`, `ENERGY03` and `VOLUMEPRESSURE03` blocks.
     pub fn write_frame(&mut self, frame: &EnergyFrame) -> Result<(), IoError> {
-        // Write header comment on first frame
-        if self.write_header {
-            writeln!(self.writer, "# Block definitions (ENE format):")?;
-            writeln!(self.writer, "# {:>3} = Time (ps)", 0)?;
-            writeln!(self.writer, "# {:>3} = Kinetic energy (kJ/mol)", 1)?;
-            writeln!(self.writer, "# {:>3} = Potential energy (kJ/mol)", 2)?;
-            writeln!(self.writer, "# {:>3} = Total energy (kJ/mol)", 3)?;
-            writeln!(self.writer, "# {:>3} = Temperature (K)", 4)?;
-            writeln!(self.writer, "# {:>3} = Volume (nm³)", 5)?;
-            writeln!(self.writer, "# {:>3} = Pressure (bar)", 6)?;
-            writeln!(self.writer, "# {:>3} = Bond energy", 7)?;
-            writeln!(self.writer, "# {:>3} = Angle energy", 8)?;
-            writeln!(self.writer, "# {:>3} = Improper dihedral", 9)?;
-            writeln!(self.writer, "# {:>3} = Proper dihedral", 10)?;
-            writeln!(self.writer, "# {:>3} = Lennard-Jones", 11)?;
-            writeln!(self.writer, "# {:>3} = Coulomb (real)", 12)?;
-            writeln!(self.writer, "# {:>3} = Coulomb (reciprocal)", 13)?;
-            writeln!(self.writer, "# {:>3} = Coulomb (self)", 14)?;
-            writeln!(self.writer, "# {:>3} = SHAKE constraint", 15)?;
-            writeln!(self.writer, "# {:>3} = Distance restraint", 16)?;
-            self.write_header = false;
+        let (nb, ng) = (self.n_baths, self.n_groups);
+        let w = &mut self.writer;
+        let num = |v: f64| format!("{:>18.9e}", v);
+        let row = |vals: &[f64]| vals.iter().map(|&v| num(v)).collect::<Vec<_>>().join("");
+        writeln!(w, "TIMESTEP")?;
+        writeln!(w, "{:>15}{:>15.9}", frame.step, frame.time)?;
+        writeln!(w, "END")?;
+
+        writeln!(w, "ENERGY03")?;
+        writeln!(w, "# totals")?;
+        let mut totals = [0.0f64; N_TOTALS];
+        let bonded = frame.bond + frame.angle + frame.improper + frame.dihedral;
+        totals[0] = frame.total;
+        totals[1] = frame.kinetic;
+        totals[2] = frame.potential;
+        totals[3] = bonded;
+        totals[4] = frame.bond;
+        totals[5] = frame.angle;
+        totals[6] = frame.improper;
+        totals[7] = frame.dihedral;
+        totals[9] = frame.lj + frame.coul_real + frame.coul_recip;
+        totals[10] = frame.lj;
+        totals[11] = frame.coul_real;
+        totals[13] = frame.coul_recip;
+        totals[18] = frame.special;
+        totals[19] = frame.sasa;
+        totals[21] = frame.shake;
+        totals[22] = frame.restraint;
+        for v in totals {
+            writeln!(w, "{}", num(v))?;
         }
-
-        // Write energy values with full f64 precision (scientific notation, matching GROMOS)
-        write!(
-            self.writer,
-            "{:20.12e} {:20.12e} {:20.12e} {:20.12e} {:20.12e}",
-            frame.time, frame.kinetic, frame.potential, frame.total, frame.temperature
+        writeln!(w, "# baths")?;
+        writeln!(w, "{nb}")?;
+        for b in 0..nb {
+            let kin = frame.bath_kinetic.get(b).copied().unwrap_or(0.0);
+            writeln!(w, "{}", row(&[kin, 0.0, 0.0]))?;
+        }
+        writeln!(w, "# bonded")?;
+        writeln!(w, "{ng}")?;
+        for g in 0..ng {
+            let v = if g == 0 {
+                [frame.bond, frame.angle, frame.improper, frame.dihedral, 0.0]
+            } else {
+                [0.0; 5]
+            };
+            writeln!(w, "{}", row(&v))?;
+        }
+        writeln!(w, "# nonbonded")?;
+        for i in 0..ng {
+            for j in i..ng {
+                let lj = frame
+                    .group_lj
+                    .get(i)
+                    .and_then(|r| r.get(j))
+                    .copied()
+                    .unwrap_or(0.0);
+                let crf = frame
+                    .group_crf
+                    .get(i)
+                    .and_then(|r| r.get(j))
+                    .copied()
+                    .unwrap_or(0.0);
+                writeln!(w, "{}", row(&[lj, crf, 0.0, 0.0, 0.0, 0.0]))?;
+            }
+        }
+        writeln!(w, "# special")?;
+        for _ in 0..ng {
+            writeln!(w, "{}", row(&[0.0; 13]))?;
+        }
+        writeln!(w, "# eds\n# numstates\n0")?;
+        writeln!(
+            w,
+            "           # total         nonbonded           special            offset        total_orig       total_phys"
         )?;
-
-        write!(
-            self.writer,
-            " {:20.12e} {:20.12e}",
-            frame.volume, frame.pressure
+        writeln!(w, "# gamd\n# numaccelgroups\n0")?;
+        writeln!(
+            w,
+            "      # E_dihedral       E_potential        K_dihedral       K_potential         dV_group"
         )?;
-
-        // Bonded energies
-        write!(
-            self.writer,
-            " {:20.12e} {:20.12e} {:20.12e} {:20.12e}",
-            frame.bond, frame.angle, frame.improper, frame.dihedral
+        writeln!(w, "# precalclam\n# nr_lambdas\n0")?;
+        writeln!(
+            w,
+            "          # A_e_lj            B_e_lj           A_e_crf           B_e_crf        AB_kinetic           AB_bond          AB_angle       AB_improper         AB_disres         AB_angres         AB_dihres        AB_disfld"
         )?;
+        writeln!(w, "# ABdih\n      # A_dihedral       B_dihedral")?;
+        writeln!(w, "{}", row(&[0.0, 0.0]))?;
+        writeln!(w, "END")?;
 
-        // Nonbonded energies
-        write!(
-            self.writer,
-            " {:20.12e} {:20.12e} {:20.12e} {:20.12e}",
-            frame.lj, frame.coul_real, frame.coul_recip, frame.coul_self
-        )?;
-
-        // Constraints
-        write!(
-            self.writer,
-            " {:20.12e} {:20.12e}",
-            frame.shake, frame.restraint
-        )?;
-
-        writeln!(self.writer)?;
-
+        writeln!(w, "VOLUMEPRESSURE03")?;
+        writeln!(w, "# mass")?;
+        writeln!(w, "{}", num(frame.mass))?;
+        writeln!(w, "# temperature")?;
+        writeln!(w, "{nb}")?;
+        for _ in 0..nb {
+            writeln!(w, "{}", row(&[frame.temperature, 0.0, 0.0, 1.0]))?;
+        }
+        writeln!(w, "# volume")?;
+        writeln!(w, "{}", num(frame.volume))?;
+        for r in &frame.box_vectors {
+            writeln!(w, "{}", row(r))?;
+        }
+        writeln!(w, "# pressure")?;
+        writeln!(w, "{}", num(frame.pressure))?;
+        writeln!(w, "{}", num(0.0))?;
+        writeln!(w, "{}", num(0.0))?;
+        for _ in 0..3 {
+            writeln!(w, "{}", row(&[0.0; 3]))?;
+        }
+        for r in &frame.virial_tensor {
+            writeln!(w, "{}", row(r))?;
+        }
+        for r in &frame.kinetic_tensor {
+            writeln!(w, "{}", row(r))?;
+        }
+        writeln!(w, "END")?;
         self.frame_count += 1;
         Ok(())
     }
 
-    /// Write energy frame in ENA format (energy analysis, more detail)
-    ///
-    /// ENA format includes additional breakdown of energy terms
-    /// by energy group (useful for free energy calculations)
-    pub fn write_frame_ena(
-        &mut self,
-        frame: &EnergyFrame,
-        energy_groups: &[Vec<f64>],
-    ) -> Result<(), IoError> {
-        // Write standard frame first
-        self.write_frame(frame)?;
-
-        // Write additional energy group data
-        writeln!(self.writer, "# ENA - Energy group analysis:")?;
-        for (i, group) in energy_groups.iter().enumerate() {
-            write!(self.writer, "# Group {:3}:", i)?;
-            for value in group {
-                write!(self.writer, " {:15.6}", value)?;
-            }
-            writeln!(self.writer)?;
-        }
-
-        Ok(())
-    }
-
-    /// Finalize and close the energy file
+    /// Kept for callers of the pre-0.0.34 API; the native layout has no trailing block.
     pub fn finalize(&mut self) -> Result<(), IoError> {
-        writeln!(self.writer, "END")?;
-        self.writer.flush()?;
-        Ok(())
+        self.flush()
     }
 
-    /// Flush buffered data
     pub fn flush(&mut self) -> Result<(), IoError> {
-        self.writer.flush()?;
-        Ok(())
+        self.writer.flush().map_err(IoError::Io)
     }
 
-    /// Get number of frames written
     pub fn frame_count(&self) -> usize {
         self.frame_count
     }
+}
+
+/// Read a native-layout energy trajectory (this crate's writer since 0.0.34, or gromosXX's own
+/// files): the `# totals` of every `ENERGY03` block, the time from the preceding `TIMESTEP`,
+/// volume / pressure / temperature from `VOLUMEPRESSURE03`. Comment lines are skipped.
+pub fn read_energy_trajectory_native<P: AsRef<Path>>(path: P) -> Result<Vec<EnergyFrame>, IoError> {
+    let file = File::open(path.as_ref())
+        .map_err(|e| IoError::FileNotFound(format!("{}: {e}", path.as_ref().display())))?;
+    let reader = BufReader::new(file);
+    #[derive(PartialEq)]
+    enum Block {
+        None,
+        Timestep,
+        Energy,
+        VolPres,
+    }
+    let mut frames: Vec<EnergyFrame> = Vec::new();
+    let mut block = Block::None;
+    let mut section = String::new();
+    let mut step = 0usize;
+    let mut time = 0.0;
+    let mut totals: Vec<f64> = Vec::new();
+    let mut vp: Vec<(String, Vec<f64>)> = Vec::new();
+    for line in reader.lines() {
+        let line = line.map_err(IoError::Io)?;
+        let t = line.trim();
+        match t {
+            "TIMESTEP" => {
+                block = Block::Timestep;
+                continue;
+            },
+            "ENERGY03" => {
+                block = Block::Energy;
+                section.clear();
+                totals.clear();
+                continue;
+            },
+            "VOLUMEPRESSURE03" => {
+                block = Block::VolPres;
+                section.clear();
+                vp.clear();
+                continue;
+            },
+            "END" => {
+                match block {
+                    Block::Energy => {
+                        let at = |i: usize| totals.get(i).copied().unwrap_or(0.0);
+                        frames.push(EnergyFrame {
+                            step,
+                            time,
+                            total: at(0),
+                            kinetic: at(1),
+                            potential: at(2),
+                            bond: at(4),
+                            angle: at(5),
+                            improper: at(6),
+                            dihedral: at(7),
+                            lj: at(10),
+                            coul_real: at(11),
+                            coul_recip: at(13),
+                            special: at(18),
+                            sasa: at(19),
+                            shake: at(21),
+                            restraint: at(22),
+                            ..Default::default()
+                        });
+                    },
+                    Block::VolPres => {
+                        if let Some(f) = frames.last_mut() {
+                            for (name, vals) in &vp {
+                                match (name.as_str(), vals.first()) {
+                                    ("volume", Some(v)) => f.volume = *v,
+                                    ("pressure", Some(v)) => f.pressure = *v,
+                                    ("mass", Some(v)) => f.mass = *v,
+                                    ("temperature", _) => {
+                                        // count, then one line of 4 per bath: the first bath's total
+                                        if vals.len() >= 2 {
+                                            f.temperature = vals[1];
+                                        }
+                                    },
+                                    _ => {},
+                                }
+                            }
+                        }
+                    },
+                    _ => {},
+                }
+                block = Block::None;
+                continue;
+            },
+            _ => {},
+        }
+        if t.is_empty() {
+            continue;
+        }
+        match block {
+            Block::Timestep => {
+                let vals: Vec<f64> = t
+                    .split_whitespace()
+                    .filter_map(|x| x.parse().ok())
+                    .collect();
+                if vals.len() >= 2 {
+                    step = vals[0] as usize;
+                    time = vals[1];
+                }
+            },
+            Block::Energy => {
+                if let Some(name) = t.strip_prefix('#') {
+                    section = name.trim().to_string();
+                    continue;
+                }
+                if section.is_empty() || section == "totals" {
+                    totals.extend(t.split_whitespace().filter_map(|x| x.parse::<f64>().ok()));
+                }
+            },
+            Block::VolPres => {
+                if let Some(name) = t.strip_prefix('#') {
+                    vp.push((name.trim().to_string(), Vec::new()));
+                    continue;
+                }
+                if let Some((_, vals)) = vp.last_mut() {
+                    vals.extend(t.split_whitespace().filter_map(|x| x.parse::<f64>().ok()));
+                }
+            },
+            Block::None => {},
+        }
+    }
+    Ok(frames)
 }
 
 /// Write a single energy frame to a file (convenience function)
@@ -462,6 +633,7 @@ impl EnergyReader {
                         } else {
                             Vec::new()
                         },
+                        ..Default::default()
                     };
 
                     self.frames_read += 1;

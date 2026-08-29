@@ -266,6 +266,34 @@ fn parse_args(args: Vec<String>) -> Result<MDArgs, String> {
     Ok(md_args)
 }
 
+/// One `.tre` frame in gromosXX's layout from the current state: totals and per-bath /
+/// per-group energies from the accumulator, plus mass, box, virial and kinetic tensors.
+fn native_energy_frame(
+    state: &gromos_core::State,
+    topo: &gromos_core::Topology,
+    step: usize,
+    time: f64,
+    temp: f64,
+) -> EnergyFrame {
+    let volume = state.box_config.volume();
+    let pressure = state.pressure();
+    let mut frame = EnergyFrame::from_energy(&state.energies, time, temp, volume, pressure);
+    frame.step = step;
+    frame.mass = topo.mass.iter().sum();
+    let m = &state.box_config.vectors;
+    let vir = &state.virial_tensor;
+    let kin = &state.kinetic_energy_tensor;
+    for a in 0..3 {
+        for b in 0..3 {
+            // column i of a gromos-core `Mat3` is GROMOS's row i (see `math.rs`)
+            frame.box_vectors[a][b] = m.col(a)[b];
+            frame.virial_tensor[a][b] = vir.col(b)[a];
+            frame.kinetic_tensor[a][b] = kin.col(b)[a];
+        }
+    }
+    frame
+}
+
 fn main() {
     let t_total = Instant::now();
     let args: Vec<String> = env::args().collect();
@@ -745,7 +773,9 @@ fn main() {
     };
 
     // Setup energy writer
-    let mut ene_writer = match EnergyWriter::new(&tre_file, "GROMOS-RS MD energies") {
+    let mut ene_writer = match EnergyWriter::new(&tre_file, &imd.title)
+        .map(|w| w.with_layout(imd.num_temp_baths, imd.negr))
+    {
         Ok(w) => w,
         Err(e) => {
             eprintln!("Error creating energy file: {}", e);
@@ -1120,9 +1150,16 @@ fn main() {
                 );
                 println!("    E_pot = {:.10e} kJ/mol", state.energies.potential_total);
                 println!();
-                // Write final frame before breaking
+                // Write final frames before breaking. gromosXX writes the converged energies
+                // once more, labelled with the previous step (its frame count is NSTEPS + 1).
                 if let Err(e) = traj_writer.write_frame(step, time, &conf) {
                     eprintln!("Error writing final trajectory frame: {}", e);
+                }
+                let last = step.saturating_sub(1);
+                let ene_frame =
+                    native_energy_frame(conf.old(), &topo, last, last as f64 * dt, temp);
+                if let Err(e) = ene_writer.write_frame(&ene_frame) {
+                    eprintln!("Error writing final energy frame: {}", e);
                 }
                 break;
             }
@@ -1155,13 +1192,10 @@ fn main() {
             }
         }
 
-        // Write energies
-        if due(step, nstener) {
-            let volume = conf.old().box_config.volume();
-            let pressure = conf.old().pressure();
-            let ene_frame =
-                EnergyFrame::from_energy(&conf.old().energies, time, temp, volume, pressure);
-
+        // Write energies — on gromosXX's schedule: steps 0 … NSTLIM−1 (the state after the
+        // last step is in the final configuration, not in the energy trajectory).
+        if due(step, nstener) && step < n_steps {
+            let ene_frame = native_energy_frame(conf.old(), &topo, step, time, temp);
             if let Err(e) = ene_writer.write_frame(&ene_frame) {
                 eprintln!("Error writing energy: {}", e);
             }
@@ -1170,7 +1204,7 @@ fn main() {
         // Write free-energy trajectory (dH/dλ) at the WRITETRAJ NTWG frequency (gromosXX's
         // `write.free_energy`); NTWG=0 writes no frames.
         if let Some(ref mut fw) = free_energy_writer {
-            if due(step, imd.ntwg) {
+            if due(step, imd.ntwg) && step < n_steps {
                 let e = &conf.old().energies;
                 let fe_frame = FreeEnergyFrame {
                     step,

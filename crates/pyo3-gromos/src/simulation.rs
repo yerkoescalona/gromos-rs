@@ -421,7 +421,7 @@ impl PySimulation {
 
     /// Run `n_steps` MD steps, sampling energies every `ene_freq` steps.
     ///
-    /// Returns an `(n_frames, 12)` numpy array with columns
+    /// Returns an `(n_frames, 13)` numpy array with columns
     /// `[time, kinetic, potential, total, volume, pressure, bond, angle, improper, dihedral, lj, coulomb]`
     /// — the same component order as the `.tre` file written by the `md` binary
     /// (see `gromos_io::energy::EnergyFrame`), so a `run()` array and a `.tre`
@@ -430,7 +430,7 @@ impl PySimulation {
     /// are sampled after every `ene_freq`-th step.
     ///
     /// Example:
-    ///     energies = sim.run(1000, ene_freq=100)  # (11, 12) array
+    ///     energies = sim.run(1000, ene_freq=100)  # (11, 13) array
     #[pyo3(signature = (n_steps, ene_freq=100))]
     fn run<'py>(
         &mut self,
@@ -626,6 +626,24 @@ impl PySimulation {
         Ok(d)
     }
 
+    /// dH/dλ (kJ/mol) at the last step — the thermodynamic-integration integrand; 0 unless the
+    /// recipe's `perturbation` is enabled (a `pttopo` in `inputs`, `NTG=1`).
+    #[getter]
+    fn dhdl(&self) -> f64 {
+        self.configuration.old().energies.dhdl_total
+    }
+
+    /// dH/dλ split by term at the last step: `{"lj", "crf", "bonded"}` (kJ/mol).
+    #[getter]
+    fn dhdl_terms<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let e = &self.configuration.old().energies;
+        let d = pyo3::types::PyDict::new_bound(py);
+        d.set_item("lj", e.dhdl_lj)?;
+        d.set_item("crf", e.dhdl_crf)?;
+        d.set_item("bonded", e.dhdl_bonded)?;
+        Ok(d)
+    }
+
     /// Kinetic energy (kJ/mol).
     #[getter]
     fn kinetic_energy(&self) -> f64 {
@@ -717,8 +735,9 @@ impl PySimulation {
 
 // Private helpers
 impl PySimulation {
-    /// `[time, kinetic, potential, total, volume, pressure, bond, angle, improper, dihedral, lj, coulomb]`
-    /// for the current state — same layout as `EnergyFrame`, used by `run()` to
+    /// `[time, kinetic, potential, total, volume, pressure, bond, angle, improper, dihedral, lj,
+    /// coulomb, dhdl]` for the current state — the `EnergyFrame` layout plus dH/dλ, used by
+    /// `run()` to
     /// build the energy timeseries. Temperature is left at 0.0: unlike volume
     /// and pressure it needs the degrees-of-freedom count, which this row does
     /// not carry (use the `temperature` getter).
@@ -746,6 +765,7 @@ impl PySimulation {
             frame.dihedral,
             frame.lj,
             frame.coul_real,
+            state.energies.dhdl_total,
         ]
     }
 }

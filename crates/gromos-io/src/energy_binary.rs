@@ -293,6 +293,7 @@ impl BinaryEnergyReader {
             shake: self.reader.read_f64::<LittleEndian>()?,
             restraint: self.reader.read_f64::<LittleEndian>()?,
             extra: Vec::new(),
+            ..Default::default()
         };
 
         self.frames_read += 1;

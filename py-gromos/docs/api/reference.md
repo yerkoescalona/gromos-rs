@@ -242,16 +242,16 @@ Simulation.from_sequence(topo, conf, params, sequence: Plan)
 Advance the simulation by `n_steps` steps. All state properties are updated after
 this call.
 
-**`run(n_steps: int, ene_freq: int = 100) -> ndarray (n_frames, 12) f64`**  
+**`run(n_steps: int, ene_freq: int = 100) -> ndarray (n_frames, 13) f64`**  
 Advance `n_steps` steps in Rust, sampling energies every `ene_freq`-th step, and
-return one `(n_frames, 12)` NumPy array — no Python-side per-step loop, no `.tre`
+return one `(n_frames, 13)` NumPy array — no Python-side per-step loop, no `.tre`
 file. Columns: `[time, kinetic, potential, total, volume, pressure, bond, angle,
-improper, dihedral, lj, coulomb]`. Frame 0 is the state before any of these steps
+improper, dihedral, lj, coulomb, dhdl]` (`dhdl` is dH/dλ, 0 without a perturbation). Frame 0 is the state before any of these steps
 ran. Wrap the result in `EnergyTimeseries` (see below) for named-column access,
 block-averaging, dataframes, and plots.
 
 ```python
-energies = sim.run(5000, ene_freq=100)   # (51, 12) array
+energies = sim.run(5000, ene_freq=100)   # (51, 13) array
 from gromos import EnergyTimeseries
 ts = EnergyTimeseries(energies)
 ts.total          # ndarray — total energy column
@@ -279,6 +279,8 @@ ts.plot("bond", "angle")
 | `n_solvent_atoms` | `int` | Solvent atom count |
 | `algorithm_names` | `list[str]` | Names of algorithms in the sequence |
 | `term_energies` | `dict[str, float]` | Energy of each additive term at the last step, keyed by registry name (`xtb`, `xtb:1` for a repeated kind); their sum is what the terms add to `total_energy` |
+| `dhdl` | `float` | ∂H/∂λ at the last step (kJ/mol) — the TI integrand; 0 without a perturbation |
+| `dhdl_terms` | `dict[str, float]` | ∂H/∂λ split: `lj`, `crf`, `bonded` |
 | `recipe` | `Recipe` | The effective recipe the engine ran (`recipe_toml`: as TOML) |
 | `plan` | `Plan` | The plan the engine instantiated, a frozen snapshot (`plan_json`: as JSON) |
 | `diagnostics` | `list[str]` | Absent optional blocks (and what that means), passed-through blocks |
@@ -372,7 +374,7 @@ e = Energy()
 
 ## EnergyTimeseries
 
-Wraps the `(n_frames, 12)` NumPy array returned by `Simulation.run()`.
+Wraps the `(n_frames, 13)` NumPy array returned by `Simulation.run()`.
 
 ```python
 from gromos import EnergyTimeseries

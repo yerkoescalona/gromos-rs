@@ -531,6 +531,15 @@ class Simulation:
     @property
     def kinetic_energy(self) -> float: ...
     @property
+    def dhdl(self) -> float:
+        """dH/dλ (kJ/mol) at the last step — the TI integrand; 0 unless the recipe's
+        ``perturbation`` is enabled (a ``pttopo`` in ``inputs`` and ``NTG=1``)."""
+        ...
+    @property
+    def dhdl_terms(self) -> dict[str, float]:
+        """dH/dλ split by term at the last step: ``{"lj", "crf", "bonded"}`` (kJ/mol)."""
+        ...
+    @property
     def term_energies(self) -> dict[str, float]:
         """Energy of every additive term (``Term("xtb", ...)``) at the last step, keyed by the
         term's registry name (``"xtb"``, ``"xtb:1"`` for a repeated kind), in plan order. Their

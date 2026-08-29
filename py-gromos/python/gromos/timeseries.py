@@ -33,6 +33,7 @@ COLUMNS = (
     "dihedral",
     "lj",
     "coulomb",
+    "dhdl",
 )
 
 DATAFRAME_BACKENDS = ("polars", "pandas", "dict")
@@ -51,7 +52,7 @@ config = Config()
 
 
 class EnergyTimeseries:
-    """Wraps the `(n_frames, 12)` array from `Simulation.run()`.
+    """Wraps the `(n_frames, 13)` array from `Simulation.run()`.
 
     Examples
     --------
@@ -83,7 +84,7 @@ class EnergyTimeseries:
 
     @property
     def array(self) -> np.ndarray:
-        """The raw `(n_frames, 12)` numpy array."""
+        """The raw `(n_frames, 13)` numpy array."""
         return self._array
 
     def to_dataframe(self, backend: Union[str, None] = None) -> Union["object", Dict[str, np.ndarray]]:

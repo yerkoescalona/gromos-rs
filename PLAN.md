@@ -72,7 +72,7 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 4   | ch4_water_fep_l000 / l025 / l075 / l100 | 2998 | the same system at λ = 0, 0.25, 0.75, 1; ten steps; dH/dλ total, LJ, CRF, bonded per step | **PASS** (2026-08-29) |
 | 4   | meoh_water_fep | 2862 | charged CH3OH→dummy in 953 SPC water, λ=0.5, ten steps, dH/dλ per term (soft-core RF for charged atoms) | **PASS** (2026-08-29, after the kernel fix) |
 
-**44 of 45 tests pass.** (1 ignored: `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
+**45 of 45 tests pass** (2026-08-30; nothing ignored).
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
@@ -250,7 +250,15 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
   was also perturbed; CRF never applied; excluded end state without its RF term): **fixed 2026-08-30**.
   **`aladip_vacuum_fep` passes** — every FEP reference matches gromosXX. Method worth keeping: single-block
   / single-atom / single-property `.ptp` variants through both binaries, then a null perturbation
-  (identical A and B, α = 0) — a non-zero Δ there is a bookkeeping bug by construction.
+  (identical A and B, α = 0) — a non-zero Δ there is a bookkeeping bug by construction; gromosXX has
+  that invariance by construction of its code paths, here it is `tests/fep_null_perturbation.rs`.
+- **Tool interop (2026-08-30):** `.tre` is written in gromosXX's native layout (ENERGY03 /
+  VOLUMEPRESSURE03, frames at steps 0…NSTLIM−1); gromos++ `ene_ana` (with the current library
+  `.local/gromosXX/md++/data/ene_ana.md++.lib`, not `gromos++/data_old/`) reads both engines' `.tre` and
+  `.trg` and reports identical averages for the same window. Python: `sim.dhdl`, `sim.dhdl_terms`,
+  `dhdl` column in `run()`. Open: our `sim_box` builds a 2.148 nm box where gromos++ builds 2.200 nm
+  for the same `@minwall 1.0` (323 vs 350 waters) — a box-size rounding convention, not randomness;
+  the solvation itself is deterministic in both.
 
 **1.8 — Virtual atoms** — skip for now; not blocking any common use case
 - [ ] Port `algorithm/virtualatoms/` (aromatic centroids, lone pairs, TIP4P site)
@@ -1085,6 +1093,10 @@ cargo build --release --bin md
 
 # Run integration tests
 cargo test -p gromos-md --test test_gromosXX_references
+# FEP: null-perturbation invariance (energies/forces bit-identical to the unperturbed run)
+cargo test -p gromos-md --test fep_null_perturbation
+# gromos++ tools on gromos-rs output (the current library, not data_old/):
+#   ene_ana @en_files run.tre @fr_files run.trg @prop totene totpot dvdl @library .local/gromosXX/md++/data/ene_ana.md++.lib
 
 # Include ignored systems
 cargo test -p gromos-md --test test_gromosXX_references -- --include-ignored

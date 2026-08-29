@@ -120,43 +120,7 @@ fn parse_energy03(path: &Path) -> Vec<EnergyFrame> {
     frames
 }
 
-// ─── Parser: gromos-rs ENERTRJ format (actual) ─────────────────────────────
-//
-// Structure: single ENERTRJ block, one line per step with columns:
-//   [0]=time, [1]=E_kin, [2]=E_pot, [3]=E_tot, [4]=T, ...
-
-fn parse_enertrj(path: &Path) -> Vec<EnergyFrame> {
-    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let mut frames = Vec::new();
-    let mut in_block = false;
-
-    for line in content.lines() {
-        let t = line.trim();
-        if t == "ENERTRJ" {
-            in_block = true;
-            continue;
-        }
-        if t == "END" && in_block {
-            break;
-        }
-        if in_block && !t.starts_with('#') && !t.is_empty() {
-            let vals: Vec<f64> = t
-                .split_whitespace()
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            // [0]=time [1]=Ekin [2]=Epot [3]=Etot [4]=T [5]=V [6]=P ...
-            if vals.len() >= 4 {
-                frames.push(EnergyFrame {
-                    e_kinetic: vals[1],
-                    e_potential: vals[2],
-                    e_total: vals[3],
-                });
-            }
-        }
-    }
-    frames
-}
-
+// The engine writes the native layout since 0.0.34, so `parse_energy03` reads both sides.
 // ─── Parser: free-energy trajectories (.trg) ────────────────────────────────
 //
 // gromosXX writes `TIMESTEP` + `FREEENERDERIVS03` blocks (`# lambda`, then `# totals` in
@@ -377,7 +341,7 @@ fn run_reference(system: &str) {
 
     // Parse energies: expected (ENERGY03) vs actual (ENERTRJ)
     let expected = parse_energy03(&sys_dir.join("expected/energies.tre"));
-    let actual = parse_enertrj(&tre);
+    let actual = parse_energy03(&tre);
 
     // gromos-rs writes step 0..NSTLIM (inclusive), GROMOS writes 0..NSTLIM-1;
     // compare the frames that exist in both outputs.
@@ -594,7 +558,8 @@ ref_test!(aladip_vacuum_fep, "aladip_vacuum_fep");
 ref_test!(meoh_water_fep, "meoh_water_fep");
 
 // ── Energy minimization ──────────────────────────────────────────────────────
-ref_test!(ignore: aladip_vacuum_em, "aladip_vacuum_em", "EM energy frame count off-by-one vs gromosXX");
+// gromosXX writes the converged energies once more at convergence; `md` does the same since 0.0.34.
+ref_test!(aladip_vacuum_em, "aladip_vacuum_em");
 ref_test!(aladip_vacuum_em_shake, "aladip_vacuum_em_shake");
 ref_test!(aladip_solvated_em_noshake, "aladip_solvated_em_noshake");
 ref_test!(aladip_solvated_em_shake, "aladip_solvated_em_shake");

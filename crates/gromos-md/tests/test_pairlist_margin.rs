@@ -29,33 +29,14 @@ fn md_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_md"))
 }
 
-// ─── Minimal ENERTRJ parser ──────────────────────────────────────────────────
+// ─── Total energies from the native .tre layout ──────────────────────────────
 
 fn parse_enertrj_etotal(path: &Path) -> Vec<f64> {
-    let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let mut totals = Vec::new();
-    let mut in_block = false;
-    for line in content.lines() {
-        let t = line.trim();
-        if t == "ENERTRJ" {
-            in_block = true;
-            continue;
-        }
-        if t == "END" && in_block {
-            break;
-        }
-        if in_block && !t.starts_with('#') && !t.is_empty() {
-            let vals: Vec<f64> = t
-                .split_whitespace()
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            // [0]=time [1]=Ekin [2]=Epot [3]=Etot
-            if vals.len() >= 4 {
-                totals.push(vals[3]);
-            }
-        }
-    }
-    totals
+    gromos_io::read_energy_trajectory_native(path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .into_iter()
+        .map(|f| f.total)
+        .collect()
 }
 
 // ─── Run md binary with a patched PAIRLIST algorithm keyword ────────────────

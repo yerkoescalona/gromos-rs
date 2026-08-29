@@ -7,6 +7,25 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 
 ## [0.0.34] (2026-08-30)
 
+### Added
+
+- **`.tre` in gromosXX's native layout** (`TIMESTEP` + `ENERGY03` + `VOLUMEPRESSURE03`; per-bath
+  kinetic and per-group LJ/CRF from the engine's own accumulators, the untracked splits written as
+  zeros and documented), and frames on gromosXX's schedule (steps 0 … NSTLIM−1). gromos++ `ene_ana`
+  with the current `ene_ana.md++.lib` (`.local/gromosXX/md++/data/`) now reads gromos-rs energies
+  and free energies and reports the same `totene`/`totkin`/`totpot`/`totlj`/`totcrf`/`dvdl` as for
+  gromosXX's files of the same window — the LiveCoMS analysis scripts run unchanged on gromos-rs
+  output. `gromos_io::read_energy_trajectory_native` reads the layout; the reference and pairlist
+  tests use it.
+- **dH/dλ from Python**: `Simulation.dhdl` (kJ/mol, the TI integrand), `Simulation.dhdl_terms`
+  (`{"lj", "crf", "bonded"}`), and `dhdl` as the 13th column of `run()` / `EnergyTimeseries`.
+- `md` writes the converged energies once more at EM convergence, as gromosXX does, so
+  `aladip_vacuum_em` — ignored since the reference was made ("frame count off-by-one") — passes.
+  **The Rust reference suite is 45 of 45.**
+- `tests/fep_null_perturbation.rs`: a `.ptp` with identical end states and α = 0 must leave energies
+  and forces bit-identical to the unperturbed run, and α ≠ 0 must not — the invariance that pinned
+  the FEP defects, now a permanent test.
+
 ### Fixed — every FEP reference now matches gromosXX
 
 Found by bisecting `aladip_vacuum_fep` against the native gromosXX one perturbation block, atom

@@ -275,12 +275,11 @@ REFERENCE_SYSTEMS = [
 # positions at all, so this was never caught there either. Tracked as
 # follow-up, not a Python-API defect — excluded only from the position test.
 #
-# `aladip_vacuum_em` has the same EM energy/trajectory frame-count off-by-one
-# vs gromosXX that `test_gromosXX_references.rs` marks `ignore:` for (PLAN.md).
-# Energies and forces still validate correctly through the Python API — only
-# the position frame at the point of the shift (frame 6) misaligns — so it's
-# kept here (giving Python strictly more coverage than the ignored Rust test)
-# rather than dropped from REFERENCE_SYSTEMS entirely.
+# `aladip_vacuum_em`: gromosXX repeats the converged frame at the end of its
+# trajectories (the `md` binary does the same since 0.0.34 and the Rust suite
+# passes); `Simulation` has no "converged, stop" step, so its position frame 6
+# is the state after one more (no-op) minimisation step, not the repeat.
+# Energies and forces validate; only positions are excluded here.
 POSITION_MISMATCH_SYSTEMS = {"aladip_trunc_oct", "aladip_vacuum_em"}
 
 # Systems whose gromos-rs result is known to be WRONG against a correct reference — an engine
@@ -732,7 +731,7 @@ def test_run_matches_step_loop():
 
     sim_run = Simulation(topo_path, conf_path, input_path)
     frames = sim_run.run(10, ene_freq=1)
-    assert frames.shape == (11, 12)
+    assert frames.shape == (11, 13)
 
     sim_step = Simulation(topo_path, conf_path, input_path)
 
