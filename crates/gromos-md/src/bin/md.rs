@@ -1167,9 +1167,10 @@ fn main() {
             }
         }
 
-        // Write free-energy trajectory (dH/dλ) at energy output frequency
+        // Write free-energy trajectory (dH/dλ) at the WRITETRAJ NTWG frequency (gromosXX's
+        // `write.free_energy`); NTWG=0 writes no frames.
         if let Some(ref mut fw) = free_energy_writer {
-            if due(step, nstener) {
+            if due(step, imd.ntwg) {
                 let e = &conf.old().energies;
                 let fe_frame = FreeEnergyFrame {
                     step,

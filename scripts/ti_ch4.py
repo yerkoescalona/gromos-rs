@@ -154,10 +154,13 @@ def main() -> None:
     for e in engines:
         r = results["engines"][e]
         tot = sum(r["timings_s"].values())
+        if r["dG"] is None:
+            lines.append(f"- **{e}**: no ΔG (ext_ti_ana found no usable frames — see ext_ti_ana_{e}.txt)")
+            continue
         err = f" ± {r['dG_err']:.2f}" if r.get("dG_err") is not None else ""
         lines.append(f"- **{e}**: ΔG = {r['dG']:.2f}{err} kJ/mol; wall time {tot:.0f} s for {len(lambdas)} windows"
                      + ("" if tot else " (all cached)"))
-    if len(engines) == 2:
+    if len(engines) == 2 and all(results["engines"][e]["dG"] is not None for e in engines):
         a, b = (results["engines"][e]["dG"] for e in engines)
         lines.append(f"- ΔG(gromos-rs) − ΔG(gromosXX) = {b - a:+.3f} kJ/mol")
     lines.append("- Reference: ΔG_hyd(CH4) experiment ≈ +8.4 kJ/mol, i.e. ΔG(CH4→dummy) ≈ −8 kJ/mol; the "
