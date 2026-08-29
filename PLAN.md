@@ -70,9 +70,9 @@ Ref data: `crates/gromos-md/tests/gromosXX_references/`
 | 2   | nacl_1water_distres | 5  | distance restraint on Na-Cl pair (NTDIR=2, CDIR*w0) | **PASS** |
 | 4   | ch4_water_fep | 2998 | CH4→dummy in 999 SPC water, λ=0.5, twin-range NB FEP | **PASS** (its `.trg` is empty — NTWG=0; dH/dλ is covered by the rows below) |
 | 4   | ch4_water_fep_l000 / l025 / l075 / l100 | 2998 | the same system at λ = 0, 0.25, 0.75, 1; ten steps; dH/dλ total, LJ, CRF, bonded per step | **PASS** (2026-08-29) |
-| 4   | meoh_water_fep | 2862 | charged CH3OH→dummy in 953 SPC water, λ=0.5 (RF self/excluded-pair terms) | **FAIL, ignored** — CRF off by 0.16 kJ/mol at frame 0, LJ exact (2026-08-29) |
+| 4   | meoh_water_fep | 2862 | charged CH3OH→dummy in 953 SPC water, λ=0.5, ten steps, dH/dλ per term (soft-core RF for charged atoms) | **PASS** (2026-08-29, after the kernel fix) |
 
-**42 of 45 tests pass.** (3 ignored: `aladip_vacuum_fep` — FEP mismatch, bisected 2026-08-29 (see 1.7); `meoh_water_fep` — perturbed RF term for charged atoms; `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
+**43 of 45 tests pass.** (2 ignored: `aladip_vacuum_fep` — λ-mixed masses and PERTATOMPAIR still open (see 1.7); `aladip_vacuum_em` — EM energy frame count off-by-one vs gromosXX)
 
 (No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
 
@@ -227,8 +227,10 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 - [x] dH/dλ accumulation, `.trg` output, `ext_ti_ana` integration
 - [x] `ch4_water_fep` passes to <1e-6 kJ/mol vs GROMOS; `ch4_water_fep` tracks dH/dλ in reference test
 - Note: perturbed RF self-term still needs second-sourcing from GROMOS book (flagged at `perturbed_nonbonded_term.cc:596,749,1444`). Zero-charge `ch4_water_fep` doesn't exercise it.
-  **2026-08-29: now exercised and failing** — `meoh_water_fep` (charged 54a7 CH3OH → dummies, λ=0.5):
-  LJ exact (3e-11), CRF off by 0.16 kJ/mol at frame 0. Reference in place, `ignore`d until fixed.
+  **2026-08-29: exercised by `meoh_water_fep` (charged 54a7 CH3OH → dummies, λ=0.5) and fixed the same
+  day** — the soft-core pair kernel divided `crf/(2R_c³)` by the softened cutoff³ (gromosXX divides
+  `crf/2`), and the pairlist correction only handled pairs whose lower-index atom was perturbed
+  (gromosXX: either atom). The reference passes, energies/positions/forces/dH/dλ per term.
 - **dH/dλ comparison was vacuous until 2026-08-29:** the suite parsed `FREEENERGY03` blocks, gromosXX
   writes `FREEENERDERIVS03` — zero frames were ever compared. Fixed (reader/writer/test on the native
   layout, per-term split recorded); `ch4_water_fep_l000/l025/l075/l100` now prove dH/dλ (total, LJ,
@@ -242,9 +244,10 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
   Soft bond/angle/improper: **fixed the same day** — not a formula difference (a Python replica of
   gromosXX's soft-core formulas reproduced its numbers to all digits) but `PerturbedSolute::is_empty`
   ignoring the soft lists, so a soft-only `.ptp` removed the regular term and evaluated nothing; every
-  bonded case (regular and soft, absent or same B state) is now exact. Still open: `PERTATOMPARAM`
-  (charged, λ-mixed masses) differs in LJ, CRF *and* kinetic; `PERTATOMPAIR` differs in LJ. Fix order:
-  charged perturbed nonbonded (also closes `meoh_water_fep`) → atom pairs → masses.
+  bonded case (regular and soft, absent or same B state) is now exact. `PERTATOMPARAM` charge and LJ
+  type changes: exact after the two nonbonded fixes above (every single-atom null / charge / type
+  variant). Still open: λ-mixed **masses** are never applied in the `md` path (`mass_at_lambda` has no
+  caller; kinetic 4.5681 vs 4.5769), and `PERTATOMPAIR` differs in LJ (−5.1358 vs −5.2921).
 
 **1.8 — Virtual atoms** — skip for now; not blocking any common use case
 - [ ] Port `algorithm/virtualatoms/` (aromatic centroids, lone pairs, TIP4P site)

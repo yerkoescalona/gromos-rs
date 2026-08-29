@@ -293,7 +293,6 @@ EXPECTED_ENGINE_FAILURES = {
     # parser defaults; it now runs as a regular reference system.
     # Same known FEP mismatch the Rust suite `ignore`s (PLAN.md Reference Test Status).
     "aladip_vacuum_fep": "known FEP mismatch vs gromosXX (ignored in the Rust suite too)",
-    "meoh_water_fep": "perturbed reaction-field term for charged atoms: CRF off by 0.16 kJ/mol (PLAN.md 1.7; ignored in the Rust suite too)",
 }
 
 REFERENCE_PARAMS = [

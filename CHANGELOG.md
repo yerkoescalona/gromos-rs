@@ -9,6 +9,16 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 
 ### Fixed
 
+- **Perturbed nonbonded electrostatics, two defects found by bisecting `aladip_vacuum_fep` against
+  gromosXX with single-block `.ptp` files.** (1) The soft-core pair kernel's reaction-field term
+  used `crf/(2·R_c³)` where gromosXX uses `crf/2` before dividing by the softened cutoff³ — an
+  extra 1/R_c³ on the r² term of every perturbed pair, invisible with zero charges (CH4) and
+  0.16 kJ/mol on methanol. (2) The pairlist correction only soft-cored pairs whose *lower-index*
+  atom was perturbed; gromosXX routes a pair to the perturbed list when either atom is. A
+  perturbed atom that is not at the start of the topology lost most of its soft-core pairs.
+  `meoh_water_fep` now passes (energies, positions, forces, dH/dλ per term, ten steps);
+  every single-atom null/charge/type variant of the dipeptide is exact. Suite: 43 passed, 2 ignored.
+
 - **dH/dλ was never compared against gromosXX.** The reference suite (and `gromos-io`'s `.trg`
   reader, hence `ext_ti_ana`) looked for a one-line `FREEENERGY03` block, while the native binary
   writes `TIMESTEP` + `FREEENERDERIVS03` (`# lambda`, `# totals` in ENERGY03 order, per-bath and

@@ -186,9 +186,13 @@ pub fn perturbed_lj_crf_interaction(
     let b_cut2soft3 = b_cut2soft * b_cut2soft * b_cut2soft;
 
     // CRF constants with soft-core cutoff
-    // crf_2cut3i = crf / (2 * cutoff³)
-    let a_crf_2cut3i = crf.crf_2cut3i / a_cut2soft3.sqrt();
-    let b_crf_2cut3i = crf.crf_2cut3i / b_cut2soft3.sqrt();
+    // GROMOS: A_crf_2cut3i = (crf/2) / sqrt(A_cut2soft³). `crf.crf_2cut3i` is crf/(2·cutoff³),
+    // so the softened form is crf_2cut3i · cutoff³ / sqrt(cut2soft³) — until 0.0.34 this divided
+    // crf_2cut3i by sqrt(cut2soft³) once more (an extra 1/cutoff³ on the r² reaction-field
+    // term of every perturbed pair; invisible with zero charges, 0.16 kJ/mol on methanol).
+    let cut3 = cut2 * cut2.sqrt();
+    let a_crf_2cut3i = crf.crf_2cut3i * cut3 / a_cut2soft3.sqrt();
+    let b_crf_2cut3i = crf.crf_2cut3i * cut3 / b_cut2soft3.sqrt();
 
     let a_crf_cut3i = 2.0 * a_crf_2cut3i;
     let b_crf_cut3i = 2.0 * b_crf_2cut3i;
@@ -332,10 +336,12 @@ pub fn perturbed_pairlist_correction<BC: BoundaryCondition>(
     for &(ii, jj) in pairlist {
         let i = ii as usize;
         let j = jj as usize;
-        // GROMOS insert_pair only routes to perturbed pairlist when a1 (= i here,
-        // since pairs are stored with i < j) is perturbed.  Pairs where only j is
-        // perturbed stay in the regular pairlist and receive state-A treatment.
-        if pert[i].is_none() {
+        // gromosXX's insert_pair routes a pair to the perturbed pairlist when *either* atom is
+        // perturbed (`if is_perturbed(i) … else if is_perturbed(j) → (j, i)`). Until 0.0.34 this
+        // skipped pairs whose lower-index atom was unperturbed, so a perturbed atom that is not
+        // at the start of the topology lost the soft-core treatment of most of its pairs
+        // (invisible for CH4 — atom 1 — and methanol — atoms 1–3).
+        if pert[i].is_none() && pert[j].is_none() {
             continue;
         }
         let pi = pert[i].as_ref();

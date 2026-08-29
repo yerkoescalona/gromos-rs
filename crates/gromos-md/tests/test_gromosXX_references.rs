@@ -586,10 +586,10 @@ ref_test!(ch4_water_fep_l025, "ch4_water_fep_l025");
 ref_test!(ch4_water_fep_l075, "ch4_water_fep_l075");
 ref_test!(ch4_water_fep_l100, "ch4_water_fep_l100");
 ref_test!(ignore: aladip_vacuum_fep, "aladip_vacuum_fep");
-// Charged perturbed atoms (54a7 CH3OH -> dummies): the perturbed reaction-field self/excluded-pair
-// terms that `ch4_water_fep` (zero charge) never exercised. Fails today on CRF only
-// (0.16 kJ/mol at frame 0; LJ exact) — PLAN.md 1.7 note. Un-ignore when the term is second-sourced.
-ref_test!(ignore: meoh_water_fep, "meoh_water_fep", "perturbed RF term for charged atoms: CRF differs by 0.16 kJ/mol (PLAN.md 1.7)");
+// Charged perturbed atoms (54a7 CH3OH -> dummies): the soft-core reaction-field terms that
+// `ch4_water_fep` (zero charge) never exercised. Found and fixed the 1/cutoff³ error in the
+// perturbed pair kernel's softened RF term (0.0.34).
+ref_test!(meoh_water_fep, "meoh_water_fep");
 
 // ── Energy minimization ──────────────────────────────────────────────────────
 ref_test!(ignore: aladip_vacuum_em, "aladip_vacuum_em", "EM energy frame count off-by-one vs gromosXX");
