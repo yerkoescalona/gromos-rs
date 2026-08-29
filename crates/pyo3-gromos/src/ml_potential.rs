@@ -16,16 +16,16 @@
 use numpy::{PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
 
-use gromos_forces::nonbonded::SchNetInteraction;
-use gromos_forces::orchestrator::ProviderOrchestrator;
-use gromos_forces::orchestrator_algorithm::ProviderOrchestratorAlgorithm;
-use gromos_forces::provider::PotentialProvider;
-use gromos_forces::zones::ZonePartition;
 use gromos_core::configuration::Configuration;
 use gromos_core::math::{Periodicity, Vacuum, Vec3};
 use gromos_core::selection::AtomSelection;
 use gromos_core::spatial_index::ConfigurationSpatialIndex;
 use gromos_core::topology::Topology;
+use gromos_forces::nonbonded::SchNetInteraction;
+use gromos_forces::orchestrator::ProviderOrchestrator;
+use gromos_forces::orchestrator_algorithm::ProviderOrchestratorAlgorithm;
+use gromos_forces::provider::PotentialProvider;
+use gromos_forces::zones::ZonePartition;
 
 use crate::topology::PyTopology;
 
@@ -162,7 +162,10 @@ pub(crate) fn build_ml_orchestrator_algorithm(
     let mut orchestrator = ProviderOrchestrator::new();
     orchestrator.register(inner_selection, Box::new(potential.load()?));
 
-    Ok(ProviderOrchestratorAlgorithm::new(orchestrator, periodicity))
+    Ok(ProviderOrchestratorAlgorithm::new(
+        orchestrator,
+        periodicity,
+    ))
 }
 
 /// Resolve an inner/buffer zone split by selector string against a real topology, for testing

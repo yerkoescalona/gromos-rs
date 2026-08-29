@@ -102,9 +102,8 @@ fn combined_qmmm_shows_real_bidirectional_coupling_on_a_real_system() {
     // ── Real xtb call #1: QM zone's own energy/forces, and (as a side effect) real Mulliken
     // charges for the embedding term ────────────────────────────────────────────────────────
     let charge_work_dir = std::env::temp_dir().join("gromos_rs_xtb_qmmm_water_dimer_charges");
-    let mut qm_for_charges =
-        XtbInteraction::new(&charge_work_dir, 2, 0, 1, vec![8, 1, 1, 8, 1, 1])
-            .expect("work_dir creatable");
+    let mut qm_for_charges = XtbInteraction::new(&charge_work_dir, 2, 0, 1, vec![8, 1, 1, 8, 1, 1])
+        .expect("work_dir creatable");
     let qm_direct = qm_for_charges
         .contribute(&inner_sel, &topo, &conf, &index)
         .expect("xtb QM-zone calculation should succeed");
@@ -135,7 +134,9 @@ fn combined_qmmm_shows_real_bidirectional_coupling_on_a_real_system() {
         .unwrap();
 
     let mut embedding = ElectrostaticEmbedding::new(imd.rcrf, region_charges.clone());
-    let embedding_direct = embedding.contribute(&inner_sel, &topo, &conf, &index).unwrap();
+    let embedding_direct = embedding
+        .contribute(&inner_sel, &topo, &conf, &index)
+        .unwrap();
 
     // qm_direct (above) is the third.
 
@@ -145,7 +146,8 @@ fn combined_qmmm_shows_real_bidirectional_coupling_on_a_real_system() {
     orchestrator.register(
         classical_region,
         Box::new(
-            LjCrfInteraction::new(imd.rcrf, 1.0, imd.epsrf, imd.appak).with_zone_partition(partition),
+            LjCrfInteraction::new(imd.rcrf, 1.0, imd.epsrf, imd.appak)
+                .with_zone_partition(partition),
         ),
     );
     orchestrator.register(
@@ -159,9 +161,9 @@ fn combined_qmmm_shows_real_bidirectional_coupling_on_a_real_system() {
                 .expect("work_dir creatable"),
         ),
     );
-    let combined = orchestrator
-        .evaluate(&topo, &conf, &index)
-        .expect("orchestrator should combine all three providers without an index-contract violation");
+    let combined = orchestrator.evaluate(&topo, &conf, &index).expect(
+        "orchestrator should combine all three providers without an index-contract violation",
+    );
 
     // Transparency: the orchestrator's sum must equal the three direct calls added by hand.
     let expected_energy = classical_direct.energy + embedding_direct.energy + qm_direct.energy;
@@ -262,8 +264,8 @@ fn path_a_real_electrostatic_embedding_on_the_real_water_dimer() {
     let inner_sel = AtomSelection::from_indices(inner.clone(), n_atoms).unwrap();
     let partition = ZonePartition::new(n_atoms, &inner, &[]);
 
-    let mut classical = LjCrfInteraction::new(imd.rcrf, 1.0, imd.epsrf, imd.appak)
-        .with_zone_partition(partition);
+    let mut classical =
+        LjCrfInteraction::new(imd.rcrf, 1.0, imd.epsrf, imd.appak).with_zone_partition(partition);
     let classical_direct = classical
         .contribute(&AtomSelection::all(n_atoms), &topo, &conf, &index)
         .unwrap();

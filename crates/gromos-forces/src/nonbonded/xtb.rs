@@ -35,8 +35,11 @@ use gromos_core::selection::AtomSelection;
 use gromos_core::spatial_index::SpatialIndex;
 use gromos_core::topology::Topology;
 use gromos_core::units::{BOHR_TO_NM, HARTREE_TO_KJMOL, NM_TO_ANGSTROM};
+// Only the test module spawns the real `xtb` binary; the library goes through
+// `qm_subprocess`, so an unconditional import is reported unused.
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(test)]
 use std::process::Command;
 
 use super::qm_subprocess;
@@ -119,12 +122,23 @@ impl XtbInteraction {
 
     /// Write xtb's `pcharge` file: count line, then `charge x y z` per MM atom, coordinates in
     /// **Bohr** (verified empirically — see module docs).
-    fn write_pcharge(&self, path: &std::path::Path, mm_atoms: &[usize], topo: &Topology, conf: &Configuration) {
+    fn write_pcharge(
+        &self,
+        path: &std::path::Path,
+        mm_atoms: &[usize],
+        topo: &Topology,
+        conf: &Configuration,
+    ) {
         let mut file = std::fs::File::create(path).expect("pcharge path is in a writable work_dir");
         writeln!(file, "{}", mm_atoms.len()).unwrap();
         for &i in mm_atoms {
             let p = conf.current().pos[i] / BOHR_TO_NM;
-            writeln!(file, "{:.10} {:.10} {:.10} {:.10}", topo.charge[i], p.x, p.y, p.z).unwrap();
+            writeln!(
+                file,
+                "{:.10} {:.10} {:.10} {:.10}",
+                topo.charge[i], p.x, p.y, p.z
+            )
+            .unwrap();
         }
     }
 
@@ -182,7 +196,11 @@ fn parse_pcgrad(path: &std::path::Path, expected_n: usize) -> Result<Vec<Vec3>, 
                 ProviderError::ComputationFailed(format!("failed to parse pcgrad component: {e}"))
             })
         };
-        gradients.push(Vec3::new(parse(parts[0])?, parse(parts[1])?, parse(parts[2])?));
+        gradients.push(Vec3::new(
+            parse(parts[0])?,
+            parse(parts[1])?,
+            parse(parts[2])?,
+        ));
     }
     if gradients.len() != expected_n {
         return Err(ProviderError::ComputationFailed(format!(
@@ -195,7 +213,10 @@ fn parse_pcgrad(path: &std::path::Path, expected_n: usize) -> Result<Vec<Vec3>, 
 
 /// Parse xtb's `.engrad` (ORCA-style) output: atom count, energy (Eh), then the flattened
 /// gradient (Eh/bohr). Comment lines start with `#`; everything else is one value per line.
-fn parse_engrad(path: &std::path::Path, expected_n: usize) -> Result<(f64, Vec<Vec3>), ProviderError> {
+fn parse_engrad(
+    path: &std::path::Path,
+    expected_n: usize,
+) -> Result<(f64, Vec<Vec3>), ProviderError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| ProviderError::ComputationFailed(format!("failed to read .engrad: {e}")))?;
     let mut values = content
@@ -203,7 +224,9 @@ fn parse_engrad(path: &std::path::Path, expected_n: usize) -> Result<(f64, Vec<V
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'));
 
-    let parse_next = |values: &mut dyn Iterator<Item = &str>, what: &str| -> Result<f64, ProviderError> {
+    let parse_next = |values: &mut dyn Iterator<Item = &str>,
+                      what: &str|
+     -> Result<f64, ProviderError> {
         values
             .next()
             .ok_or_else(|| ProviderError::ComputationFailed(format!(".engrad missing {what}")))?
@@ -297,7 +320,16 @@ impl PotentialProvider for XtbInteraction {
         qm_subprocess::run_subprocess(
             &self.binary,
             &self.work_dir,
-            &["region.xyz", "--gfn", &gfn_arg, "--grad", "--chrg", &chrg_arg, "--uhf", &uhf_arg],
+            &[
+                "region.xyz",
+                "--gfn",
+                &gfn_arg,
+                "--grad",
+                "--chrg",
+                &chrg_arg,
+                "--uhf",
+                &uhf_arg,
+            ],
         )?;
 
         let (energy_eh, gradient_eh_bohr) = parse_engrad(&engrad_path, n)?;

@@ -14,9 +14,8 @@ use std::process::Command;
 /// call, no temp-directory dependency).
 pub(crate) fn ensure_work_dir(work_dir: impl Into<PathBuf>) -> Result<PathBuf, ProviderError> {
     let work_dir = work_dir.into();
-    std::fs::create_dir_all(&work_dir).map_err(|e| {
-        ProviderError::ComputationFailed(format!("failed to create work_dir: {e}"))
-    })?;
+    std::fs::create_dir_all(&work_dir)
+        .map_err(|e| ProviderError::ComputationFailed(format!("failed to create work_dir: {e}")))?;
     Ok(work_dir)
 }
 
@@ -28,7 +27,11 @@ pub(crate) fn remove_stale(path: &Path) {
 
 /// Run `binary` with `args` in `work_dir`; a spawn failure or nonzero exit status becomes a
 /// `ProviderError` carrying stderr.
-pub(crate) fn run_subprocess(binary: &str, work_dir: &Path, args: &[&str]) -> Result<(), ProviderError> {
+pub(crate) fn run_subprocess(
+    binary: &str,
+    work_dir: &Path,
+    args: &[&str],
+) -> Result<(), ProviderError> {
     let output = Command::new(binary)
         .current_dir(work_dir)
         .args(args)

@@ -99,9 +99,14 @@ fn main() {
             (c.energy, forces)
         };
 
-    let mut out =
-        std::fs::File::create(&out_path).unwrap_or_else(|e| panic!("cannot create {out_path}: {e}"));
-    writeln!(out, "{n_atoms} {} {} {}", atomic_numbers[0], atomic_numbers[1], atomic_numbers[2]).unwrap();
+    let mut out = std::fs::File::create(&out_path)
+        .unwrap_or_else(|e| panic!("cannot create {out_path}: {e}"));
+    writeln!(
+        out,
+        "{n_atoms} {} {} {}",
+        atomic_numbers[0], atomic_numbers[1], atomic_numbers[2]
+    )
+    .unwrap();
 
     let mut rng = rand::thread_rng();
     // Small perturbation around equilibrium (nm) and a modest random initial velocity (nm/ps) —

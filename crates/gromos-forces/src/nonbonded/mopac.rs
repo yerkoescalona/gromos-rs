@@ -152,8 +152,9 @@ impl MopacInteraction {
         atom_indices: &[usize],
         conf: &Configuration,
     ) -> Result<(), ProviderError> {
-        let mut file = std::fs::File::create(path)
-            .map_err(|e| ProviderError::ComputationFailed(format!("failed to create .mop input: {e}")))?;
+        let mut file = std::fs::File::create(path).map_err(|e| {
+            ProviderError::ComputationFailed(format!("failed to create .mop input: {e}"))
+        })?;
         let mut keywords = format!(
             "{} 1SCF GRAD AUX(PRECISION=9) CHARGE={}",
             self.method.keyword(),
@@ -169,7 +170,12 @@ impl MopacInteraction {
         for &g in atom_indices {
             let symbol = element_symbol(self.atomic_numbers[g])?;
             let p = conf.current().pos[g] * NM_TO_ANGSTROM;
-            writeln!(file, "{:>2}{:14.9} 1{:14.9} 1{:14.9} 1", symbol, p.x, p.y, p.z).unwrap();
+            writeln!(
+                file,
+                "{:>2}{:14.9} 1{:14.9} 1{:14.9} 1",
+                symbol, p.x, p.y, p.z
+            )
+            .unwrap();
         }
         Ok(())
     }
@@ -364,8 +370,9 @@ mod tests {
             return;
         }
         let work_dir = std::env::temp_dir().join("gromos_rs_mopac_test_water_energy");
-        let mut interaction = MopacInteraction::new(work_dir, MopacMethod::Pm7, 0, 1, vec![8, 1, 1])
-            .expect("work_dir creatable");
+        let mut interaction =
+            MopacInteraction::new(work_dir, MopacMethod::Pm7, 0, 1, vec![8, 1, 1])
+                .expect("work_dir creatable");
 
         let (topo, conf) = water_topo_and_conf();
         let region = AtomSelection::all(3);
@@ -393,9 +400,10 @@ mod tests {
     #[test]
     fn unsupported_embedding_is_rejected_not_silently_ignored() {
         let work_dir = std::env::temp_dir().join("gromos_rs_mopac_test_embedding_rejection");
-        let mut interaction = MopacInteraction::new(work_dir, MopacMethod::Pm7, 0, 1, vec![8, 1, 1])
-            .expect("work_dir creatable")
-            .with_embedding(Embedding::Electrostatic);
+        let mut interaction =
+            MopacInteraction::new(work_dir, MopacMethod::Pm7, 0, 1, vec![8, 1, 1])
+                .expect("work_dir creatable")
+                .with_embedding(Embedding::Electrostatic);
         assert_eq!(
             PotentialProvider::embedding(&interaction),
             Embedding::Electrostatic
@@ -425,8 +433,9 @@ mod tests {
             return;
         }
         let work_dir = std::env::temp_dir().join("gromos_rs_mopac_test_fd");
-        let mut interaction = MopacInteraction::new(work_dir, MopacMethod::Pm7, 0, 1, vec![8, 1, 1])
-            .expect("work_dir creatable");
+        let mut interaction =
+            MopacInteraction::new(work_dir, MopacMethod::Pm7, 0, 1, vec![8, 1, 1])
+                .expect("work_dir creatable");
 
         let positions = water_positions_nm();
         let (topo, _) = water_topo_and_conf();
