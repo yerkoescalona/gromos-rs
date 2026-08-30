@@ -659,6 +659,14 @@ pub fn build_sequence_from_imd(
     recipe.inputs = inputs.clone();
     let mut built = build_sequence_from_recipe(&recipe, prepared)?;
     built.diagnostics = diagnostics;
+    if let Some(partition) = options.pair_partition {
+        if let Some(ff) = built
+            .sequence
+            .find_mut::<gromos_integrators::algorithms::Forcefield>()
+        {
+            ff.pair_partition = Some(partition);
+        }
+    }
     Ok(built)
 }
 

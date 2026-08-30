@@ -73,6 +73,12 @@ pub trait Algorithm {
     /// Algorithm name for logging/debugging.
     fn name(&self) -> &str;
 
+    /// Downcast hook: algorithms that callers may need to configure after the sequence is
+    /// built (the force field's MPI hooks) return `Some(self)`. Default: not downcastable.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
+
     /// Opt in to accumulating an internal sub-phase breakdown.
     ///
     /// Default: no-op. Algorithms that expose [`Self::sub_timings`] should honour
@@ -111,6 +117,14 @@ impl AlgorithmSequence {
     }
 
     /// Add an algorithm to the end of the sequence.
+    /// The first algorithm of concrete type `T` that opted into [`Algorithm::as_any_mut`].
+    pub fn find_mut<T: Algorithm + 'static>(&mut self) -> Option<&mut T> {
+        self.algorithms
+            .iter_mut()
+            .find_map(|a| a.as_any_mut().and_then(|any| any.downcast_mut::<T>()))
+    }
+
+    /// Append an algorithm to the end of the sequence.
     pub fn push(&mut self, alg: Box<dyn Algorithm>) {
         self.algorithms.push(alg);
         self.timings.push(std::time::Duration::ZERO);

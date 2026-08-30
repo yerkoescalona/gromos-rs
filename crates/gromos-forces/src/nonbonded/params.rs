@@ -98,11 +98,16 @@ impl CRFParameters {
 
 /// Storage for forces and energies
 #[repr(C)]
+#[derive(Debug, Clone)]
 pub struct ForceStorage {
     pub forces: Vec<Vec3>,
     pub e_lj: f64,
     pub e_crf: f64,
     pub virial: [[f64; 3]; 3],
+    /// dH/dλ of the Lennard-Jones part of these pairs (perturbed runs; zero otherwise)
+    pub dhdl_lj: f64,
+    /// dH/dλ of the reaction-field part of these pairs
+    pub dhdl_crf: f64,
 }
 
 impl ForceStorage {
@@ -112,6 +117,8 @@ impl ForceStorage {
             e_lj: 0.0,
             e_crf: 0.0,
             virial: [[0.0; 3]; 3],
+            dhdl_lj: 0.0,
+            dhdl_crf: 0.0,
         }
     }
 
@@ -120,6 +127,8 @@ impl ForceStorage {
         self.e_lj = 0.0;
         self.e_crf = 0.0;
         self.virial = [[0.0; 3]; 3];
+        self.dhdl_lj = 0.0;
+        self.dhdl_crf = 0.0;
     }
 
     /// Accumulate another ForceStorage into this one (thread-local reduction).
@@ -134,6 +143,8 @@ impl ForceStorage {
                 self.virial[a][b] += other.virial[a][b];
             }
         }
+        self.dhdl_lj += other.dhdl_lj;
+        self.dhdl_crf += other.dhdl_crf;
     }
 }
 

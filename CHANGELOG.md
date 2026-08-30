@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.38] (2026-08-30)
+
+### Added
+
+- **MPI in `md`** (`cargo build --release --features use-mpi --bin md`, run under `mpirun`): the
+  nonbonded pair terms are decomposed across ranks by first atom index (`Forcefield::pair_partition`,
+  `RunOptions::pair_partition`); each rank builds the full pairlist itself and keeps its share, and
+  one reduce + broadcast per step (`Forcefield::set_nonbonded_reducer`) gives every rank the same
+  forces, energies, virial and dH/dλ, so every rank runs the whole integrator and rank 0 writes the
+  files. `np=1` is bit-identical to the serial binary; `np=2/4` reproduce the serial energies to all
+  printed digits (forces and positions to 1e-9, the summation order). `scripts/bench_mpi.py` times
+  it; BENCHMARKING.md §6 has the table. `crates/gromos-run/tests/pair_partition.rs` checks the
+  decomposition without MPI. `AlgorithmSequence::find_mut::<T>()` (via `Algorithm::as_any_mut`)
+  reaches the built force field; `ForceStorage` carries `dhdl_lj`/`dhdl_crf`.
+
+### Removed
+
+- The dead MPI code: `md_mpi`, `md_mpi_cuda`, `repex_mpi`, `mpi_scaling` binaries and
+  `gromos_integrators::{mpi, remd_mpi}` (an API that no longer existed, an undeclared feature, and
+  `&[Vec3]` reinterpreted as `&[f32]`). REMD over MPI, when it comes, builds on the new seam.
+
+### Changed
+
+- The force field adds the non-pairlist terms (excluded-pair/self reaction field, 1-4, the
+  perturbed corrections that are not pairlist-based) after the pair terms instead of in between;
+  the reference suite (45/45), the check-suite port and the null-perturbation test are unchanged
+  within their tolerances (the sums differ in the last bits only).
+
 ## [0.0.37] (2026-08-30)
 
 ### Fixed

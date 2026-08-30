@@ -56,6 +56,9 @@ impl ParallelPolicy {
 #[serde(deny_unknown_fields, default)]
 pub struct RunOptions {
     pub parallel: ParallelPolicy,
+    /// MPI pair decomposition `(rank, size)` for the force field (`md` under `mpirun`); the
+    /// caller installs the reduction on the built `Forcefield`. `None`: single process.
+    pub pair_partition: Option<(usize, usize)>,
     /// Unmodelled `.imd` blocks this caller accepts as passthrough (PLAN.md 3.9 A17). The
     /// binary allows `GAMD`/`EDS` because it applies them itself; the Python binding allows none.
     pub passthrough: crate::recipe::PassthroughPolicy,

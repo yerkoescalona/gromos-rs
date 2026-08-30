@@ -130,10 +130,6 @@ path = "src/bin/conversion/amber2gromos.rs"
 name = "mk_script"
 path = "src/bin/utilities/mk_script.rs"
 
-[[bin]]
-name = "mpi_scaling"
-path = "src/bin/utilities/mpi_scaling.rs"
-
 # TODO: remove this stub — real atominfo lives in gromos-analysis/src/bin/structural/atominfo.rs
 [[bin]]
 name = "atominfo"

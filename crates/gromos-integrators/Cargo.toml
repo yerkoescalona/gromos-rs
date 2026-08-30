@@ -37,7 +37,6 @@ serde = { workspace = true, optional = true }
 [features]
 default = []
 serde = ["dep:serde", "gromos-core/serde"]
-mpi = []
 
 [dev-dependencies]
 criterion = { workspace = true }

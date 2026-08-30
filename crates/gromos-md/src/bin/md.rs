@@ -274,7 +274,8 @@ fn main() {
     }
 
     // Parse command-line arguments (file paths only, GROMOS style)
-    let md_args = match parse_args(args) {
+    #[allow(unused_mut)] // mutated by the MPI setup (feature `use-mpi`)
+    let mut md_args = match parse_args(args) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -290,6 +291,15 @@ fn main() {
         _ => "debug",
     };
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter)).init();
+    // MPI (feature `use-mpi`, run under `mpirun`): every rank runs this whole driver on the
+    // same inputs; only the nonbonded pair terms are split across ranks and summed each step
+    // (`Forcefield::pair_partition` + `set_nonbonded_reducer`). Rank 0 writes the outputs.
+    #[cfg(feature = "use-mpi")]
+    let mpi_run = mpi_support::setup(&mut md_args);
+    #[cfg(feature = "use-mpi")]
+    let mpi_partition: Option<(usize, usize)> = mpi_run.partition();
+    #[cfg(not(feature = "use-mpi"))]
+    let mpi_partition: Option<(usize, usize)> = None;
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                   GROMOS-RS MD Engine                        ║");
@@ -586,6 +596,7 @@ fn main() {
     // pass through the recipe; anything else unmodelled is an error (PLAN.md 3.9 A17).
     let options = RunOptions {
         passthrough: PassthroughPolicy::allow(["GAMD", "EDS"]),
+        pair_partition: mpi_partition,
         ..RunOptions::default()
     };
     let built = match build_sequence_from_imd(&imd, &prepared, &inputs, &options) {
@@ -602,6 +613,8 @@ fn main() {
         diagnostics,
         summary,
     } = built;
+    #[cfg(feature = "use-mpi")]
+    mpi_run.install_reducer(&mut md_sequence);
     for note in &diagnostics.notes {
         println!("  NOTE: {}", note);
     }
@@ -1433,4 +1446,120 @@ fn main() {
     println!("  Energies:   {}", tre_file);
     println!();
     println!("Done!");
+}
+
+/// MPI support for `md` (feature `use-mpi`): pair decomposition across ranks, rank 0 owns the
+/// output. See `Forcefield::pair_partition` for the decomposition and BENCHMARKING.md §6.
+#[cfg(feature = "use-mpi")]
+mod mpi_support {
+    use gromos_core::algorithm::AlgorithmSequence;
+    use gromos_forces::nonbonded::ForceStorage;
+    use gromos_integrators::algorithms::Forcefield;
+    use mpi::collective::SystemOperation;
+    use mpi::topology::SimpleCommunicator;
+    use mpi::traits::*;
+
+    pub struct MpiRun {
+        _universe: mpi::environment::Universe,
+        pub rank: usize,
+        pub size: usize,
+    }
+
+    /// Initialise MPI. Ranks other than 0 write no files and send their stdout to /dev/null;
+    /// their stderr (the log) stays, prefixed by mpirun.
+    pub fn setup(args: &mut super::MDArgs) -> MpiRun {
+        let universe = mpi::initialize().expect("MPI_Init");
+        let world = universe.world();
+        let (rank, size) = (world.rank() as usize, world.size() as usize);
+        if rank != 0 {
+            for out in [
+                &mut args.fin_file,
+                &mut args.trc_file,
+                &mut args.trv_file,
+                &mut args.trf_file,
+                &mut args.trs_file,
+                &mut args.tre_file,
+                &mut args.trg_file,
+                &mut args.bae_file,
+                &mut args.bag_file,
+            ] {
+                *out = None;
+            }
+            // SAFETY: replacing fd 1 by /dev/null; the descriptor stays open and valid.
+            unsafe {
+                let null = std::ffi::CString::new("/dev/null").unwrap();
+                let fd = libc::open(null.as_ptr(), libc::O_WRONLY);
+                if fd >= 0 {
+                    libc::dup2(fd, 1);
+                    libc::close(fd);
+                }
+            }
+        } else {
+            println!(
+                "MPI: {size} rank(s); pair terms split by first atom index, summed every step"
+            );
+        }
+        MpiRun {
+            _universe: universe,
+            rank,
+            size,
+        }
+    }
+
+    impl MpiRun {
+        pub fn partition(&self) -> Option<(usize, usize)> {
+            (self.size > 1).then_some((self.rank, self.size))
+        }
+
+        /// Sum the pair-term storage over all ranks: reduce to rank 0, broadcast the sum, so
+        /// every rank continues with bit-identical forces and energies.
+        pub fn install_reducer(&self, sequence: &mut AlgorithmSequence) {
+            if self.size <= 1 {
+                return;
+            }
+            let ff = sequence
+                .find_mut::<Forcefield>()
+                .expect("the sequence carries a Forcefield");
+            ff.set_nonbonded_reducer(Box::new(|s: &mut ForceStorage| {
+                let world = SimpleCommunicator::world();
+                let root = world.process_at_rank(0);
+                let n = s.forces.len();
+                let mut send = Vec::with_capacity(3 * n + 13);
+                for f in &s.forces {
+                    send.extend_from_slice(&[f.x, f.y, f.z]);
+                }
+                send.push(s.e_lj);
+                send.push(s.e_crf);
+                for row in &s.virial {
+                    send.extend_from_slice(row);
+                }
+                send.push(s.dhdl_lj);
+                send.push(s.dhdl_crf);
+                let mut recv = vec![0.0f64; send.len()];
+                if world.rank() == 0 {
+                    root.reduce_into_root(&send[..], &mut recv[..], SystemOperation::sum());
+                } else {
+                    root.reduce_into(&send[..], SystemOperation::sum());
+                }
+                root.broadcast_into(&mut recv[..]);
+                for (i, f) in s.forces.iter_mut().enumerate() {
+                    f.x = recv[3 * i];
+                    f.y = recv[3 * i + 1];
+                    f.z = recv[3 * i + 2];
+                }
+                let mut k = 3 * n;
+                s.e_lj = recv[k];
+                s.e_crf = recv[k + 1];
+                k += 2;
+                for row in s.virial.iter_mut() {
+                    for v in row.iter_mut() {
+                        *v = recv[k];
+                        k += 1;
+                    }
+                }
+                s.dhdl_lj = recv[k];
+                s.dhdl_crf = recv[k + 1];
+            }));
+        }
+    }
 }

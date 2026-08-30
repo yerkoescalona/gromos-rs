@@ -12,6 +12,12 @@ All lower crates (gromos-core, gromos-forces, gromos-integrators, gromos-io).
 matching gromosXX to reference tolerances.
 
 ## Status
+- **MPI (2026-08-30):** `md` built with `--features use-mpi` (`LIBCLANG_PATH=/usr/lib/llvm-19/lib`)
+  runs under `mpirun -np N`: every rank runs the whole driver on the same inputs, the pair terms are
+  split by `RunOptions::pair_partition` and summed each step (`mod mpi_support` at the bottom of
+  `md.rs`: reduce to rank 0 + broadcast, 3N+13 doubles), rank 0 alone writes files and stdout.
+  `np=1` is bit-identical to the serial binary. The old `md_mpi`/`md_mpi_cuda`/`repex_mpi` bins are
+  gone. Timing: `scripts/bench_mpi.py`, BENCHMARKING.md §6.
 - Full MD loop ✓: NVE / NVT (Berendsen + NHC) / NPT
 - Force trajectory output (@trf) ✓: FREEFORCERED + CONSFORCERED, atom-by-atom tolerance 1e-6
 - **37/40 reference tests passing** (3 ignored: `aladip_vacuum_fep` known FEP mismatch,

@@ -51,6 +51,41 @@ use rayon::prelude::*;
 /// above `u32::MAX` are not a realistic concern for this engine.
 pub type Pairlist = Vec<(u32, u32)>;
 
+/// Keep the pairs of `list` that belong to `rank` of `size` ranks: those whose first atom
+/// index ≡ rank (mod size). Membership does not depend on the order of the list, so every
+/// rank can build the full list independently and keep its own share; the shares of all
+/// ranks partition the list exactly (see `partition_is_exact`).
+pub fn keep_partition(list: &mut Pairlist, rank: usize, size: usize) {
+    if size <= 1 {
+        return;
+    }
+    list.retain(|&(i, _)| (i as usize) % size == rank);
+}
+
+#[cfg(test)]
+mod partition_tests {
+    use super::*;
+
+    #[test]
+    fn partition_is_exact() {
+        let full: Pairlist = (0..37u32)
+            .flat_map(|i| (i + 1..40).map(move |j| (i, j)))
+            .collect();
+        for size in 1..=5 {
+            let mut seen = Vec::new();
+            for rank in 0..size {
+                let mut part = full.clone();
+                keep_partition(&mut part, rank, size);
+                seen.extend(part);
+            }
+            seen.sort();
+            let mut expected = full.clone();
+            expected.sort();
+            assert_eq!(seen, expected, "size {size}");
+        }
+    }
+}
+
 /// Holds all nonbonded atom pairs, split by range and solute/solvent role.
 ///
 /// The four lists correspond to the twin-range + solute/solvent classification

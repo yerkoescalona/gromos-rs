@@ -53,7 +53,7 @@ vectorised minimum image (slower), CSR per-atom pairlist layout (no gain), an in
 
 **Suggested, not done:**
 
-- Phase 4 MPI (blocked on the four items in 6.2 — libclang, feature gate, f64→f32 cast, facade
+- Phase 4 MPI: done 2026-08-30 — `md --features use-mpi` under `mpirun`, np=1 bit-identical to serial, 1.6× at np=4 on 8k–24k atoms (§6.3)
   re-export). Phase 3 is done through 8 threads plus the SMT point; the 81 000-atom box
   (`make_solvated_box.py --replicate 3`) has not been run.
 - Threads: the remaining serial phases are SHAKE, integration and the thermostat (both engines);
@@ -604,7 +604,7 @@ honest ceiling is 8 threads, as A10 said; leave `RAYON_NUM_THREADS` at the physi
 
 - [x] **Gate / decision (Phase 3 → 4):** `E(8)` is 0.52 on the 24k box and 0.55 on `water_1000`
   — threads are well short of saturation, so MPI on this single node (Phase 4) could only prove
-  *that MPI works*, not that it is faster. Phase 4 stays blocked on the 6.2 items and is not
+  *that MPI works*, not that it is faster. Phase 4 is measured in §6.3 (2026-08-30) and is not
   scheduled; the next thread-scaling gain is SHAKE/SETTLE over molecules. **Phase 3 closed
   2026-08-29.**
 
@@ -650,42 +650,69 @@ agree exactly under that same policy.
 - [ ] `mpirun -np 2` and `-np 4` reproduce the same energies (forces are summed in a different order → expect agreement to ~1e-10 relative, not bit-exact; record the actual deviation).
 - [ ] Time `-np ∈ {1, 2, 4, 8}` on `water_8000` and `water_27000`, with `--bind-to core` and `OMP_NUM_THREADS=1`.
 
-### 6.2 gromos-rs side (blocked — four fixes before a binary exists)
+### 6.2 gromos-rs side — done 2026-08-30 (0.0.38): `md` carries MPI
 
-These are prerequisites, in dependency order. Each one is verifiable.
+What existed was not salvageable: `md_mpi.rs` spoke an API that no longer exists, the
+`gromos-integrators` MPI module reinterpreted `&[Vec3]` as `&[f32]`, and nothing ever distributed
+work. All of it was removed (`md_mpi`, `md_mpi_cuda`, `repex_mpi`, `mpi_scaling`, `integrators::
+{mpi, remd_mpi}`) and MPI was put where it belongs — on the algorithm sequence every front-end
+already uses:
 
-- [ ] **Install bindgen's dependency:** `sudo apt install libclang-dev` (or `-18-dev` and `export LIBCLANG_PATH=/usr/lib/llvm-18/lib`). *Verify:* `cargo check -p gromos-md --features use-mpi --bin md_mpi` gets past `mpi-sys`.
-- [ ] **Fix the feature gate.** `crates/gromos-integrators/src/mpi.rs` and `remd_mpi.rs` are gated on `use-mpi`, but `crates/gromos-integrators/Cargo.toml` only declares `mpi = []` (no dependency). Declare `use-mpi = ["dep:mpi"]`, add `mpi = { workspace = true, optional = true }`, and make `gromos-md`'s `use-mpi` enable it. *Verify:* `cargo check -p gromos-integrators --features use-mpi` compiles a non-empty module (no "never constructed" warnings for `MpiControl`).
-- [ ] **Fix the f64→f32 corruption.** `mpi.rs` `broadcast_positions` / `reduce_forces` reinterpret `&[Vec3]` (= `glam::DVec3`, 3×f64) as `&[f32]` with length `len*3` — wrong type *and* half the bytes. Replace with `bytemuck`-style `cast_slice::<Vec3, f64>` (glam is built with the `bytemuck` feature already) and change `broadcast_box(&mut [f32; 9])` to f64. *Verify:* a unit test that broadcasts a known `Vec<Vec3>` through `-np 1` and reads it back bit-exact.
-- [ ] **Expose the module through the facade** (`crates/gromos/src/lib.rs`: `#[cfg(feature = "use-mpi")] pub use gromos_integrators::mpi;`) so `md_mpi.rs`'s `mpi::MpiControl` resolves; then get `cargo build --release --features use-mpi --bin md_mpi` green.
-- [ ] Read what `md_mpi.rs` *actually distributes* once it compiles — the audit saw only the initialisation skeleton (`MpiControl::new`, a "Slave process N initialized" log line). If the workers never receive a pair range, the binary is a serial `md` with an `MPI_Init` wrapper, and "MPI works" is not yet true. *Verify:* `-np 2` must show non-zero worker compute time in the log.
-- [ ] Note: `md_mpi.rs` uses `--topo/--conf/--steps` clap flags, not the `@topo @conf @input` convention every other binary uses (`overview.md` global decision). Align it before benchmarking so the same `bench.imd` drives both engines (A3).
+- `Forcefield::pair_partition = Some((rank, size))` keeps, after every pairlist update (and for
+  the initial list), only the pairs whose first atom index ≡ rank (mod size). Membership does not
+  depend on list order, so every rank builds the full pairlist itself and no pairlist is ever
+  communicated. The terms every rank computes in full (excluded-pair and self reaction field,
+  1-4, the non-pairlist perturbed corrections) go to a separate storage that is not reduced.
+- `Forcefield::set_nonbonded_reducer(f)`: `f` is called once per step with the pair-term storage
+  (forces, E_LJ, E_CRF, virial, dH/dλ). Under `mpirun` it reduces to rank 0 and broadcasts the
+  sum, so every rank continues with bit-identical numbers and runs the whole integrator itself —
+  the only traffic per step is that one reduce + broadcast of 3N + 13 doubles.
+- `RunOptions::pair_partition` carries the decomposition through `gromos-run`; `md` built with
+  `--features use-mpi` (needs `LIBCLANG_PATH=/usr/lib/llvm-19/lib` for bindgen) initialises MPI,
+  sets the partition, installs the reducer, and lets only rank 0 write files and stdout. The same
+  `@topo @conf @input` command line, the same `bench.imd` (A3); no separate binary.
+- `crates/gromos-run/tests/pair_partition.rs` checks the decomposition without MPI: the shares of
+  2, 3 and 5 ranks sum to the unpartitioned pair terms (forces, energies, virial) to 1e-9.
 
-### 6.3 gromos-rs correctness and timing (only after 6.2 is green)
+### 6.3 gromos-rs correctness and timing — measured 2026-08-30
 
-- [ ] `mpirun -np 1 md_mpi` == serial `md` energies to `1e-8` on `water_1000`.
-- [ ] `-np 2, 4, 8` agree to ~1e-10 relative; record deviation.
-- [ ] Time `-np ∈ {1, 2, 4, 8}` on `water_8000`, `water_27000`, `--bind-to core`, `RAYON_NUM_THREADS=1`.
-- [ ] Hybrid point (optional, later): `-np 2` × `RAYON_NUM_THREADS=4`.
+- [x] `mpirun -np 1 md` == serial `md` **bit-for-bit** on `water_1000` (`.tre`, `.trf`, `final.cnf`
+      byte-identical: with one rank the reducer is the identity).
+- [x] `-np 2, 4`: last-frame energies identical to the serial run at all ten printed digits;
+      forces and final positions differ by at most 1e-9 (the printed resolution) — the cross-rank
+      sum adds the per-atom force contributions in a different order.
+- [x] Timed with `--bind-to core`, `RAYON_NUM_THREADS=1`, `scripts/bench_mpi.py` (n = 3 repeats,
+      median and std). Results below.
+- [ ] Hybrid point (`-np 2` × `RAYON_NUM_THREADS=4`): not measured.
+- [ ] gromosXX's `md_mpi` (6.1): still the stub build; the gromosXX columns stay empty.
 
-### Results (fill in)
+### Results (2026-08-30; 8-core desktop, `mpirun --bind-to core`, `RAYON_NUM_THREADS=1` per rank, `scripts/bench_mpi.py`)
 
-| System | np | Rust s | Rust S | gromosXX s | gromosXX S | max rel. energy deviation vs np=1 |
-|--------|--:|-------:|-------:|-----------:|-----------:|-----------------------------------:|
-| water_8000 | 1 | | 1.00 | | 1.00 | — |
-| water_8000 | 2 | | | | | |
-| water_8000 | 4 | | | | | |
-| water_8000 | 8 | | | | | |
-| water_27000 | 1 | | 1.00 | | 1.00 | — |
-| water_27000 | 2 | | | | | |
-| water_27000 | 4 | | | | | |
-| water_27000 | 8 | | | | | |
+| System | steps | run | np | wall s (median) | std | n | speedup vs serial | max rel. energy deviation vs serial |
+|--------|--:|-----|--:|--:|--:|--:|--:|--:|
+| water_1000 (3 000 atoms) | 500 | serial | 1 | 1.55 | 0.00 | 3 | 1.00 | 0.0e+00 |
+| water_1000 (3 000 atoms) | 500 | np1 | 1 | 1.49 | 0.00 | 3 | 1.04 | 0.0e+00 |
+| water_1000 (3 000 atoms) | 500 | np2 | 2 | 1.27 | 0.00 | 3 | 1.22 | 2.4e-09 |
+| water_1000 (3 000 atoms) | 500 | np4 | 4 | 1.13 | 0.00 | 3 | 1.37 | 1.3e-09 |
+| water_1000 (3 000 atoms) | 500 | np8 | 8 | 1.18 | 0.01 | 3 | 1.31 | 9.4e-10 |
+| ch4_water_7975 (7 975 atoms) | 200 | serial | 1 | 9.60 | 0.25 | 3 | 1.00 | 0.0e+00 |
+| ch4_water_7975 (7 975 atoms) | 200 | np1 | 1 | 9.56 | 0.01 | 3 | 1.00 | 0.0e+00 |
+| ch4_water_7975 (7 975 atoms) | 200 | np2 | 2 | 7.09 | 0.02 | 3 | 1.35 | 0.0e+00 |
+| ch4_water_7975 (7 975 atoms) | 200 | np4 | 4 | 6.00 | 0.01 | 3 | 1.60 | 0.0e+00 |
+| ch4_water_7975 (7 975 atoms) | 200 | np8 | 8 | 6.44 | 0.01 | 3 | 1.49 | 0.0e+00 |
+| ch4_water_7995 (23 986 atoms, `make_solvated_box --replicate 2`) | 100 | serial | 1 | 4.85 | 0.02 | 3 | 1.00 | 0.0e+00 |
+| ch4_water_7995 (23 986 atoms, `make_solvated_box --replicate 2`) | 100 | np1 | 1 | 4.86 | 0.01 | 3 | 1.00 | 0.0e+00 |
+| ch4_water_7995 (23 986 atoms, `make_solvated_box --replicate 2`) | 100 | np2 | 2 | 3.58 | 0.01 | 3 | 1.35 | 0.0e+00 |
+| ch4_water_7995 (23 986 atoms, `make_solvated_box --replicate 2`) | 100 | np4 | 4 | 3.01 | 0.00 | 3 | 1.61 | 0.0e+00 |
+| ch4_water_7995 (23 986 atoms, `make_solvated_box --replicate 2`) | 100 | np8 | 8 | 3.21 | 0.01 | 3 | 1.51 | 0.0e+00 |
 
-- [ ] **Interpretation rule:** on a single node, MPI master/worker must beat the same core count in threads to be worth anything; if `S_mpi(8) < S_threads(8)` (expected, per A13 and `FUTURE.md` Dim 8), record that as the finding and stop — the answer to "can MPI work" is *yes, correct, not faster on one node*, which is a complete and useful result.
-
----
-
----
+Reading: with one rank the MPI build is the serial build (bit-identical output); the pair kernels
+are the only distributed part, so the speedup is bounded by their share of the step — every rank
+still builds the pairlist, evaluates the bonded terms, applies constraints and integrates. The
+reduce + broadcast of 3N+13 doubles per step is cheap next to that redundancy. Shared-memory
+threading (`RAYON_NUM_THREADS`, §4) remains the better single-node choice; the MPI seam is what a
+multi-node run needs, and the redundant per-rank work is the next thing to cut (pairlist and
+bonded terms partitioned the same way). gromosXX's `md_mpi` columns stay empty until §6.1 is done.
 
 ## 7. Recording a run (do this for every table row)
 

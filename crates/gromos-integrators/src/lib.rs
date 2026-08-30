@@ -25,10 +25,6 @@ pub mod remd;
 pub mod replica;
 
 // MPI support (optional)
-#[cfg(feature = "mpi")]
-pub mod mpi;
-#[cfg(feature = "mpi")]
-pub mod remd_mpi;
 
 // Re-export main types
 pub use barostats::{berendsen_barostat, calculate_virial, parrinello_rahman_barostat};

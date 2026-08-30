@@ -12,6 +12,13 @@ barostats, energy minimisation.
 Berendsen barostat, COM removal.
 
 ## Status
+- **MPI seam (2026-08-30):** `Forcefield::pair_partition = Some((rank, size))` keeps the pairs
+  whose first atom index ≡ rank (mod size) after every pairlist update (and for the initial list);
+  `set_nonbonded_reducer(f)` is called once per step with the pair-term `ForceStorage` (forces,
+  E_LJ, E_CRF, virial, dH/dλ) — the cross-rank sum lives in `md`, not here. Terms every rank
+  computes in full (excluded-pair/self RF, 1-4, non-pairlist perturbed corrections) accumulate in
+  a separate `local_storage` and are added after the reduction. `Algorithm::as_any_mut` +
+  `AlgorithmSequence::find_mut::<T>()` reach the built force field.
 - SHAKE ✓ (solute NTC>1 + solvent NTCS>0, virial, skip optimisation, NTISHK)
 - SETTLE ✓ (analytical 3-site rigid water, Miyamoto & Kollman 1992)
 - LINCS ✓ (wired, reference-tested for solvent + solute)

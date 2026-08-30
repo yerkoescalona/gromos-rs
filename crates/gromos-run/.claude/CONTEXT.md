@@ -27,6 +27,10 @@ RunError                                                                 -> ever
 ```
 
 ## Status
+- **MPI (2026-08-30):** `RunOptions::pair_partition: Option<(usize, usize)>` sets
+  `Forcefield::pair_partition` on the built sequence; the caller installs the reducer
+  (`sequence.find_mut::<Forcefield>()`). `tests/pair_partition.rs` checks that rank shares sum to
+  the full pair terms without MPI.
 - **PLAN.md 3.9 step 1 ✓ (2026-08-29)** — assembly lifted verbatim from `md.rs:414-572` and
   `md.rs:987-1298`; the binary's `println!`/`process::exit` sites became `RunError` variants and
   `PrepareNote`s / `BuildSummary` that the binary prints. Divergences resolved *toward the binary*

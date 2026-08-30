@@ -50,6 +50,8 @@ and crate-specific rules that extend the workspace-wide guides.
 
 `cargo build --release --bin md`, then `cargo test -p gromos-md --test test_gromosXX_references`,
 and `cargo test -p gromos-md --test gromos_check_suite` (gromosXX's own per-term oracle).
+MPI: `LIBCLANG_PATH=/usr/lib/llvm-19/lib cargo build --release --features use-mpi --bin md`, then
+`mpirun -np 2 target/release/md @topo … ` must reproduce the serial energies (`scripts/bench_mpi.py`, BENCHMARKING.md §6).
 See `crates/gromos-md/.claude/CONTEXT.md` for how to add a reference test.
 
 The same behaviour from the Python side (both suites must stay green — they drive one builder):

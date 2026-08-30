@@ -121,6 +121,12 @@ Only needed if you're building with `--features use-mpi` or `--features use-cuda
 ```bash
 # use-mpi (crate `mpi = "0.8"`)
 sudo apt install -y libopenmpi-dev openmpi-bin
+sudo apt install -y libclang-19-dev          # bindgen, for mpi-sys
+export LIBCLANG_PATH=/usr/lib/llvm-19/lib     # then:
+cargo build --release --features use-mpi --bin md
+mpirun -np 4 target/release/md @topo sys.top @conf sys.cnf @input md.imd @fin out.cnf @tre out.tre
+# every rank runs the whole driver; the nonbonded pair terms are split by rank and summed each
+# step; rank 0 writes the files. np=1 is bit-identical to the serial build (BENCHMARKING.md §6).
 
 # use-cuda (crate `cudarc`) needs the NVIDIA CUDA toolkit — see
 # https://developer.nvidia.com/cuda-downloads. Requires an NVIDIA GPU; not covered further

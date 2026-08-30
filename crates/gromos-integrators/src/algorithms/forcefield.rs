@@ -66,6 +66,18 @@ pub struct Forcefield {
     pub crf_params: CRFParameters,
     /// Coulomb prefactor 1/(4πε₀) in GROMOS units (kJ mol⁻¹ nm e⁻²).
     pub four_pi_eps_i: f64,
+    /// MPI domain decomposition by pair: `(rank, size)` keeps only the pairs whose first atom
+    /// index ≡ rank (mod size) after every pairlist update, so each rank evaluates its share
+    /// and [`Self::set_nonbonded_reducer`] sums the shares. `None`: every pair, no reduction.
+    pub pair_partition: Option<(usize, usize)>,
+    /// Whether the pairlist currently held has been reduced to this rank's share (the initial
+    /// pairlist is generated before the first `apply`).
+    partition_applied: bool,
+    /// Contributions every rank computes in full (excluded-pair and self reaction field, 1-4,
+    /// the perturbed corrections that are not pairlist-based) — kept out of the reduction.
+    local_storage: ForceStorage,
+    /// Sums `nonbonded_storage` across ranks (MPI); called once per step after the pair terms.
+    nonbonded_reducer: Option<Box<dyn FnMut(&mut ForceStorage) + Send>>,
     /// NSLFEXCL: add the reaction-field term of the excluded pairs and the self term
     /// (gromosXX `sim.param().nonbonded.rf_excluded`, which gates `RF_excluded_outerloop`,
     /// the perturbed variant, and the excluded-state term of perturbed atom pairs).
@@ -161,6 +173,10 @@ impl Forcefield {
             lj_params: LJParamMatrix::from_nested(&lj_params),
             crf_params,
             four_pi_eps_i: gromos_core::units::four_pi_eps_i,
+            pair_partition: None,
+            partition_applied: false,
+            local_storage: ForceStorage::new(0),
+            nonbonded_reducer: None,
             rf_excluded: true,
             periodicity,
             pairlist,
@@ -256,7 +272,18 @@ impl Forcefield {
     }
 }
 
+impl Forcefield {
+    /// Install the cross-rank sum of the pair terms (MPI). See [`Self::pair_partition`].
+    pub fn set_nonbonded_reducer(&mut self, f: Box<dyn FnMut(&mut ForceStorage) + Send>) {
+        self.nonbonded_reducer = Some(f);
+    }
+}
+
 impl Algorithm for Forcefield {
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
     fn init(
         &mut self,
         topo: &Topology,
@@ -265,6 +292,7 @@ impl Algorithm for Forcefield {
     ) -> Result<(), String> {
         let n = topo.inverse_mass.len();
         self.nonbonded_storage = ForceStorage::new(n);
+        self.local_storage = ForceStorage::new(n);
         self.charges = topo.charge.clone();
         self.iac_u32 = topo.iac.iter().map(|&i| i as u32).collect();
         self.longrange_forces = vec![Vec3::ZERO; n];
@@ -283,6 +311,7 @@ impl Algorithm for Forcefield {
         // Lazy init if init() was not called
         if self.nonbonded_storage.forces.len() != n_atoms {
             self.nonbonded_storage = ForceStorage::new(n_atoms);
+            self.local_storage = ForceStorage::new(n_atoms);
             self.charges = topo.charge.clone();
             self.iac_u32 = topo.iac.iter().map(|&i| i as u32).collect();
             self.longrange_forces = vec![Vec3::ZERO; n_atoms];
@@ -343,11 +372,35 @@ impl Algorithm for Forcefield {
         }
 
         // --- 1. Update pairlist if needed ---
+        // The initial pairlist was generated before the first `apply`: reduce it to this
+        // rank's share once (later updates are reduced right after the update below).
+        if let (Some((rank, size)), false) = (self.pair_partition, self.partition_applied) {
+            for list in [
+                &mut self.pairlist.solute_short,
+                &mut self.pairlist.solute_long,
+                &mut self.pairlist.solvent_short,
+                &mut self.pairlist.solvent_long,
+            ] {
+                gromos_core::pairlist::keep_partition(list, rank, size);
+            }
+            self.partition_applied = true;
+            self.cg_groups_built = false;
+        }
         let pairlist_updated = self.pairlist.needs_update();
         if pairlist_updated {
             let t_pl = self.timing_enabled.then(std::time::Instant::now);
             self.pairlist_algorithm
                 .update(topo, conf, &mut self.pairlist, &self.periodicity);
+            if let Some((rank, size)) = self.pair_partition {
+                for list in [
+                    &mut self.pairlist.solute_short,
+                    &mut self.pairlist.solute_long,
+                    &mut self.pairlist.solvent_short,
+                    &mut self.pairlist.solvent_long,
+                ] {
+                    gromos_core::pairlist::keep_partition(list, rank, size);
+                }
+            }
             if let Some(t) = t_pl {
                 self.timing.pairlist += t.elapsed();
             }
@@ -419,6 +472,7 @@ impl Algorithm for Forcefield {
 
         // --- 3. Calculate nonbonded forces ---
         self.nonbonded_storage.clear();
+        self.local_storage.clear();
         let need_virial = self.virial_type != VirialType::None;
 
         // Short-range solute interactions
@@ -956,7 +1010,7 @@ impl Algorithm for Forcefield {
                 &self.crf_params,
                 &self.periodicity,
                 self.four_pi_eps_i,
-                &mut self.nonbonded_storage,
+                &mut self.local_storage,
                 topo.num_solute_atoms(),
             );
             if let Some(t) = t_rf {
@@ -976,7 +1030,7 @@ impl Algorithm for Forcefield {
                 &self.crf_params,
                 &self.periodicity,
                 self.four_pi_eps_i,
-                &mut self.nonbonded_storage,
+                &mut self.local_storage,
                 1.0, // coulomb_scaling: 1.0 for standard GROMOS
             );
         }
@@ -1025,9 +1079,13 @@ impl Algorithm for Forcefield {
                 );
                 self.nonbonded_storage.e_lj += corr_pl.delta_e_lj;
                 self.nonbonded_storage.e_crf += corr_pl.delta_e_crf;
-                let mut dhdl_nb = corr_pl.dhdl;
-                let mut dhdl_nb_lj = corr_pl.dhdl_lj;
-                let mut dhdl_nb_crf = corr_pl.dhdl_crf;
+                // pairlist-based dH/dλ travels with the (reduced) pair storage; the locals
+                // below collect the terms every rank computes in full
+                self.nonbonded_storage.dhdl_lj += corr_pl.dhdl_lj;
+                self.nonbonded_storage.dhdl_crf += corr_pl.dhdl_crf;
+                let mut dhdl_nb = 0.0;
+                let mut dhdl_nb_lj = 0.0;
+                let mut dhdl_nb_crf = 0.0;
                 for i in 0..n_atoms {
                     self.nonbonded_storage.forces[i] += corr_pl.forces[i];
                 }
@@ -1057,9 +1115,8 @@ impl Algorithm for Forcefield {
                     );
                     self.nonbonded_storage.e_lj += corr.delta_e_lj;
                     self.nonbonded_storage.e_crf += corr.delta_e_crf;
-                    dhdl_nb += corr.dhdl;
-                    dhdl_nb_lj += corr.dhdl_lj;
-                    dhdl_nb_crf += corr.dhdl_crf;
+                    self.nonbonded_storage.dhdl_lj += corr.dhdl_lj;
+                    self.nonbonded_storage.dhdl_crf += corr.dhdl_crf;
                     for i in 0..n_atoms {
                         self.nonbonded_storage.forces[i] += corr.forces[i];
                     }
@@ -1089,7 +1146,7 @@ impl Algorithm for Forcefield {
                         self.four_pi_eps_i,
                     );
                     de_self = e;
-                    self.nonbonded_storage.e_crf += de_self;
+                    self.local_storage.e_crf += de_self;
                     dhdl_nb += dhdl_self;
                     dhdl_nb_crf += dhdl_self;
                 }
@@ -1110,11 +1167,11 @@ impl Algorithm for Forcefield {
                         self.four_pi_eps_i,
                         &mut corr_ex,
                     );
-                    self.nonbonded_storage.e_crf += corr_ex.delta_e_crf;
+                    self.local_storage.e_crf += corr_ex.delta_e_crf;
                     dhdl_nb += corr_ex.dhdl;
                     dhdl_nb_crf += corr_ex.dhdl_crf;
                     for i in 0..n_atoms {
-                        self.nonbonded_storage.forces[i] += corr_ex.forces[i];
+                        self.local_storage.forces[i] += corr_ex.forces[i];
                     }
                 }
 
@@ -1140,13 +1197,13 @@ impl Algorithm for Forcefield {
                         corr14.delta_e_lj,
                         corr14.delta_e_crf
                     );
-                    self.nonbonded_storage.e_lj += corr14.delta_e_lj;
-                    self.nonbonded_storage.e_crf += corr14.delta_e_crf;
+                    self.local_storage.e_lj += corr14.delta_e_lj;
+                    self.local_storage.e_crf += corr14.delta_e_crf;
                     dhdl_nb += corr14.dhdl;
                     dhdl_nb_lj += corr14.dhdl_lj;
                     dhdl_nb_crf += corr14.dhdl_crf;
                     for i in 0..n_atoms {
-                        self.nonbonded_storage.forces[i] += corr14.forces[i];
+                        self.local_storage.forces[i] += corr14.forces[i];
                     }
                 }
 
@@ -1167,13 +1224,13 @@ impl Algorithm for Forcefield {
                         self.rf_excluded,
                         &mut corr_ap,
                     );
-                    self.nonbonded_storage.e_lj += corr_ap.delta_e_lj;
-                    self.nonbonded_storage.e_crf += corr_ap.delta_e_crf;
+                    self.local_storage.e_lj += corr_ap.delta_e_lj;
+                    self.local_storage.e_crf += corr_ap.delta_e_crf;
                     dhdl_nb += corr_ap.dhdl;
                     dhdl_nb_lj += corr_ap.dhdl_lj;
                     dhdl_nb_crf += corr_ap.dhdl_crf;
                     for i in 0..n_atoms {
-                        self.nonbonded_storage.forces[i] += corr_ap.forces[i];
+                        self.local_storage.forces[i] += corr_ap.forces[i];
                     }
                     log::debug!(
                         "  AtomPair corr: Δe_lj={:.6e} Δe_crf={:.6e}",
@@ -1201,6 +1258,19 @@ impl Algorithm for Forcefield {
             };
 
         // --- 4. Assemble forces and energies ---
+        // Sum the pair terms across MPI ranks (identity without a reducer), then add the terms
+        // every rank computed in full.
+        if let Some(reduce) = self.nonbonded_reducer.as_mut() {
+            reduce(&mut self.nonbonded_storage);
+        }
+        let pair_dhdl_lj = self.nonbonded_storage.dhdl_lj;
+        let pair_dhdl_crf = self.nonbonded_storage.dhdl_crf;
+        let local = std::mem::replace(&mut self.local_storage, ForceStorage::new(0));
+        self.nonbonded_storage.merge(&local);
+        self.local_storage = local;
+        let pert_nb_dhdl = pert_nb_dhdl + pair_dhdl_lj + pair_dhdl_crf;
+        let pert_nb_dhdl_lj = pert_nb_dhdl_lj + pair_dhdl_lj;
+        let pert_nb_dhdl_crf = pert_nb_dhdl_crf + pair_dhdl_crf;
         {
             let state = conf.current_mut();
             let has_bonded = !bonded_result.forces.is_empty();

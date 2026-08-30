@@ -31,13 +31,14 @@ rand_distr = { workspace = true }
 
 # MPI support (optional)
 mpi = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
 
 # CUDA support (optional)
 cudarc = { workspace = true, optional = true }
 
 [features]
 default = []
-use-mpi = ["mpi", "gromos-forces/use-mpi"]
+use-mpi = ["mpi", "libc", "gromos-forces/use-mpi"]
 use-cuda = ["cudarc"]
 ml = ["gromos-forces/ml", "gromos-run/ml"]
 

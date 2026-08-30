@@ -278,7 +278,8 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 **1.9 — Advanced sampling** — stubs exist; delegatable
 - [ ] EDS — `V_mixed = −1/β·ln(Σ exp(−β(Eᵢ−eir_i)))`
 - [ ] GaMD — `V_boost = k·(V−E_threshold)²`
-- [ ] REMD — MPI parallel tempering; feature-gated MPI
+- [ ] REMD — MPI parallel tempering; the dead `integrators::{mpi, remd_mpi}` modules were removed
+      2026-08-30, the MPI seam is now `Forcefield::pair_partition` / `RunOptions::pair_partition`
 
 ---
 
@@ -1091,7 +1092,9 @@ repeats), `scripts/make_solvated_box.py` (24k-atom production box via `sim_box`)
 - [x] O(N) cell list confirmed and fixed (was pruning nothing: grid from IMD `SIZE`, distance-pruned).
 - [ ] 81 000-atom box (`make_solvated_box.py --replicate 3`); remaining serial phases: SHAKE/SETTLE
       over molecules, integration, thermostat.
-- [ ] Phase 4 MPI — blocked on four build-plumbing items (BENCHMARKING.md §6.2); single node can
+- [x] Phase 4 MPI — done 2026-08-30 (0.0.38): `md --features use-mpi` decomposes the pair terms across
+      ranks on the algorithm sequence (`Forcefield::pair_partition` + reducer), `np=1` bit-identical
+      to serial, `np=2/4` identical energies; scaling table in BENCHMARKING.md §6.3. Single node can
       only prove correctness, not speed. Phase X (integrated GPU) recorded as a future spin-off.
 - [ ] Criterion micro-benches (`cargo bench`) remain the per-kernel regression guard; not yet baselined.
 
