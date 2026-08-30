@@ -354,53 +354,37 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     println!("#  ATNM  MRES  PANM   IAC      MASS        CG  CGC   INE");
     println!("#                                                     INE14");
 
+    // gromos++ OutTopology layout: INE and its list on the atom line, INE14 and its list on
+    // the next, six indices per line.
+    let list = |prefix_width: usize, items: &[usize]| {
+        for (k, x) in items.iter().enumerate() {
+            if k % 6 == 0 && k != 0 {
+                println!();
+                print!("{:width$}", "", width = prefix_width);
+            }
+            print!(" {:5}", x + 1);
+        }
+        println!();
+    };
     for i in 0..n_atoms {
-        let ne = topo.exclusions.get(i).map_or(0, |e| e.len());
-        println!(
-            "{:6}{:5} {:>5}{:5}{:10.5}{:12.5}{:3}{:4}",
+        let mut excls: Vec<usize> = topo.exclusions.get(i).cloned().unwrap_or_default();
+        excls.sort();
+        let mut pairs: Vec<usize> = topo.one_four_pairs.get(i).cloned().unwrap_or_default();
+        pairs.sort();
+        print!(
+            "{:6} {:4} {:4} {:3} {:8.5} {:8.5} {:2} {:5}",
             i + 1,
             topo.residue_numbers[i],
             topo.atom_names[i],
-            topo.iac[i],
+            topo.iac[i] + 1, // 0-based inside, 1-based in the file
             topo.masses[i],
             topo.charges[i],
             topo.chargegroup_codes[i],
-            ne
+            excls.len()
         );
-        // Print exclusion list
-        if let Some(excls) = topo.exclusions.get(i) {
-            if !excls.is_empty() {
-                let mut sorted: Vec<usize> = excls.clone();
-                sorted.sort();
-                for (j, &e) in sorted.iter().enumerate() {
-                    print!("{:5}", e + 1);
-                    if (j + 1) % 20 == 0 {
-                        println!();
-                    }
-                }
-                if !sorted.len().is_multiple_of(20) {
-                    println!();
-                }
-            }
-        }
-        // Print 1-4 pairs
-        let n14 = topo.one_four_pairs.get(i).map_or(0, |p| p.len());
-        println!("   {:4}", n14);
-        if let Some(pairs) = topo.one_four_pairs.get(i) {
-            if !pairs.is_empty() {
-                let mut sorted: Vec<usize> = pairs.clone();
-                sorted.sort();
-                for (j, &p) in sorted.iter().enumerate() {
-                    print!("{:5}", p + 1);
-                    if (j + 1) % 20 == 0 {
-                        println!();
-                    }
-                }
-                if !sorted.len().is_multiple_of(20) {
-                    println!();
-                }
-            }
-        }
+        list(47, &excls);
+        print!("{:46}{}", "", pairs.len());
+        list(45, &pairs);
     }
     println!("END");
 
@@ -478,7 +462,7 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     println!("END");
 
     // IMPDIHEDRALTYPECODE
-    println!("IMPDIHEDRALTYPECODE");
+    println!("IMPDIHEDRALTYPE");
     println!("# NQTY: number of improper dihedral types");
     println!("{:5}", topo.improper_dihedral_parameters.len());
     println!("#  CQ     Q0");
@@ -517,7 +501,7 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     println!("END");
 
     // TORSDIHEDRALTYPECODE
-    println!("TORSDIHEDRALTYPECODE");
+    println!("TORSDIHEDRALTYPE");
     println!("# NPTY: number of dihedral types");
     println!("{:5}", topo.dihedral_parameters.len());
     println!("#   CP     PD    NP");
@@ -557,6 +541,14 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     if !topo.lj_parameters.is_empty() {
         let n_types = topo.atom_type_names.len();
         let n_pairs = n_types * (n_types + 1) / 2;
+        println!("CROSSDIHEDRALH");
+        println!("#  NPHIH: number of cross dihedrals involving H atoms in solute");
+        println!("    0");
+        println!("END");
+        println!("CROSSDIHEDRAL");
+        println!("#  NPPC: number of cross dihedrals NOT involving H atoms in solute");
+        println!("    0");
+        println!("END");
         println!("LJPARAMETERS");
         println!("# NRATT2: number of LJ parameter pairs");
         println!("{:5}", n_pairs);
@@ -608,6 +600,10 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
     }
     println!("END");
 
+    println!("LJEXCEPTIONS");
+    println!("# NEX: number of exceptions");
+    println!("    0");
+    println!("END");
     // SOLVENTATOM
     if !topo.solvent_atoms.is_empty() {
         println!("SOLVENTATOM");
@@ -619,7 +615,7 @@ fn write_combined(topo: &CombinedTopology, title: &str) {
                 "{:5} {:>5}{:5}{:10.5}{:12.5}",
                 idx + 1,
                 sa.name,
-                sa.iac,
+                sa.iac + 1,
                 sa.mass,
                 sa.charge
             );

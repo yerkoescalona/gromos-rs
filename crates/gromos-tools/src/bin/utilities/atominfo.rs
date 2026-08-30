@@ -87,21 +87,26 @@ fn main() {
     eprintln!("# Showing atoms: {}-{}", range_start + 1, range_end);
     eprintln!();
 
+    // gromos++ `atominfo` columns: Atom, GROMOS number, Residue, ResName, AtomName, IAC, Charge, Mass
+    println!("ATOMS");
     println!(
-        "{:>8} {:>10} {:>12} {:>8}",
-        "Atom#", "Mass", "Charge", "IAC"
+        "{:>13}{:>10}{:>10}{:>10}{:>10}{:>12}{:>9}{:>11}",
+        "Atom", "GROMOSnr", "Residue", "ResName", "AtomName", "IAC", "Charge", "Mass"
     );
-    println!("{}", "-".repeat(50));
-
     for i in range_start..range_end {
         println!(
-            "{:8} {:10.4} {:12.6} {:8}",
+            "{:>13}{:>10}{:>10}{:>10}{:>10}{:>12}{:>9.3}{:>11.4}",
+            format!("1:{}", i + 1),
             i + 1,
-            topo.mass[i],
+            topo.residue_nr(i).unwrap_or(0),
+            topo.residue_name(i).unwrap_or("?"),
+            topo.atom_name(i).unwrap_or("?"),
+            topo.iac[i] + 1,
             topo.charge[i],
-            topo.iac[i]
+            topo.mass[i]
         );
     }
+    println!("END");
 
     eprintln!();
     eprintln!("# Listed {} atoms", range_end - range_start);

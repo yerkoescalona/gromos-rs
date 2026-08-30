@@ -344,9 +344,13 @@ SOLUTEATOM
 # ATNM MRES PANM IAC   MASS      CG   CGC INE IEXCL
 4
     1    1   C     6  12.000000  0.000000  0  2  2  3
+                                              0
     2    1   H     1   1.000000  0.000000  0  1  1
+                                              0
     3    1   H     1   1.000000  0.000000  0  1  1
+                                              0
     4    1   H     1   1.000000  0.000000  0  0
+                                              0
 END
 BONDSTRETCHTYPE
 # CB        CHB       B0

@@ -484,8 +484,57 @@ impl PtpWriter {
         }
         writeln!(self.file, "TITLE\n{title}\nEND")?;
         self.write_perturbed_atoms(topology_a, topology_b, alpha_lj, alpha_crf)?;
-        writeln!(self.file, "PERTURBATIONPARAMETERS\n# ALPHLJ  ALPHCRF")?;
-        writeln!(self.file, "  {alpha_lj:8.3}  {alpha_crf:8.3}\nEND")?;
+        // The other blocks gromos++ `make_pt_top` writes, empty: this writer perturbs atom
+        // parameters only (PLAN.md: bonded perturbations come from gromos++ or by hand).
+        for (block, what, cols) in [
+            (
+                "PERTATOMPAIR",
+                "perturbed atom pairs",
+                "#    i     j  i(A)  i(B)",
+            ),
+            (
+                "PERTBONDSTRETCH",
+                "perturbed bonds",
+                "#    i     j t(A) t(B)",
+            ),
+            (
+                "PERTBONDSTRETCHH",
+                "perturbed bonds",
+                "#    i     j t(A) t(B)",
+            ),
+            (
+                "PERTBONDANGLE",
+                "perturbed bond angles",
+                "#    i     j     k t(A) t(B)",
+            ),
+            (
+                "PERTBONDANGLEH",
+                "perturbed bond angles",
+                "#    i     j     k t(A) t(B)",
+            ),
+            (
+                "PERTIMPROPERDIH",
+                "perturbed improper dihedrals",
+                "#    i     j     k     l t(A) t(B)",
+            ),
+            (
+                "PERTIMPROPERDIHH",
+                "perturbed improper dihedrals",
+                "#    i     j     k     l t(A) t(B)",
+            ),
+            (
+                "PERTPROPERDIH",
+                "perturbed dihedrals",
+                "#    i     j     k     l t(A) t(B)",
+            ),
+            (
+                "PERTPROPERDIHH",
+                "perturbed dihedrals",
+                "#    i     j     k     l t(A) t(B)",
+            ),
+        ] {
+            writeln!(self.file, "{block}\n# number of {what}\n0\n{cols}\nEND")?;
+        }
         Ok(())
     }
 
@@ -496,30 +545,39 @@ impl PtpWriter {
         alpha_lj: f64,
         alpha_crf: f64,
     ) -> io::Result<()> {
-        writeln!(self.file, "PERTURBEDATOM")?;
-        writeln!(
-            self.file,
-            "#  NR  IACNA  IACNB  MASNA  MASNB  CHARGA  CHARGB  ALPHLJ  ALPHCRF"
-        )?;
+        // gromosXX / gromos++ layout (`PERTATOMPARAM`): NR RES NAME IAC(A) MASS(A) CHARGE(A)
+        // IAC(B) MASS(B) CHARGE(B) ALJ ACRF, IACs 1-based in the file.
+        let mut lines = Vec::new();
         for i in 0..a.num_atoms() {
             let (iac_a, iac_b) = (a.iac[i], b.iac[i]);
             let (ma, mb) = (a.mass[i], b.mass[i]);
             let (ca, cb) = (a.charge[i], b.charge[i]);
             if iac_a != iac_b || (ma - mb).abs() > 1e-6 || (ca - cb).abs() > 1e-6 {
-                writeln!(
-                    self.file,
-                    "{:5} {:6} {:6} {:7.2} {:7.2} {:8.3} {:8.3} {:7.3} {:8.3}",
+                lines.push(format!(
+                    "{:5}{:5}{:>6}{:4}{:11.5}{:11.5}{:4}{:11.5}{:11.5}{:11.2}{:11.2}",
                     i + 1,
-                    iac_a,
-                    iac_b,
+                    a.residue_nr(i).unwrap_or(1),
+                    a.atom_name(i).unwrap_or(""),
+                    iac_a + 1,
                     ma,
-                    mb,
                     ca,
+                    iac_b + 1,
+                    mb,
                     cb,
                     alpha_lj,
                     alpha_crf
-                )?;
+                ));
             }
+        }
+        writeln!(self.file, "PERTATOMPARAM")?;
+        writeln!(self.file, "# number of perturbed atoms")?;
+        writeln!(self.file, "{:5}", lines.len())?;
+        writeln!(
+            self.file,
+            "#  NR  RES  NAME IAC(A)  MASS(A) CHARGE(A) IAC(B)  MASS(B) CHARGE(B)       ALJ       ACRF"
+        )?;
+        for l in lines {
+            writeln!(self.file, "{l}")?;
         }
         writeln!(self.file, "END")
     }

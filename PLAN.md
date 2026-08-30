@@ -80,7 +80,9 @@ gromosXX binary to 1e-7 and against the suite's hard-coded table with its own δ
 restraint value is `#[ignore]`d until 1.6 lands. It caught NSLFEXCL being parsed and never
 consumed (fixed 0.0.35).
 
-(No reference tests yet for `gromos-analysis` / `gromos-tools` — see P2 + cross-cutting below.)
+`gromos-tools` (2026-08-30): nine reference tests against gromos++ output — `make_top` (2), `com_top`,
+`red_top`, `make_pt_top`, `sim_box`, `copy_box`, `inbox`, `ion` (`crates/gromos-tools/tests/`, the exact
+gromos++ command in each fixture README). `gromos-analysis`: none yet (P2 / cross-cutting below).
 
 ---
 
@@ -329,6 +331,23 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
       posres / distanceres / `.trg` round trips, `gromos-run` dof / constraint selection / bundle / prepare —
       52 tests, every `src` file of those crates now has at least one.
 - [ ] Split large files: `nonbonded.rs` (~1500 LOC), `gromos-io/topology.rs` (~1200 LOC) — parked
+
+**2.4b — gromos-tools audit** — done 2026-08-30 (0.0.37); table in `crates/gromos-tools/.claude/CONTEXT.md`
+- [x] Every tool run on real inputs; where gromos++ has the same program, outputs compared. Found and
+      fixed: `make_top` was not gromos++'s algorithm (atoms dropped around end groups, exclusions from
+      connectivity, `…TYPECODE` block names gromos++ rejects) → ported from `utils/make_top.h`, reads back
+      identical for a peptide and a two-MTB methanol; `com_top` wrote 0-based IACs; `red_top` wrote no
+      topology; `copy_box`/`inbox` crashed on gromosXX titles and dropped the solvent; `ion` used a
+      different potential; `make_pt_top` wrote an unknown block; `atominfo` 0-based IACs.
+- [x] Reader defects the audit exposed (they affect every consumer, not just the tools): `SOLUTEATOM`
+      exclusions beyond the first line were dropped (gromos++ wraps six per line — every protein!), a
+      counts-on-their-own-lines layout lost all exclusions silently, `SOLUTEMOLECULES` with several
+      entries per line was rejected, multi-line `TITLE` blocks were rejected by the trajectory reader.
+      All read as token streams now, like gromosXX.
+- [ ] Still stand-ins with other semantics than gromos++'s program of the same name (documented in the
+      CONTEXT table): `gch`, `check_box`, `bin_box`, `unify_box`, `pert_top`, `con_top`, `link_top`,
+      `addvirt_top`, `prep_eds`, `prep_noe`, `amber2gromos`, `ran_box`, `ran_solvation`. Port on demand.
+- [ ] `check_top`: gromos++'s dihedral-type cross-check against the building blocks.
 
 **2.5 — Stub cleanup** — parked
 - [x] `frameout`, `ener`, `rmsd`, `nhoparam`, `ext_ti_ana`, `bar`, `ext_ti_merge` — real implementations

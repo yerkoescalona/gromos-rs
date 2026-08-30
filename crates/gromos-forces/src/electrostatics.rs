@@ -606,8 +606,10 @@ fn fft_3d_forward(
 
     // Create FFTW plan and execute
     let mut output = vec![c64::new(0.0, 0.0); nx * ny as f64 * (nz / 2 + 1)];
-    let mut plan: R2CPlan64 = R2CPlan::aligned(&[nx, ny, nz], Flag::MEASURE).expect("FFTW real-to-complex plan for the PME grid");
-    plan.r2c(&mut input, &mut output).expect("FFTW forward transform of the PME grid");
+    let mut plan: R2CPlan64 = R2CPlan::aligned(&[nx, ny, nz], Flag::MEASURE)
+        .expect("FFTW real-to-complex plan for the PME grid");
+    plan.r2c(&mut input, &mut output)
+        .expect("FFTW forward transform of the PME grid");
 
     // Convert to 3D complex grid
     let mut complex_grid = vec![vec![vec![Complex64::new(0.0, 0.0); nz / 2 + 1]; ny]; nx];
@@ -717,8 +719,10 @@ fn fft_3d_inverse(
 
     // Execute inverse FFT
     let mut output = vec![0.0; nx * ny as f64 * nz as f64];
-    let mut plan: C2RPlan64 = C2RPlan::aligned(&[nx, ny, nz], Flag::MEASURE).expect("FFTW complex-to-real plan for the PME grid");
-    plan.c2r(&mut input, &mut output).expect("FFTW backward transform of the PME grid");
+    let mut plan: C2RPlan64 = C2RPlan::aligned(&[nx, ny, nz], Flag::MEASURE)
+        .expect("FFTW complex-to-real plan for the PME grid");
+    plan.c2r(&mut input, &mut output)
+        .expect("FFTW backward transform of the PME grid");
 
     // Normalize and convert to 3D grid
     let norm = 1.0 / (nx * ny as f64 * nz as f64);

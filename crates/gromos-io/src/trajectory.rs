@@ -294,15 +294,20 @@ impl TrajectoryReader {
             ));
         }
 
-        buffer.clear();
-        reader.read_line(buffer)?;
-        let title = buffer.trim().to_string();
-
-        buffer.clear();
-        reader.read_line(buffer)?;
-        if !buffer.trim().starts_with("END") {
-            return Err(IoError::FormatError("Expected END after TITLE".to_string()));
+        // The title runs until END and may span several lines (gromosXX writes a blank line
+        // and "final configuration" into its TITLE block).
+        let mut title_lines = Vec::new();
+        loop {
+            buffer.clear();
+            if reader.read_line(buffer)? == 0 {
+                return Err(IoError::FormatError("Expected END after TITLE".to_string()));
+            }
+            if buffer.trim() == "END" {
+                break;
+            }
+            title_lines.push(buffer.trim().to_string());
         }
+        let title = title_lines.join("\n").trim().to_string();
 
         Ok(title)
     }

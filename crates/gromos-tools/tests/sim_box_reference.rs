@@ -45,15 +45,15 @@ fn parse(text: &str) -> Cnf {
                     .map(|x| x.parse().unwrap())
                     .collect();
                 atoms.push((res, name, [v[0], v[1], v[2]]));
-            }
+            },
             "GENBOX" => {
                 genbox_line += 1;
                 if genbox_line == 2 {
                     let v: Vec<f64> = t.split_whitespace().map(|x| x.parse().unwrap()).collect();
                     box_dims = [v[0], v[1], v[2]];
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     Cnf { atoms, box_dims }
@@ -90,9 +90,8 @@ fn methanol_in_spc_matches_gromospp() {
         String::from_utf8_lossy(&out.stderr)
     );
     let ours = parse(&String::from_utf8_lossy(&out.stdout));
-    let theirs = parse(
-        &std::fs::read_to_string(data().join("meoh_spc_minwall1.gromospp.cnf")).unwrap(),
-    );
+    let theirs =
+        parse(&std::fs::read_to_string(data().join("meoh_spc_minwall1.gromospp.cnf")).unwrap());
 
     for d in 0..3 {
         assert!(
@@ -121,7 +120,10 @@ fn methanol_in_spc_matches_gromospp() {
     assert_eq!(mine.len(), ref_.len());
     for (a, b) in mine.iter().zip(&ref_) {
         for d in 0..3 {
-            assert!((a[d] - b[d]).abs() < 1e-8, "solvent position {a:?} vs gromos++ {b:?}");
+            assert!(
+                (a[d] - b[d]).abs() < 1e-8,
+                "solvent position {a:?} vs gromos++ {b:?}"
+            );
         }
     }
 }

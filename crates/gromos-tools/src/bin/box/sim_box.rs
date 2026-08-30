@@ -449,7 +449,10 @@ fn main() {
             }
         }
     }
-    eprintln!("  Total solvent atoms before filtering: {}", all_solvent.len());
+    eprintln!(
+        "  Total solvent atoms before filtering: {}",
+        all_solvent.len()
+    );
 
     // Atoms per solvent molecule from the template's residue numbering (3 for water).
     let atoms_per_molecule = {
@@ -469,7 +472,8 @@ fn main() {
     let thresh2 = sb_args.thresh * sb_args.thresh;
     let min_init = target_box.length_squared();
     for mol_idx in 0..num_molecules {
-        let mol_atoms = &all_solvent[mol_idx * atoms_per_molecule..(mol_idx + 1) * atoms_per_molecule];
+        let mol_atoms =
+            &all_solvent[mol_idx * atoms_per_molecule..(mol_idx + 1) * atoms_per_molecule];
         let cog = calc_cog(mol_atoms);
         let check = nearest_image(cog, target_box);
         if check != cog {

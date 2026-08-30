@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.37] (2026-08-30)
+
+### Fixed
+
+- **`make_top` is now a port of gromos++'s `make_top`** (`utils/make_top.h`): begin/end groups
+  replace atoms the way gromos++ does (the old code dropped atoms of the residue after an end
+  group and skipped atoms between residues), exclusions come from the building blocks (not from
+  connectivity), 1-4 pairs from the bond graph (`get14s`), bonded terms ordered as gromos++'s sets,
+  several `@build` files, `OutTopology` block names and layout (`IMPDIHEDRALTYPE`,
+  `TORSDIHEDRALTYPE` — the old `…TYPECODE` names made gromos++ reject the file), `CROSSDIHEDRAL*`
+  and `LJEXCEPTIONS` blocks. For `NH3+ ALA GLY COO-` and a two-MTB methanol the result reads back
+  identical to gromos++'s and gromos++'s reader accepts it.
+- **`com_top`** wrote IACs 0-based (solute and solvent) and a `SOLUTEATOM` layout our own reader
+  read as "no exclusions"; block names as above. Reads back identical to gromos++'s output.
+- **The topology reader read `SOLUTEATOM` line-wise**: exclusions beyond the first line (gromos++
+  wraps six per line — every protein) were dropped, and a layout with the counts on their own lines
+  lost all exclusions silently. It now reads the block as the token stream gromosXX reads.
+  `SOLUTEMOLECULES` with several entries per line (gromos++'s layout) was rejected.
+- **The trajectory reader rejected multi-line `TITLE` blocks** (gromosXX's own `final configuration`
+  files), which is why `copy_box` and `inbox` crashed on them.
+- **`red_top`** wrote a comment list instead of a topology; **`copy_box`** dropped the solvent and
+  wrote the box inside `POSITION`; **`inbox`** wrote nothing. All three rewritten to gromos++'s
+  semantics (`@atoms 1:1-6`, `@dir x:2,y:2`, nearest image to the box centre) with `GENBOX` output.
+- **`ion`** chose a different water than gromos++: the potential now includes every atom of every
+  other molecule within the cutoff, Coulomb shifted by −1/R_c, as `utils::Energy` computes it.
+- **`make_pt_top`** wrote a `PERTURBEDATOM` block no reader knows; now `PERTATOMPARAM` (+ the empty
+  bonded blocks) as gromos++ writes.
+- **`atominfo`** printed 0-based IACs; now gromos++'s columns.
+
+### Added
+
+- `gromos_io::topology::write_parsed_topology`: a complete writer in gromos++ `OutTopology` layout —
+  what it writes reads back identical (used by `red_top`).
+- Reference tests against gromos++ output for `make_top` (2), `com_top`, `red_top`, `make_pt_top`,
+  `copy_box`, `inbox`, `ion` (`crates/gromos-tools/tests/`), fixtures with the exact gromos++
+  commands in their READMEs. The tools audit table lives in `crates/gromos-tools/.claude/CONTEXT.md`.
+
 ## [0.0.36] (2026-08-30)
 
 ### Fixed

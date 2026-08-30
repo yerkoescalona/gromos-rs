@@ -164,17 +164,34 @@ fn main() {
             atoms[ow_idx].pos.z,
         );
 
+        // gromos++ `ion` (utils::Energy, ε = 1 so no reaction field): the electrostatic
+        // energy of the molecule's first atom with every atom of every *other* molecule
+        // within the cutoff, each pair shifted by −1/R_c. Solvent charges come from the
+        // topology's SOLVENTATOM block.
         let mut phi = 0.0;
-        #[allow(clippy::needless_range_loop)] // one index over several arrays
-        for j in 0..n_solute {
-            let q_j = parsed_topo.charges[j];
-            if q_j.abs() < 1e-10 {
+        let charge_of = |k: usize| -> f64 {
+            if k < n_solute {
+                parsed_topo.charges[k]
+            } else {
+                parsed_topo
+                    .solvent_atoms
+                    .get((k - n_solute) % atoms_per_solvent)
+                    .map_or(0.0, |s| s.charge)
+            }
+        };
+        let own = ow_idx..ow_idx + atoms_per_solvent;
+        for (k, atom) in atoms.iter().enumerate() {
+            if own.contains(&k) {
                 continue;
             }
-            let atom_pos = (atoms[j].pos.x, atoms[j].pos.y, atoms[j].pos.z);
+            let q_k = charge_of(k);
+            if q_k.abs() < 1e-10 {
+                continue;
+            }
+            let atom_pos = (atom.pos.x, atom.pos.y, atom.pos.z);
             let d2 = dist_sq_pbc(ow_pos, atom_pos, &box_dim);
             if d2 < cutoff_sq && d2 > 1e-10 {
-                phi += coulomb_k * q_j / d2.sqrt();
+                phi += coulomb_k * q_k * (1.0 / d2.sqrt() - 1.0 / cutoff);
             }
         }
         potentials.push(phi);
