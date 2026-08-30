@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.43] (2026-08-30)
+
+The reference suite could not have caught the defects of 0.0.42: all 44 systems use one temperature
+bath, one value per line, and molecules that are never wrapped. This release closes that blind spot
+and fixes the two further defects the new references exposed.
+
+### Added
+
+- **Three reference systems for the input styles real GROMOS files come in**
+  (`crates/gromos-md/tests/gromosXX_references/README-livecoms.md`), each generated with the same
+  gromosXX binary as the rest of the suite: `aladip_multibath` (`NBATHS=2` + `DOFSET`, all bonds
+  constrained), `aladip_multibath_collapsed` (the same run with `NONBONDED`/`CONSTRAINT` wrapped as
+  real files write them — `TOLA2 = 1e-10` on the value stream), and `aladip_wrapped` (the solute
+  split across the periodic boundary, 3.80 nm between two of its atoms in a 3.767 nm box, charge
+  groups whole). gromosXX gives `aladip_multibath` and `aladip_wrapped` **the same energies** — the
+  wrap is pure bookkeeping — which is exactly the property an interaction that skips the minimum
+  image breaks.
+- **The reference harness now compares the final configuration** (`expected/final.conf`, positions
+  and velocities) and requires the frame counts to match. That is where a wrong step count shows —
+  the per-step frames look right either way — and it is what let the NSTLIM+1 loop hide. Positions
+  are compared modulo a periodic image; NTB = −1 systems skip the coordinate comparison, because
+  gromos-rs writes the rotated triclinic frame and gromosXX the truncated-octahedron one.
+
+### Fixed
+
+- **Charge groups are put back into the box each step** (`LatticeShift`, gromosXX's
+  `Lattice_Shift_Tracker`: solute groups by their centre of geometry, solvent groups by their first
+  atom, immediately before the force field). Without it our coordinates drifted out of the box for
+  ever, so the written configuration and the charge-group cutoff saw a different image than
+  gromosXX's.
+- **A constrained bond is no longer also a force term.** With `NTC ≥ 2` gromosXX moves those bonds
+  out of the bond list when it creates the constraints, so they contribute no energy and no force;
+  we computed them as well, which on `aladip_multibath` (NTC=3) put 19.36 kJ/mol of bond energy into
+  a term gromosXX reports as exactly zero. `Topology::constrained_bonds` now carries the set and the
+  quartic and harmonic bond loops skip it.
+
 ## [0.0.42] (2026-08-30)
 
 Everything in this release came out of running the **GROMOS LiveCoMS tutorial suite**

@@ -727,6 +727,12 @@ pub struct Topology {
     /// Constraint template within one solvent molecule.
     pub solvent_constraint_template: Vec<SolventConstraintTemplate>,
 
+    /// Solute bonds that a constraint algorithm owns (`CONSTRAINT` NTC ≥ 2), as ordered global
+    /// atom pairs. gromosXX moves these out of the bond *force* list when it creates the
+    /// constraints (`create_constraints.cc`), so a constrained bond contributes no potential
+    /// energy and no force — its length is imposed instead. Empty for NTC = 1.
+    pub constrained_bonds: std::collections::HashSet<(usize, usize)>,
+
     /// Charge-group codes (CGC) for solute atoms, from the topology CGSOLUTE block.
     pub chargegroup_codes: Vec<usize>,
 
@@ -785,6 +791,7 @@ impl Topology {
             lj_parameters: Vec::new(),
             solvent_atom_template: Vec::new(),
             solvent_constraint_template: Vec::new(),
+            constrained_bonds: std::collections::HashSet::new(),
             chargegroup_codes: Vec::new(),
             distance_restraints: Vec::new(),
             perturbed_distance_restraints: Vec::new(),

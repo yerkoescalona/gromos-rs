@@ -29,9 +29,10 @@ use gromos_forces::{
 use gromos_integrators::{
     algorithms::{
         BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, BerendsenThermostatParams,
-        EnergyCalculation, Forcefield, LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm,
-        NoseHooverThermostat, PressureCalculation, RemoveCOMMotion, SettleAlgorithm,
-        ShakeAlgorithm, SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
+        EnergyCalculation, Forcefield, LatticeShift, LeapFrogPosition, LeapFrogVelocity,
+        LincsAlgorithm, NoseHooverThermostat, PressureCalculation, RemoveCOMMotion,
+        SettleAlgorithm, ShakeAlgorithm, SteepestDescentAlgorithm, TemperatureCalculation,
+        VirialType,
     },
     constraints::ShakeParameters,
 };
@@ -424,6 +425,7 @@ pub fn instantiate(
             AlgorithmSpec::Orchestrator { terms } => {
                 seq.push(instantiate_orchestrator(terms, topo, periodicity)?);
             },
+            AlgorithmSpec::LatticeShift => seq.push(Box::new(LatticeShift::new())),
             AlgorithmSpec::LeapFrogVelocity => seq.push(Box::new(LeapFrogVelocity::new())),
             AlgorithmSpec::Thermostat { algorithm, baths } => {
                 let first = baths
@@ -816,6 +818,18 @@ mod tests {
         for dir in dirs {
             let name = dir.file_name().unwrap().to_string_lossy().to_string();
             let Some(loaded) = load(&dir) else { continue };
+            // The legacy builder is the pre-3.9 path this test uses as an oracle, and it only ever
+            // built a single temperature bath (`imd.temp_bath.first()`). For an input with several
+            // baths there is nothing to compare against — the recipe path is checked directly
+            // against gromosXX by `test_gromosXX_references.rs` instead.
+            if loaded
+                .imd
+                .temp_bath
+                .first()
+                .is_some_and(|b| b.temp0.len() > 1)
+            {
+                continue;
+            }
             let steps = loaded.imd.nstlim.min(10);
             let dt = loaded.imd.dt;
 

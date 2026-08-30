@@ -18,6 +18,12 @@ pub fn calculate_bond_forces_quartic(
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for bond in topo.all_bonds_global() {
+        // gromosXX moves a constrained bond out of the force list when it creates the
+        // constraints (`create_constraints.cc`): its length is imposed, so it contributes
+        // neither energy nor force. Empty set for NTC = 1.
+        if topo.constrained_bonds.contains(&(bond.i, bond.j)) {
+            continue;
+        }
         if bond.bond_type >= topo.bond_parameters.len() {
             continue;
         }
@@ -64,6 +70,12 @@ pub fn calculate_bond_forces_harmonic(
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for bond in topo.all_bonds_global() {
+        // gromosXX moves a constrained bond out of the force list when it creates the
+        // constraints (`create_constraints.cc`): its length is imposed, so it contributes
+        // neither energy nor force. Empty set for NTC = 1.
+        if topo.constrained_bonds.contains(&(bond.i, bond.j)) {
+            continue;
+        }
         if bond.bond_type >= topo.bond_parameters.len() {
             continue;
         }

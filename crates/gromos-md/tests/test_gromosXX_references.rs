@@ -23,6 +23,11 @@ const ENERGY_REL_TOL: f64 = 1e-8;
 const ENERGY_ABS_TOL: f64 = 1e-10; // for near-zero energies
 const FORCE_ABS_TOL: f64 = 1e-6; // kJ/(mol*nm)
 const DHDL_REL_TOL: f64 = 1e-6; // dH/dλ relative tolerance
+/// The final configuration after the whole run: the frame-by-frame agreement is 1e-8 relative in
+/// the energies, and the positions accumulate that over every step, so this is looser than the
+/// per-step position tolerance.
+const FINAL_POSITION_ABS_TOL: f64 = 1e-6; // nm
+const FINAL_VELOCITY_ABS_TOL: f64 = 1e-4; // nm/ps
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -309,11 +314,13 @@ fn run_reference(system: &str) {
     let expected = parse_energy03(&sys_dir.join("expected/energies.tre"));
     let actual = parse_energy03(&tre);
 
-    // gromos-rs writes step 0..NSTLIM (inclusive), GROMOS writes 0..NSTLIM-1;
-    // compare the frames that exist in both outputs.
-    assert!(
-        actual.len() >= expected.len(),
-        "{system}: too few frames (expected {}, got {})",
+    // Both engines run exactly NSTLIM steps and write one frame per step, so the counts must
+    // match. (They did not until 0.0.42: our loop ran NSTLIM+1 steps, and this assertion used to
+    // allow the extra frame — which is precisely why the step count went unnoticed.)
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "{system}: frame count differs from gromosXX (expected {}, got {})",
         expected.len(),
         actual.len()
     );
@@ -428,7 +435,142 @@ fn run_reference(system: &str) {
         }
     }
 
+    // ── Final configuration ──────────────────────────────────────────────────
+    // The end state is what a continuation run starts from, and it is the only place a wrong
+    // step count shows up — the per-step frames look right either way.
+    let expected_fin = sys_dir.join("expected/final.conf");
+    if expected_fin.exists() {
+        let ours = parse_configuration(&out.join("final.conf"));
+        let theirs = parse_configuration(&expected_fin);
+        // Which periodic image a configuration file records is not physics: gromosXX puts charge
+        // groups back into the box at the start of each step, so an atom that the last position
+        // update pushed just outside is written on one side by one engine and on the other by the
+        // other. Differences are compared modulo a box vector; anything else is a real deviation.
+        let pbc = reference_periodicity(&expected_fin);
+        // NTB = −1: the engine works (and writes) in the rotated triclinic frame that
+        // `truncoct_triclinic_box` produces, gromosXX writes the truncated-octahedron frame, so the
+        // two configurations are the same structure in different axes. The energies and forces of
+        // this system are compared above; its coordinates are not (PLAN.md 1.5b).
+        let same_frame = parse_box(&expected_fin).map(|(ntb, _)| ntb) != Some(-1);
+        for (what, a, b) in [
+            ("position", &ours.0, &theirs.0),
+            ("velocity", &ours.1, &theirs.1),
+        ] {
+            if b.is_empty() || !same_frame {
+                continue;
+            }
+            assert_eq!(
+                a.len(),
+                b.len(),
+                "{system}: final {what} count differs from gromosXX"
+            );
+            for (i, (x, y)) in a.iter().zip(b).enumerate() {
+                for (c, (xc, yc)) in x.iter().zip(y).enumerate() {
+                    let tol = if what == "position" {
+                        FINAL_POSITION_ABS_TOL
+                    } else {
+                        FINAL_VELOCITY_ABS_TOL
+                    };
+                    let mut diff = xc - yc;
+                    if what == "position" {
+                        if let Some(p) = &pbc {
+                            // fold the whole difference vector through the lattice, then take
+                            // this component (a truncated octahedron's images are not axis shifts)
+                            let d = p.nearest_image(
+                                gromos_core::math::Vec3::new(x[0] - y[0], x[1] - y[1], x[2] - y[2]),
+                                gromos_core::math::Vec3::ZERO,
+                            );
+                            diff = [d.x, d.y, d.z][c];
+                        }
+                    }
+                    assert!(
+                        diff.abs() <= tol,
+                        "{system}: final {what} of atom {} component {c}: {xc:.10e} vs gromosXX {yc:.10e} (tol {tol:.1e})",
+                        i + 1
+                    );
+                }
+            }
+        }
+    }
+
     let _ = fs::remove_dir_all(&out);
+}
+
+/// The boundary of a reference `.cnf`, built from its GENBOX block the way the engine builds it
+/// (NTB = −1 is a truncated octahedron, whose periodic images are not axis-aligned shifts).
+fn reference_periodicity(path: &Path) -> Option<gromos_core::math::Periodicity> {
+    use gromos_core::math::{Periodicity, Rectangular, Triclinic, Vec3};
+    let (ntb, edges) = parse_box(path)?;
+    if edges[0] <= 0.0 {
+        return None;
+    }
+    let dims = Vec3::new(edges[0], edges[1], edges[2]);
+    Some(match ntb {
+        -1 => Periodicity::Triclinic(Triclinic::new(gromos_core::math::truncoct_triclinic_box(
+            gromos_core::math::Mat3::from_diagonal(dims),
+            true,
+        ))),
+        2 => Periodicity::Triclinic(Triclinic::new(gromos_core::math::Mat3::from_diagonal(dims))),
+        0 => return None,
+        _ => Periodicity::Rectangular(Rectangular::new(dims)),
+    })
+}
+
+/// NTB and the box edge lengths of a `.cnf`'s GENBOX block, if it has one.
+fn parse_box(path: &Path) -> Option<(i32, [f64; 3])> {
+    let text = fs::read_to_string(path).ok()?;
+    let mut lines = text
+        .lines()
+        .skip_while(|l| l.trim() != "GENBOX")
+        .skip(1)
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'));
+    let ntb: i32 = lines.next()?.split_whitespace().next()?.parse().ok()?;
+    let v: Vec<f64> = lines
+        .next()?
+        .split_whitespace()
+        .filter_map(|x| x.parse().ok())
+        .collect();
+    (v.len() >= 3).then_some((ntb, [v[0], v[1], v[2]]))
+}
+
+/// POSITION and VELOCITY blocks of a `.cnf`, as `[x, y, z]` per atom.
+fn parse_configuration(path: &Path) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let (mut pos, mut vel) = (Vec::new(), Vec::new());
+    let mut block: Option<&str> = None;
+    for line in text.lines() {
+        let t = line.trim();
+        if t == "POSITION" || t == "POSITIONRED" {
+            block = Some("pos");
+            continue;
+        }
+        if t == "VELOCITY" || t == "VELOCITYRED" {
+            block = Some("vel");
+            continue;
+        }
+        if t == "END" {
+            block = None;
+            continue;
+        }
+        let Some(kind) = block else { continue };
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        let v: Vec<f64> = t
+            .split_whitespace()
+            .filter_map(|x| x.parse::<f64>().ok())
+            .collect();
+        if v.len() >= 3 {
+            let xyz = [v[v.len() - 3], v[v.len() - 2], v[v.len() - 1]];
+            if kind == "pos" {
+                pos.push(xyz);
+            } else {
+                vel.push(xyz);
+            }
+        }
+    }
+    (pos, vel)
 }
 
 // ─── Test declarations ──────────────────────────────────────────────────────
@@ -531,3 +673,11 @@ ref_test!(aladip_solvated_em_noshake, "aladip_solvated_em_noshake");
 ref_test!(aladip_solvated_em_shake, "aladip_solvated_em_shake");
 ref_test!(aladip_solvated_em_posres, "aladip_solvated_em_posres");
 ref_test!(aladip_solvated_em, "aladip_solvated_em");
+
+// ── Level 5: the input styles real GROMOS files come in ─────────────────────
+// Added 2026-08-30 after the LiveCoMS tutorial suite exposed a class of defect the levels above
+// cannot see: every system there uses one temperature bath, one value per line, and molecules that
+// are never wrapped across the box. See README-livecoms.md in the reference directory.
+ref_test!(aladip_multibath, "aladip_multibath");
+ref_test!(aladip_multibath_collapsed, "aladip_multibath_collapsed");
+ref_test!(aladip_wrapped, "aladip_wrapped");

@@ -196,6 +196,27 @@ pub fn prepare_system(
         topology.solvate(actual_nsm);
     }
 
+    // 3b. Hand the bonds that a constraint algorithm owns to the topology, so the bonded force
+    //     loop leaves them alone — gromosXX does this when it creates the constraints
+    //     (`create_constraints.cc`): a constrained bond has no potential energy and no force.
+    {
+        use gromos_integrators::constraints::ShakeBuffers;
+        let sel = crate::ConstraintSelection::from_imd(
+            imd,
+            topology.num_atoms() > topology.num_solute_atoms(),
+        );
+        topology.constrained_bonds.clear();
+        if sel.solute_constrained() {
+            let ntc = crate::ConstraintSelection::ntc_mode_of(imd.ntc);
+            {
+                for (i, j, _) in &ShakeBuffers::new(&topology, ntc, false).solute_constraints {
+                    topology.constrained_bonds.insert((*i, *j));
+                    topology.constrained_bonds.insert((*j, *i));
+                }
+            }
+        }
+    }
+
     // 4. Topology validation (fatal stops; errors and warnings are reported).
     validate(&mut notes, "topology", validate_topology(&topology))?;
 

@@ -18,7 +18,9 @@ use gromos_core::Topology;
 use serde::{Deserialize, Serialize};
 
 use crate::dof::{bath_dof, BathRange};
-use crate::recipe::{ConstraintAlgorithm, Coupling, SoluteConstraints, ThermostatAlgorithm};
+use crate::recipe::{
+    BoundaryKind, ConstraintAlgorithm, Coupling, SoluteConstraints, ThermostatAlgorithm,
+};
 use crate::recipe::{RunRecipe, TermSpec, Thermostat, VirialKind};
 use crate::{total_dof, ConstraintSelection, RunError};
 use gromos_integrators::constraints::NtcMode;
@@ -117,6 +119,9 @@ pub enum AlgorithmSpec {
     Orchestrator {
         terms: Vec<TermSpec>,
     },
+    /// Put every charge group back into the box (gromosXX `Lattice_Shift_Tracker`), once per step
+    /// before the force field. Only for periodic boundaries.
+    LatticeShift,
     LeapFrogVelocity,
     Thermostat {
         algorithm: ThermostatAlgorithm,
@@ -234,6 +239,7 @@ impl AlgorithmSpec {
             AlgorithmSpec::RemoveCom { .. } => "remove_com",
             AlgorithmSpec::Forcefield(_) => "forcefield",
             AlgorithmSpec::Orchestrator { .. } => "orchestrator",
+            AlgorithmSpec::LatticeShift => "lattice_shift",
             AlgorithmSpec::LeapFrogVelocity => "leap_frog_velocity",
             AlgorithmSpec::Thermostat { .. } => "thermostat",
             AlgorithmSpec::LeapFrogPosition => "leap_frog_position",
@@ -728,6 +734,11 @@ pub fn build_plan(
                 initial: com.initial,
                 every: com.every,
             });
+        }
+        // gromosXX inserts the lattice-shift tracker here for every non-vacuum boundary
+        // (`create_md_sequence.cc`), so molecules are wrapped before the forces are evaluated.
+        if recipe.boundary.kind != BoundaryKind::Vacuum {
+            plan.push(AlgorithmSpec::LatticeShift);
         }
         plan.push(forcefield);
         if !ff.terms.is_empty() {

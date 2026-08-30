@@ -22,9 +22,9 @@ use gromos_forces::{
 use gromos_integrators::{
     algorithms::{
         BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, EnergyCalculation,
-        Forcefield, LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm, NoseHooverThermostat,
-        PressureCalculation, RemoveCOMMotion, SettleAlgorithm, ShakeAlgorithm,
-        SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
+        Forcefield, LatticeShift, LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm,
+        NoseHooverThermostat, PressureCalculation, RemoveCOMMotion, SettleAlgorithm,
+        ShakeAlgorithm, SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
     },
     constraints::{NtcMode, ShakeParameters},
 };
@@ -367,6 +367,11 @@ pub(crate) fn legacy_build_sequence(
         // 1. COM motion removal (GROMOS: first in sequence, before the forcefield).
         if imd.nticom >= 1 || imd.nscm != 0 {
             seq.push(Box::new(RemoveCOMMotion::new(imd.nticom, imd.nscm)));
+        }
+        // 1b. Lattice-shift tracker: charge groups back into the box before the forces
+        //     (gromosXX `create_md_sequence.cc`, every non-vacuum boundary).
+        if imd.ntb != 0 {
+            seq.push(Box::new(LatticeShift::new()));
         }
         // 2. Forcefield.
         seq.push(Box::new(forcefield));

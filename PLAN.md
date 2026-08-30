@@ -82,7 +82,9 @@ consumed (fixed 0.0.35).
 
 `gromos-tools` (2026-08-30): nine reference tests against gromos++ output — `make_top` (2), `com_top`,
 `red_top`, `make_pt_top`, `sim_box`, `copy_box`, `inbox`, `ion` (`crates/gromos-tools/tests/`, the exact
-gromos++ command in each fixture README). `gromos-analysis` (2026-08-30): fifteen reference tests against gromos++ output — `tser`, `mdf`, `dg_ener`, `dfmult`, `matrix_overlap`, `bilayer_dist`, `bilayer_oparam`, `jval`, `edyn`, `gca`, `eds_update_1`, `eds_update_2`, `jepot`, `pocket`, `dfgrid` (`crates/gromos-analysis/tests/data/README.md`); gromos-tools adds `explode`, `duplicate`, `pt_top`, `make_sasa_top`.
+gromos++ command in each fixture README). `gromos-md` (2026-08-30): 48 reference systems — the 45 physics levels plus three for real-world
+input styles (`README-livecoms.md`), each also compared on its final configuration.
+`gromos-analysis` (2026-08-30): fifteen reference tests against gromos++ output — `tser`, `mdf`, `dg_ener`, `dfmult`, `matrix_overlap`, `bilayer_dist`, `bilayer_oparam`, `jval`, `edyn`, `gca`, `eds_update_1`, `eds_update_2`, `jepot`, `pocket`, `dfgrid` (`crates/gromos-analysis/tests/data/README.md`); gromos-tools adds `explode`, `duplicate`, `pt_top`, `make_sasa_top`.
 
 ---
 
@@ -225,9 +227,14 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 **1.5b — Real-input compatibility (opened 2026-08-30 by the LiveCoMS tutorial run, CHANGELOG 0.0.42)**
 - [x] IMD blocks read as value streams (`NONBONDED`, `CONSTRAINT`), minimum image in SHAKE and every
       bonded term, `MULTIBATH` NBATHS > 1, MD loop step count, duplicate `mdf` binary.
-- [ ] **Put charge groups back into the box** as gromosXX does (`put_chargegroups_into_box`): with a
-      wrapped solute our trajectory still drifts from gromosXX (~3e-2 nm / 10 steps) though frame 0
-      matches exactly. Likely the charge-group cutoff; next item to close.
+- [x] **Put charge groups back into the box** as gromosXX does — `LatticeShift` in the sequence
+      (0.0.43); a constrained bond is no longer also a force term. Both were found by the new
+      references below.
+- [x] **References for real input styles** (0.0.43): `aladip_multibath` (NBATHS=2 + DOFSET),
+      `aladip_multibath_collapsed` (blocks wrapped as real files write them), `aladip_wrapped`
+      (solute split across the boundary) — `gromosXX_references/README-livecoms.md`. The harness
+      now also compares `expected/final.conf` and the frame count, which is what catches a wrong
+      step count.
 - [ ] `.trc` frame 0 should be the initial configuration (gromosXX's schedule); `@trv` is ignored.
 - [ ] Convert the remaining IMD blocks to the value-stream reader (only NONBONDED and CONSTRAINT are
       done; the rest are still line-indexed and will misread differently-wrapped files).
