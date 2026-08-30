@@ -155,7 +155,17 @@ fn vacuum() -> gromos_core::math::Periodicity {
 }
 
 fn bonded_split(topo: &Topology, conf: &Configuration, lambda: f64) -> [f64; 12] {
-    let unpert = calculate_bonded_forces_ntf(topo, conf, &vacuum(), true, true, true, true, true);
+    let unpert = calculate_bonded_forces_ntf(
+        topo,
+        conf,
+        &vacuum(),
+        true,
+        gromos_forces::bonded::CovalentForm::default(),
+        true,
+        true,
+        true,
+        true,
+    );
     let dl = 1.0; // NLAM = 1 → dλ/dλ = 1
     let pb = calculate_perturbed_bond_forces(topo, conf, &vacuum(), lambda, dl);
     let sb = calculate_soft_bond_forces(topo, conf, &vacuum(), lambda, dl);

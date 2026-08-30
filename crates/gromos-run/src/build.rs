@@ -257,6 +257,11 @@ fn instantiate_forcefield(
     );
     forcefield.four_pi_eps_i = ff.four_pi_eps_i;
     forcefield.rf_excluded = ff.rf_excluded;
+    forcefield.covalent_form = gromos_forces::bonded::CovalentForm {
+        quartic_bonds: !ff.covalent_form.0,
+        cosine_harmonic_angles: !ff.covalent_form.1,
+        arbitrary_phase_shifts: !ff.covalent_form.2,
+    };
     forcefield.ntf_bond = ff.bonds;
     forcefield.ntf_angle = ff.angles;
     forcefield.ntf_improper = ff.impropers;
@@ -813,7 +818,12 @@ mod tests {
             .collect();
         dirs.sort();
         assert!(dirs.len() >= 40);
-        let options = RunOptions::default();
+        // The same passthrough policy the binary uses: blocks that carry no physics for the
+        // recipe (GAMD and EDS are applied by the binary itself, INNERLOOP selects a kernel).
+        let options = RunOptions {
+            passthrough: crate::recipe::PassthroughPolicy::allow(["GAMD", "EDS", "INNERLOOP"]),
+            ..RunOptions::default()
+        };
         let mut compared = 0;
         for dir in dirs {
             let name = dir.file_name().unwrap().to_string_lossy().to_string();
@@ -828,6 +838,11 @@ mod tests {
                 .first()
                 .is_some_and(|b| b.temp0.len() > 1)
             {
+                continue;
+            }
+            // Likewise COVALENTFORM: the legacy builder always used the quartic/cosine-harmonic
+            // forms, so an input asking for the harmonic ones has no counterpart to compare with.
+            if loaded.imd.ntbbh != 0 || loaded.imd.ntbah != 0 || loaded.imd.ntbdn != 0 {
                 continue;
             }
             let steps = loaded.imd.nstlim.min(10);

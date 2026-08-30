@@ -90,6 +90,8 @@ pub struct Forcefield {
     pub pairlist_algorithm: PairlistAlgorithm,
     /// Whether to use quartic bond potentials (vs harmonic)
     pub use_quartic_bonds: bool,
+    /// COVALENTFORM: which functional form each covalent term takes (gromosXX's NTBBH/NTBAH/NTBDN).
+    pub covalent_form: gromos_forces::bonded::CovalentForm,
     /// Whether to run nonbonded in parallel
     pub parallel_nonbonded: bool,
     /// NTF flags: which bonded terms to include (GROMOS FORCE block)
@@ -182,6 +184,7 @@ impl Forcefield {
             pairlist,
             pairlist_algorithm,
             use_quartic_bonds: true,
+            covalent_form: gromos_forces::bonded::CovalentForm::default(),
             parallel_nonbonded: false,
             ntf_bond: true,
             ntf_angle: true,
@@ -444,6 +447,7 @@ impl Algorithm for Forcefield {
                 conf,
                 &self.periodicity,
                 self.use_quartic_bonds,
+                self.covalent_form,
                 self.ntf_bond,
                 self.ntf_angle,
                 self.ntf_dihedral,

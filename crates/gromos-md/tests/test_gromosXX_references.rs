@@ -295,6 +295,11 @@ fn run_reference(system: &str) {
         cmd.arg("@distrest").arg(sys_dir.join(dr));
     }
 
+    // Optional GaMD specification
+    if let Some(g) = toml_str_opt(&toml, "gamd") {
+        cmd.arg("@gamd").arg(sys_dir.join(g));
+    }
+
     // Optional perturbation topology
     if let Some(pt) = toml_str_opt(&toml, "pttopo") {
         cmd.arg("@pttopo").arg(sys_dir.join(pt));
@@ -736,3 +741,15 @@ ref_test!(aladip_solvated_em, "aladip_solvated_em");
 ref_test!(aladip_multibath, "aladip_multibath");
 ref_test!(aladip_multibath_collapsed, "aladip_multibath_collapsed");
 ref_test!(aladip_wrapped, "aladip_wrapped");
+ref_test!(aladip_harmonic_covalent, "aladip_harmonic_covalent");
+// The classical part of this system already matches gromosXX exactly (its potential energy at
+// frame 0 agrees to 1e-9); what differs is the GaMD boost itself. gromosXX accumulates the
+// dihedral and total forces of every acceleration group during the force calculation and scales
+// them by k·(V−E), recording ΔV = k(V−E)²/2 in the special energy — on this system ΔV ≈ 1.23
+// kJ/mol, which our run neither applies the same way nor reports. The reference stays here as the
+// specification for that work (PLAN.md 1.9).
+ref_test!(
+    ignore: aladip_gamd,
+    "aladip_gamd",
+    "GaMD boost unvalidated: gromosXX's per-acceleration-group force scaling and its ΔV in the special energy are not reproduced (PLAN.md 1.9)"
+);

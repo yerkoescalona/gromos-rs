@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.45] (2026-08-30)
+
+**The first LiveCoMS tutorial runs on gromos-rs**: tutorial 4 (GaMD), all four of its input files,
+unmodified. Its classical force field matches gromosXX exactly at frame 0; the GaMD boost itself is
+the remaining difference and now has a reference of its own.
+
+### Added
+
+- **`COVALENTFORM` is modelled** (NTBBH / NTBAH / NTBDN): quartic or harmonic bonds, cosine-harmonic
+  or harmonic angles, arbitrary or 0°/180° dihedral phase shifts. All six forms were already
+  implemented — nothing selected between them, and the block was refused, which is what blocked the
+  GaMD tutorial. New reference `aladip_harmonic_covalent` (NTBBH=1, NTBAH=1) generated with
+  gromosXX. Note the dihedral default is now the arbitrary-phase form, as GROMOS specifies; for
+  force fields whose phase shifts are 0° or 180° (all the reference systems) the two agree exactly.
+- **`INNERLOOP` passes through**: it selects which inner-loop kernel gromosXX uses (special solvent
+  loops, CUDA device) and carries no physics, so it no longer stops a run.
+- **`aladip_gamd` reference** — aladip + 20 SPC with a GAMD block (dual boost, production mode,
+  fixed parameters) and its `@gamd` specification file; the harness and the regeneration script
+  learned the flag. The test is `#[ignore]`d with the measured reason: gromosXX accumulates the
+  dihedral and total forces of each acceleration group during the force calculation, scales them by
+  k·(V−E) and reports ΔV = k(V−E)²/2 in the special energy (≈1.23 kJ/mol on this system); our run
+  neither applies that scaling the same way nor reports the boost. The reference is the
+  specification for that work (PLAN.md 1.9).
+
 ## [0.0.44] (2026-08-30)
 
 Continuing down the LiveCoMS list, with a reference for each gap.

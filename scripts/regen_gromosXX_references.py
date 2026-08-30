@@ -81,6 +81,10 @@ def run_system(sys_dir: Path) -> bool:
         if distrest:
             cmd += ["@distrest", str(sys_dir / distrest)]
 
+        gamd = parse_toml_str(toml, "gamd")
+        if gamd:
+            cmd += ["@gamd", str(sys_dir / gamd)]
+
         pttopo = parse_toml_str(toml, "pttopo")
         if pttopo:
             cmd += ["@pttopo", str(sys_dir / pttopo)]
@@ -97,6 +101,10 @@ def run_system(sys_dir: Path) -> bool:
         expected.mkdir(exist_ok=True)
 
         copied = []
+        # gromosXX writes a title-only .trv when NTWV = 0; that is not a reference.
+        if trv.exists() and "VELOCITYRED" not in trv.read_text():
+            trv.unlink()
+
         for src, dst_name in [
             (tre, "energies.tre"),
             (trf, "forces.trf"),

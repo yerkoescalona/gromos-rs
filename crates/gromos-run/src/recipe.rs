@@ -326,12 +326,28 @@ pub struct ForcefieldSpec {
     pub dihedrals: bool,
     pub charges: bool,
     pub nonbonded: bool,
+    /// COVALENTFORM: which functional form the covalent terms take.
+    #[serde(default)]
+    pub covalent_form: CovalentForm,
     pub energy_groups: EnergyGroups,
     pub pairlist: PairlistSpec,
     pub electrostatics: NonbondedSpec,
     pub restraints: RestraintsSpec,
     /// Additive providers (none in an `.imd`; Python adds them).
     pub terms: Vec<TermSpec>,
+}
+
+/// gromosXX `COVALENTFORM` (NTBBH, NTBAH, NTBDN): which functional form each covalent term takes.
+/// The defaults are the GROMOS ones, which is what an input without the block means.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct CovalentForm {
+    /// NTBBH = 1: harmonic bonds instead of the quartic form
+    pub harmonic_bonds: bool,
+    /// NTBAH = 1: harmonic angles instead of the cosine-harmonic form
+    pub harmonic_angles: bool,
+    /// NTBDN = 1: dihedral phase shifts limited to 0° and 180° instead of arbitrary ones
+    pub limited_phase_shifts: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -796,6 +812,11 @@ impl RunRecipe {
                 dihedrals: imd.ntf[3] != 0,
                 charges: imd.ntf[4] != 0,
                 nonbonded: imd.ntf[5] != 0,
+                covalent_form: CovalentForm {
+                    harmonic_bonds: imd.ntbbh == 1,
+                    harmonic_angles: imd.ntbah == 1,
+                    limited_phase_shifts: imd.ntbdn == 1,
+                },
                 energy_groups: EnergyGroups {
                     count: imd.negr,
                     last_atoms: imd.nre.clone(),
@@ -1000,6 +1021,9 @@ impl RunRecipe {
             rcrf: r.forcefield.electrostatics.rf_cutoff,
             epsrf: r.forcefield.electrostatics.epsilon_rf,
             nslfexcl: r.forcefield.electrostatics.self_exclusion,
+            ntbbh: i32::from(r.forcefield.covalent_form.harmonic_bonds),
+            ntbah: i32::from(r.forcefield.covalent_form.harmonic_angles),
+            ntbdn: i32::from(r.forcefield.covalent_form.limited_phase_shifts),
             ntf: [
                 r.forcefield.bonds as i32,
                 r.forcefield.angles as i32,

@@ -79,6 +79,10 @@ pub struct ForcefieldPlan {
     pub rf_excluded: bool,
     pub four_pi_eps_i: f64,
     pub bonds: bool,
+    /// COVALENTFORM: NTBBH / NTBAH / NTBDN, as `(harmonic_bonds, harmonic_angles,
+    /// limited_phase_shifts)` — the GROMOS defaults are all false.
+    #[serde(default)]
+    pub covalent_form: (bool, bool, bool),
     pub angles: bool,
     pub impropers: bool,
     pub dihedrals: bool,
@@ -274,6 +278,7 @@ impl AlgorithmSpec {
                 rf_excluded: true,
                 four_pi_eps_i: gromos_core::units::four_pi_eps_i,
                 bonds: true,
+                covalent_form: (false, false, false),
                 angles: true,
                 impropers: true,
                 dihedrals: true,
@@ -661,6 +666,11 @@ pub fn build_plan(
         rf_excluded: ff.electrostatics.self_exclusion != 0,
         four_pi_eps_i,
         bonds: ff.bonds,
+        covalent_form: (
+            ff.covalent_form.harmonic_bonds,
+            ff.covalent_form.harmonic_angles,
+            ff.covalent_form.limited_phase_shifts,
+        ),
         angles: ff.angles,
         impropers: ff.impropers,
         dihedrals: ff.dihedrals,

@@ -240,6 +240,10 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
       input's frame (0.0.44, each covered by the reference harness).
 - [x] Every IMD block reads as a value stream (0.0.44); `aladip_multibath_collapsed` has every block
       on one line.
+- [x] `COVALENTFORM` modelled and `INNERLOOP` passed through (0.0.45) — with these, **LiveCoMS
+      tutorial 4 (GaMD) runs unmodified**; the classical force field matches gromosXX exactly.
+      Remaining tutorial blockers are unported features, each refused by name: `ROTTRANS` (t_02,
+      t_03), `PRECALCLAM` (t_02 TI), `REPLICA` (t_03), `AEDS` (t_05), IMD-driven QM/MM (t_06).
 - [ ] Velocity frames carry a different half-step than gromosXX's (frame 0 should be the input
       velocities; residual ~1e-4 nm/ps ≈ one thermostat scaling). The harness checks the frames are
       written, not their values.
@@ -299,6 +303,10 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 - [ ] Only needed for: united-atom NMR restraints, TIP4P water, some perturbed topologies
 
 **1.9 — Advanced sampling** — stubs exist; delegatable
+- [ ] GaMD — a gromosXX reference exists and is `#[ignore]`d until it passes:
+      `gromosXX_references/aladip_gamd` (dual boost, production mode). What is missing is gromosXX's
+      per-acceleration-group force accumulation (dihedral and total forces stored during the force
+      calculation, scaled by k·(V−E)) and ΔV = k(V−E)²/2 in the special energy.
 - [ ] EDS — `V_mixed = −1/β·ln(Σ exp(−β(Eᵢ−eir_i)))`
 - [ ] GaMD — `V_boost = k·(V−E_threshold)²`
 - [ ] REMD — MPI parallel tempering; the dead `integrators::{mpi, remd_mpi}` modules were removed

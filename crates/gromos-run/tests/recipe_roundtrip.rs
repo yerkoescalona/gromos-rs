@@ -33,11 +33,15 @@ fn every_reference_input_round_trips_through_the_recipe() {
     assert!(inputs.len() >= 40);
     for path in &inputs {
         let imd = read_imd_file(path).unwrap();
-        let (recipe, diag) =
-            RunRecipe::from_imd(&imd).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        // GAMD and EDS are applied by the binary, not the recipe, and INNERLOOP selects a kernel:
+        // the same passthrough policy the binary uses.
+        let policy = PassthroughPolicy::allow(["GAMD", "EDS", "INNERLOOP"]);
+        let (recipe, diag) = RunRecipe::from_imd_with(&imd, &policy)
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         assert_eq!(recipe.version, RECIPE_VERSION);
+        let expected_passthrough = imd.raw_blocks.keys().any(|b| policy.allowed.contains(b));
         assert!(
-            diag.notes.iter().all(|n| !n.contains("passed through")),
+            expected_passthrough || diag.notes.iter().all(|n| !n.contains("passed through")),
             "{}: unexpected passthrough {:?}",
             path.display(),
             diag.notes
@@ -45,7 +49,7 @@ fn every_reference_input_round_trips_through_the_recipe() {
 
         // recipe → ImdParameters → recipe
         let back = recipe.to_imd();
-        let (again, _) = RunRecipe::from_imd(&back).unwrap();
+        let (again, _) = RunRecipe::from_imd_with(&back, &policy).unwrap();
         assert_eq!(
             again,
             recipe,
@@ -57,7 +61,7 @@ fn every_reference_input_round_trips_through_the_recipe() {
         let text = recipe.to_imd_string(None);
         let reparsed =
             parse_imd_str(&text).unwrap_or_else(|e| panic!("{}: {e}\n{text}", path.display()));
-        let (again, _) = RunRecipe::from_imd(&reparsed).unwrap();
+        let (again, _) = RunRecipe::from_imd_with(&reparsed, &policy).unwrap();
         assert_eq!(
             again,
             recipe,

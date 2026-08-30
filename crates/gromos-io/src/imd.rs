@@ -85,6 +85,14 @@ pub struct ImdParameters {
     pub size: f64,      // Grid cell size (nm)
     pub type_: i32,     // Pairlist type
 
+    // COVALENTFORM block: which functional form each covalent term takes.
+    /// NTBBH: 0 = quartic bonds (default), 1 = harmonic
+    pub ntbbh: i32,
+    /// NTBAH: 0 = cosine-harmonic angles (default), 1 = harmonic
+    pub ntbah: i32,
+    /// NTBDN: 0 = dihedrals with arbitrary phase shifts (default), 1 = phase shifts 0° or 180°
+    pub ntbdn: i32,
+
     // NONBONDED block
     pub nlrele: i32,   // Long-range electrostatics (0=cutoff, 1=RF, 2=PME, 3=P3M)
     pub appak: f64,    // Reaction field κ (nm⁻¹)
@@ -318,6 +326,9 @@ impl Default for ImdParameters {
             rcutl: 1.4,
             size: 0.4,
             type_: 0,
+            ntbbh: 0,
+            ntbah: 0,
+            ntbdn: 0,
             nlrele: 1,
             appak: 0.0,
             rcrf: 1.4,
@@ -978,6 +989,25 @@ fn parse_block(
             }
             if let Some(v) = t.next_i32("NSCALE")? {
                 params.nscale = v;
+            }
+        },
+        "COVALENTFORM" => {
+            // gromosXX `read_COVALENTFORM`: NTBBH, NTBAH, NTBDN — which functional form the bond,
+            // angle and dihedral terms take. The defaults (0 0 0) are the GROMOS ones.
+            let mut t = Tokens::new("COVALENTFORM", data_lines);
+            for (name, slot) in [
+                ("NTBBH", &mut params.ntbbh),
+                ("NTBAH", &mut params.ntbah),
+                ("NTBDN", &mut params.ntbdn),
+            ] {
+                if let Some(v) = t.next_i32(name)? {
+                    if v != 0 && v != 1 {
+                        return Err(IoError::ParseError(format!(
+                            "block COVALENTFORM: {name} must be 0 or 1, found {v}"
+                        )));
+                    }
+                    *slot = v;
+                }
             }
         },
         "ENERGYMIN" => {

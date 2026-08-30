@@ -40,6 +40,7 @@ pub const MODELLED_BLOCKS: &[&str] = &[
     "PRINTOUT",
     "WRITETRAJ",
     "CONSTRAINT",
+    "COVALENTFORM",
     "FORCE",
     "PAIRLIST",
     "NONBONDED",
@@ -141,6 +142,16 @@ pub fn write_imd(params: &ImdParameters, n_atoms: Option<usize>) -> String {
             vals![p.ntwx, p.ntwse, p.ntwv, p.ntwf, p.ntwe, p.ntwg, p.ntwb],
         );
     });
+
+    // Only written when it says something other than the GROMOS defaults, as gromosXX's own
+    // inputs do: an absent COVALENTFORM means quartic bonds, cosine-harmonic angles, arbitrary
+    // dihedral phase shifts.
+    if p.ntbbh != 0 || p.ntbah != 0 || p.ntbdn != 0 {
+        block(&mut out, "COVALENTFORM", |o| {
+            o.push_str("#   NTBBH    NTBAH    NTBDN\n");
+            row(o, vals![p.ntbbh, p.ntbah, p.ntbdn]);
+        });
+    }
 
     block(&mut out, "CONSTRAINT", |o| {
         o.push_str("#       NTC\n");

@@ -595,7 +595,9 @@ fn main() {
     // The binary applies GAMD/EDS itself (out-of-band, after each step), so those blocks may
     // pass through the recipe; anything else unmodelled is an error (PLAN.md 3.9 A17).
     let options = RunOptions {
-        passthrough: PassthroughPolicy::allow(["GAMD", "EDS"]),
+        // INNERLOOP selects which inner-loop kernel gromosXX uses (special solvent loops, CUDA
+        // device); it carries no physics, so it rides along instead of stopping the run.
+        passthrough: PassthroughPolicy::allow(["GAMD", "EDS", "INNERLOOP"]),
         pair_partition: mpi_partition,
         ..RunOptions::default()
     };

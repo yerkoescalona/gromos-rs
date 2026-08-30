@@ -158,6 +158,7 @@ pub fn single_point_energy(
         &conf,
         &periodicity,
         params.quartic_bonds,
+        crate::bonded::CovalentForm::default(),
         params.ntf[0],
         params.ntf[1],
         params.ntf[3],

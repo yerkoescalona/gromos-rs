@@ -1,0 +1,32 @@
+# GROMOS-RS GaMD Statistics
+# GaMD Statistics File
+#
+# Columns:
+# Step      : MD step number
+# V_dih     : Current dihedral potential energy (kJ/mol)
+# V_tot     : Current total potential energy (kJ/mol)
+# V_max_dih : Maximum dihedral energy observed (kJ/mol)
+# V_min_dih : Minimum dihedral energy observed (kJ/mol)
+# V_avg_dih : Average dihedral energy (kJ/mol)
+# σ_dih     : Standard deviation of dihedral energy (kJ/mol)
+# V_max_tot : Maximum total energy observed (kJ/mol)
+# V_min_tot : Minimum total energy observed (kJ/mol)
+# V_avg_tot : Average total energy (kJ/mol)
+# σ_tot     : Standard deviation of total energy (kJ/mol)
+# k_dih     : GaMD boost coefficient for dihedral (kJ/mol)
+# k_tot     : GaMD boost coefficient for total (kJ/mol)
+# E_dih     : GaMD threshold energy for dihedral (kJ/mol)
+# E_tot     : GaMD threshold energy for total (kJ/mol)
+#
+#     Step        V_dih        V_tot    V_max_dih    V_min_dih    V_avg_dih        σ_dih    V_max_tot    V_min_tot    V_avg_tot        σ_tot        k_dih        k_tot        E_dih        E_tot
+         0       0.0000       0.0000         -inf          inf       0.0000       0.0000       0.0000       0.0000       0.0000       0.0000     0.000000     0.000000       0.0000       0.0000
+        10       3.7824     -28.3531         -inf          inf       0.0000       0.0000       0.0000     -53.2052     -34.8562      13.6889     0.000000     0.000000       0.0000       0.0000
+        20       1.9346     -36.8610         -inf          inf       0.0000       0.0000       0.0000     -55.8275     -38.8469      11.5705     0.000000     0.000000       0.0000       0.0000
+        30       2.9137     -45.7341         -inf          inf       0.0000       0.0000       0.0000     -55.8275     -41.0466      10.5040     0.000000     0.000000       0.0000       0.0000
+        40       4.8567     -63.4514         -inf          inf       0.0000       0.0000       0.0000     -71.5340     -45.9965      12.9158     0.000000     0.000000       0.0000       0.0000
+        50      11.5735     -54.8265         -inf          inf       0.0000       0.0000       0.0000     -72.0667     -48.8779      13.2247     0.000000     0.000000       0.0000       0.0000
+        60       5.7122     -61.4314         -inf          inf       0.0000       0.0000       0.0000     -72.0667     -50.3022      12.6946     0.000000     0.000000       0.0000       0.0000
+        70       1.8961     -71.0729         -inf          inf       0.0000       0.0000       0.0000     -79.5462     -53.4457      14.2541     0.000000     0.000000       0.0000       0.0000
+        80       2.9480     -60.9137         -inf          inf       0.0000       0.0000       0.0000     -79.5462     -54.9691      14.0851     0.000000     0.000000       0.0000       0.0000
+        90       3.2633     -58.4929         -inf          inf       0.0000       0.0000       0.0000     -79.5462     -55.8188      13.5893     0.000000     0.000000       0.0000       0.0000
+# END

@@ -169,16 +169,48 @@ pub fn calculate_bonded_forces(
     pbc: &Periodicity,
     use_quartic_bonds: bool,
 ) -> ForceEnergy {
-    calculate_bonded_forces_ntf(topo, conf, pbc, use_quartic_bonds, true, true, true, true)
+    calculate_bonded_forces_ntf(
+        topo,
+        conf,
+        pbc,
+        use_quartic_bonds,
+        CovalentForm::default(),
+        true,
+        true,
+        true,
+        true,
+    )
 }
 
 /// Calculate bonded forces gated by NTF flags (FORCE block in GROMOS).
+/// Which functional form each covalent term takes — gromosXX's `COVALENTFORM` block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CovalentForm {
+    /// NTBBH = 0: quartic bonds (the GROMOS default); 1: harmonic
+    pub quartic_bonds: bool,
+    /// NTBAH = 0: cosine-harmonic angles (the GROMOS default); 1: harmonic
+    pub cosine_harmonic_angles: bool,
+    /// NTBDN = 0: arbitrary dihedral phase shifts (the GROMOS default); 1: 0° and 180° only
+    pub arbitrary_phase_shifts: bool,
+}
+
+impl Default for CovalentForm {
+    fn default() -> Self {
+        Self {
+            quartic_bonds: true,
+            cosine_harmonic_angles: true,
+            arbitrary_phase_shifts: true,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)] // the NTF flags of the FORCE block, one per term
 pub fn calculate_bonded_forces_ntf(
     topo: &Topology,
     conf: &Configuration,
     pbc: &Periodicity,
     use_quartic_bonds: bool,
+    form: CovalentForm,
     ntf_bond: bool,
     ntf_angle: bool,
     ntf_dihedral: bool,
@@ -187,7 +219,7 @@ pub fn calculate_bonded_forces_ntf(
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     if ntf_bond {
-        let mut bf = if use_quartic_bonds {
+        let mut bf = if use_quartic_bonds && form.quartic_bonds {
             calculate_bond_forces_quartic(topo, conf, pbc)
         } else {
             calculate_bond_forces_harmonic(topo, conf, pbc)
@@ -197,13 +229,23 @@ pub fn calculate_bonded_forces_ntf(
         result.add(&bf);
     }
     if ntf_angle {
-        let mut af = calculate_angle_forces(topo, conf, pbc);
+        // COVALENTFORM NTBAH: cosine-harmonic (the GROMOS default) or harmonic
+        let mut af = if form.cosine_harmonic_angles {
+            calculate_angle_forces(topo, conf, pbc)
+        } else {
+            calculate_harmonic_angle_forces(topo, conf, pbc)
+        };
         log::debug!("  bonded: angle={:.6e}", af.energy);
         af.angle_energy = af.energy;
         result.add(&af);
     }
     if ntf_dihedral {
-        let mut df = calculate_dihedral_forces(topo, conf, pbc);
+        // COVALENTFORM NTBDN: arbitrary phase shifts (the GROMOS default) or 0°/180° only
+        let mut df = if form.arbitrary_phase_shifts {
+            calculate_dihedral_new_forces(topo, conf, pbc)
+        } else {
+            calculate_dihedral_forces(topo, conf, pbc)
+        };
         log::debug!("  bonded: dihe={:.6e}", df.energy);
         df.dihedral_energy = df.energy;
         result.add(&df);
