@@ -149,16 +149,21 @@ fn step0_energies(sys: &System, nslfexcl: Option<i32>, rlam: Option<f64>) -> gro
     prepared.configuration.old().energies.clone()
 }
 
+/// The check suite's reference values are single molecules in vacuum: no box, no minimum image.
+fn vacuum() -> gromos_core::math::Periodicity {
+    gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+}
+
 fn bonded_split(topo: &Topology, conf: &Configuration, lambda: f64) -> [f64; 12] {
-    let unpert = calculate_bonded_forces_ntf(topo, conf, true, true, true, true, true);
+    let unpert = calculate_bonded_forces_ntf(topo, conf, &vacuum(), true, true, true, true, true);
     let dl = 1.0; // NLAM = 1 → dλ/dλ = 1
-    let pb = calculate_perturbed_bond_forces(topo, conf, lambda, dl);
-    let sb = calculate_soft_bond_forces(topo, conf, lambda, dl);
-    let pa = calculate_perturbed_angle_forces(topo, conf, lambda, dl);
-    let sa = calculate_soft_angle_forces(topo, conf, lambda, dl);
-    let pi = calculate_perturbed_improper_dihedral_forces(topo, conf, lambda, dl);
-    let si = calculate_soft_improper_forces(topo, conf, lambda, dl);
-    let pd = calculate_perturbed_dihedral_forces(topo, conf, lambda, dl);
+    let pb = calculate_perturbed_bond_forces(topo, conf, &vacuum(), lambda, dl);
+    let sb = calculate_soft_bond_forces(topo, conf, &vacuum(), lambda, dl);
+    let pa = calculate_perturbed_angle_forces(topo, conf, &vacuum(), lambda, dl);
+    let sa = calculate_soft_angle_forces(topo, conf, &vacuum(), lambda, dl);
+    let pi = calculate_perturbed_improper_dihedral_forces(topo, conf, &vacuum(), lambda, dl);
+    let si = calculate_soft_improper_forces(topo, conf, &vacuum(), lambda, dl);
+    let pd = calculate_perturbed_dihedral_forces(topo, conf, &vacuum(), lambda, dl);
     [
         unpert.bond_energy,
         pb.energy,

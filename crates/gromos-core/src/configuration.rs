@@ -159,6 +159,10 @@ pub struct Energy {
     /// Per-temperature-group kinetic energies (length = number of temperature groups).
     pub kinetic_energy: Vec<f64>,
 
+    /// Per-bath kinetic energy from the current (new) velocities — what a thermostat scales on.
+    /// Empty for a single-bath run, where `kinetic_energy_new` carries the same number.
+    pub kinetic_energy_new_bath: Vec<f64>,
+
     /// Per-energy-group-pair LJ energies (energy_groups × energy_groups matrix).
     pub lj_energy: Vec<Vec<f64>>,
     /// Per-energy-group-pair CRF energies (energy_groups × energy_groups matrix).
@@ -194,6 +198,7 @@ impl Energy {
             dhdl_lj: 0.0,
             dhdl_crf: 0.0,
             kinetic_energy_new: 0.0,
+            kinetic_energy_new_bath: Vec::new(),
             kinetic_energy: vec![0.0; num_temperature_groups],
             lj_energy: vec![vec![0.0; num_energy_groups]; num_energy_groups],
             crf_energy: vec![vec![0.0; num_energy_groups]; num_energy_groups],
@@ -245,6 +250,9 @@ impl Energy {
         self.dhdl_lj = 0.0;
         self.dhdl_crf = 0.0;
         self.kinetic_energy_new = 0.0;
+        for e in self.kinetic_energy_new_bath.iter_mut() {
+            *e = 0.0;
+        }
         self.virial_total = 0.0;
 
         self.kinetic_energy.fill(0.0);

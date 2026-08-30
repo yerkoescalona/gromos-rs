@@ -41,6 +41,15 @@ pub struct BerendsenThermostat {
 }
 
 impl BerendsenThermostat {
+    /// Create a Berendsen thermostat from resolved baths: reference temperature, coupling time and
+    /// degrees of freedom per bath, and the atom range each one scales.
+    pub fn new(params: Vec<BerendsenThermostatParams>, bath_ranges: Vec<(usize, usize)>) -> Self {
+        Self {
+            params,
+            bath_ranges,
+        }
+    }
+
     /// Create a new Berendsen thermostat with a single bath covering all atoms.
     pub fn new_single_bath(temperature: f64, tau: f64, dof: f64, n_atoms: usize) -> Self {
         Self {
@@ -71,8 +80,17 @@ impl Algorithm for BerendsenThermostat {
                 continue;
             }
 
-            // Read E_kin from previous step (stored by TemperatureCalculation)
-            let ekin = conf.current().energies.kinetic_energy_new;
+            // Read E_kin from the previous step (stored by TemperatureCalculation). A multi-bath
+            // run scales each bath on its own kinetic energy, as gromosXX does
+            // (`bath_struct::ekin`); with one bath the per-bath vector is empty and the total is
+            // the same number.
+            let ekin = conf
+                .current()
+                .energies
+                .kinetic_energy_new_bath
+                .get(bath_idx)
+                .copied()
+                .unwrap_or(conf.current().energies.kinetic_energy_new);
 
             // Compute free temperature: T_free = 2·E_kin / (DOF · k_B)
             let mut free_temp = if params.dof > 0.0 {

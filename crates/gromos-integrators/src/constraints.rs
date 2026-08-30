@@ -12,7 +12,7 @@
 //! - COM Motion Removal: Remove center-of-mass translation and rotation
 
 use gromos_core::configuration::Configuration;
-use gromos_core::math::Vec3;
+use gromos_core::math::{Periodicity, Vec3};
 use gromos_core::topology::Topology;
 
 /// Precomputed constraint data and reusable buffers for SHAKE.
@@ -196,6 +196,30 @@ pub struct ConstraintResult {
     pub max_error: f64,
 }
 
+/// The minimum-image convention of the current box. gromosXX's SHAKE takes the constraint vector
+/// as `periodicity.nearest_image(pos_i, pos_j)` (`shake.h::shake_iteration`), so a molecule whose
+/// atoms sit on opposite sides of the box — every configuration written with the molecules put
+/// back into the box — is constrained across the boundary instead of across the whole box.
+pub fn box_periodicity(conf: &Configuration) -> Periodicity {
+    use gromos_core::configuration::BoxType;
+    use gromos_core::math::{Rectangular, Triclinic, Vacuum};
+    let b = &conf.current().box_config;
+    match b.box_type {
+        BoxType::Rectangular => {
+            let d = b.dimensions();
+            if d.x > 0.0 && d.y > 0.0 && d.z > 0.0 {
+                Periodicity::Rectangular(Rectangular::new(d))
+            } else {
+                Periodicity::Vacuum(Vacuum)
+            }
+        },
+        BoxType::Triclinic | BoxType::TruncatedOctahedral => {
+            Periodicity::Triclinic(Triclinic::new(b.vectors))
+        },
+        _ => Periodicity::Vacuum(Vacuum),
+    }
+}
+
 /// Apply SHAKE algorithm to satisfy distance constraints
 ///
 /// The SHAKE algorithm (Ryckaert, Ciccotti & Berendsen, 1977) iteratively
@@ -222,6 +246,7 @@ pub fn shake(
     dt: f64,
     params: &ShakeParameters,
 ) -> ConstraintResult {
+    let pbc = box_periodicity(conf);
     let tolerance = params.tolerance;
     let dt2 = dt * dt;
 
@@ -329,6 +354,7 @@ pub fn shake(
             if !shake_one_constraint_full(
                 conf,
                 topo,
+                &pbc,
                 i,
                 j,
                 constraint_length,
@@ -349,6 +375,7 @@ pub fn shake(
             if !shake_one_constraint_full(
                 conf,
                 topo,
+                &pbc,
                 i,
                 j,
                 constraint_length,
@@ -402,6 +429,7 @@ pub fn shake_buffered(
     params: &ShakeParameters,
     buffers: &mut ShakeBuffers,
 ) -> ConstraintResult {
+    let pbc = box_periodicity(conf);
     if buffers.is_empty() {
         return ConstraintResult {
             converged: true,
@@ -441,6 +469,7 @@ pub fn shake_buffered(
             if !shake_one_constraint_full(
                 conf,
                 topo,
+                &pbc,
                 i,
                 j,
                 constraint_length,
@@ -461,6 +490,7 @@ pub fn shake_buffered(
             if !shake_one_constraint_full(
                 conf,
                 topo,
+                &pbc,
                 i,
                 j,
                 constraint_length,
@@ -504,9 +534,11 @@ pub fn shake_buffered(
 /// Returns true if already converged.
 /// Accumulates constraint force (pre-1/dt² scaling) and virial tensor.
 #[inline]
+#[allow(clippy::too_many_arguments)] // one constraint's worth of state, as in gromosXX
 fn shake_one_constraint_full(
     conf: &mut Configuration,
     topo: &Topology,
+    pbc: &Periodicity,
     i: usize,
     j: usize,
     constraint_length: f64,
@@ -516,8 +548,8 @@ fn shake_one_constraint_full(
 ) -> bool {
     let constr_length2 = constraint_length * constraint_length;
 
-    // GROMOS convention: r = pos(i) - pos(j)
-    let r = conf.current().pos[i] - conf.current().pos[j];
+    // GROMOS convention: r = pos(i) - pos(j), under the minimum-image convention
+    let r = pbc.nearest_image(conf.current().pos[i], conf.current().pos[j]);
     let dist2 = r.dot(r);
 
     // GROMOS: diff = constr_length2 - dist2
@@ -528,8 +560,8 @@ fn shake_one_constraint_full(
         return true; // already converged
     }
 
-    // Reference (old) distance vector
-    let ref_r = conf.old().pos[i] - conf.old().pos[j];
+    // Reference (old) distance vector, likewise the nearest image
+    let ref_r = pbc.nearest_image(conf.old().pos[i], conf.old().pos[j]);
     let sp = ref_r.dot(r);
 
     // Mass weighting

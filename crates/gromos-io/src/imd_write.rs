@@ -147,22 +147,24 @@ pub fn write_imd(params: &ImdParameters, n_atoms: Option<usize>) -> String {
         row(o, vals![p.ntc]);
         o.push_str("#       NTCP\n");
         row(o, vals![constraint_algorithm(p.ntcp)]);
-        o.push_str("#       NTCP0(1)\n");
+        // SHAKE takes a tolerance, LINCS an expansion order; "off" and SETTLE take no parameter,
+        // and gromosXX reads none for them — writing one would shift every value after it.
         if p.ntcp == 2 {
+            o.push_str("#       NTCP0(1)\n");
             row(o, vals![p.lincs_order_solute]);
-        } else {
+        } else if p.ntcp == 1 {
+            o.push_str("#       NTCP0(1)\n");
             row(o, vals![p.shake_tol]);
         }
         o.push_str("#       NTCS\n");
         row(o, vals![constraint_algorithm(p.ntcs)]);
-        // SETTLE takes no NTCS0 parameter — the reference inputs omit the line.
-        if p.ntcs != 3 {
+        // SETTLE and "off" take no NTCS0 parameter — the reference inputs omit the line.
+        if p.ntcs == 2 {
             o.push_str("#       NTCS0(1)\n");
-            if p.ntcs == 2 {
-                row(o, vals![p.lincs_order_solvent]);
-            } else {
-                row(o, vals![p.ntcs0]);
-            }
+            row(o, vals![p.lincs_order_solvent]);
+        } else if p.ntcs == 1 {
+            o.push_str("#       NTCS0(1)\n");
+            row(o, vals![p.ntcs0]);
         }
     });
 

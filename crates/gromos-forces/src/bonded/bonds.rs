@@ -4,12 +4,17 @@ use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
 
 use super::ForceEnergy;
+use gromos_core::math::Periodicity;
 
 /// Calculate quartic bond forces and energies (GROMOS standard)
 ///
 /// Potential: V = (1/4) * k_harmonic * (r^2 - r0^2)^2
 /// Force: F = -dV/dr = -k_harmonic * (r^2 - r0^2) * r * r_vec/r
-pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_bond_forces_quartic(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for bond in topo.all_bonds_global() {
@@ -19,7 +24,7 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
 
         let params = &topo.bond_parameters[bond.bond_type];
         // GROMOS convention: v = pos(i) - pos(j)
-        let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
+        let r_vec = pbc.nearest_image(conf.current().pos[bond.i], conf.current().pos[bond.j]);
 
         // Energy: V = (1/4) * k * (r^2 - r0^2)^2
         let r2 = r_vec.length_squared();
@@ -51,7 +56,11 @@ pub fn calculate_bond_forces_quartic(topo: &Topology, conf: &Configuration) -> F
 ///
 /// Potential: V = (1/2) * k * (r - r0)^2
 /// Force: F = -k * (r - r0) * r_vec/r
-pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_bond_forces_harmonic(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for bond in topo.all_bonds_global() {
@@ -61,7 +70,7 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
 
         let params = &topo.bond_parameters[bond.bond_type];
         // GROMOS convention: v = pos(i) - pos(j)
-        let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
+        let r_vec = pbc.nearest_image(conf.current().pos[bond.i], conf.current().pos[bond.j]);
         let r = r_vec.length();
 
         if r < 1e-10 {
@@ -99,7 +108,11 @@ pub fn calculate_bond_forces_harmonic(topo: &Topology, conf: &Configuration) -> 
 ///
 /// This is a soft repulsive potential that prevents bonds from stretching too much
 /// but allows free compression. Useful for coarse-grained models.
-pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_cg_bond_forces(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     // CG bonds are stored separately in topology (if available)
@@ -118,7 +131,7 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
         }
 
         // GROMOS convention: v = pos(i) - pos(j)
-        let r_vec = conf.current().pos[bond.i] - conf.current().pos[bond.j];
+        let r_vec = pbc.nearest_image(conf.current().pos[bond.i], conf.current().pos[bond.j]);
         let r = r_vec.length();
 
         if r < 1e-10 {
@@ -157,6 +170,11 @@ pub fn calculate_cg_bond_forces(topo: &Topology, conf: &Configuration) -> ForceE
 
 #[cfg(test)]
 mod tests {
+    /// The unit tests below are single isolated molecules: no box, so no minimum image.
+    fn vacuum() -> gromos_core::math::Periodicity {
+        gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+    }
+
     use super::*;
     use gromos_core::math::Vec3;
     use gromos_io::coordinate::read_coordinate_file;
@@ -176,7 +194,7 @@ mod tests {
         let topo = build_topology(parsed);
         let conf = conf_result.unwrap();
 
-        let result = calculate_bond_forces_quartic(&topo, &conf);
+        let result = calculate_bond_forces_quartic(&topo, &conf, &vacuum());
 
         println!("Bond energy: {:.6} kJ/mol", result.energy);
         println!(
@@ -239,7 +257,7 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(0.1, 0.0, 0.0);
 
-        let result = calculate_cg_bond_forces(&topo, &conf);
+        let result = calculate_cg_bond_forces(&topo, &conf, &vacuum());
 
         println!("\n========== CG Bond Test (Compressed) ==========");
         println!("Bond length: 0.10 nm, equilibrium: 0.15 nm");
@@ -304,7 +322,7 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(0.15, 0.0, 0.0);
 
-        let result = calculate_cg_bond_forces(&topo, &conf);
+        let result = calculate_cg_bond_forces(&topo, &conf, &vacuum());
 
         println!("\n========== CG Bond Test (Equilibrium) ==========");
         println!("Bond length: 0.15 nm (at equilibrium)");
@@ -364,7 +382,7 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(0.20, 0.0, 0.0);
 
-        let result = calculate_cg_bond_forces(&topo, &conf);
+        let result = calculate_cg_bond_forces(&topo, &conf, &vacuum());
 
         // Calculate expected values
         // diff = 0.20 - 0.15 = 0.05 nm
@@ -461,7 +479,7 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(0.25, 0.0, 0.0);
 
-        let result = calculate_cg_bond_forces(&topo, &conf);
+        let result = calculate_cg_bond_forces(&topo, &conf, &vacuum());
 
         // diff = 0.10 nm, Energy = 0.5 * 500 * (0.10)^4 = 0.025 kJ/mol
         let diff: f64 = 0.10;

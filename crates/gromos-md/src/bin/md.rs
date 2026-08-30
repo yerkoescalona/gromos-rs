@@ -926,8 +926,20 @@ fn main() {
     let timing_enabled = md_args.verbose >= 1;
     md_sequence.enable_timing(timing_enabled);
 
-    // Main simulation loop
-    for step in 0..=n_steps {
+    // Main simulation loop.
+    //
+    // gromosXX runs exactly NSTLIM steps. Step 0 here is a *full* step — `start` is
+    // `init` + `run_step` — so the range is exclusive: `0..=n_steps` ran NSTLIM+1 steps, which
+    // left `@fin` (and a continuation from it) one step ahead of gromosXX. The written frames
+    // were unaffected, which is why the reference tests never saw it.
+    if n_steps == 0 {
+        // NSTLIM=0: no dynamics, but the energies of the initial configuration are still wanted.
+        if let Err(e) = start(&mut md_sequence, &topo, &mut conf, &sim_state) {
+            eprintln!("Error: {}", e);
+            process::exit(1);
+        }
+    }
+    for step in 0..n_steps {
         let time = step as f64 * dt;
 
         log::debug!("Step {}: time = {:.6} ps", step, time);

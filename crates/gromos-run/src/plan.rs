@@ -17,9 +17,11 @@ use std::path::PathBuf;
 use gromos_core::Topology;
 use serde::{Deserialize, Serialize};
 
+use crate::dof::{bath_dof, BathRange};
 use crate::recipe::{ConstraintAlgorithm, Coupling, SoluteConstraints, ThermostatAlgorithm};
-use crate::recipe::{RunRecipe, TermSpec, VirialKind};
+use crate::recipe::{RunRecipe, TermSpec, Thermostat, VirialKind};
 use crate::{total_dof, ConstraintSelection, RunError};
+use gromos_integrators::constraints::NtcMode;
 
 /// Position restraints as the plan carries them: the input files, the force constant, and
 /// whether the reference positions are the start-up configuration (`reference: None`).
@@ -90,6 +92,19 @@ pub struct ForcefieldPlan {
 ///
 /// `Forcefield` is much larger than the unit variants; that is the nature of the data (it is
 /// what the force field needs) and a plan has one of them, so it is not boxed.
+/// One temperature bath of a `MULTIBATH` block, resolved onto the topology.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThermostatBath {
+    pub temperature: f64,
+    /// TAU (ps); < 0 = this bath is not coupled
+    pub tau: f64,
+    /// Kinetic degrees of freedom of this bath (resolved from DOFSET and the constraints).
+    pub dof: f64,
+    /// Last atom of the bath (0-based, inclusive).
+    pub last_atom: usize,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -105,10 +120,8 @@ pub enum AlgorithmSpec {
     LeapFrogVelocity,
     Thermostat {
         algorithm: ThermostatAlgorithm,
-        temperature: f64,
-        tau: f64,
-        /// Kinetic degrees of freedom the bath couples to (resolved from the constraints).
-        dof: f64,
+        /// One entry per MULTIBATH bath, in file order.
+        baths: Vec<ThermostatBath>,
     },
     LeapFrogPosition,
     Shake {
@@ -134,7 +147,12 @@ pub enum AlgorithmSpec {
         min_steps: usize,
         force_limit: f64,
     },
-    TemperatureCalculation,
+    TemperatureCalculation {
+        /// Last atom (0-based, inclusive) of each bath, in bath order; empty = one bath over the
+        /// whole system. The kinetic energy is accumulated per bath, as gromosXX does.
+        #[serde(default)]
+        bath_last_atom: Vec<usize>,
+    },
     PressureCalculation {
         virial: VirialKind,
     },
@@ -223,7 +241,7 @@ impl AlgorithmSpec {
             AlgorithmSpec::Settle => "settle",
             AlgorithmSpec::Lincs { .. } => "lincs",
             AlgorithmSpec::SteepestDescent { .. } => "steepest_descent",
-            AlgorithmSpec::TemperatureCalculation => "temperature_calculation",
+            AlgorithmSpec::TemperatureCalculation { .. } => "temperature_calculation",
             AlgorithmSpec::PressureCalculation { .. } => "pressure_calculation",
             AlgorithmSpec::Barostat { .. } => "barostat",
             AlgorithmSpec::EnergyCalculation => "energy_calculation",
@@ -264,9 +282,12 @@ impl AlgorithmSpec {
             AlgorithmSpec::LeapFrogVelocity,
             AlgorithmSpec::Thermostat {
                 algorithm: ThermostatAlgorithm::Berendsen,
-                temperature: 300.0,
-                tau: 0.1,
-                dof: 1944.0,
+                baths: vec![ThermostatBath {
+                    temperature: 300.0,
+                    tau: 0.1,
+                    dof: 1944.0,
+                    last_atom: 647,
+                }],
             },
             AlgorithmSpec::LeapFrogPosition,
             AlgorithmSpec::Shake {
@@ -292,7 +313,9 @@ impl AlgorithmSpec {
                 min_steps: 1,
                 force_limit: 0.0,
             },
-            AlgorithmSpec::TemperatureCalculation,
+            AlgorithmSpec::TemperatureCalculation {
+                bath_last_atom: Vec::new(),
+            },
             AlgorithmSpec::PressureCalculation {
                 virial: VirialKind::Molecular,
             },
@@ -450,6 +473,99 @@ impl TermSpec {
 ///
 /// Needs the topology (constraint counts → degrees of freedom, solvent shape); the restraint
 /// file paths come from `recipe.inputs` and become plan values.
+/// Resolve a recipe's `MULTIBATH` onto the topology: one [`ThermostatBath`] per bath, with the
+/// DOFSET ranges turned into per-bath degrees of freedom and the atom range each bath scales.
+///
+/// gromosXX allows a DOFSET line to send a range's centre-of-mass and internal degrees of freedom
+/// to *different* baths; the velocity scaling of such a split range is not implemented here, so a
+/// COM-bath ≠ IR-bath line is refused by name rather than silently coupled to one of them. Every
+/// GROMOS input we have seen (including all of the LiveCoMS tutorials) uses COMBATH = IRBATH.
+fn thermostat_baths(
+    t: &Thermostat,
+    topo: &Topology,
+    sel: &ConstraintSelection,
+    ntc_mode: NtcMode,
+    ndfmin: i32,
+    total: f64,
+) -> Result<Vec<ThermostatBath>, RunError> {
+    let n_baths = t.baths.len();
+    let last_atom = topo.num_atoms().saturating_sub(1);
+    if n_baths <= 1 {
+        return Ok(t
+            .baths
+            .iter()
+            .map(|b| ThermostatBath {
+                temperature: b.temperature,
+                tau: b.tau,
+                dof: total,
+                last_atom,
+            })
+            .collect());
+    }
+    if t.algorithm != ThermostatAlgorithm::Berendsen {
+        return Err(RunError::Recipe(format!(
+            "{n_baths} temperature baths with {:?} coupling: only weak coupling (Berendsen) is \
+             implemented for more than one bath",
+            t.algorithm
+        )));
+    }
+    if t.dof_sets.is_empty() {
+        return Err(RunError::Recipe(format!(
+            "{n_baths} temperature baths but no DOFSET lines: gromosXX needs one range per bath"
+        )));
+    }
+    let mut ranges = Vec::with_capacity(t.dof_sets.len());
+    for set in &t.dof_sets {
+        let [last, com, ir] = *set;
+        if com != ir {
+            return Err(RunError::Recipe(format!(
+                "DOFSET line with COMBATH {com} ≠ IRBATH {ir}: splitting a range's centre-of-mass \
+                 and internal degrees of freedom over two baths is not implemented"
+            )));
+        }
+        if com == 0 || com > n_baths {
+            return Err(RunError::Recipe(format!(
+                "DOFSET line refers to bath {com}, but MULTIBATH declares {n_baths}"
+            )));
+        }
+        if last == 0 || last > topo.num_atoms() {
+            return Err(RunError::Recipe(format!(
+                "DOFSET line's LAST atom {last} is outside the topology ({} atoms)",
+                topo.num_atoms()
+            )));
+        }
+        ranges.push(BathRange {
+            last_atom: last - 1,
+            com_bath: com - 1,
+            ir_bath: ir - 1,
+        });
+    }
+    if ranges.last().map(|r| r.last_atom) != Some(last_atom) {
+        return Err(RunError::Recipe(format!(
+            "the last DOFSET range ends at atom {} but the topology has {} atoms: gromosXX \
+             requires the last bath to reach the last atom",
+            ranges.last().map(|r| r.last_atom + 1).unwrap_or(0),
+            topo.num_atoms()
+        )));
+    }
+    let dof = bath_dof(topo, sel, ntc_mode, ndfmin, n_baths, &ranges);
+    // the atoms a bath scales: the end of its last DOFSET range
+    let mut bath_last = vec![0usize; n_baths];
+    for r in &ranges {
+        bath_last[r.ir_bath] = bath_last[r.ir_bath].max(r.last_atom);
+    }
+    Ok(t.baths
+        .iter()
+        .enumerate()
+        .map(|(i, b)| ThermostatBath {
+            temperature: b.temperature,
+            tau: b.tau,
+            dof: dof[i],
+            last_atom: bath_last[i],
+        })
+        .collect())
+}
+
 pub fn build_plan(
     recipe: &RunRecipe,
     topo: &Topology,
@@ -621,26 +737,27 @@ pub fn build_plan(
         }
         plan.push(AlgorithmSpec::LeapFrogVelocity);
         if let Some(t) = &recipe.ensemble.thermostat {
-            if t.baths.len() > 1 {
-                return Err(RunError::Recipe(format!(
-                    "{} temperature baths: gromos-rs supports one bath (MULTIBATH NBATHS=1)",
-                    t.baths.len()
-                )));
-            }
-            if let Some(bath) = t.baths.first() {
-                if bath.tau > 0.0 {
-                    plan.push(AlgorithmSpec::Thermostat {
-                        algorithm: t.algorithm,
-                        temperature: bath.temperature,
-                        tau: bath.tau,
-                        dof,
-                    });
-                }
+            let baths = thermostat_baths(t, topo, &sel, ntc_mode, recipe.boundary.ndfmin, dof)?;
+            if baths.iter().any(|b| b.tau > 0.0) {
+                plan.push(AlgorithmSpec::Thermostat {
+                    algorithm: t.algorithm,
+                    baths,
+                });
             }
         }
         plan.push(AlgorithmSpec::LeapFrogPosition);
         constraints(&mut plan);
-        plan.push(AlgorithmSpec::TemperatureCalculation);
+        plan.push(AlgorithmSpec::TemperatureCalculation {
+            bath_last_atom: match &recipe.ensemble.thermostat {
+                Some(t) if t.baths.len() > 1 => {
+                    thermostat_baths(t, topo, &sel, ntc_mode, recipe.boundary.ndfmin, dof)?
+                        .iter()
+                        .map(|b| b.last_atom)
+                        .collect()
+                },
+                _ => Vec::new(),
+            },
+        });
         if let Some(b) = barostat {
             plan.push(AlgorithmSpec::PressureCalculation { virial: b.virial });
             plan.push(AlgorithmSpec::Barostat {

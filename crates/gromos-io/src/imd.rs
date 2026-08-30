@@ -691,59 +691,52 @@ fn parse_block(
             }
         },
         "CONSTRAINT" => {
-            // GROMOS format:
-            //   Line 0: NTC
-            //   Line 1: NTCP (string: "shake" or number)
-            //   Line 2: NTCP0 (tolerance)
-            //   Line 3: NTCS (string: "shake" or number)
-            //   Line 4: NTCS0 (tolerance)
-            if data_lines.is_empty() {
-                return Ok(());
-            }
-            let mut idx = 0;
-            if idx < data_lines.len() {
-                params.ntc = parse_i32(&parse_values(&data_lines[idx])[0])?;
-                idx += 1;
-            }
-            if idx < data_lines.len() {
-                let v = parse_values(&data_lines[idx]);
-                // NTCP can be "shake" (string) or a number
-                params.ntcp = match v[0].as_str() {
-                    "shake" => 1,
-                    "lincs" => 2,
-                    "settle" => 3,
-                    _ => parse_i32(&v[0])?,
+            // gromosXX `read_CONSTRAINT`: NTC, then the solute algorithm and *its* options, then
+            // the solvent algorithm and its options — a value stream, so the file may put all of
+            // them on one line (the GROMOS tutorials) or one per line (our reference inputs).
+            // Which options follow depends on the algorithm: SETTLE reads none, LINCS reads an
+            // expansion order, SHAKE reads a tolerance.
+            let mut t = Tokens::new("CONSTRAINT", data_lines);
+            if let Some(ntc) = t.next_raw() {
+                params.ntc = match ntc.as_str() {
+                    "off" => 0,
+                    "solvent" => 1,
+                    "hydrogen" => 2,
+                    "all" => 3,
+                    "specified" => 4,
+                    _ => parse_i32(&ntc)?,
                 };
-                idx += 1;
             }
-            if idx < data_lines.len() {
-                let v = parse_values(&data_lines[idx]);
-                // NTCP0: SHAKE tolerance, or LINCS expansion order when NTCP=lincs
-                if params.ntcp == 2 {
-                    params.lincs_order_solute = parse_i32(&v[0])? as usize;
-                } else {
-                    params.shake_tol = parse_f64(&v[0])?;
+            if let Some(alg) = t.next_raw() {
+                params.ntcp = constraint_algorithm_code("NTCP", &alg)?;
+                match params.ntcp {
+                    0 | 3 => {},
+                    2 => {
+                        if let Some(v) = t.next_usize("NTCP[0]")? {
+                            params.lincs_order_solute = v;
+                        }
+                    },
+                    _ => {
+                        if let Some(v) = t.next_f64("NTCP[0]")? {
+                            params.shake_tol = v;
+                        }
+                    },
                 }
-                idx += 1;
             }
-            if idx < data_lines.len() {
-                let v = parse_values(&data_lines[idx]);
-                params.ntcs = match v[0].as_str() {
-                    "shake" => 1,
-                    "lincs" => 2,
-                    "settle" => 3,
-                    _ => parse_i32(&v[0])?,
-                };
-                idx += 1;
-            }
-            if idx < data_lines.len() {
-                let v = parse_values(&data_lines[idx]);
-                // NTCS0: SHAKE tolerance, or LINCS expansion order when NTCS=lincs
-                // (settle reads no NTCS0 parameter — line absent from .in for NTCS=settle)
-                if params.ntcs == 2 {
-                    params.lincs_order_solvent = parse_i32(&v[0])? as usize;
-                } else {
-                    params.ntcs0 = parse_f64(&v[0])?;
+            if let Some(alg) = t.next_raw() {
+                params.ntcs = constraint_algorithm_code("NTCS", &alg)?;
+                match params.ntcs {
+                    0 | 3 => {},
+                    2 => {
+                        if let Some(v) = t.next_usize("NTCS[0]")? {
+                            params.lincs_order_solvent = v;
+                        }
+                    },
+                    _ => {
+                        if let Some(v) = t.next_f64("NTCS[0]")? {
+                            params.ntcs0 = v;
+                        }
+                    },
                 }
             }
         },
@@ -811,84 +804,86 @@ fn parse_block(
             }
         },
         "NONBONDED" => {
-            // GROMOS format:
-            //   Line 0: NLRELE
-            //   Line 1: APPAK RCRF EPSRF NSLFEXCL
-            //   Line 2: NSHAPE ASHAPE NA2CLC TOLA2 EPSLS
-            //   Line 3: NKX NKY NKZ NK2 (optional, for PME)
-            //   Line 4: NGX NGY NGZ NASORD NFDORD NALIAS NSPORD (optional)
-            //   ...
-            if let Some(line) = data_lines.first() {
-                params.nlrele = parse_i32(&parse_values(line)[0])?;
+            // gromosXX reads this block as a stream of values (`In_Parameter::read_NONBONDED`,
+            // one `get_next_parameter` per name), so the line wrapping of the file is irrelevant:
+            // real inputs put NLRELE on the same line as APPAK/RCRF/EPSRF/NSLFEXCL, ours put it
+            // on its own. Values missing at the end of the block keep their defaults.
+            let mut t = Tokens::new("NONBONDED", data_lines);
+            if let Some(v) = t.next_i32("NLRELE")? {
+                params.nlrele = v;
             }
-            if data_lines.len() >= 2 {
-                let v = parse_values(&data_lines[1]);
-                if !v.is_empty() {
-                    params.appak = parse_f64(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.rcrf = parse_f64(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.epsrf = parse_f64(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.nslfexcl = parse_i32(&v[3])?;
-                }
+            if let Some(v) = t.next_f64("APPAK")? {
+                params.appak = v;
             }
-            // Lines 3-7: lattice-sum settings, carried for the round trip.
+            if let Some(v) = t.next_f64("RCRF")? {
+                params.rcrf = v;
+            }
+            if let Some(v) = t.next_f64("EPSRF")? {
+                params.epsrf = v;
+            }
+            if let Some(v) = t.next_i32("NSLFEXCL")? {
+                params.nslfexcl = v;
+            }
+            // Lattice-sum settings: unused by a reaction-field run, carried for the round trip.
             let x = &mut params.nonbonded_extra;
-            if data_lines.len() >= 3 {
-                let v = parse_values(&data_lines[2]);
-                if v.len() >= 5 {
-                    x.nshape = parse_i32(&v[0])?;
-                    x.ashape = parse_f64(&v[1])?;
-                    x.na2clc = parse_i32(&v[2])?;
-                    x.tola2 = parse_f64(&v[3])?;
-                    x.epsls = parse_f64(&v[4])?;
-                }
+            if let Some(v) = t.next_i32("NSHAPE")? {
+                x.nshape = v;
             }
-            if data_lines.len() >= 4 {
-                let v = parse_values(&data_lines[3]);
-                if v.len() >= 3 {
-                    params.grid_x = parse_usize(&v[0])?;
-                    params.grid_y = parse_usize(&v[1])?;
-                    params.grid_z = parse_usize(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.nonbonded_extra.nk2 = parse_f64(&v[3])?;
+            if let Some(v) = t.next_f64("ASHAPE")? {
+                x.ashape = v;
+            }
+            if let Some(v) = t.next_i32("NA2CLC")? {
+                x.na2clc = v;
+            }
+            if let Some(v) = t.next_f64("TOLA2")? {
+                x.tola2 = v;
+            }
+            if let Some(v) = t.next_f64("EPSLS")? {
+                x.epsls = v;
+            }
+            for (name, slot) in [
+                ("NKX", &mut params.grid_x),
+                ("NKY", &mut params.grid_y),
+                ("NKZ", &mut params.grid_z),
+            ] {
+                if let Some(v) = t.next_usize(name)? {
+                    *slot = v;
                 }
             }
             let x = &mut params.nonbonded_extra;
-            if data_lines.len() >= 5 {
-                let v = parse_values(&data_lines[4]);
-                if v.len() >= 7 {
-                    x.ng = [
-                        parse_usize(&v[0])?,
-                        parse_usize(&v[1])?,
-                        parse_usize(&v[2])?,
-                    ];
-                    x.nasord = parse_i32(&v[3])?;
-                    x.nfdord = parse_i32(&v[4])?;
-                    x.nalias = parse_i32(&v[5])?;
-                    x.nspord = parse_i32(&v[6])?;
+            if let Some(v) = t.next_f64("KCUT")? {
+                x.nk2 = v;
+            }
+            for (name, k) in [("NGX", 0), ("NGY", 1), ("NGZ", 2)] {
+                if let Some(v) = t.next_usize(name)? {
+                    x.ng[k] = v;
                 }
             }
-            if data_lines.len() >= 6 {
-                let v = parse_values(&data_lines[5]);
-                if v.len() >= 4 {
-                    x.nqeval = parse_i32(&v[0])?;
-                    x.faccur = parse_f64(&v[1])?;
-                    x.nrdgrd = parse_i32(&v[2])?;
-                    x.nwrgdr = parse_i32(&v[3])?;
+            for (name, slot) in [
+                ("NASORD", &mut x.nasord),
+                ("NFDORD", &mut x.nfdord),
+                ("NALIAS", &mut x.nalias),
+                ("NSPORD", &mut x.nspord),
+                ("NQEVAL", &mut x.nqeval),
+            ] {
+                if let Some(v) = t.next_i32(name)? {
+                    *slot = v;
                 }
             }
-            if data_lines.len() >= 7 {
-                let v = parse_values(&data_lines[6]);
-                if v.len() >= 2 {
-                    x.nlrlj = parse_i32(&v[0])?;
-                    x.slvdns = parse_f64(&v[1])?;
+            if let Some(v) = t.next_f64("FACCUR")? {
+                x.faccur = v;
+            }
+            for (name, slot) in [
+                ("NRDGRD", &mut x.nrdgrd),
+                ("NWRGRD", &mut x.nwrgdr),
+                ("NLRLJ", &mut x.nlrlj),
+            ] {
+                if let Some(v) = t.next_i32(name)? {
+                    *slot = v;
                 }
+            }
+            if let Some(v) = t.next_f64("SLVDNS")? {
+                x.slvdns = v;
             }
         },
         "INITIALISE" => {
@@ -1248,6 +1243,98 @@ impl ImdParameters {
 }
 
 /// Split a line into whitespace-separated tokens
+/// The constraint algorithm codes of a `CONSTRAINT` block, by gromosXX's names and numbers
+/// (`in_parameter.cc`: shake 1, lincs 2, flexshake 3, settle 4, m_shake 5, gpu_shake 6), mapped
+/// onto the codes this crate uses (1 shake, 2 lincs, 3 settle). The algorithms gromos-rs does not
+/// implement are refused by name instead of being mapped onto a different one.
+fn constraint_algorithm_code(what: &str, token: &str) -> Result<i32, IoError> {
+    Ok(match token {
+        "off" | "0" => 0,
+        "shake" | "1" => 1,
+        "lincs" | "2" => 2,
+        "settle" | "4" => 3,
+        "flexshake" | "3" => {
+            return Err(IoError::ParseError(format!(
+                "{what} = flexshake is not implemented by gromos-rs"
+            )))
+        },
+        "m_shake" | "5" | "gpu_shake" | "6" => {
+            return Err(IoError::ParseError(format!(
+                "{what} = {token} is not implemented by gromos-rs"
+            )))
+        },
+        other => {
+            return Err(IoError::ParseError(format!(
+                "{what} expects shake/lincs/settle (or 1/2/4), found {other:?}"
+            )))
+        },
+    })
+}
+
+/// A block read as a stream of whitespace-separated values, the way gromosXX reads every input
+/// block (`io::Block::get_next_parameter`): the parameters come in a fixed order and the file may
+/// wrap them across lines however it likes. `next_*` returns `None` once the block runs out, so a
+/// short block leaves the remaining parameters at their defaults.
+struct Tokens<'a> {
+    block: &'a str,
+    values: Vec<String>,
+    pos: usize,
+}
+
+impl<'a> Tokens<'a> {
+    fn new(block: &'a str, lines: &[String]) -> Self {
+        Tokens {
+            block,
+            values: lines.iter().flat_map(|l| parse_values(l)).collect(),
+            pos: 0,
+        }
+    }
+
+    fn next_raw(&mut self) -> Option<String> {
+        let v = self.values.get(self.pos).cloned();
+        if v.is_some() {
+            self.pos += 1;
+        }
+        v
+    }
+
+    fn next_i32(&mut self, name: &str) -> Result<Option<i32>, IoError> {
+        match self.next_raw() {
+            None => Ok(None),
+            Some(v) => v.parse::<i32>().map(Some).map_err(|_| {
+                IoError::ParseError(format!(
+                    "block {}: {name} expects an integer, found {v:?}",
+                    self.block
+                ))
+            }),
+        }
+    }
+
+    fn next_usize(&mut self, name: &str) -> Result<Option<usize>, IoError> {
+        match self.next_raw() {
+            None => Ok(None),
+            Some(v) => v.parse::<usize>().map(Some).map_err(|_| {
+                IoError::ParseError(format!(
+                    "block {}: {name} expects a non-negative integer, found {v:?}",
+                    self.block
+                ))
+            }),
+        }
+    }
+
+    fn next_f64(&mut self, name: &str) -> Result<Option<f64>, IoError> {
+        match self.next_raw() {
+            None => Ok(None),
+            Some(v) => v.parse::<f64>().map(Some).map_err(|_| {
+                IoError::ParseError(format!(
+                    "block {}: {name} expects a number, found {v:?}",
+                    self.block
+                ))
+            }),
+        }
+    }
+}
+
 fn parse_values(line: &str) -> Vec<String> {
     line.split_whitespace().map(|s| s.to_string()).collect()
 }

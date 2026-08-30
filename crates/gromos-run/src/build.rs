@@ -28,10 +28,10 @@ use gromos_forces::{
 };
 use gromos_integrators::{
     algorithms::{
-        BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, EnergyCalculation,
-        Forcefield, LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm, NoseHooverThermostat,
-        PressureCalculation, RemoveCOMMotion, SettleAlgorithm, ShakeAlgorithm,
-        SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
+        BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, BerendsenThermostatParams,
+        EnergyCalculation, Forcefield, LeapFrogPosition, LeapFrogVelocity, LincsAlgorithm,
+        NoseHooverThermostat, PressureCalculation, RemoveCOMMotion, SettleAlgorithm,
+        ShakeAlgorithm, SteepestDescentAlgorithm, TemperatureCalculation, VirialType,
     },
     constraints::ShakeParameters,
 };
@@ -425,27 +425,52 @@ pub fn instantiate(
                 seq.push(instantiate_orchestrator(terms, topo, periodicity)?);
             },
             AlgorithmSpec::LeapFrogVelocity => seq.push(Box::new(LeapFrogVelocity::new())),
-            AlgorithmSpec::Thermostat {
-                algorithm,
-                temperature,
-                tau,
-                dof,
-            } => match algorithm {
-                ThermostatAlgorithm::Berendsen => seq.push(Box::new(
-                    BerendsenThermostat::new_single_bath(*temperature, *tau, *dof, n_atoms),
-                )),
-                ThermostatAlgorithm::NoseHoover => seq.push(Box::new(
-                    NoseHooverThermostat::new_single_bath(*temperature, *tau, *dof, n_atoms),
-                )),
-                ThermostatAlgorithm::NoseHooverChain(n) => {
-                    seq.push(Box::new(NoseHooverThermostat::new_chain_bath(
-                        *temperature,
-                        *tau,
-                        *dof,
-                        n_atoms,
-                        (*n).max(2),
-                    )))
-                },
+            AlgorithmSpec::Thermostat { algorithm, baths } => {
+                let first = baths
+                    .first()
+                    .ok_or_else(|| RunError::Recipe("thermostat without a bath".to_string()))?;
+                match algorithm {
+                    ThermostatAlgorithm::Berendsen => {
+                        let mut alg = BerendsenThermostat::new_single_bath(
+                            first.temperature,
+                            first.tau,
+                            first.dof,
+                            n_atoms,
+                        );
+                        if baths.len() > 1 {
+                            alg.params.clear();
+                            alg.bath_ranges.clear();
+                            let mut start = 0;
+                            for b in baths {
+                                alg.params.push(BerendsenThermostatParams {
+                                    temperature: b.temperature,
+                                    tau: b.tau,
+                                    dof: b.dof,
+                                });
+                                alg.bath_ranges.push((start, b.last_atom));
+                                start = b.last_atom + 1;
+                            }
+                        }
+                        seq.push(Box::new(alg))
+                    },
+                    ThermostatAlgorithm::NoseHoover => {
+                        seq.push(Box::new(NoseHooverThermostat::new_single_bath(
+                            first.temperature,
+                            first.tau,
+                            first.dof,
+                            n_atoms,
+                        )))
+                    },
+                    ThermostatAlgorithm::NoseHooverChain(n) => {
+                        seq.push(Box::new(NoseHooverThermostat::new_chain_bath(
+                            first.temperature,
+                            first.tau,
+                            first.dof,
+                            n_atoms,
+                            (*n).max(2),
+                        )))
+                    },
+                }
             },
             AlgorithmSpec::LeapFrogPosition => seq.push(Box::new(LeapFrogPosition::new())),
             AlgorithmSpec::Shake {
@@ -493,8 +518,8 @@ pub fn instantiate(
                     .with_min_steps(*min_steps)
                     .with_force_limit(*force_limit),
             )),
-            AlgorithmSpec::TemperatureCalculation => {
-                seq.push(Box::new(TemperatureCalculation::new()))
+            AlgorithmSpec::TemperatureCalculation { bath_last_atom } => {
+                seq.push(Box::new(TemperatureCalculation::with_baths(bath_last_atom)))
             },
             AlgorithmSpec::PressureCalculation { virial } => {
                 seq.push(Box::new(PressureCalculation::new(virial_type(*virial))))
@@ -567,22 +592,21 @@ fn summarize(
                     ntc: ConstraintSelection::ntc_mode_of(solute.ntc()),
                 })
             },
-            AlgorithmSpec::Thermostat {
-                algorithm,
-                temperature,
-                tau,
-                ..
-            } => {
+            AlgorithmSpec::Thermostat { algorithm, baths } => {
+                let label = match algorithm {
+                    ThermostatAlgorithm::Berendsen => "Berendsen".to_string(),
+                    ThermostatAlgorithm::NoseHoover => "Nose-Hoover".to_string(),
+                    ThermostatAlgorithm::NoseHooverChain(n) => format!("Nose-Hoover-Chain({n})"),
+                };
+                // the summary names the first bath; a multi-bath run says how many there are
                 summary.thermostat = Some(ThermostatSummary {
-                    label: match algorithm {
-                        ThermostatAlgorithm::Berendsen => "Berendsen".to_string(),
-                        ThermostatAlgorithm::NoseHoover => "Nose-Hoover".to_string(),
-                        ThermostatAlgorithm::NoseHooverChain(n) => {
-                            format!("Nose-Hoover-Chain({n})")
-                        },
+                    label: if baths.len() > 1 {
+                        format!("{label} ({} baths)", baths.len())
+                    } else {
+                        label
                     },
-                    temperature: *temperature,
-                    tau: *tau,
+                    temperature: baths.first().map(|b| b.temperature).unwrap_or(0.0),
+                    tau: baths.first().map(|b| b.tau).unwrap_or(0.0),
                 })
             },
             AlgorithmSpec::Barostat {

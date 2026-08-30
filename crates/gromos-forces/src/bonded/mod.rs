@@ -20,6 +20,7 @@ pub use perturbed::{
 };
 
 use gromos_core::configuration::Configuration;
+use gromos_core::math::Periodicity;
 use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
 
@@ -165,15 +166,18 @@ impl LambdaController {
 pub fn calculate_bonded_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     use_quartic_bonds: bool,
 ) -> ForceEnergy {
-    calculate_bonded_forces_ntf(topo, conf, use_quartic_bonds, true, true, true, true)
+    calculate_bonded_forces_ntf(topo, conf, pbc, use_quartic_bonds, true, true, true, true)
 }
 
 /// Calculate bonded forces gated by NTF flags (FORCE block in GROMOS).
+#[allow(clippy::too_many_arguments)] // the NTF flags of the FORCE block, one per term
 pub fn calculate_bonded_forces_ntf(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     use_quartic_bonds: bool,
     ntf_bond: bool,
     ntf_angle: bool,
@@ -184,28 +188,28 @@ pub fn calculate_bonded_forces_ntf(
 
     if ntf_bond {
         let mut bf = if use_quartic_bonds {
-            calculate_bond_forces_quartic(topo, conf)
+            calculate_bond_forces_quartic(topo, conf, pbc)
         } else {
-            calculate_bond_forces_harmonic(topo, conf)
+            calculate_bond_forces_harmonic(topo, conf, pbc)
         };
         log::debug!("  bonded: bond={:.6e}", bf.energy);
         bf.bond_energy = bf.energy;
         result.add(&bf);
     }
     if ntf_angle {
-        let mut af = calculate_angle_forces(topo, conf);
+        let mut af = calculate_angle_forces(topo, conf, pbc);
         log::debug!("  bonded: angle={:.6e}", af.energy);
         af.angle_energy = af.energy;
         result.add(&af);
     }
     if ntf_dihedral {
-        let mut df = calculate_dihedral_forces(topo, conf);
+        let mut df = calculate_dihedral_forces(topo, conf, pbc);
         log::debug!("  bonded: dihe={:.6e}", df.energy);
         df.dihedral_energy = df.energy;
         result.add(&df);
     }
     if ntf_improper {
-        let mut imf = calculate_improper_dihedral_forces(topo, conf);
+        let mut imf = calculate_improper_dihedral_forces(topo, conf, pbc);
         log::debug!("  bonded: impr={:.6e}", imf.energy);
         imf.improper_energy = imf.energy;
         result.add(&imf);
@@ -225,6 +229,11 @@ pub fn calculate_bonded_forces_ntf(
 
 #[cfg(test)]
 mod tests {
+    /// The unit tests below are single isolated molecules: no box, so no minimum image.
+    fn vacuum() -> gromos_core::math::Periodicity {
+        gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+    }
+
     use super::*;
     use gromos_core::configuration::Configuration;
     use gromos_core::topology::Topology;
@@ -233,7 +242,7 @@ mod tests {
     fn test_bonded_forces_complete() {
         let topo = Topology::new();
         let conf = Configuration::new(0, 1, 1);
-        let result = calculate_bonded_forces(&topo, &conf, true);
+        let result = calculate_bonded_forces(&topo, &conf, &vacuum(), true);
         assert_eq!(result.energy, 0.0);
         assert!(result.forces.is_empty());
     }

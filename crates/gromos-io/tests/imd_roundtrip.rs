@@ -162,3 +162,50 @@ fn multibath_without_dof_sets_is_synthesised_from_n_atoms() {
     let q = parse_imd_str(&written).expect("re-parse");
     assert_eq!((q.negr, q.nre.clone()), (1, vec![648]));
 }
+
+/// gromosXX reads each block as a stream of values, so the same parameters wrapped differently
+/// must parse to the same thing. The two layouts below are the real ones in the wild: ours (the
+/// gromosXX reference inputs) puts NLRELE on its own line, the GROMOS LiveCoMS tutorials put it
+/// with APPAK/RCRF/EPSRF/NSLFEXCL — which used to land TOLA2's `1e-10` in NSLFEXCL's integer slot.
+#[test]
+fn line_wrapping_of_a_block_does_not_matter() {
+    const HEAD: &str = "TITLE\nwrapping\nEND\nSYSTEM\n1 1\nEND\nSTEP\n10 0.0 0.002\nEND\n";
+    let ours = format!(
+        "{HEAD}NONBONDED\n\
+         # NLRELE\n     1\n\
+         # APPAK RCRF EPSRF NSLFEXCL\n   0.0   1.4   61   1\n\
+         # NSHAPE ASHAPE NA2CLC TOLA2 EPSLS\n   3   1.4   2   1e-10   0\n\
+         # NKX NKY NKZ KCUT\n   10 10 10 100\n\
+         # NGX NGY NGZ NASORD NFDORD NALIAS NSPORD\n   32 32 32 3 2 3 4\n\
+         # NQEVAL FACCUR NRDGRD NWRGRD\n   100000 1.6 0 0\n\
+         # NLRLJ SLVDNS\n   0 33.3\nEND\n"
+    );
+    let tutorial = format!(
+        "{HEAD}NONBONDED\n\
+         # NLRELE APPAK RCRF EPSRF NSLFEXCL\n       1      0.0       1.4        61    1\n\
+         # NSHAPE ASHAPE NA2CLC TOLA2 EPSLS\n       3       1.4        2   1e-10       0\n\
+         # NKX NKY NKZ KCUT\n   10     10    10     100\n\
+         # NGX NGY NGZ NASORD NFDORD NALIAS NSPORD\n   32    32    32       3       2        3       4\n\
+         # NQEVAL FACCUR NRDGRD NWRGRD NLRLJ SLVDNS\n  100000      1.6        0        0       0      33.3\nEND\n"
+    );
+    let a = parse_imd_str(&ours).expect("our reference layout");
+    let b = parse_imd_str(&tutorial).expect("the LiveCoMS tutorial layout");
+    assert_eq!(a.nlrele, 1);
+    assert_eq!(a.rcrf, 1.4);
+    assert_eq!(a.epsrf, 61.0);
+    assert_eq!(a.nslfexcl, 1);
+    assert_eq!(a.nonbonded_extra.tola2, 1e-10);
+    assert_eq!(comparable(&a), comparable(&b));
+}
+
+/// A value of the wrong type still fails, and the message names the block and the parameter.
+#[test]
+fn a_malformed_value_names_its_parameter() {
+    let text = "TITLE\nx\nEND\nNONBONDED\n1 0.0 1.4 61 oops\nEND\n";
+    let err = parse_imd_str(text).expect_err("NSLFEXCL is not a number");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("NONBONDED") && msg.contains("NSLFEXCL"),
+        "{msg}"
+    );
+}

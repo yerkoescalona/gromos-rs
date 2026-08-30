@@ -1,3 +1,4 @@
+use crate::constraints::box_periodicity;
 use crate::constraints::{shake, ShakeParameters};
 use crate::fep::LambdaController;
 use crate::integrator::Integrator;
@@ -166,7 +167,12 @@ impl Replica {
         self.configuration.current_mut().energies.clear();
 
         // Bonded forces (bonds + angles + dihedrals)
-        let bonded_result = calculate_bonded_forces(topology, &self.configuration, true);
+        let bonded_result = calculate_bonded_forces(
+            topology,
+            &self.configuration,
+            &box_periodicity(&self.configuration),
+            true,
+        );
 
         // Accumulate bonded forces and energies
         for (i, &force) in bonded_result.forces.iter().enumerate() {

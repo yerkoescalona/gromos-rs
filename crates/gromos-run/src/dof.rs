@@ -13,6 +13,84 @@ use gromos_integrators::constraints::{NtcMode, ShakeBuffers};
 
 use crate::ConstraintSelection;
 
+/// One temperature bath's share of the system: the atoms up to `last_atom` (0-based, inclusive)
+/// that a `MULTIBATH` DOFSET line assigns to it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BathRange {
+    /// last atom of the range (0-based, inclusive)
+    pub last_atom: usize,
+    /// bath index that takes the centre-of-mass degrees of freedom of the range
+    pub com_bath: usize,
+    /// bath index that takes the internal/rotational degrees of freedom
+    pub ir_bath: usize,
+}
+
+/// Degrees of freedom per temperature bath, as gromosXX's
+/// `Multibath::calculate_degrees_of_freedom` counts them:
+///
+/// * every DOFSET range contributes `3 × (number of temperature groups starting in it)` to the
+///   COM bath and the remaining `3 × (atoms in the range)` minus that to the IR bath;
+/// * constraints are subtracted from the bath that owns their atoms;
+/// * NDFMIN is spread over the baths in proportion to their degrees of freedom.
+///
+/// With one bath over the whole system this is exactly [`total_dof`].
+pub fn bath_dof(
+    topo: &Topology,
+    sel: &ConstraintSelection,
+    ntc: NtcMode,
+    ndfmin: i32,
+    n_baths: usize,
+    ranges: &[BathRange],
+) -> Vec<f64> {
+    let n_atoms = topo.num_atoms();
+    let mut dof = vec![0.0; n_baths];
+    let mut last: i64 = -1;
+    for r in ranges {
+        let group_starts = topo
+            .temperature_groups
+            .iter()
+            .filter_map(|g| g.first().copied())
+            .filter(|&first| first as i64 > last && first <= r.last_atom)
+            .count();
+        let atoms_in_range = r.last_atom as i64 - last;
+        dof[r.com_bath] += 3.0 * group_starts as f64;
+        dof[r.ir_bath] += 3.0 * atoms_in_range as f64 - 3.0 * group_starts as f64;
+        last = r.last_atom as i64;
+    }
+    // constraints go to the bath of their atoms (gromosXX: Topology::calculate_constraint_dof)
+    let bath_of = |atom: usize| -> usize {
+        ranges
+            .iter()
+            .find(|r| atom <= r.last_atom)
+            .map(|r| r.ir_bath)
+            .unwrap_or(n_baths - 1)
+    };
+    if sel.solute_constrained() {
+        for c in &ShakeBuffers::new(topo, ntc, false).solute_constraints {
+            dof[bath_of(c.0)] -= 1.0;
+        }
+    }
+    if sel.solvent_constrained() {
+        let per_molecule = topo.solvent_constraint_template.len();
+        let n_solute = topo.num_solute_atoms();
+        let atoms_per_molecule = topo.solvent_atom_template.len().max(1);
+        for m in 0..topo.num_solvent_molecules() {
+            let first = n_solute + m * atoms_per_molecule;
+            if first < n_atoms {
+                dof[bath_of(first)] -= per_molecule as f64;
+            }
+        }
+    }
+    // NDFMIN in proportion to each bath's degrees of freedom (gromosXX's "Martin Stroet edit")
+    let total: f64 = dof.iter().sum();
+    if ndfmin != 0 && total > 0.0 {
+        for d in dof.iter_mut() {
+            *d -= ndfmin as f64 * (*d / total);
+        }
+    }
+    dof
+}
+
 /// Total kinetic degrees of freedom of the system.
 pub fn total_dof(topo: &Topology, sel: &ConstraintSelection, ntc: NtcMode, ndfmin: i32) -> f64 {
     let n_atoms = topo.num_atoms();

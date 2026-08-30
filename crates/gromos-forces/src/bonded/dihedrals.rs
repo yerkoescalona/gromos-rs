@@ -5,6 +5,7 @@ use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
 
 use super::ForceEnergy;
+use gromos_core::math::Periodicity;
 
 /// Calculate proper dihedral forces (GROMOS torsional potential)
 ///
@@ -16,7 +17,11 @@ use super::ForceEnergy;
 /// - φ is the dihedral angle
 ///
 /// Uses Chebyshev polynomials for efficient cos(m*φ) calculation
-pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_dihedral_forces(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for dihedral in topo.all_proper_dihedrals_global() {
@@ -27,9 +32,18 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
         let params = &topo.dihedral_parameters[dihedral.dihedral_type];
 
         // GROMOS convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
-        let r_ij = conf.current().pos[dihedral.i] - conf.current().pos[dihedral.j];
-        let r_kj = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.j];
-        let r_kl = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.l];
+        let r_ij = pbc.nearest_image(
+            conf.current().pos[dihedral.i],
+            conf.current().pos[dihedral.j],
+        );
+        let r_kj = pbc.nearest_image(
+            conf.current().pos[dihedral.k],
+            conf.current().pos[dihedral.j],
+        );
+        let r_kl = pbc.nearest_image(
+            conf.current().pos[dihedral.k],
+            conf.current().pos[dihedral.l],
+        );
 
         // Cross products kept for reference (Chebyshev path uses projection instead)
         let _r_mj = r_ij.cross(r_kj); // normal to plane i-j-k
@@ -106,7 +120,10 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
 
         // GROMOS: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
         // rlj = pos(l) - pos(j)
-        let r_lj = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.j];
+        let r_lj = pbc.nearest_image(
+            conf.current().pos[dihedral.l],
+            conf.current().pos[dihedral.j],
+        );
         let rij_v = [r_ij.x, r_ij.y, r_ij.z];
         let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
         let rlj_v = [r_lj.x, r_lj.y, r_lj.z];
@@ -131,7 +148,11 @@ pub fn calculate_dihedral_forces(topo: &Topology, conf: &Configuration) -> Force
 ///
 /// This is the improved GROMOS dihedral potential that supports arbitrary phase shifts δ,
 /// not limited to 0° or 180° as in the old formula. It's simpler and more flexible.
-pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_dihedral_new_forces(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for dihedral in topo.all_proper_dihedrals_global() {
@@ -142,9 +163,18 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         let params = &topo.dihedral_parameters[dihedral.dihedral_type];
 
         // GROMOS convention: rij = pos(i)-pos(j), rkj = pos(k)-pos(j), rkl = pos(k)-pos(l)
-        let r_ij = conf.current().pos[dihedral.i] - conf.current().pos[dihedral.j];
-        let r_kj = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.j];
-        let r_kl = conf.current().pos[dihedral.k] - conf.current().pos[dihedral.l];
+        let r_ij = pbc.nearest_image(
+            conf.current().pos[dihedral.i],
+            conf.current().pos[dihedral.j],
+        );
+        let r_kj = pbc.nearest_image(
+            conf.current().pos[dihedral.k],
+            conf.current().pos[dihedral.j],
+        );
+        let r_kl = pbc.nearest_image(
+            conf.current().pos[dihedral.k],
+            conf.current().pos[dihedral.l],
+        );
 
         // Cross products to get plane normals
         let r_mj = r_ij.cross(r_kj); // normal to plane i-j-k
@@ -218,7 +248,10 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
         result.forces[dihedral.l] += f_l;
 
         // GROMOS: virial_tensor(a, bb) += rij(a)*fi(bb) + rkj(a)*fk(bb) + rlj(a)*fl(bb)
-        let r_lj = conf.current().pos[dihedral.l] - conf.current().pos[dihedral.j];
+        let r_lj = pbc.nearest_image(
+            conf.current().pos[dihedral.l],
+            conf.current().pos[dihedral.j],
+        );
         let rij_v = [r_ij.x, r_ij.y, r_ij.z];
         let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
         let rlj_v = [r_lj.x, r_lj.y, r_lj.z];
@@ -238,6 +271,11 @@ pub fn calculate_dihedral_new_forces(topo: &Topology, conf: &Configuration) -> F
 
 #[cfg(test)]
 mod tests {
+    /// The unit tests below are single isolated molecules: no box, so no minimum image.
+    fn vacuum() -> gromos_core::math::Periodicity {
+        gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+    }
+
     use super::*;
     use gromos_core::configuration::Configuration;
     use gromos_core::math::Vec3;
@@ -292,7 +330,7 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(1.0, 0.0, 0.0);
         conf.current_mut().pos[3] = Vec3::new(2.0, -0.5, 0.0); // Below the j-k plane (opposite side)
 
-        let result = calculate_dihedral_new_forces(&topo, &conf);
+        let result = calculate_dihedral_new_forces(&topo, &conf, &vacuum());
 
         // At minimum: V = K * (1 + cos(m*φ - δ)) = K * (1 + cos(π - π)) = K * (1 + 1) = 2K = 20
         let expected_energy = 10.0 * (1.0 + (1.0 * PI - PI).cos());
@@ -372,8 +410,8 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(1.0, 0.0, 0.0);
         conf.current_mut().pos[3] = Vec3::new(2.0, 0.5, 0.01); // Small z-deviation for φ ≈ 0°
 
-        let result_new = calculate_dihedral_new_forces(&topo, &conf);
-        let result_old = calculate_dihedral_forces(&topo, &conf);
+        let result_new = calculate_dihedral_new_forces(&topo, &conf, &vacuum());
+        let result_old = calculate_dihedral_forces(&topo, &conf, &vacuum());
 
         println!("\n========== New vs Old Dihedral Comparison ==========");
         println!("New formula energy: {:.6} kJ/mol", result_new.energy);
@@ -439,7 +477,7 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(1.0, 0.0, 0.0);
         conf.current_mut().pos[3] = Vec3::new(2.0, 0.0, 0.5); // Second plane (xz) - 90° rotation
 
-        let result = calculate_dihedral_new_forces(&topo, &conf);
+        let result = calculate_dihedral_new_forces(&topo, &conf, &vacuum());
 
         // Energy: V = K * (1 + cos(m*φ - δ)) = 15 * (1 + cos(3*90° - 60°))
         //           = 15 * (1 + cos(270° - 60°)) = 15 * (1 + cos(210°))
@@ -513,7 +551,7 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(0.5, 0.2, -0.1);
         conf.current_mut().pos[3] = Vec3::new(1.3, -0.2, 0.3);
 
-        let result = calculate_dihedral_new_forces(&topo, &conf);
+        let result = calculate_dihedral_new_forces(&topo, &conf, &vacuum());
 
         println!("\n========== New Dihedral Force Conservation Test ==========");
         println!("Energy: {:.6} kJ/mol", result.energy);

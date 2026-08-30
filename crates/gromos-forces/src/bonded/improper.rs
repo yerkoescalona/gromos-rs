@@ -5,11 +5,16 @@ use gromos_core::math::Vec3;
 use gromos_core::topology::Topology;
 
 use super::ForceEnergy;
+use gromos_core::math::Periodicity;
 
 /// Calculate improper dihedral forces (for planarity/chirality).
 ///
 /// Potential: V = (1/2) * K * (ζ - ζ₀)²
-pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_improper_dihedral_forces(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for improper in topo.all_improper_dihedrals_global() {
@@ -20,9 +25,18 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
         let params = &topo.improper_dihedral_parameters[improper.dihedral_type];
 
         // GROMOS convention: rkj = pos(k)-pos(j), rij = pos(i)-pos(j), rkl = pos(k)-pos(l)
-        let r_kj = conf.current().pos[improper.k] - conf.current().pos[improper.j];
-        let r_ij = conf.current().pos[improper.i] - conf.current().pos[improper.j];
-        let r_kl = conf.current().pos[improper.k] - conf.current().pos[improper.l];
+        let r_kj = pbc.nearest_image(
+            conf.current().pos[improper.k],
+            conf.current().pos[improper.j],
+        );
+        let r_ij = pbc.nearest_image(
+            conf.current().pos[improper.i],
+            conf.current().pos[improper.j],
+        );
+        let r_kl = pbc.nearest_image(
+            conf.current().pos[improper.k],
+            conf.current().pos[improper.l],
+        );
 
         let r_mj = r_ij.cross(r_kj);
         let r_nk = r_kj.cross(r_kl);
@@ -88,7 +102,10 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
         result.forces[improper.l] += f_l;
 
         // GROMOS: virial += rij*fi + rkj*fk + rlj*fl
-        let r_lj = conf.current().pos[improper.l] - conf.current().pos[improper.j];
+        let r_lj = pbc.nearest_image(
+            conf.current().pos[improper.l],
+            conf.current().pos[improper.j],
+        );
         let rij_v = [r_ij.x, r_ij.y, r_ij.z];
         let rkj_v = [r_kj.x, r_kj.y, r_kj.z];
         let rlj_v = [r_lj.x, r_lj.y, r_lj.z];
@@ -108,7 +125,11 @@ pub fn calculate_improper_dihedral_forces(topo: &Topology, conf: &Configuration)
 /// Calculate cross-dihedral forces (8-atom coupled torsional term).
 ///
 /// Potential: V = K * (1 + cos(m*(φ + ψ) - δ))
-pub fn calculate_crossdihedral_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_crossdihedral_forces(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for crossdih in topo.all_cross_dihedrals_global() {
@@ -118,13 +139,31 @@ pub fn calculate_crossdihedral_forces(topo: &Topology, conf: &Configuration) -> 
 
         let params = &topo.dihedral_parameters[crossdih.cross_dihedral_type];
 
-        let r_ab = conf.current().pos[crossdih.b] - conf.current().pos[crossdih.a];
-        let r_cb = conf.current().pos[crossdih.b] - conf.current().pos[crossdih.c];
-        let r_cd = conf.current().pos[crossdih.d] - conf.current().pos[crossdih.c];
+        let r_ab = pbc.nearest_image(
+            conf.current().pos[crossdih.b],
+            conf.current().pos[crossdih.a],
+        );
+        let r_cb = pbc.nearest_image(
+            conf.current().pos[crossdih.b],
+            conf.current().pos[crossdih.c],
+        );
+        let r_cd = pbc.nearest_image(
+            conf.current().pos[crossdih.d],
+            conf.current().pos[crossdih.c],
+        );
 
-        let r_ef = conf.current().pos[crossdih.f] - conf.current().pos[crossdih.e];
-        let r_gf = conf.current().pos[crossdih.f] - conf.current().pos[crossdih.g];
-        let r_gh = conf.current().pos[crossdih.h] - conf.current().pos[crossdih.g];
+        let r_ef = pbc.nearest_image(
+            conf.current().pos[crossdih.f],
+            conf.current().pos[crossdih.e],
+        );
+        let r_gf = pbc.nearest_image(
+            conf.current().pos[crossdih.f],
+            conf.current().pos[crossdih.g],
+        );
+        let r_gh = pbc.nearest_image(
+            conf.current().pos[crossdih.h],
+            conf.current().pos[crossdih.g],
+        );
 
         let r_nc = r_cb.cross(r_cd);
         let d_cb2 = r_cb.dot(r_cb);
@@ -221,6 +260,12 @@ pub fn calculate_crossdihedral_forces(topo: &Topology, conf: &Configuration) -> 
 
 #[cfg(test)]
 mod tests {
+
+    /// The unit tests below are single isolated molecules: no box, so no minimum image.
+    fn vacuum() -> gromos_core::math::Periodicity {
+        gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+    }
+
     use super::*;
     use gromos_core::configuration::Configuration;
     use gromos_core::math::Vec3;
@@ -276,7 +321,7 @@ mod tests {
         conf.current_mut().pos[6] = Vec3::new(5.0, 0.0, 0.0);
         conf.current_mut().pos[7] = Vec3::new(6.0, -0.5, 0.0);
 
-        let result = calculate_crossdihedral_forces(&topo, &conf);
+        let result = calculate_crossdihedral_forces(&topo, &conf, &vacuum());
         assert!(!result.energy.is_nan() && !result.energy.is_infinite());
         assert!(result.energy >= 0.0 && result.energy <= 20.0);
     }
@@ -317,7 +362,7 @@ mod tests {
         conf.current_mut().pos[6] = Vec3::new(3.8, 0.3, -0.3);
         conf.current_mut().pos[7] = Vec3::new(4.7, -0.3, 0.2);
 
-        let result = calculate_crossdihedral_forces(&topo, &conf);
+        let result = calculate_crossdihedral_forces(&topo, &conf, &vacuum());
         let total: Vec3 = result.forces.iter().copied().sum();
         assert!(
             total.length() < 1e-4,
@@ -362,7 +407,7 @@ mod tests {
         conf.current_mut().pos[6] = Vec3::new(5.0, 0.0, 0.0);
         conf.current_mut().pos[7] = Vec3::new(6.0, -0.5, 0.0);
 
-        let result = calculate_crossdihedral_forces(&topo, &conf);
+        let result = calculate_crossdihedral_forces(&topo, &conf, &vacuum());
         // φ ≈ π, ψ ≈ π → φ+ψ ≈ 2π, cos(2π)=1, E = K*(1+1) = 20
         assert!(
             result.energy > 15.0 && result.energy < 21.0,
@@ -374,6 +419,11 @@ mod tests {
 
 #[cfg(test)]
 mod improper_tests {
+    /// The unit tests below are single isolated molecules: no box, so no minimum image.
+    fn vacuum() -> gromos_core::math::Periodicity {
+        gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+    }
+
     use super::*;
     use gromos_core::topology::{Dihedral, ImproperDihedralParameters, MolTypeAtom};
 
@@ -454,7 +504,7 @@ mod improper_tests {
             Vec3::new(0.1, 0.0, 0.0),
             Vec3::new(0.2, 0.1, 0.0),
         ]);
-        let r = calculate_improper_dihedral_forces(&topo, &conf);
+        let r = calculate_improper_dihedral_forces(&topo, &conf, &vacuum());
         assert!(r.energy.abs() < 1e-20);
         assert!(r.forces.iter().all(|f| f.length() < 1e-12));
     }
@@ -470,7 +520,7 @@ mod improper_tests {
             Vec3::new(0.15, 0.12, 0.05),
         ];
         let conf = conf_with(base);
-        let analytic = calculate_improper_dihedral_forces(&topo, &conf);
+        let analytic = calculate_improper_dihedral_forces(&topo, &conf, &vacuum());
         assert!(analytic.energy > 0.0);
         let h = 1e-6;
         for a in 0..4 {
@@ -491,8 +541,10 @@ mod improper_tests {
                         minus[a].z -= h;
                     },
                 }
-                let e_plus = calculate_improper_dihedral_forces(&topo, &conf_with(plus)).energy;
-                let e_minus = calculate_improper_dihedral_forces(&topo, &conf_with(minus)).energy;
+                let e_plus =
+                    calculate_improper_dihedral_forces(&topo, &conf_with(plus), &vacuum()).energy;
+                let e_minus =
+                    calculate_improper_dihedral_forces(&topo, &conf_with(minus), &vacuum()).energy;
                 let fd = -(e_plus - e_minus) / (2.0 * h);
                 let an = match d {
                     0 => analytic.forces[a].x,

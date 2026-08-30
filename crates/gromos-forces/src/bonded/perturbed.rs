@@ -10,6 +10,7 @@ use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
 
 use super::ForceEnergyLambda;
+use gromos_core::math::Periodicity;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ fn chebyshev(m: i32, cos_phi: f64) -> (f64, f64) {
 pub fn calculate_perturbed_bond_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -70,7 +72,7 @@ pub fn calculate_perturbed_bond_forces(
         // b_mix = r0(λ), already computed above as `r0`
 
         // GROMOS: v = pos(i) - pos(j)
-        let v = conf.current().pos[bond.i] - conf.current().pos[bond.j];
+        let v = pbc.nearest_image(conf.current().pos[bond.i], conf.current().pos[bond.j]);
         let dist2 = v.length_squared();
         let r02 = r0 * r0;
         let delta = dist2 - r02;
@@ -101,6 +103,7 @@ pub fn calculate_perturbed_bond_forces(
 pub fn calculate_perturbed_angle_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -118,8 +121,8 @@ pub fn calculate_perturbed_angle_forces(
         let cd_d = cos0b - cos0a;
 
         // GROMOS: rij = pos(i)-pos(j), rkj = pos(k)-pos(j)
-        let rij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
-        let rkj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
+        let rij = pbc.nearest_image(conf.current().pos[angle.i], conf.current().pos[angle.j]);
+        let rkj = pbc.nearest_image(conf.current().pos[angle.k], conf.current().pos[angle.j]);
         let dij = rij.length();
         let dkj = rkj.length();
         if dij < 1e-10 || dkj < 1e-10 {
@@ -160,6 +163,7 @@ pub fn calculate_perturbed_angle_forces(
 pub fn calculate_perturbed_improper_dihedral_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -175,9 +179,9 @@ pub fn calculate_perturbed_improper_dihedral_forces(
         let q_d = pb.q0 - pa.q0;
 
         // Same geometry as calculate_improper_dihedral_forces
-        let r_kj = conf.current().pos[imp.k] - conf.current().pos[imp.j];
-        let r_ij = conf.current().pos[imp.i] - conf.current().pos[imp.j];
-        let r_kl = conf.current().pos[imp.k] - conf.current().pos[imp.l];
+        let r_kj = pbc.nearest_image(conf.current().pos[imp.k], conf.current().pos[imp.j]);
+        let r_ij = pbc.nearest_image(conf.current().pos[imp.i], conf.current().pos[imp.j]);
+        let r_kl = pbc.nearest_image(conf.current().pos[imp.k], conf.current().pos[imp.l]);
 
         let r_mj = r_ij.cross(r_kj);
         let r_nk = r_kj.cross(r_kl);
@@ -259,6 +263,7 @@ pub fn calculate_perturbed_improper_dihedral_forces(
 pub fn calculate_perturbed_dihedral_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -269,9 +274,9 @@ pub fn calculate_perturbed_dihedral_forces(
         let pb = &topo.dihedral_parameters[dih.b_type];
 
         // Dihedral geometry (same as calculate_dihedral_forces)
-        let r_ij = conf.current().pos[dih.i] - conf.current().pos[dih.j];
-        let r_kj = conf.current().pos[dih.k] - conf.current().pos[dih.j];
-        let r_kl = conf.current().pos[dih.k] - conf.current().pos[dih.l];
+        let r_ij = pbc.nearest_image(conf.current().pos[dih.i], conf.current().pos[dih.j]);
+        let r_kj = pbc.nearest_image(conf.current().pos[dih.k], conf.current().pos[dih.j]);
+        let r_kl = pbc.nearest_image(conf.current().pos[dih.k], conf.current().pos[dih.l]);
 
         let _r_mj = r_ij.cross(r_kj);
         let _r_nk = r_kj.cross(r_kl);
@@ -341,6 +346,7 @@ pub fn calculate_perturbed_dihedral_forces(
 pub fn calculate_soft_bond_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -361,7 +367,7 @@ pub fn calculate_soft_bond_forces(
         let b_diff = r0_b - r0_a;
         let alpha = sb.alpha;
 
-        let v = conf.current().pos[sb.i] - conf.current().pos[sb.j];
+        let v = pbc.nearest_image(conf.current().pos[sb.i], conf.current().pos[sb.j]);
         let dist = v.length();
         if dist < 1e-10 {
             continue;
@@ -406,6 +412,7 @@ pub fn calculate_soft_bond_forces(
 pub fn calculate_soft_angle_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -426,8 +433,8 @@ pub fn calculate_soft_angle_forces(
         let cos_diff = cos0_b - cos0_a;
         let alpha = sa.alpha;
 
-        let rij = conf.current().pos[sa.i] - conf.current().pos[sa.j];
-        let rkj = conf.current().pos[sa.k] - conf.current().pos[sa.j];
+        let rij = pbc.nearest_image(conf.current().pos[sa.i], conf.current().pos[sa.j]);
+        let rkj = pbc.nearest_image(conf.current().pos[sa.k], conf.current().pos[sa.j]);
         let dij = rij.length();
         let dkj = rkj.length();
         if dij < 1e-10 || dkj < 1e-10 {
@@ -478,6 +485,7 @@ pub fn calculate_soft_angle_forces(
 pub fn calculate_soft_improper_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -499,9 +507,9 @@ pub fn calculate_soft_improper_forces(
         let alpha = si.alpha;
 
         // Same geometry as calculate_improper_dihedral_forces
-        let r_kj = conf.current().pos[si.k] - conf.current().pos[si.j];
-        let r_ij = conf.current().pos[si.i] - conf.current().pos[si.j];
-        let r_kl = conf.current().pos[si.k] - conf.current().pos[si.l];
+        let r_kj = pbc.nearest_image(conf.current().pos[si.k], conf.current().pos[si.j]);
+        let r_ij = pbc.nearest_image(conf.current().pos[si.i], conf.current().pos[si.j]);
+        let r_kl = pbc.nearest_image(conf.current().pos[si.k], conf.current().pos[si.l]);
 
         let r_mj = r_ij.cross(r_kj);
         let r_nk = r_kj.cross(r_kl);
@@ -579,6 +587,7 @@ pub fn calculate_soft_improper_forces(
 pub fn calculate_perturbed_bonded_forces(
     topo: &Topology,
     conf: &Configuration,
+    pbc: &Periodicity,
     lambda: f64,
     lambda_derivative: f64,
 ) -> ForceEnergyLambda {
@@ -586,38 +595,43 @@ pub fn calculate_perturbed_bonded_forces(
     let mut result = ForceEnergyLambda::new(n);
 
     if !topo.perturbed_solute.bonds.is_empty() {
-        let term = calculate_perturbed_bond_forces(topo, conf, lambda, lambda_derivative);
+        let term = calculate_perturbed_bond_forces(topo, conf, pbc, lambda, lambda_derivative);
         result.bond_energy += term.energy;
         result.add(&term);
     }
     if !topo.perturbed_solute.angles.is_empty() {
-        let term = calculate_perturbed_angle_forces(topo, conf, lambda, lambda_derivative);
+        let term = calculate_perturbed_angle_forces(topo, conf, pbc, lambda, lambda_derivative);
         result.angle_energy += term.energy;
         result.add(&term);
     }
     if !topo.perturbed_solute.improper_dihedrals.is_empty() {
-        let term =
-            calculate_perturbed_improper_dihedral_forces(topo, conf, lambda, lambda_derivative);
+        let term = calculate_perturbed_improper_dihedral_forces(
+            topo,
+            conf,
+            pbc,
+            lambda,
+            lambda_derivative,
+        );
         result.improper_energy += term.energy;
         result.add(&term);
     }
     if !topo.perturbed_solute.proper_dihedrals.is_empty() {
-        let term = calculate_perturbed_dihedral_forces(topo, conf, lambda, lambda_derivative);
+        let term = calculate_perturbed_dihedral_forces(topo, conf, pbc, lambda, lambda_derivative);
         result.dihedral_energy += term.energy;
         result.add(&term);
     }
     if !topo.perturbed_solute.soft_bonds.is_empty() {
-        let term = calculate_soft_bond_forces(topo, conf, lambda, lambda_derivative);
+        let term = calculate_soft_bond_forces(topo, conf, pbc, lambda, lambda_derivative);
         result.bond_energy += term.energy;
         result.add(&term);
     }
     if !topo.perturbed_solute.soft_angles.is_empty() {
-        let term = calculate_soft_angle_forces(topo, conf, lambda, lambda_derivative);
+        let term = calculate_soft_angle_forces(topo, conf, pbc, lambda, lambda_derivative);
         result.angle_energy += term.energy;
         result.add(&term);
     }
     if !topo.perturbed_solute.soft_impropers.is_empty() {
-        let term = calculate_soft_improper_forces(topo, conf, lambda, lambda_derivative);
+        let term = calculate_soft_improper_forces(topo, conf, pbc, lambda, lambda_derivative);
         result.improper_energy += term.energy;
         result.add(&term);
     }
@@ -627,6 +641,11 @@ pub fn calculate_perturbed_bonded_forces(
 
 #[cfg(test)]
 mod tests {
+    /// The unit tests below are single isolated molecules: no box, so no minimum image.
+    fn vacuum() -> gromos_core::math::Periodicity {
+        gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+    }
+
     use super::*;
     use gromos_core::configuration::Configuration;
     use gromos_core::math::Vec3;
@@ -680,7 +699,7 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.20, 0.0, 0.0); // r=0.20 nm
 
         // At λ=0: K=1000, r0=0.15 → E = 0.25*1000*(0.04-0.0225)² = 0.25*1000*0.0003063 = 0.07656
-        let res = calculate_perturbed_bond_forces(&topo, &conf, 0.0, 1.0);
+        let res = calculate_perturbed_bond_forces(&topo, &conf, &vacuum(), 0.0, 1.0);
         let r2 = 0.20_f64 * 0.20;
         let r02 = 0.15_f64 * 0.15;
         let expected = 0.25 * 1000.0 * (r2 - r02) * (r2 - r02);
@@ -723,7 +742,7 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.25, 0.0, 0.0);
 
         // At λ=1: K=2000, r0=0.20
-        let res = calculate_perturbed_bond_forces(&topo, &conf, 1.0, 1.0);
+        let res = calculate_perturbed_bond_forces(&topo, &conf, &vacuum(), 1.0, 1.0);
         let r2 = 0.25_f64 * 0.25;
         let r02 = 0.20_f64 * 0.20;
         let expected = 0.25 * 2000.0 * (r2 - r02) * (r2 - r02);
@@ -766,7 +785,7 @@ mod tests {
         conf.current_mut().pos[0] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[1] = Vec3::new(r0_lam, 0.0, 0.0);
 
-        let res = calculate_perturbed_bond_forces(&topo, &conf, lambda, 1.0);
+        let res = calculate_perturbed_bond_forces(&topo, &conf, &vacuum(), lambda, 1.0);
         assert!(
             res.energy.abs() < 1e-12,
             "at r=r0(λ), E should be 0: {}",
@@ -810,7 +829,7 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(1.0, 0.0, 0.0); // 180°
 
         // At λ=0: K=500, cos0=cos(120°)=-0.5, cosθ=cos(180°)=-1.0
-        let res = calculate_perturbed_angle_forces(&topo, &conf, 0.0, 1.0);
+        let res = calculate_perturbed_angle_forces(&topo, &conf, &vacuum(), 0.0, 1.0);
         let cost = -1.0_f64;
         let cos0 = th0a.cos();
         let expected = 0.5 * 500.0 * (cost - cos0) * (cost - cos0);
@@ -851,7 +870,7 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[2] = Vec3::new(0.8, 0.6, 0.0);
 
-        let res = calculate_perturbed_angle_forces(&topo, &conf, 0.5, 1.0);
+        let res = calculate_perturbed_angle_forces(&topo, &conf, &vacuum(), 0.5, 1.0);
         let total: Vec3 = res.forces.iter().copied().sum();
         assert!(
             total.length() < 1e-10,
@@ -893,7 +912,7 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(1.0, 0.0, 0.0);
         conf.current_mut().pos[3] = Vec3::new(0.5, -0.1, 0.0);
 
-        let res = calculate_perturbed_improper_dihedral_forces(&topo, &conf, 0.0, 1.0);
+        let res = calculate_perturbed_improper_dihedral_forces(&topo, &conf, &vacuum(), 0.0, 1.0);
         assert!(res.energy >= 0.0 && res.energy.is_finite());
         assert!(res.lambda_derivative.is_finite());
     }
@@ -939,8 +958,8 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(1.0, 0.0, 0.0);
         conf.current_mut().pos[3] = Vec3::new(2.0, -0.5, 0.0);
 
-        let res_0 = calculate_perturbed_dihedral_forces(&topo, &conf, 0.0, 1.0);
-        let res_1 = calculate_perturbed_dihedral_forces(&topo, &conf, 1.0, 1.0);
+        let res_0 = calculate_perturbed_dihedral_forces(&topo, &conf, &vacuum(), 0.0, 1.0);
+        let res_1 = calculate_perturbed_dihedral_forces(&topo, &conf, &vacuum(), 1.0, 1.0);
 
         // At λ=0, result = state A; at λ=1, result = state B
         // dE/dλ = λ_d * (E_B - E_A) — verify sign is consistent

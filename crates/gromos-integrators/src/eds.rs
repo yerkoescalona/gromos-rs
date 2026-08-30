@@ -1,3 +1,4 @@
+use crate::constraints::box_periodicity;
 use crate::constraints::{shake, ShakeParameters};
 use crate::integrator::Integrator;
 use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
@@ -715,7 +716,12 @@ impl EDSRunner {
         let mut total_energy = 0.0;
 
         // Bonded forces
-        let bonded_result = calculate_bonded_forces(topology, configuration, true);
+        let bonded_result = calculate_bonded_forces(
+            topology,
+            configuration,
+            &box_periodicity(configuration),
+            true,
+        );
         for (i, &force) in bonded_result.forces.iter().enumerate() {
             forces[i] += force;
         }

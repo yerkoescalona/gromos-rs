@@ -28,18 +28,26 @@ use gromos_core::topology::Topology;
 /// In GROMOS, E_kin = 0.5 * sum_i( m_i * (|v_new|^2 + |v_old|^2) / 2 )
 /// This averages the kinetic energy between the current and old velocities.
 /// The result is stored in conf.old().energies (GROMOS convention).
-#[derive(Debug, Clone)]
-pub struct TemperatureCalculation;
+#[derive(Debug, Clone, Default)]
+pub struct TemperatureCalculation {
+    /// Last atom (0-based, inclusive) of each temperature bath, in bath order. Empty = one bath
+    /// over the whole system, where only the totals are written.
+    bath_last_atom: Vec<usize>,
+}
 
 impl TemperatureCalculation {
     pub fn new() -> Self {
-        Self
+        Self {
+            bath_last_atom: Vec::new(),
+        }
     }
-}
 
-impl Default for TemperatureCalculation {
-    fn default() -> Self {
-        Self::new()
+    /// The kinetic energy is accumulated per bath as well as in total, as gromosXX does
+    /// (`Multibath::calculate_kinetic_energy`): each bath's thermostat scales on its own energy.
+    pub fn with_baths(bath_last_atom: &[usize]) -> Self {
+        Self {
+            bath_last_atom: bath_last_atom.to_vec(),
+        }
     }
 }
 
@@ -72,18 +80,35 @@ impl Algorithm for TemperatureCalculation {
         //   old().vel     = previous velocities v(t-dt/2)
         // The average gives the kinetic energy at time t.
         let n_atoms = topo.inverse_mass.len();
+        let n_baths = self.bath_last_atom.len();
         let mut e_kin = 0.0;
         let mut e_kin_new = 0.0;
+        let mut per_bath = vec![0.0; n_baths];
+        let mut per_bath_new = vec![0.0; n_baths];
+        let mut bath = 0;
         for i in 0..n_atoms {
             let v_new = conf.current().vel[i];
             let v_old = conf.old().vel[i];
             let m = topo.mass[i];
-            e_kin += 0.5 * m * (v_new.length_squared() + v_old.length_squared()) / 2.0;
-            e_kin_new += 0.5 * m * v_new.length_squared();
+            let avg = 0.5 * m * (v_new.length_squared() + v_old.length_squared()) / 2.0;
+            let new = 0.5 * m * v_new.length_squared();
+            e_kin += avg;
+            e_kin_new += new;
+            if n_baths > 0 {
+                while bath + 1 < n_baths && i > self.bath_last_atom[bath] {
+                    bath += 1;
+                }
+                per_bath[bath] += avg;
+                per_bath_new[bath] += new;
+            }
         }
         conf.old_mut().energies.kinetic_total = e_kin;
         // Store "new" E_kin for thermostat scaling (GROMOS: multibath.bath.ekin)
         conf.old_mut().energies.kinetic_energy_new = e_kin_new;
+        if n_baths > 0 {
+            conf.old_mut().energies.kinetic_energy = per_bath;
+            conf.old_mut().energies.kinetic_energy_new_bath = per_bath_new;
+        }
         log::debug!("  E_kin={:.10e}  E_kin_new={:.10e}", e_kin, e_kin_new);
         Ok(())
     }

@@ -156,6 +156,7 @@ pub fn single_point_energy(
     let bonded = calculate_bonded_forces_ntf(
         topo,
         &conf,
+        &periodicity,
         params.quartic_bonds,
         params.ntf[0],
         params.ntf[1],

@@ -4,12 +4,17 @@ use gromos_core::configuration::Configuration;
 use gromos_core::topology::Topology;
 
 use super::ForceEnergy;
+use gromos_core::math::Periodicity;
 
 /// Calculate angle forces (GROMOS cosine-based)
 ///
 /// Potential: V = (1/2) * k_harmonic * (cos(θ) - cos(θ0))^2
 /// Forces calculated using chain rule on angle derivatives
-pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_angle_forces(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     for angle in topo.all_angles_global() {
@@ -20,8 +25,8 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
         let params = &topo.angle_parameters[angle.angle_type];
 
         // GROMOS convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
-        let rij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
-        let rkj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
+        let rij = pbc.nearest_image(conf.current().pos[angle.i], conf.current().pos[angle.j]);
+        let rkj = pbc.nearest_image(conf.current().pos[angle.k], conf.current().pos[angle.j]);
 
         let dij = rij.length();
         let dkj = rkj.length();
@@ -77,7 +82,11 @@ pub fn calculate_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEne
 ///
 /// This is an alternative to the cosine-based angle potential.
 /// It's simpler and more intuitive, commonly used in other force fields.
-pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) -> ForceEnergy {
+pub fn calculate_harmonic_angle_forces(
+    topo: &Topology,
+    conf: &Configuration,
+    pbc: &Periodicity,
+) -> ForceEnergy {
     let mut result = ForceEnergy::new(topo.num_atoms());
 
     const EPSILON: f64 = 1e-10; // Small value for numerical stability
@@ -91,8 +100,8 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
         let params = &topo.angle_parameters[angle.angle_type];
 
         // GROMOS convention: rij = pos(i) - pos(j), rkj = pos(k) - pos(j)
-        let r_ij = conf.current().pos[angle.i] - conf.current().pos[angle.j];
-        let r_kj = conf.current().pos[angle.k] - conf.current().pos[angle.j];
+        let r_ij = pbc.nearest_image(conf.current().pos[angle.i], conf.current().pos[angle.j]);
+        let r_kj = pbc.nearest_image(conf.current().pos[angle.k], conf.current().pos[angle.j]);
 
         let d_ij = r_ij.length();
         let d_kj = r_kj.length();
@@ -177,6 +186,11 @@ pub fn calculate_harmonic_angle_forces(topo: &Topology, conf: &Configuration) ->
 
 #[cfg(test)]
 mod tests {
+    /// The unit tests below are single isolated molecules: no box, so no minimum image.
+    fn vacuum() -> gromos_core::math::Periodicity {
+        gromos_core::math::Periodicity::Vacuum(gromos_core::math::Vacuum)
+    }
+
     use super::*;
     use gromos_core::math::Vec3;
     use gromos_core::topology::Topology;
@@ -197,7 +211,7 @@ mod tests {
         let topo = build_topology(parsed);
         let conf = conf_result.unwrap();
 
-        let result = calculate_angle_forces(&topo, &conf);
+        let result = calculate_angle_forces(&topo, &conf, &vacuum());
 
         println!("Angle energy: {:.6} kJ/mol", result.energy);
         println!(
@@ -271,7 +285,7 @@ mod tests {
         conf.current_mut().pos[2] = Vec3::new(-0.075, 0.12990, 0.0); // 120° angle
 
         // Calculate forces
-        let result = calculate_harmonic_angle_forces(&topo, &conf);
+        let result = calculate_harmonic_angle_forces(&topo, &conf, &vacuum());
 
         println!("\n========== Harmonic Angle Test (Equilibrium) ==========");
         println!("Angle energy: {:.6} kJ/mol", result.energy);
@@ -363,7 +377,7 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[2] = Vec3::new(0.0, 0.15, 0.0); // 90° angle
 
-        let result = calculate_harmonic_angle_forces(&topo, &conf);
+        let result = calculate_harmonic_angle_forces(&topo, &conf, &vacuum());
 
         println!("\n========== Harmonic Angle Test (Compressed 90°) ==========");
         println!("Angle energy: {:.6} kJ/mol", result.energy);
@@ -461,8 +475,8 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[2] = Vec3::new(-0.04226, 0.09063, 0.0); // 115°
 
-        let harmonic = calculate_harmonic_angle_forces(&topo, &conf);
-        let cosine = calculate_angle_forces(&topo, &conf);
+        let harmonic = calculate_harmonic_angle_forces(&topo, &conf, &vacuum());
+        let cosine = calculate_angle_forces(&topo, &conf, &vacuum());
 
         println!("\n========== Harmonic vs Cosine Angle Comparison ==========");
         println!("Harmonic energy: {:.6} kJ/mol", harmonic.energy);
@@ -548,7 +562,7 @@ mod tests {
         conf.current_mut().pos[1] = Vec3::new(0.0, 0.0, 0.0);
         conf.current_mut().pos[2] = Vec3::new(-0.15, 0.001, 0.0); // Almost linear
 
-        let result = calculate_harmonic_angle_forces(&topo, &conf);
+        let result = calculate_harmonic_angle_forces(&topo, &conf, &vacuum());
 
         println!("\n========== Harmonic Angle Test (Nearly Linear) ==========");
         println!("Angle energy: {:.6} kJ/mol", result.energy);

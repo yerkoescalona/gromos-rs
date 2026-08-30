@@ -1,3 +1,4 @@
+use crate::constraints::box_periodicity;
 use crate::constraints::{shake, ShakeParameters};
 use crate::integrator::Integrator;
 use crate::thermostats::{berendsen_thermostat, BerendsenThermostatParameters};
@@ -558,7 +559,12 @@ impl GamdRunner {
         }
 
         // Calculate bonded forces (bonds, angles, dihedrals)
-        let bonded_result = calculate_bonded_forces(topology, configuration, true);
+        let bonded_result = calculate_bonded_forces(
+            topology,
+            configuration,
+            &box_periodicity(configuration),
+            true,
+        );
 
         // For simplicity, assume all bonded energy is non-dihedral
         // (In a full implementation, you'd separate dihedral contributions)

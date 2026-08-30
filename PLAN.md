@@ -222,6 +222,17 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
 > Each arrow is a commit boundary with green tests. 9a-0 and 9d carry zero numerical risk (prove-then-
 > wire); 9a-1, 9c, 9b each isolate exactly one source of float divergence and test it against an oracle.
 
+**1.5b — Real-input compatibility (opened 2026-08-30 by the LiveCoMS tutorial run, CHANGELOG 0.0.42)**
+- [x] IMD blocks read as value streams (`NONBONDED`, `CONSTRAINT`), minimum image in SHAKE and every
+      bonded term, `MULTIBATH` NBATHS > 1, MD loop step count, duplicate `mdf` binary.
+- [ ] **Put charge groups back into the box** as gromosXX does (`put_chargegroups_into_box`): with a
+      wrapped solute our trajectory still drifts from gromosXX (~3e-2 nm / 10 steps) though frame 0
+      matches exactly. Likely the charge-group cutoff; next item to close.
+- [ ] `.trc` frame 0 should be the initial configuration (gromosXX's schedule); `@trv` is ignored.
+- [ ] Convert the remaining IMD blocks to the value-stream reader (only NONBONDED and CONSTRAINT are
+      done; the rest are still line-indexed and will misread differently-wrapped files).
+- [ ] `atominfo` is built by both gromos-analysis and gromos-tools — one name, two programs.
+
 **1.6 — Restraints & special interactions** — distance done; dihedral next
 - [x] Distance restraints — `nacl_1water_distres` passes (NTDIR=2, CDIR*w0, instantaneous).
   Physics in `gromos-forces/restraints.rs`, wired into `Forcefield`. Perturbed variant

@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.42] (2026-08-30)
+
+Everything in this release came out of running the **GROMOS LiveCoMS tutorial suite**
+(`.local/gromos_tutorial_livecoms`, six tutorials, 21 `.imd` inputs) against gromos-rs for the
+first time — real GROMOS input files rather than the ones our reference suite generates. Every
+defect below was invisible to the 44 reference systems because they share one style: one
+temperature bath, one value per line, and molecules that are never wrapped across the box.
+
+### Fixed
+
+- **The MD loop ran NSTLIM+1 steps.** `start()` is `init` + a full `run_step`, so `for step in
+  0..=n_steps` integrated one step too many. The written frames were unaffected (which is why the
+  reference tests never caught it), but `@fin` — and therefore any continuation from it — was one
+  step ahead of gromosXX. Our final configuration is now bit-identical to gromosXX's for the same
+  NSTLIM (checked on `water_216_box`).
+- **SHAKE ignored the minimum-image convention** (gromosXX: `shake.h::shake_iteration` takes both
+  the current and the reference vector as `periodicity.nearest_image`). A solute whose atoms sit on
+  opposite sides of the box — i.e. every equilibrated GROMOS configuration — could not converge:
+  the tutorials' aladip has two "bonds" 3.3 nm long as stored.
+- **The bonded terms ignored it too** (bonds, angles, dihedrals, impropers and their perturbed and
+  soft-core variants): 40 vector sites now go through `nearest_image`, as every gromosXX bonded
+  interaction does. On the tutorial system this moved the angle energy from 1183 kJ/mol to
+  gromosXX's 16.86 — the whole potential energy now matches gromosXX **exactly** at frame 0.
+- **`NONBONDED` and `CONSTRAINT` were parsed line by line**, but gromosXX reads every block as a
+  value stream (`Block::get_next_parameter`), so the file may wrap the values anywhere. Real inputs
+  put `NLRELE` on the same line as `APPAK RCRF EPSRF NSLFEXCL`, which landed `TOLA2 = 1e-10` in
+  `NSLFEXCL`'s integer slot and rejected all 21 tutorial files; `CONSTRAINT` on one line silently
+  lost NTCP and both tolerances. Both blocks now read through a `Tokens` cursor, error messages name
+  the parameter, and `CONSTRAINT` accepts gromosXX's names and numbers (settle is 4, not 3) and
+  refuses the algorithms we do not implement instead of mapping them onto another one.
+- **Two crates produced a binary named `mdf`** (gromos-analysis's gromos++ port and gromos-md's
+  mean-force utility), so they overwrote each other in `target/<profile>/` and the analysis
+  reference test intermittently executed the wrong program. gromos-md's binaries are now declared
+  explicitly and its utility is `mean_force`. (`atominfo` is still built by both gromos-analysis and
+  gromos-tools — the gromos-tools one is a lesser duplicate of a ported program; left for a
+  decision.)
+
+### Added
+
+- **Multi-bath temperature coupling** (`MULTIBATH` with NBATHS > 1, weak coupling): per-bath
+  degrees of freedom exactly as `Multibath::calculate_degrees_of_freedom` counts them
+  (temperature-group COM dof to the COM bath, the rest to the IR bath, constraints subtracted from
+  the bath that owns them, NDFMIN spread in proportion), per-bath kinetic energy, and scaling per
+  bath range. On the tutorials this reproduces gromosXX's own DOF (24.99 / 7653.01) and per-bath
+  temperatures (184.41 K / 298.52 K). Every reference system uses one bath, and that path is
+  unchanged. A DOFSET line with COMBATH ≠ IRBATH, and multi-bath Nosé-Hoover, are refused by name.
+
+### Known, not yet fixed (found by the same run)
+
+- gromosXX puts charge groups back into the box; we never wrap. On a system whose molecules are
+  wrapped this still moves the trajectory apart (~3e-2 nm after 10 steps on the tutorial system)
+  even though frame 0 matches exactly — the charge-group cutoff is the likely path.
+- Our `.trc` writes the state *after* the first step as frame 0; gromosXX writes the initial
+  configuration. `@trv` is accepted and then ignored.
+- The tutorials' remaining blockers are unported features, refused by name: `ROTTRANS`,
+  `PRECALCLAM`, `AEDS`, `REPLICA`, `DISTANCEFIELD`, `ORDERPARAMRES`, and `@qmmm`. `GAMD` is applied
+  but unvalidated (gromosXX reports a 45.3 kJ/mol boost where we record none).
+
 ## [0.0.41] (2026-08-30)
 
 ### Added

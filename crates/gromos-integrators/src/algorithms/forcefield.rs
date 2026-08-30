@@ -442,6 +442,7 @@ impl Algorithm for Forcefield {
             calculate_bonded_forces_ntf(
                 topo,
                 conf,
+                &self.periodicity,
                 self.use_quartic_bonds,
                 self.ntf_bond,
                 self.ntf_angle,
@@ -459,7 +460,13 @@ impl Algorithm for Forcefield {
         // Forces are accumulated in the returned ForceEnergyLambda and applied in step 4.
         let (lambda, lambda_deriv) = self.lambda_and_derivative;
         let perturbed_bonded = if !topo.perturbed_solute.is_empty() {
-            let pr = calculate_perturbed_bonded_forces(topo, conf, lambda, lambda_deriv);
+            let pr = calculate_perturbed_bonded_forces(
+                topo,
+                conf,
+                &self.periodicity,
+                lambda,
+                lambda_deriv,
+            );
             log::debug!(
                 "  Perturbed bonded: E={:.10e} dH/dλ={:.10e}",
                 pr.energy,
