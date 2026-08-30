@@ -210,3 +210,262 @@ fn matrix_overlap_matches_gromospp() {
         1e-5,
     );
 }
+
+fn topo() -> String {
+    shared()
+        .join("shared/aladip.topo")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn trc() -> String {
+    shared()
+        .join("aladip_solvated/expected/trajectory.trc")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn strs(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn bilayer_dist_matches_gromospp() {
+    let d = data("bilayer_dist");
+    let out = run(
+        env!("CARGO_BIN_EXE_bilayer_dist"),
+        &strs(&[
+            "@topo",
+            &topo(),
+            "@pbc",
+            "r",
+            "@atoms",
+            "1:a",
+            "@selection",
+            "s:OW",
+            "@grid",
+            "10",
+            "@traj",
+            &trc(),
+        ]),
+        None,
+    );
+    assert_same_text(
+        &out,
+        &std::fs::read_to_string(d.join("aladip_grid10.gromospp.out")).unwrap(),
+        1e-5,
+    );
+    let out = run(
+        env!("CARGO_BIN_EXE_bilayer_dist"),
+        &strs(&[
+            "@topo",
+            &topo(),
+            "@pbc",
+            "r",
+            "@atoms",
+            "1:a",
+            "@selection",
+            "s:OW",
+            "@grid",
+            "10",
+            "@density",
+            "@traj",
+            &trc(),
+        ]),
+        None,
+    );
+    assert_same_text(
+        &out,
+        &std::fs::read_to_string(d.join("aladip_grid10_density.gromospp.out")).unwrap(),
+        1e-5,
+    );
+}
+
+#[test]
+fn bilayer_oparam_matches_gromospp() {
+    let out = run(
+        env!("CARGO_BIN_EXE_bilayer_oparam"),
+        &strs(&[
+            "@topo",
+            &topo(),
+            "@pbc",
+            "r",
+            "@atoms",
+            "1:2-11",
+            "@refvec",
+            "0",
+            "0",
+            "1",
+            "@traj",
+            &trc(),
+        ]),
+        None,
+    );
+    assert_same_text(
+        &out,
+        &std::fs::read_to_string(data("bilayer_oparam").join("aladip_2-11.gromospp.out")).unwrap(),
+        1e-4,
+    );
+}
+
+#[test]
+fn jval_matches_gromospp() {
+    let d = data("jval");
+    let jv = d.join("aladip.jval").to_string_lossy().into_owned();
+    for (extra, reference) in [
+        (vec!["@timeseries"], "timeseries.gromospp.out"),
+        (vec!["@rmsd"], "rmsd.gromospp.out"),
+        (vec![], "averages.gromospp.out"),
+    ] {
+        let mut args = strs(&["@topo", &topo(), "@pbc", "r", "@jval", &jv]);
+        args.extend(strs(&extra));
+        args.extend(strs(&["@traj", &trc()]));
+        let out = run(env!("CARGO_BIN_EXE_jval"), &args, None);
+        assert_same_text(
+            &out,
+            &std::fs::read_to_string(d.join(reference)).unwrap(),
+            1e-5,
+        );
+    }
+}
+
+#[test]
+fn edyn_matches_gromospp_and_projects_on_eigenvectors() {
+    let dir = std::env::temp_dir().join(format!(
+        "gromos_edyn_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    run(
+        env!("CARGO_BIN_EXE_edyn"),
+        &strs(&[
+            "@topo",
+            &topo(),
+            "@pbc",
+            "r",
+            "@atoms",
+            "1:a",
+            "@eigenvalues",
+            "1",
+            "2",
+            "@traj",
+            &trc(),
+        ]),
+        Some(&dir),
+    );
+    let d = data("edyn");
+    for (ours, theirs, rel) in [
+        ("COVAR.out", "COVAR.gromospp.out", 1e-4),
+        ("COVATOM.out", "COVATOM.gromospp.out", 1e-4),
+        ("EIFLUC.out", "EIFLUC.gromospp.out", 1e-4),
+    ] {
+        assert_same_text(
+            &std::fs::read_to_string(dir.join(ours)).unwrap(),
+            &std::fs::read_to_string(d.join(theirs)).unwrap(),
+            rel,
+        );
+    }
+    // eigenvalues: the nine non-zero ones (10 frames → rank ≤ 9) to 1e-4, the rest are numerical zeros
+    let ours = std::fs::read_to_string(dir.join("EIVAL.out")).unwrap();
+    let theirs = std::fs::read_to_string(d.join("EIVAL.gromospp.out")).unwrap();
+    for (a, b) in ours.lines().zip(theirs.lines()).skip(1).take(9) {
+        let (x, y): (f64, f64) = (
+            a.split_whitespace().nth(1).unwrap().parse().unwrap(),
+            b.split_whitespace().nth(1).unwrap().parse().unwrap(),
+        );
+        assert!((x - y).abs() <= 1e-4 * y.abs(), "eigenvalue {a} vs {b}");
+    }
+    // projections on eigenvector k fluctuate with variance = eigenvalue k
+    let essdyn = std::fs::read_to_string(dir.join("ESSDYN.out")).unwrap();
+    let eig: Vec<f64> = ours
+        .lines()
+        .skip(1)
+        .map(|l| l.split_whitespace().nth(1).unwrap().parse().unwrap())
+        .collect();
+    for (k, line) in essdyn.lines().filter(|l| !l.starts_with('#')).enumerate() {
+        let fluct: f64 = line.split_whitespace().nth(2).unwrap().parse().unwrap();
+        assert!(
+            (fluct * fluct - eig[k]).abs() <= 1e-4 * eig[k].max(1e-12) + 1e-12,
+            "EV {}: fluctuation² {} vs eigenvalue {}",
+            k + 1,
+            fluct * fluct,
+            eig[k]
+        );
+    }
+    std::fs::remove_dir_all(dir).ok();
+}
+
+fn positions_of(text: &str) -> Vec<Vec<[f64; 3]>> {
+    let mut frames = Vec::new();
+    let mut cur: Option<Vec<[f64; 3]>> = None;
+    for line in text.lines() {
+        if line.starts_with("POSITION") {
+            cur = Some(Vec::new());
+            continue;
+        }
+        if let Some(c) = cur.as_mut() {
+            if line.starts_with("END") {
+                frames.push(cur.take().unwrap());
+            } else if !line.starts_with('#') && line.len() > 24 {
+                let v: Vec<f64> = line[24..]
+                    .split_whitespace()
+                    .map(|x| x.parse().unwrap())
+                    .collect();
+                c.push([v[0], v[1], v[2]]);
+            }
+        }
+    }
+    frames
+}
+
+#[test]
+fn gca_matches_gromospp() {
+    let d = data("gca");
+    let dihedral = std::fs::read_to_string(d.join("dihedral.txt"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let conf = shared()
+        .join("shared/aladip.conf")
+        .to_string_lossy()
+        .into_owned();
+    for (props, mobile, reference) in [
+        (
+            format!("t%1:{dihedral}%30%-60%60"),
+            None,
+            "torsion_scan.gromospp.cnf",
+        ),
+        (
+            "d%1:1,2%0.2 a%1:1,2,3%100".to_string(),
+            Some("first"),
+            "dist_angle_first.gromospp.cnf",
+        ),
+        ("a%1:1,2,3%100".to_string(), None, "angle_last.gromospp.cnf"),
+    ] {
+        let mut args = strs(&["@topo", &topo(), "@pbc", "r", "@prop", &props]);
+        if let Some(m) = mobile {
+            args.extend(strs(&["@mobile", m]));
+        }
+        args.extend(strs(&["@traj", &conf]));
+        let out = run(env!("CARGO_BIN_EXE_gca"), &args, None);
+        let ours = positions_of(&out);
+        let theirs = positions_of(&std::fs::read_to_string(d.join(reference)).unwrap());
+        assert_eq!(ours.len(), theirs.len(), "{reference}: frame count");
+        for (f, (a, b)) in ours.iter().zip(&theirs).enumerate() {
+            assert_eq!(a.len(), b.len());
+            for (k, (x, y)) in a.iter().zip(b).enumerate() {
+                for dim in 0..3 {
+                    assert!(
+                        (x[dim] - y[dim]).abs() < 1e-7,
+                        "{reference} frame {f} atom {}: {x:?} vs gromos++ {y:?}",
+                        k + 1
+                    );
+                }
+            }
+        }
+    }
+}

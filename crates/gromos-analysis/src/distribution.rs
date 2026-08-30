@@ -82,6 +82,20 @@ impl Distribution {
         self.n_values
     }
 
+    /// gromos++ `Distribution::value(k)`: the centre of bin `k`.
+    pub fn centre(&self, k: usize) -> f64 {
+        self.begin + (k as f64 + 0.5) * self.step
+    }
+
+    /// gromos++ `Distribution::operator[](k)`: the count of bin `k`.
+    pub fn count(&self, k: usize) -> usize {
+        self.counts[k]
+    }
+
+    pub fn nsteps(&self) -> usize {
+        self.counts.len()
+    }
+
     /// Centre of the most populated bin.
     pub fn max_val_at(&self) -> f64 {
         let mut x_max = 0;

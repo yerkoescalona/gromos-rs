@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.40] (2026-08-30)
+
+### Added
+
+- **gromos++ ports, batch 2** (reference tests against gromos++ output in
+  `crates/gromos-analysis/tests/gromospp_references.rs`): `bilayer_dist`, `bilayer_oparam`,
+  `jval` (Karplus ³J from dihedral time series; time series, rmsd and averages modes), `edyn`
+  (essential dynamics), `gca` (generate conformations by setting bonds, angles, dihedrals).
+  Two gromos++ behaviours are reproduced knowingly: `gca @mobile first` moves the first atom in
+  the wrong direction (the formula is gromos++'s; `last`, the default, is right). One is not:
+  gromos++'s `edyn` projects onto the *covariance-matrix columns* because `edyn.cc` discards the
+  eigenvector matrix returned by `diagonaliseSymmetric` (its `EIVEC.out` equals `COVAR.out`);
+  ours projects onto the eigenvectors and the test checks that the projection variances equal the
+  eigenvalues. `EIVAL`/`EIFLUC`/`COVAR`/`COVATOM` match gromos++.
+- `gromos_io::topology::solvate_to_atoms`: the analysis programs read every atom of a frame, as
+  gromos++ `select("ALL")` does, so `s:OW`-style selections work on gromosXX trajectories.
+
 ## [0.0.39] (2026-08-30)
 
 ### Added

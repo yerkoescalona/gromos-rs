@@ -53,6 +53,8 @@ pub struct Property {
     pub spec: String,
     pub kind: Kind,
     pub atoms: Vec<usize>,
+    /// The numeric arguments after the atoms (`t%1:1,2,3,4%30%-60%60` → 30, −60, 60).
+    pub args: Vec<f64>,
     pub stat: Stat,
     last: Option<f64>,
 }
@@ -162,10 +164,21 @@ impl Property {
                 ))
             },
         };
+        let numeric_from = if matches!(kind, Kind::Order(..) | Kind::OrderParam(..)) {
+            3
+        } else {
+            2
+        };
+        let args: Vec<f64> = parts
+            .iter()
+            .skip(numeric_from)
+            .filter_map(|a| a.trim().parse::<f64>().ok())
+            .collect();
         Ok(Property {
             spec: spec.to_string(),
             kind,
             atoms,
+            args,
             stat: Stat::new(),
             last: None,
         })
@@ -174,7 +187,18 @@ impl Property {
     /// gromos++ `toTitle`: the type's name and the atoms as `AtomSpecifier::toString` writes
     /// them (`mol:atoms`, consecutive atoms collapsed to `first-last`).
     pub fn title(&self, topo: &Topology) -> String {
-        let name = match &self.kind {
+        let name = self.type_name();
+        let atoms = if self.atoms.is_empty() {
+            self.spec.split('%').nth(1).unwrap_or("").to_string()
+        } else {
+            atoms_to_string(&self.atoms, topo)
+        };
+        format!("{name}%{atoms}")
+    }
+
+    /// gromos++ `type()`: the long type name.
+    pub fn type_name(&self) -> &'static str {
+        match &self.kind {
             Kind::Distance => "Distance",
             Kind::Angle => "Angle",
             Kind::Torsion => "Torsion",
@@ -183,13 +207,7 @@ impl Property {
             Kind::OrderParam(..) => "VectorOrderParam",
             Kind::PseudoRotation => "PseudoRotation",
             Kind::PuckerAmplitude => "PuckerAmplitude",
-        };
-        let atoms = if self.atoms.is_empty() {
-            self.spec.split('%').nth(1).unwrap_or("").to_string()
-        } else {
-            atoms_to_string(&self.atoms, topo)
-        };
-        format!("{name}%{atoms}")
+        }
     }
 
     /// Evaluate on a frame and record the value.

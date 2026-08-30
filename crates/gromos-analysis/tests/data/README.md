@@ -14,3 +14,8 @@ are stripped from the stored outputs.
 
 `tests/gromospp_references.rs` runs ours with the same arguments and compares every number
 (1e-6 relative; `-nan` matched literally) and every label.
+| bilayer_dist | `bilayer_dist @topo shared/aladip.topo @pbc r @atoms 1:a @selection s:OW @grid 10 @traj aladip.trc` and `… @density` |
+| bilayer_oparam | `bilayer_oparam @topo shared/aladip.topo @pbc r @atoms 1:2-11 @refvec 0 0 1 @traj aladip.trc` |
+| jval | `jval @topo shared/aladip.topo @pbc r @jval aladip.jval [@timeseries or @rmsd] @traj aladip.trc` |
+| edyn | `edyn @topo shared/aladip.topo @pbc r @atoms 1:a @eigenvalues 1 2 @traj aladip.trc` — `EIVAL`, `EIFLUC`, `COVAR`, `COVATOM` compared; gromos++'s projections (`EIVEC`, `EVPRJ`, `ESSDYN`, `PRJMAX/MIN`) use the covariance columns instead of the eigenvectors (`edyn.cc` discards the return value of `diagonaliseSymmetric`) and are not compared — ours use the eigenvectors, checked by an invariant test |
+| gca | `gca @topo shared/aladip.topo @pbc r @prop "t%1:<dihedral.txt>%30%-60%60" @traj shared/aladip.conf`, `… @prop "d%1:1,2%0.2 a%1:1,2,3%100" @mobile first`, `… @prop "a%1:1,2,3%100"` — POSITION blocks compared (gromos++ also copies the input VELOCITY block) |

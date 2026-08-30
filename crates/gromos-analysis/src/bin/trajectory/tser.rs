@@ -11,7 +11,7 @@ use gromos_analysis::distribution::{trim_float, Distribution};
 use gromos_analysis::pbc::Pbc;
 use gromos_analysis::property::PropertyContainer;
 use gromos_analysis::time::Time;
-use gromos_io::topology::{build_topology, read_topology_file};
+use gromos_io::topology::{build_topology, read_topology_file, solvate_to_atoms};
 use gromos_io::trajectory::TrajectoryReader;
 
 const USAGE: &str = "# tser
@@ -78,8 +78,17 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    let topo =
+    let mut topo =
         build_topology(read_topology_file(args.value("topo")?).map_err(|e| format!("@topo: {e}"))?);
+    // gromos++ reads every atom of the frames (`select("ALL")`): solvate to the first frame
+    if let Some(first) = args.values("traj").first() {
+        if let Ok(Some(frame)) = TrajectoryReader::new(first)
+            .map_err(|e| format!("@traj {first}: {e}"))?
+            .read_frame()
+        {
+            solvate_to_atoms(&mut topo, frame.positions.len()).map_err(|e| e.to_string())?;
+        }
+    }
     let pbc = Pbc::from_args(&args)?;
     let mut props = PropertyContainer::parse(args.values("prop"), &topo)?;
     let skip: usize = args.get("skip", 0)?;

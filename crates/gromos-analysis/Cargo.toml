@@ -79,6 +79,10 @@ path = "src/bin/structural/cog.rs"
 name = "distmat"
 path = "src/bin/structural/distmat.rs"
 
+[[bin]]
+name = "edyn"
+path = "src/bin/structural/edyn.rs"
+
 # ── Energy ─────────────────────────────────────────────────────────
 
 [[bin]]
@@ -142,6 +146,14 @@ path = "src/bin/distribution/sasa.rs"
 [[bin]]
 name = "sasa_hasel"
 path = "src/bin/distribution/sasa_hasel.rs"
+
+[[bin]]
+name = "bilayer_dist"
+path = "src/bin/distribution/bilayer_dist.rs"
+
+[[bin]]
+name = "bilayer_oparam"
+path = "src/bin/distribution/bilayer_oparam.rs"
 
 # ── Dynamics / transport ───────────────────────────────────────────
 
@@ -267,6 +279,10 @@ path = "src/bin/noe/predict_noe.rs"
 name = "nhoparam"
 path = "src/bin/noe/nhoparam.rs"
 
+[[bin]]
+name = "jval"
+path = "src/bin/noe/jval.rs"
+
 # ── Clustering ─────────────────────────────────────────────────────
 
 [[bin]]
@@ -344,3 +360,7 @@ path = "src/bin/special/pairlist.rs"
 [[bin]]
 name = "matrix_overlap"
 path = "src/bin/special/matrix_overlap.rs"
+
+[[bin]]
+name = "gca"
+path = "src/bin/special/gca.rs"

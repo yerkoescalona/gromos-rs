@@ -1545,6 +1545,33 @@ pub fn write_topology_file<P: AsRef<Path>>(
     Ok(())
 }
 
+/// Give `topo` the solvent molecules a coordinate set of `n_atoms` atoms implies (the analysis
+/// programs read every atom of a frame, like gromos++ `InG96::select("ALL")`): whole solvent
+/// molecules beyond the solute, or an error when the count does not fit.
+pub fn solvate_to_atoms(topo: &mut gromos_core::Topology, n_atoms: usize) -> Result<(), IoError> {
+    let n_solute = topo.num_solute_atoms();
+    if n_atoms < n_solute {
+        return Err(IoError::FormatError(format!(
+            "{n_atoms} atoms in the coordinates, {n_solute} solute atoms in the topology"
+        )));
+    }
+    let per = topo.solvent_atom_template.len();
+    let extra = n_atoms - n_solute;
+    if extra == 0 {
+        return Ok(());
+    }
+    if per == 0 || extra % per != 0 {
+        return Err(IoError::FormatError(format!(
+            "{extra} atoms beyond the solute do not form whole solvent molecules of {per} atoms"
+        )));
+    }
+    let want = extra / per;
+    if topo.num_solvent_molecules() != want {
+        topo.solvate(want);
+    }
+    Ok(())
+}
+
 /// Write a parsed topology in gromos++ `OutTopology` layout — every block gromosXX reads,
 /// 1-based indices in the file, exclusion and 1-4 lists six per line. The inverse of
 /// [`read_topology_file`]: what this writes reads back identical.

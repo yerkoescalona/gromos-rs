@@ -1,0 +1,74 @@
+#
+#
+# TIME	    0.000000000
+# num         j-value
+    1     3.662662925
+    2    12.166794181
+#
+#
+# TIME	    0.020000000
+# num         j-value
+    1     4.453151040
+    2    12.452731356
+#
+#
+# TIME	    0.040000000
+# num         j-value
+    1     6.401740755
+    2    12.738155193
+#
+#
+# TIME	    0.060000000
+# num         j-value
+    1     5.598656920
+    2    12.871933205
+#
+#
+# TIME	    0.080000000
+# num         j-value
+    1     3.718868208
+    2    12.462428275
+#
+#
+# TIME	    0.100000000
+# num         j-value
+    1     3.363772415
+    2    12.153746086
+#
+#
+# TIME	    0.120000000
+# num         j-value
+    1     4.770039913
+    2    12.077325724
+#
+#
+# TIME	    0.140000000
+# num         j-value
+    1     7.015892461
+    2    12.074432683
+#
+#
+# TIME	    0.160000000
+# num         j-value
+    1     6.885239186
+    2    12.515843532
+#
+#
+# TIME	    0.180000000
+# num         j-value
+    1     4.125565090
+    2    12.338105061
+#
+#
+# JVALUE AVERAGES
+#
+# (print with a2ps --landscape --columns=1 --font-size=9)
+#
+# num mol  residue     atom names         atom numbers          A    B    C    delta     J0   phi ave phi rmsd    J ave  J rmsd |Jave-J0|
+    1   1   1  GLY   CB    C    O    N      1    2    3    4    6.4 -1.4  1.9    -60   7.00     186.2    10.59     5.00   1.310       2.0
+    2   1   2  ALA    H   CA   CB    C      5    6    7    8    9.5 -1.6  1.8     60   4.50     107.7     4.13    12.39   0.262       7.9
+
+#            average deviation 2.9
+#   average absolute deviation 4.9
+#   root-mean-square deviation 5.8
+#         rmsd over deviations 4.9

@@ -43,10 +43,11 @@ Analysis binaries producing results comparable to GROMOS analysis tools.
 
 ## Status — stubs / parked
 - `visco`, `amber2gromos`, `sasa_hasel`, `dssp`, `solute_entropy` — stubs; parked
-- Missing gromos++ programs still to port: `bilayer_dist`, `bilayer_oparam`, `cos_dipole`,
-  `cos_epsilon` (need COS special trajectories), `dfgrid`, `dGslv_pbsolv` (PB solver),
-  `edyn`, `eds_update_1/2`, `gca`, `jepot`, `jval`, `pocket`, `prep_bb`, `prep_xray_le`,
-  `make_sasa_top`.
+- Ported with reference tests (batch 2): `bilayer_dist`, `bilayer_oparam`, `jval`, `edyn`
+  (eigenvector projections — gromos++'s are a bug, see CHANGELOG 0.0.40), `gca`.
+- Missing gromos++ programs still to port: `cos_dipole`, `cos_epsilon` (need COS special
+  trajectories), `dfgrid`, `dGslv_pbsolv` (PB solver), `eds_update_1/2`, `jepot`, `pocket`,
+  `prep_bb`, `prep_xray_le`, `make_sasa_top`.
 
 ## Key files
 ```
