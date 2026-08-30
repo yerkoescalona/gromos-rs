@@ -87,3 +87,7 @@ py-gromos/site/
 bench/work/
 bench/systems/
 bench/gpu_probe/target/
+
+# GaMD writes its statistics next to the run (md @gamd)
+gamd_stats.dat
+gamd_boost.dat
