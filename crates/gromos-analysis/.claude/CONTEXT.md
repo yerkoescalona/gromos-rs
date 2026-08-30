@@ -23,8 +23,30 @@ Analysis binaries producing results comparable to GROMOS analysis tools.
 - `ext_ti_merge` ✓ — λ interpolation, trapezoidal ΔG
 - `fit.rs` ✓ — Kabsch rotational fit (Horn 1987 quaternion); `superimpose()`, `rmsd()`, 7 unit tests
 
+- **Ports of gromos++ programs with reference tests (2026-08-30, `tests/gromospp_references.rs`,
+  fixtures + exact gromos++ commands in `tests/data/README.md`):** `tser` (rewritten: property
+  specifiers, distributions), `mdf`, `dg_ener`, `dfmult`, `matrix_overlap`. In gromos-tools:
+  `explode`, `duplicate`, `pt_top`.
+
+## Shared machinery (use it; do not re-implement per binary)
+- `gromos_io::args::Arguments` — gromos++ `Arguments` (`@key` multi-valued, `count`, `@f` files).
+- `gromos_io::pbc::Pbc` — `@pbc <r|v> [cog|nog]`, `periodicity(box)`, `gather()` = gromos++ `coggather`.
+- `gromos_analysis::time::Time` — `@time t0 dt` or the frame's time; `Time::fmt` = gromos++ layout.
+- `gromos_analysis::property` — `d/a/t/tp/o/op/pr/pa` specifiers, `PropertyContainer`,
+  `atoms_to_string` (gromos++ `AtomSpecifier::toString`), `ordered_atoms` (order-preserving).
+- `gromos_analysis::distribution` — gromos++ `Distribution`; `cpp_g` = C++ default float format.
+- `gromos_analysis::lnexp` — log-exponential averages / covariance / statistical inefficiency.
+- `gromos_io::table::read_columns` — numeric column files; `gromos_io::coordinate::format_g96`.
+- `gromos_core::Stat::ee_strict` — gromos++'s error estimate (`nan` below 200 values).
+- gromos-core `nearest_image(ri, rj)` returns the minimum-image **vector** ri − rj; gromos++'s
+  `nearestImage(ref, pos)` is the image **position** `ref − that vector`. Every port must mind this.
+
 ## Status — stubs / parked
 - `visco`, `amber2gromos`, `sasa_hasel`, `dssp`, `solute_entropy` — stubs; parked
+- Missing gromos++ programs still to port: `bilayer_dist`, `bilayer_oparam`, `cos_dipole`,
+  `cos_epsilon` (need COS special trajectories), `dfgrid`, `dGslv_pbsolv` (PB solver),
+  `edyn`, `eds_update_1/2`, `gca`, `jepot`, `jval`, `pocket`, `prep_bb`, `prep_xray_le`,
+  `make_sasa_top`.
 
 ## Key files
 ```

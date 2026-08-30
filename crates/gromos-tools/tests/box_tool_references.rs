@@ -173,3 +173,66 @@ fn ion_picks_the_same_water_as_gromospp() {
         assert!((a[d] - b[d]).abs() < 1e-8, "NA+ at {a:?}, gromos++ {b:?}");
     }
 }
+
+#[test]
+fn explode_matches_gromospp() {
+    let d = data("explode");
+    let out = run(
+        env!("CARGO_BIN_EXE_explode"),
+        &[
+            "@topo",
+            &d.join("meoh2.top").to_string_lossy(),
+            "@pos",
+            &d.join("meoh2.cnf").to_string_lossy(),
+            "@nsm",
+            "2",
+            "@dist",
+            "1.5",
+        ],
+    );
+    let (ours, obox) = parse(&out);
+    let (theirs, tbox) =
+        parse(&std::fs::read_to_string(d.join("explode_2_1.5.gromospp.cnf")).unwrap());
+    assert_eq!(theirs.len(), 6);
+    assert_positions(&ours, &theirs);
+    for k in 0..3 {
+        assert!((obox[k] - tbox[k]).abs() < 1e-8, "box {obox:?} vs {tbox:?}");
+    }
+}
+
+#[test]
+fn duplicate_matches_gromospp() {
+    let d = data("duplicate");
+    let topo = data("explode").join("meoh2.top");
+    let out = Command::new(env!("CARGO_BIN_EXE_duplicate"))
+        .args([
+            "@topo",
+            &topo.to_string_lossy(),
+            "@pos",
+            &d.join("meoh2_dup.cnf").to_string_lossy(),
+            "@pbc",
+            "r",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        std::fs::read_to_string(d.join("report.gromospp.out")).unwrap()
+    );
+    let written = run(
+        env!("CARGO_BIN_EXE_duplicate"),
+        &[
+            "@topo",
+            &topo.to_string_lossy(),
+            "@pos",
+            &d.join("meoh2_dup.cnf").to_string_lossy(),
+            "@pbc",
+            "r",
+            "@write",
+        ],
+    );
+    let (ours, _) = parse(&written);
+    let (theirs, _) = parse(&std::fs::read_to_string(d.join("write.gromospp.cnf")).unwrap());
+    assert_positions(&ours, &theirs);
+}

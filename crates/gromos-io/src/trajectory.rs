@@ -129,8 +129,13 @@ impl TrajectoryWriter {
 
         if let Some(b) = box_dims {
             if b.x > 0.0 {
+                // gromosXX GENBOX: NTB (1 rectangular), lengths, angles, Euler angles, origin
                 writeln!(self.writer, "GENBOX")?;
+                writeln!(self.writer, "{:>8}", 1)?;
                 writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", b.x, b.y, b.z)?;
+                writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", 90.0, 90.0, 90.0)?;
+                writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", 0.0, 0.0, 0.0)?;
+                writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", 0.0, 0.0, 0.0)?;
                 writeln!(self.writer, "END")?;
             }
         }
@@ -609,20 +614,39 @@ impl TrajectoryReader {
             reader.seek(std::io::SeekFrom::Start(pos))?;
             return Ok(Vec3::ZERO);
         }
-        // Delegate to existing reader (already positioned past "GENBOX" line)
-        buffer.clear();
-        reader.read_line(buffer)?;
-        let parts: Vec<&str> = buffer.split_whitespace().collect();
-        if parts.len() < 3 {
-            return Ok(Vec3::ZERO);
+        // gromosXX writes NTB, then the box lengths, angles, Euler angles and origin; older
+        // gromos-rs files carried the lengths alone. Read up to END either way.
+        let mut lengths: Option<Vec3> = None;
+        let mut first = true;
+        loop {
+            buffer.clear();
+            if reader.read_line(buffer)? == 0 {
+                break;
+            }
+            let t = buffer.trim();
+            if t == "END" {
+                break;
+            }
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = t.split_whitespace().collect();
+            if first {
+                first = false;
+                if parts.len() == 1 {
+                    continue; // NTB line
+                }
+            }
+            if lengths.is_none() && parts.len() >= 3 {
+                let v: Vec<f64> = parts
+                    .iter()
+                    .take(3)
+                    .map(|x| x.parse::<f64>().unwrap_or(0.0))
+                    .collect();
+                lengths = Some(Vec3::new(v[0], v[1], v[2]));
+            }
         }
-        let lx = parts[0].parse::<f64>().unwrap_or(0.0);
-        let ly = parts[1].parse::<f64>().unwrap_or(0.0);
-        let lz = parts[2].parse::<f64>().unwrap_or(0.0);
-        // Consume END + potential extra lines
-        buffer.clear();
-        reader.read_line(buffer)?; // END
-        Ok(Vec3::new(lx, ly, lz))
+        Ok(lengths.unwrap_or(Vec3::ZERO))
     }
 }
 

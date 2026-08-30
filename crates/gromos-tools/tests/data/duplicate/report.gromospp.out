@@ -1,0 +1,13 @@
+
+Duplicated atoms (mol1:atom1 <-> mol2:atom2)
+--------------------------------------------
+solute: 1:1  <->  2:1
+solute: 1:2  <->  2:2
+solute: 1:3  <->  2:3
+solvent: 0:0  <->  1:3
+solvent: 0:1  <->  1:4
+solvent: 0:2  <->  1:5
+
+Duplicated Solute-Molecules:       1
+  - Molecule 1
+Duplicated Solvent-Molecules:      1

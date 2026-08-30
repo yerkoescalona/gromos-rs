@@ -75,6 +75,18 @@ name = "build_box"
 path = "src/bin/box/build_box.rs"
 
 [[bin]]
+name = "explode"
+path = "src/bin/box/explode.rs"
+
+[[bin]]
+name = "duplicate"
+path = "src/bin/box/duplicate.rs"
+
+[[bin]]
+name = "pt_top"
+path = "src/bin/topology/pt_top.rs"
+
+[[bin]]
 name = "sim_box"
 path = "src/bin/box/sim_box.rs"
 

@@ -221,6 +221,40 @@ pub struct LabeledCoordinateData {
 ///
 /// This is the labeled counterpart to [`read_coordinates`]. Use this when downstream
 /// code needs to know which atom is which (e.g. sim_box, ion, pdb2g96).
+/// A labelled coordinate file in gromos++ `OutG96S` layout: TITLE, POSITION (residue number,
+/// residue name, atom name, serial, x y z) and GENBOX (rectangular when `box_dims` is given,
+/// vacuum otherwise). Serial numbers are renumbered from 1.
+pub fn format_g96(title: &str, atoms: &[G96Atom], box_dims: Option<Vec3>) -> String {
+    let mut o = String::new();
+    o.push_str("TITLE\n");
+    o.push_str(title);
+    if !title.ends_with('\n') {
+        o.push('\n');
+    }
+    o.push_str("END\nPOSITION\n");
+    for (k, a) in atoms.iter().enumerate() {
+        o.push_str(&format!(
+            "{:>5} {:<5} {:<6}{:>6}{:15.9}{:15.9}{:15.9}\n",
+            a.res_num,
+            a.res_name,
+            a.atom_name,
+            k + 1,
+            a.pos.x,
+            a.pos.y,
+            a.pos.z
+        ));
+    }
+    o.push_str("END\nGENBOX\n");
+    let b = box_dims.unwrap_or(Vec3::ZERO);
+    o.push_str(&format!("{:>8}\n", if box_dims.is_some() { 1 } else { 0 }));
+    o.push_str(&format!("{:15.9}{:15.9}{:15.9}\n", b.x, b.y, b.z));
+    let angles = if box_dims.is_some() { 90.0 } else { 0.0 };
+    o.push_str(&format!("{:15.9}{:15.9}{:15.9}\n", angles, angles, angles));
+    o.push_str(&format!("{:15.9}{:15.9}{:15.9}\n", 0.0, 0.0, 0.0));
+    o.push_str(&format!("{:15.9}{:15.9}{:15.9}\nEND\n", 0.0, 0.0, 0.0));
+    o
+}
+
 pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData, IoError> {
     let file = File::open(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;

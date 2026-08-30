@@ -18,6 +18,7 @@ gromos-forces = { workspace = true }
 
 # SIMD and math
 glam = { workspace = true }
+nalgebra = { workspace = true }
 
 # Parallelism
 rayon = { workspace = true }
@@ -183,6 +184,14 @@ name = "bar"
 path = "src/bin/free_energy/bar.rs"
 
 [[bin]]
+name = "dg_ener"
+path = "src/bin/free_energy/dg_ener.rs"
+
+[[bin]]
+name = "dfmult"
+path = "src/bin/free_energy/dfmult.rs"
+
+[[bin]]
 name = "ext_ti_merge"
 path = "src/bin/free_energy/ext_ti_merge.rs"
 
@@ -235,6 +244,10 @@ path = "src/bin/trajectory/follow.rs"
 [[bin]]
 name = "tser"
 path = "src/bin/trajectory/tser.rs"
+
+[[bin]]
+name = "mdf"
+path = "src/bin/trajectory/mdf.rs"
 
 # ── NOE / NMR ──────────────────────────────────────────────────────
 
@@ -327,3 +340,7 @@ path = "src/bin/special/epath.rs"
 [[bin]]
 name = "pairlist"
 path = "src/bin/special/pairlist.rs"
+
+[[bin]]
+name = "matrix_overlap"
+path = "src/bin/special/matrix_overlap.rs"

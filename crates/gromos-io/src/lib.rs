@@ -9,6 +9,7 @@
 //! - .trf - Force files
 //! - .ptp - Perturbation topology files (FEP)
 
+pub mod args;
 pub mod coordinate;
 pub mod distanceres;
 pub mod dlg;
@@ -25,10 +26,12 @@ pub mod jobs;
 pub mod mk_script;
 pub mod mtb;
 pub mod output;
+pub mod pbc;
 pub mod pdb;
 pub mod posres;
 pub mod ptp;
 pub mod script_template;
+pub mod table;
 pub mod topology;
 pub mod trajectory;
 pub mod trajectory_binary;

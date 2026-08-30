@@ -29,6 +29,23 @@ impl Stat {
     }
 
     /// Append one observation.
+    /// The values in insertion order.
+    pub fn values(&self) -> &[f64] {
+        &self.vals
+    }
+
+    /// gromos++ `Stat::ee` exactly: block averaging from block size 50 up; with fewer than 200
+    /// values there is no block and gromos++ prints `nan`. [`Self::ee`] falls back to the naive
+    /// standard error instead; programs that reproduce gromos++ output use this one.
+    pub fn ee_strict(&self) -> f64 {
+        let n = self.vals.len();
+        if 4.0 * 50.0 >= n as f64 {
+            return f64::NAN;
+        }
+        self.ee()
+    }
+
+    /// Record one value.
     pub fn add(&mut self, v: f64) {
         self.vals.push(v);
     }

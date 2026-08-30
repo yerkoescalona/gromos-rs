@@ -327,3 +327,25 @@ fn make_pt_top_matches_gromospp() {
         assert!(close(a.lj_soft, b.lj_soft) && close(a.crf_soft, b.crf_soft));
     }
 }
+
+#[test]
+fn pt_top_matches_gromospp() {
+    let r = references();
+    let args: Vec<String> = [
+        "@topo",
+        &r.join("shared/ch4_spc.top").to_string_lossy(),
+        "@pttopo",
+        &data("make_pt_top")
+            .join("ch4_to_B.gromospp.ptp")
+            .to_string_lossy(),
+        "@type",
+        "TOPO",
+    ]
+    .iter()
+    .map(|x| x.to_string())
+    .collect();
+    let ours = run(env!("CARGO_BIN_EXE_pt_top"), &args);
+    let theirs = read_topology_file(data("pt_top").join("ch4_stateB.gromospp.top")).unwrap();
+    assert_eq!(theirs.iac[0], 17, "state B IAC 18 applied to atom 1");
+    assert_same(&ours, &theirs);
+}

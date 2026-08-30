@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.39] (2026-08-30)
+
+### Added
+
+- **gromos++ programs missing from gromos-analysis / gromos-tools, batch 1** — each a port of the
+  gromos++ source with a reference test against the gromos++ binary's output
+  (`crates/gromos-analysis/tests/gromospp_references.rs`, `crates/gromos-tools/tests/`):
+  `mdf` (minimum distances), `dg_ener` (exponential-averaging ΔG), `dfmult` (multi-state ΔF with
+  gromos++'s log-exponential estimators), `matrix_overlap` (covariance-matrix overlap),
+  `explode`, `duplicate`, `pt_top` (state-B topology; `PERTTOPO` output not implemented).
+- **`tser` rewritten to gromos++'s semantics**: property specifiers (`d`, `a`, `t`, `tp`, `o`, `op`,
+  `pr`, `pa`), `@time`, `@pbc` gathering, `@dist`/`@norm` distributions, `@skip`/`@stride`; output
+  identical to gromos++ (titles, averages, `-nan` where gromos++ prints it). The old `tser` was a
+  volume/density toy.
+- Shared machinery the ports use instead of re-implementing it (the crate rule): `gromos_io::args`
+  (gromos++ `Arguments`), `gromos_io::pbc` (`@pbc` and the `cog` gather), `gromos_io::table`
+  (numeric column files), `gromos_analysis::{property, distribution, lnexp, time}`,
+  `gromos_io::coordinate::format_g96`, `Stat::ee_strict`/`values`.
+
+### Fixed
+
+- **The trajectory reader mis-read gromosXX's GENBOX block** (NTB line, lengths, angles, Euler
+  angles, origin): it took the NTB line as the lengths and desynchronised on the next frame —
+  every analysis program failed on a real `.trc`. The writer now emits the same five-line block.
+
 ## [0.0.38] (2026-08-30)
 
 ### Added
