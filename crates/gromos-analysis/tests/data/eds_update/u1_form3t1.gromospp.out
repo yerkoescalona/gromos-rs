@@ -1,0 +1,39 @@
+tree: pair = 1 and 2
+tree: pair = 1 and 3
+# ############### New EDS Parameters: #################
+iteration: 1
+update tree at iteration: 1
+i_max = 0 , j_max = 1, s_max = 0.20159
+i_max = 1 , j_max = 2, s_max = 0.15771
+iteration: 2
+iteration: 3
+iteration: 4
+iteration: 5
+iteration: 6
+iteration: 7
+iteration: 8
+iteration: 9
+iteration: 10
+iteration: 11
+iteration: 12
+iteration: 13
+iteration: 14
+iteration: 15
+iteration: 16
+iteration: 17
+iteration: 18
+iteration: 19
+iteration: 20
+iteration: 21
+iteration: 22
+iteration: 23
+# iterations: 23 of 300
+
+# new tree pairs
+1  2
+2  3
+# new s parameters
+0.29075 0.175343 
+# new energy offsets: 
+0 4.51679 16.0133 
+

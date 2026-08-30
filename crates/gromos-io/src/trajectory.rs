@@ -242,14 +242,20 @@ impl TrajectoryReader {
     /// * `Ok(None)` - End of file reached
     /// * `Err(IoError)` - Error reading the frame
     pub fn read_frame(&mut self) -> Result<Option<TrajectoryFrame>, IoError> {
-        // Try to read TIMESTEP block
-        let (step, time) = match Self::read_timestep_block(&mut self.reader, &mut self.buffer)? {
+        // Try to read TIMESTEP block; a configuration file may start its frame with the
+        // position block directly (no TIMESTEP), as gromos++'s InG96 accepts.
+        let mut header_seen = false;
+        let (step, time) = match Self::read_timestep_block(
+            &mut self.reader,
+            &mut self.buffer,
+            &mut header_seen,
+        )? {
             Some(st) => st,
             None => return Ok(None), // End of file
         };
 
-        // Read POSITIONRED block (required)
-        let positions = Self::read_position_block(&mut self.reader, &mut self.buffer)?;
+        // Read POSITION/POSITIONRED block (required)
+        let positions = Self::read_position_block(&mut self.reader, &mut self.buffer, header_seen)?;
 
         // Try to read optional blocks
         let velocities = Self::try_read_velocity_block(&mut self.reader, &mut self.buffer)?;
@@ -320,6 +326,7 @@ impl TrajectoryReader {
     fn read_timestep_block(
         reader: &mut BufReader<File>,
         buffer: &mut String,
+        position_header_seen: &mut bool,
     ) -> Result<Option<(usize, f64)>, IoError> {
         buffer.clear();
         let bytes_read = reader.read_line(buffer)?;
@@ -329,14 +336,28 @@ impl TrajectoryReader {
 
         let line = buffer.trim();
         if line.is_empty() {
-            return Self::read_timestep_block(reader, buffer); // Skip empty lines
+            return Self::read_timestep_block(reader, buffer, position_header_seen);
+            // Skip empty lines
+        }
+
+        if line.starts_with("POSITION") {
+            // a frame without TIMESTEP: step 0, time 0 (gromos++ InG96)
+            *position_header_seen = true;
+            return Ok(Some((0, 0.0)));
         }
 
         if !line.starts_with("TIMESTEP") {
-            return Err(IoError::FormatError(format!(
-                "Expected TIMESTEP block, got: {}",
-                line
-            )));
+            // some other block (a configuration file's STOCHINT, PERTDATA, … after GENBOX): skip it
+            loop {
+                buffer.clear();
+                if reader.read_line(buffer)? == 0 {
+                    return Ok(None);
+                }
+                if buffer.trim() == "END" {
+                    break;
+                }
+            }
+            return Self::read_timestep_block(reader, buffer, position_header_seen);
         }
 
         // Read step and time
@@ -371,13 +392,16 @@ impl TrajectoryReader {
     fn read_position_block(
         reader: &mut BufReader<File>,
         buffer: &mut String,
+        header_seen: bool,
     ) -> Result<Vec<Vec3>, IoError> {
-        buffer.clear();
-        reader.read_line(buffer)?;
-        if !buffer.trim().starts_with("POSITIONRED") {
-            return Err(IoError::FormatError(
-                "Expected POSITIONRED block".to_string(),
-            ));
+        if !header_seen {
+            buffer.clear();
+            reader.read_line(buffer)?;
+            if !buffer.trim().starts_with("POSITION") {
+                return Err(IoError::FormatError(
+                    "Expected POSITION or POSITIONRED block".to_string(),
+                ));
+            }
         }
 
         let mut positions = Vec::new();
@@ -427,7 +451,7 @@ impl TrajectoryReader {
         let position = reader.stream_position()?;
         reader.read_line(buffer)?;
 
-        if !buffer.trim().starts_with("VELOCITYRED") {
+        if !buffer.trim().starts_with("VELOCITY") {
             // Not a velocity block, rewind
             reader.seek(std::io::SeekFrom::Start(position))?;
             return Ok(None);
@@ -448,14 +472,20 @@ impl TrajectoryReader {
             }
 
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 7 {
-                let vx = parts[4]
+            // reduced (3 columns) or labelled (7 columns) block
+            let (xi, yi, zi) = if parts.len() == 3 {
+                (0, 1, 2)
+            } else {
+                (4, 5, 6)
+            };
+            if parts.len() > zi {
+                let vx = parts[xi]
                     .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid vx velocity: {}", e)))?;
-                let vy = parts[5]
+                let vy = parts[yi]
                     .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid vy velocity: {}", e)))?;
-                let vz = parts[6]
+                let vz = parts[zi]
                     .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid vz velocity: {}", e)))?;
                 velocities.push(Vec3::new(vx, vy, vz));
@@ -473,7 +503,7 @@ impl TrajectoryReader {
         let position = reader.stream_position()?;
         reader.read_line(buffer)?;
 
-        if !buffer.trim().starts_with("FORCERED") {
+        if !buffer.trim().starts_with("FORCE") {
             // Not a force block, rewind
             reader.seek(std::io::SeekFrom::Start(position))?;
             return Ok(None);
@@ -494,14 +524,20 @@ impl TrajectoryReader {
             }
 
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 7 {
-                let fx = parts[4]
+            // reduced (3 columns) or labelled (7 columns) block
+            let (xi, yi, zi) = if parts.len() == 3 {
+                (0, 1, 2)
+            } else {
+                (4, 5, 6)
+            };
+            if parts.len() > zi {
+                let fx = parts[xi]
                     .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid fx force: {}", e)))?;
-                let fy = parts[5]
+                let fy = parts[yi]
                     .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid fy force: {}", e)))?;
-                let fz = parts[6]
+                let fz = parts[zi]
                     .parse::<f64>()
                     .map_err(|e| IoError::FormatError(format!("Invalid fz force: {}", e)))?;
                 forces.push(Vec3::new(fx, fy, fz));

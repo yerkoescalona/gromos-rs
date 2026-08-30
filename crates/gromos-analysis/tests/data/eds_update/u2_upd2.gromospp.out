@@ -1,0 +1,10 @@
+# ############### New EDS Parameters: #################
+# state A = 115, state B = 55, state T = 30
+# number of A-B and B-A transitions = 20
+# s_old = 0.06, current s = 0.03
+# new s parameter
+0.03
+
+# new energy offsets: 
+0 0.460857 
+

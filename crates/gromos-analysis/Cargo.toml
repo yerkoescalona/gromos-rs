@@ -364,3 +364,23 @@ path = "src/bin/special/matrix_overlap.rs"
 [[bin]]
 name = "gca"
 path = "src/bin/special/gca.rs"
+
+[[bin]]
+name = "eds_update_1"
+path = "src/bin/free_energy/eds_update_1.rs"
+
+[[bin]]
+name = "eds_update_2"
+path = "src/bin/free_energy/eds_update_2.rs"
+
+[[bin]]
+name = "jepot"
+path = "src/bin/noe/jepot.rs"
+
+[[bin]]
+name = "pocket"
+path = "src/bin/structural/pocket.rs"
+
+[[bin]]
+name = "dfgrid"
+path = "src/bin/special/dfgrid.rs"

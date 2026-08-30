@@ -23,6 +23,7 @@ pub mod imd;
 pub mod imd_write;
 pub mod input;
 pub mod jobs;
+pub mod jvalue;
 pub mod mk_script;
 pub mod mtb;
 pub mod output;

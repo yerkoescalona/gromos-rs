@@ -18,6 +18,7 @@ pub use gromos_io::args;
 pub use gromos_io::pbc;
 pub mod diffusion;
 pub mod distribution;
+pub mod eds;
 pub mod fit;
 pub mod gyration;
 pub mod hbond;

@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.41] (2026-08-30)
+
+### Added
+
+- **gromos++ ports, batch 3** (reference tests against gromos++ output): `eds_update_1`,
+  `eds_update_2` (EDS parameter updates; shared machinery in `gromos_analysis::eds`), `jepot`
+  (J-value local-elevation potential, all three input modes), `pocket` (binding-site vectors,
+  enclosed volume and area), `dfgrid` (distance-field grid; `cnf` output and real atoms only) and,
+  in gromos-tools, `make_sasa_top`. Every gromos++ program of the analysis/tools suite is now
+  ported except `cos_dipole`/`cos_epsilon` (need charge-on-spring special trajectories, which
+  gromos-md does not produce), `dGslv_pbsolv` (a Poisson–Boltzmann solver — new physics, not an
+  analysis port), `prep_bb` (interactive building-block editor) and `prep_xray_le` (X-ray
+  local-elevation setup; no X-ray restraints in gromos-md).
+- `gromos_io::jvalue`: JVALRESSPEC, JVALUERESEPS and restraint-trajectory (`.trs`) readers,
+  shared by `jval` and `jepot`. `gromos_analysis::time::TimeSpec` (`@timespec`/`@timepts` frame
+  selection) shared by `jval` and `jepot`; `VectorSpec` accepts `atom(<one atom>)` as a position.
+- Knowingly reproduced gromos++ behaviours: `pocket` never gathers (gromos++ parses `@pbc` and
+  does not apply it); `dfgrid` keeps gromos++'s open-set scan so that equal-length paths resolve
+  identically. One deviation: `pocket @center atom(…)` is evaluated on the first frame — gromos++
+  evaluates it before any frame is read, i.e. at the origin.
+
+### Fixed
+
+- `gromos_io::topology::write_parsed_topology` printed the harmonic angle constant CHT and the
+  improper constant CQ in the internal unit (per rad²) instead of per degree² as the file format
+  requires, and did not follow gromos++'s `OutTopology` layout (`# n` markers, number formats,
+  block comments). `pt_top` output was affected. The writer now reproduces gromos++'s layout and
+  is compared token by token with gromos++ in the `make_sasa_top` test.
+- `TrajectoryReader` accepts configuration files as trajectories, as gromos++'s `InG96` does:
+  frames without a `TIMESTEP` block, labelled `POSITION`/`VELOCITY`/`FORCE` blocks and unknown
+  trailing blocks (`STOCHINT`, `PERTDATA`, …).
+
 ## [0.0.40] (2026-08-30)
 
 ### Added

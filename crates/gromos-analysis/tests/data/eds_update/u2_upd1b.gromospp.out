@@ -1,0 +1,9 @@
+# ############### New EDS Parameters: #################
+# state0 = 161 # state1 = 39 
+# s_old = 0.06, current s = 0.03
+# new s parameter
+0.033
+
+# new energy offsets: 
+0 0.511931 
+

@@ -23,14 +23,17 @@ const SIN36SIN72: f64 = 0.559016994374947; // sin36°·sin72°
 #[derive(Debug, Clone)]
 pub enum VectorSpec {
     Atoms(usize, usize),
+    /// `atom(<one atom>)`: the position of that atom
+    Position(usize),
     Cart(Vec3),
 }
 
 impl VectorSpec {
-    fn eval(&self, pos: &[Vec3], pbc: &Periodicity) -> Vec3 {
+    pub fn eval(&self, pos: &[Vec3], pbc: &Periodicity) -> Vec3 {
         match self {
             // the vector from atom i to the image of atom j
             VectorSpec::Atoms(i, j) => -pbc.nearest_image(pos[*i], pos[*j]),
+            VectorSpec::Position(i) => pos[*i],
             VectorSpec::Cart(v) => *v,
         }
     }
@@ -92,14 +95,17 @@ pub fn ordered_atoms(spec: &str, topo: &Topology) -> Result<Vec<usize>, String> 
     Ok(out)
 }
 
-fn parse_vector(s: &str, topo: &Topology) -> Result<VectorSpec, String> {
+/// gromos++ `VectorSpecifier`: `atom(<one atom>)` is a position, `atom(<two atoms>)` the vector
+/// from the first to the image of the second, `cart(x,y,z)` a constant.
+pub fn parse_vector(s: &str, topo: &Topology) -> Result<VectorSpec, String> {
     let s = s.trim();
     if let Some(inner) = s.strip_prefix("atom(").and_then(|r| r.strip_suffix(')')) {
         let atoms = ordered_atoms(inner, topo)?;
-        if atoms.len() != 2 {
-            return Err(format!("vector '{s}': two atoms expected"));
+        match atoms.len() {
+            1 => return Ok(VectorSpec::Position(atoms[0])),
+            2 => return Ok(VectorSpec::Atoms(atoms[0], atoms[1])),
+            _ => return Err(format!("vector '{s}': one or two atoms expected")),
         }
-        return Ok(VectorSpec::Atoms(atoms[0], atoms[1]));
     }
     if let Some(inner) = s.strip_prefix("cart(").and_then(|r| r.strip_suffix(')')) {
         let v: Result<Vec<f64>, _> = inner.split(',').map(|x| x.trim().parse::<f64>()).collect();

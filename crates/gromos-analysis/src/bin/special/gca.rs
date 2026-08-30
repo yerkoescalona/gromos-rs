@@ -232,7 +232,14 @@ fn run() -> Result<(), String> {
             (data.box_dims != Vec3::ZERO).then_some(data.box_dims),
         );
         // OutG96S frame: TIMESTEP then POSITION + GENBOX (the TITLE is written once)
-        let body = frame.splitn(2, "END\n").nth(1).unwrap_or("").to_string();
+        let body = frame
+            .split_once(
+                "END
+",
+            )
+            .map(|x| x.1)
+            .unwrap_or("")
+            .to_string();
         out_frames.push_str(&format!(
             "TIMESTEP\n{:>18}{:>20.9}\n#if @time flag is used the value for step refers to the\n#step-th configuration in the original trajectory file\nEND\n",
             stepnum, stepnum as f64

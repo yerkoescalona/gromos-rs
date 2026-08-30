@@ -82,7 +82,7 @@ consumed (fixed 0.0.35).
 
 `gromos-tools` (2026-08-30): nine reference tests against gromos++ output — `make_top` (2), `com_top`,
 `red_top`, `make_pt_top`, `sim_box`, `copy_box`, `inbox`, `ion` (`crates/gromos-tools/tests/`, the exact
-gromos++ command in each fixture README). `gromos-analysis`: none yet (P2 / cross-cutting below).
+gromos++ command in each fixture README). `gromos-analysis` (2026-08-30): fifteen reference tests against gromos++ output — `tser`, `mdf`, `dg_ener`, `dfmult`, `matrix_overlap`, `bilayer_dist`, `bilayer_oparam`, `jval`, `edyn`, `gca`, `eds_update_1`, `eds_update_2`, `jepot`, `pocket`, `dfgrid` (`crates/gromos-analysis/tests/data/README.md`); gromos-tools adds `explode`, `duplicate`, `pt_top`, `make_sasa_top`.
 
 ---
 

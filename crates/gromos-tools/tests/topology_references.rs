@@ -349,3 +349,70 @@ fn pt_top_matches_gromospp() {
     assert_eq!(theirs.iac[0], 17, "state B IAC 18 applied to atom 1");
     assert_same(&ours, &theirs);
 }
+
+/// gromos++'s output text, token by token (numbers within `rel`); the TITLE block is skipped
+/// because ours keeps the input title's trailing blanks.
+fn assert_same_text(ours: &str, theirs: &str, rel: f64) {
+    let toks = |s: &str| -> Vec<String> {
+        s.lines()
+            .skip_while(|l| l.trim() != "END")
+            .flat_map(|l| l.split_whitespace().map(str::to_string).collect::<Vec<_>>())
+            .collect()
+    };
+    let (a, b) = (toks(ours), toks(theirs));
+    assert_eq!(a.len(), b.len(), "token count {} vs {}", a.len(), b.len());
+    for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+        if x == y {
+            continue;
+        }
+        match (x.parse::<f64>(), y.parse::<f64>()) {
+            (Ok(fx), Ok(fy)) => assert!(
+                (fx - fy).abs() <= rel * fx.abs().max(fy.abs()) + 1e-12,
+                "token {i}: {x} vs gromos++ {y}"
+            ),
+            _ => panic!("token {i}: '{x}' vs gromos++ '{y}'"),
+        }
+    }
+}
+
+#[test]
+fn make_sasa_top_matches_gromospp() {
+    let d = data("make_sasa_top");
+    let topo = references()
+        .join("shared/aladip.topo")
+        .to_string_lossy()
+        .into_owned();
+    let spec = d.join("aladip.sasaspec").to_string_lossy().into_owned();
+    for (extra, reference) in [
+        (vec![], "aladip_sasa.gromospp.top"),
+        (vec!["@noH"], "aladip_sasa_noH.gromospp.top"),
+    ] {
+        let mut args: Vec<String> = ["@topo", &topo, "@sasaspec", &spec]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        args.extend(extra.iter().map(|s| s.to_string()));
+        let out = Command::new(env!("CARGO_BIN_EXE_make_sasa_top"))
+            .args(&args)
+            .output()
+            .expect("run make_sasa_top");
+        assert!(
+            out.status.success(),
+            "make_sasa_top failed:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let ours = String::from_utf8_lossy(&out.stdout).into_owned();
+        let theirs = std::fs::read_to_string(d.join(reference)).unwrap();
+        assert_same_text(&ours, &theirs, 1e-5);
+        // and the topology part reads back
+        let tmp = std::env::temp_dir().join(format!(
+            "gromos_sasa_{}_{}.top",
+            std::process::id(),
+            extra.len()
+        ));
+        std::fs::write(&tmp, &ours).unwrap();
+        let parsed = read_topology_file(&tmp).unwrap();
+        std::fs::remove_file(tmp).ok();
+        assert_eq!(parsed.n_atoms, 12);
+    }
+}

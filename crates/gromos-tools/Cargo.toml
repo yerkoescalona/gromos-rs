@@ -167,3 +167,7 @@ path = "src/bin/utilities/prep_posres.rs"
 [[bin]]
 name = "prep_xray"
 path = "src/bin/utilities/prep_xray.rs"
+
+[[bin]]
+name = "make_sasa_top"
+path = "src/bin/topology/make_sasa_top.rs"

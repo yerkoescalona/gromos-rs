@@ -1560,7 +1560,7 @@ pub fn solvate_to_atoms(topo: &mut gromos_core::Topology, n_atoms: usize) -> Res
     if extra == 0 {
         return Ok(());
     }
-    if per == 0 || extra % per != 0 {
+    if per == 0 || !extra.is_multiple_of(per) {
         return Err(IoError::FormatError(format!(
             "{extra} atoms beyond the solute do not form whole solvent molecules of {per} atoms"
         )));
@@ -1576,49 +1576,53 @@ pub fn solvate_to_atoms(topo: &mut gromos_core::Topology, n_atoms: usize) -> Res
 /// 1-based indices in the file, exclusion and 1-4 lists six per line. The inverse of
 /// [`read_topology_file`]: what this writes reads back identical.
 pub fn write_parsed_topology(topo: &ParsedTopology, title: &str) -> String {
+    use crate::table::{cpp_e, cpp_g};
+    use std::f64::consts::PI;
     use std::fmt::Write as _;
     let mut o = String::new();
-    let list = |o: &mut String, prefix_width: usize, items: &[usize]| {
-        for (k, x) in items.iter().enumerate() {
-            if k % 6 == 0 && k != 0 {
-                let _ = write!(o, "\n{:width$}", "", width = prefix_width);
-            }
-            let _ = write!(o, " {:5}", x);
+    // every tenth entry of a list gets a "# n" marker, as gromos++ writes them
+    let marker = |o: &mut String, i: usize| {
+        if i > 0 && i.is_multiple_of(10) {
+            let _ = writeln!(o, "# {i}");
         }
-        o.push('\n');
     };
-    let _ = writeln!(o, "TITLE\n{title}\nEND");
+    let _ = write!(o, "TITLE\n{title}\nEND\n");
     let pc = &topo.physical_constants;
-    let _ = writeln!(
+    let _ = write!(
         o,
-        "PHYSICALCONSTANTS\n# FPEPSI: 1.0/(4.0*PI*EPS0) (EPS0 is the permittivity of vacuum)\n{:15.4}\n# HBAR: Planck's constant HBAR = H/(2* PI)\n{:15.7}\n# SPDL: Speed of light (nm/ps)\n{:15.3}\n# BOLTZ: Boltzmann's constant kB\n{:15.8}\nEND",
-        pc.four_pi_eps_i, pc.hBar, pc.spd_l, pc.kB
+        "PHYSICALCONSTANTS\n# FPEPSI: 1.0/(4.0*PI*EPS0) (EPS0 is the permittivity of vacuum)\n{}\n# HBAR: Planck's constant HBAR = H/(2* PI)\n{}\n# SPDL: Speed of light (nm/ps)\n{}\n# BOLTZ: Boltzmann's constant kB\n{}\nEND\n",
+        cpp_g(pc.four_pi_eps_i, 10),
+        cpp_g(pc.hBar, 10),
+        cpp_g(pc.spd_l, 10),
+        cpp_g(pc.kB, 10)
     );
-    let _ = writeln!(o, "TOPVERSION\n2.0\nEND");
-    let _ = writeln!(
+    o.push_str("TOPVERSION\n2.0\nEND\n");
+    let _ = write!(
         o,
-        "ATOMTYPENAME\n# NRATT: number of van der Waals atom types\n{:5}\n# TYPE: atom type names",
+        "ATOMTYPENAME\n# NRATT: number of van der Waals atom types\n{}\n# TYPE: atom type names\n",
         topo.atom_type_names.len()
     );
-    for t in &topo.atom_type_names {
+    for (i, t) in topo.atom_type_names.iter().enumerate() {
+        marker(&mut o, i);
         let _ = writeln!(o, "{t}");
     }
-    let _ = writeln!(o, "END");
-    let _ = writeln!(
+    o.push_str("END\n");
+    let _ = write!(
         o,
-        "RESNAME\n# NRAA2: number of residues in a solute molecule\n{:5}\n# AANM: residue names",
+        "RESNAME\n# NRAA2: number of residues in a solute molecule\n{}\n# AANM: residue names\n",
         topo.residue_names.len()
     );
-    for r in &topo.residue_names {
+    for (i, r) in topo.residue_names.iter().enumerate() {
+        marker(&mut o, i);
         let _ = writeln!(o, "{r}");
     }
-    let _ = writeln!(o, "END");
-    let _ = writeln!(
+    o.push_str("END\n");
+    let _ = write!(
         o,
-        "SOLUTEATOM\n#   NRP: number of solute atoms\n{:5}",
+        "SOLUTEATOM\n#   NRP: number of solute atoms\n{:5}\n",
         topo.n_atoms
     );
-    let _ = writeln!(o, "#  ATNM: atom number\n#  MRES: residue number\n#  PANM: atom name of solute atom\n#   IAC: integer (van der Waals) atom type code\n#  MASS: mass of solute atom\n#    CG: charge of solute atom\n#   CGC: charge group code (0 or 1)\n#   INE: number of excluded atoms\n# INE14: number of 1-4 interactions\n# ATNM MRES PANM IAC     MASS       CG  CGC INE\n#                                           INE14");
+    o.push_str("#  ATNM: atom number\n#  MRES: residue number\n#  PANM: atom name of solute atom\n#   IAC: integer (van der Waals) atom type code\n#  MASS: mass of solute atom\n#    CG: charge of solute atom\n#   CGC: charge group code (0 or 1)\n#   INE: number of excluded atoms\n# INE14: number of 1-4 interactions\n# ATNM MRES PANM IAC     MASS       CG  CGC INE\n#                                           INE14\n");
     for i in 0..topo.n_atoms {
         let excl: Vec<usize> = topo
             .exclusions
@@ -1632,7 +1636,7 @@ pub fn write_parsed_topology(topo: &ParsedTopology, title: &str) -> String {
             .unwrap_or_default();
         let _ = write!(
             o,
-            "{:6} {:4} {:4} {:3} {:8.5} {:8.5} {:2} {:5}",
+            "{:6} {:>4} {:>4} {:>3} {:8.5} {:8.5} {:>2} {:>5}",
             i + 1,
             topo.residue_numbers[i],
             topo.atom_names[i],
@@ -1642,44 +1646,61 @@ pub fn write_parsed_topology(topo: &ParsedTopology, title: &str) -> String {
             topo.chargegroup_codes[i],
             excl.len()
         );
-        list(&mut o, 47, &excl);
-        let _ = write!(o, "{:46}{}", "", one_four.len());
-        list(&mut o, 45, &one_four);
+        for (k, x) in excl.iter().enumerate() {
+            if k.is_multiple_of(6) && k != 0 {
+                let _ = write!(o, "\n{:47}", "");
+            }
+            let _ = write!(o, " {:>5}", x);
+        }
+        let _ = write!(o, "\n{:46}{}", "", one_four.len());
+        for (k, x) in one_four.iter().enumerate() {
+            if k.is_multiple_of(6) && k != 0 {
+                let _ = write!(o, "\n{:45}", "");
+            }
+            let _ = write!(o, " {:>5}", x);
+        }
+        o.push('\n');
     }
-    let _ = writeln!(o, "END");
-    let _ = writeln!(o, "BONDSTRETCHTYPE\n#  NBTY: number of covalent bond types\n{:5}\n#  CB: force constant\n#  HB: harmonic force constant\n#  B0: bond length at minimum energy\n#         CB         HB         B0", topo.bond_parameters.len());
-    for b in &topo.bond_parameters {
+    o.push_str("END\n");
+    let _ = write!(o, "BONDSTRETCHTYPE\n#  NBTY: number of covalent bond types\n{}\n#  CB:  quartic force constant\n#  CHB: harmonic force constant\n#  B0:  bond length at minimum energy\n#         CB         CHB         B0\n", topo.bond_parameters.len());
+    for (i, b) in topo.bond_parameters.iter().enumerate() {
+        marker(&mut o, i);
         let _ = writeln!(
             o,
-            "{:15.7e}{:15.7e}{:13.7e}",
-            b.k_quartic, b.k_harmonic, b.r0
+            "{:>16} {:>15} {:>15}",
+            cpp_e(b.k_quartic, 5),
+            cpp_e(b.k_harmonic, 5),
+            cpp_e(b.r0, 5)
         );
     }
-    let _ = writeln!(o, "END");
+    o.push_str("END\n");
     let is_h = |i: usize| (topo.masses[i] - 1.008).abs() < 1e-9;
     let (bondh, bond): (Vec<&(usize, usize, usize)>, Vec<&(usize, usize, usize)>) =
         topo.bonds.iter().partition(|b| is_h(b.0) || is_h(b.1));
-    for (name, comment, v) in [
-        ("BONDH", "involving H atoms in solute", &bondh),
-        ("BOND", "NOT involving H atoms in solute", &bond),
+    for (header, v) in [
+        ("BONDH\n#  NBONH: number of bonds involving H atoms in solute\n{n}\n#  IBH, JBH: atom sequence numbers of atoms forming a bond\n#  ICBH: bond type code\n#   IBH    JBH ICBH\n", &bondh),
+        ("BOND\n#  NBON: number of bonds NOT involving H atoms in solute\n{n}\n#  IB, JB: atom sequence numbers of atoms forming a bond\n#  ICB: bond type code\n#    IB     JB  ICB\n", &bond),
     ] {
-        let _ = writeln!(o, "{name}\n#  NBON: number of bonds {comment}\n{:5}\n#  IB, JB: atom sequence numbers of atoms forming a bond\n#  ICB: bond type code\n#    IB     JB  ICB", v.len());
-        for b in v.iter() {
-            let _ = writeln!(o, "{:7}{:7}{:5}", b.0 + 1, b.1 + 1, b.2 + 1);
+        o.push_str(&header.replace("{n}", &v.len().to_string()));
+        for (k, b) in v.iter().enumerate() {
+            marker(&mut o, k);
+            let _ = writeln!(o, "{:>7} {:>6} {:>4}", b.0 + 1, b.1 + 1, b.2 + 1);
         }
-        let _ = writeln!(o, "END");
+        o.push_str("END\n");
     }
-    let _ = writeln!(o, "BONDANGLEBENDTYPE\n#  NTTY: number of bond angle types\n{:5}\n#  CT: force constant (based on potential\n#      harmonic in the angle cosine)\n#  CHT: force constant (based on potential\n#      harmonic in the angle)\n#  T0: bond angle at minimum energy in degrees\n#         CT         CHT          T0", topo.angle_parameters.len());
-    for a in &topo.angle_parameters {
+    let _ = write!(o, "BONDANGLEBENDTYPE\n#  NTTY: number of bond angle types\n{}\n#  CT:  force constant (based on potential\n#       harmonic in the angle cosine)\n#  CHT: force constant (based on potential\n#       harmonic in the angle)\n#  T0:  bond angle at minimum energy in degrees\n#         CT         CHT          T0\n", topo.angle_parameters.len());
+    for (i, a) in topo.angle_parameters.iter().enumerate() {
+        marker(&mut o, i);
+        // CHT is stored per rad², the file carries it per degree²
         let _ = writeln!(
             o,
-            "{:15.7e}{:15.7e}{:13.7e}",
-            a.k_cosine,
-            a.k_harmonic,
-            a.theta0.to_degrees()
+            "{:>16} {:>15} {:>15}",
+            cpp_e(a.k_cosine, 5),
+            cpp_e(a.k_harmonic * PI * PI / (180.0 * 180.0), 5),
+            cpp_e(a.theta0.to_degrees(), 5)
         );
     }
-    let _ = writeln!(o, "END");
+    o.push_str("END\n");
     let (angleh, angle): (
         Vec<&(usize, usize, usize, usize)>,
         Vec<&(usize, usize, usize, usize)>,
@@ -1687,62 +1708,52 @@ pub fn write_parsed_topology(topo: &ParsedTopology, title: &str) -> String {
         .angles
         .iter()
         .partition(|a| is_h(a.0) || is_h(a.1) || is_h(a.2));
-    for (name, comment, v) in [
-        ("BONDANGLEH", "involving H atoms in solute", &angleh),
-        ("BONDANGLE", "NOT involving H atoms in solute", &angle),
+    for (header, v) in [
+        ("BONDANGLEH\n#  NTHEH: number of bond angles involving H atoms in solute\n{n}\n#  ITH, JTH, KTH: atom sequence numbers\n#    of atoms forming a bond angle in solute\n#  ICTH: bond angle type code\n#   ITH    JTH    KTH ICTH\n", &angleh),
+        ("BONDANGLE\n#  NTHE: number of bond angles NOT\n#        involving H atoms in solute\n{n}\n#  IT, JT, KT: atom sequence numbers of atoms\n#     forming a bond angle\n#  ICT: bond angle type code\n#    IT     JT     KT  ICT\n", &angle),
     ] {
-        let _ = writeln!(o, "{name}\n#  NTHE: number of bond angles {comment}\n{:5}\n#  IT, JT, KT: atom sequence numbers of atoms forming a bond angle\n#  ICT: bond angle type code\n#    IT     JT     KT  ICT", v.len());
-        for a in v.iter() {
-            let _ = writeln!(o, "{:7}{:7}{:7}{:5}", a.0 + 1, a.1 + 1, a.2 + 1, a.3 + 1);
+        o.push_str(&header.replace("{n}", &v.len().to_string()));
+        for (k, a) in v.iter().enumerate() {
+            marker(&mut o, k);
+            let _ = writeln!(
+                o,
+                "{:>7} {:>6} {:>6} {:>4}",
+                a.0 + 1,
+                a.1 + 1,
+                a.2 + 1,
+                a.3 + 1
+            );
         }
-        let _ = writeln!(o, "END");
+        o.push_str("END\n");
     }
-    let _ = writeln!(o, "IMPDIHEDRALTYPE\n#  NQTY: number of improper dihedrals\n{:5}\n#  CQ: force constant of improper dihedral per degrees square\n#  Q0: improper dihedral angle at minimum energy in degrees\n#         CQ          Q0", topo.improper_dihedral_parameters.len());
-    for p in &topo.improper_dihedral_parameters {
-        let _ = writeln!(o, "{:15.7e}{:15.7e}", p.k, p.q0.to_degrees());
+    let _ = write!(o, "IMPDIHEDRALTYPE\n#  NQTY: number of improper dihedrals\n{}\n#  CQ: force constant of improper dihedral per degrees square\n#  Q0: improper dihedral angle at minimum energy in degrees\n#            CQ             Q0\n", topo.improper_dihedral_parameters.len());
+    for (i, p) in topo.improper_dihedral_parameters.iter().enumerate() {
+        marker(&mut o, i);
+        // CQ is stored per rad², the file carries it per degree²
+        let _ = writeln!(
+            o,
+            "{:>15} {:>14}",
+            cpp_e(p.k * PI * PI / (180.0 * 180.0), 5),
+            cpp_e(p.q0.to_degrees(), 5)
+        );
     }
-    let _ = writeln!(o, "END");
+    o.push_str("END\n");
     type Dih<'a> = Vec<&'a (usize, usize, usize, usize, usize)>;
     let (imph, imp): (Dih, Dih) = topo
         .improper_dihedrals
         .iter()
         .partition(|d| is_h(d.0) || is_h(d.1) || is_h(d.2) || is_h(d.3));
-    for (name, comment, v) in [
-        ("IMPDIHEDRALH", "involving H atoms in the solute", &imph),
-        ("IMPDIHEDRAL", "NOT involving H atoms in solute", &imp),
-    ] {
-        let _ = writeln!(o, "{name}\n#  NQHI: number of improper dihedrals {comment}\n{:5}\n#  IQ,JQ,KQ,LQ: atom sequence numbers of atoms forming an improper dihedral\n#  ICQ: improper dihedral type code\n#    IQ     JQ     KQ     LQ  ICQ", v.len());
-        for d in v.iter() {
-            let _ = writeln!(
-                o,
-                "{:7}{:7}{:7}{:7}{:5}",
-                d.0 + 1,
-                d.1 + 1,
-                d.2 + 1,
-                d.3 + 1,
-                d.4 + 1
-            );
-        }
-        let _ = writeln!(o, "END");
-    }
-    let _ = writeln!(o, "TORSDIHEDRALTYPE\n#  NPTY: number of dihedral types\n{:5}\n#  CP: force constant\n#  PD: phase-shift angle\n#  NP: multiplicity\n#       CP        PD  NP", topo.dihedral_parameters.len());
-    for d in &topo.dihedral_parameters {
-        let _ = writeln!(o, "{:10.5}{:10.5}{:4}", d.k, d.pd.to_degrees(), d.m);
-    }
-    let _ = writeln!(o, "END");
     let (dihh, dih): (Dih, Dih) = topo
         .proper_dihedrals
         .iter()
         .partition(|d| is_h(d.0) || is_h(d.1) || is_h(d.2) || is_h(d.3));
-    for (name, comment, v) in [
-        ("DIHEDRALH", "involving H atoms in solute", &dihh),
-        ("DIHEDRAL", "NOT involving H atoms in solute", &dih),
-    ] {
-        let _ = writeln!(o, "{name}\n#  NPHI: number of dihedrals {comment}\n{:5}\n#  IP, JP, KP, LP: atom sequence numbers of atoms forming a dihedral\n#  ICP: dihedral type code\n#    IP     JP     KP     LP  ICP", v.len());
-        for d in v.iter() {
+    let write_dihedrals = |o: &mut String, header: &str, v: &Dih| {
+        o.push_str(&header.replace("{n}", &v.len().to_string()));
+        for (k, d) in v.iter().enumerate() {
+            marker(o, k);
             let _ = writeln!(
                 o,
-                "{:7}{:7}{:7}{:7}{:5}",
+                "{:>7} {:>6} {:>6} {:>6} {:>4}",
                 d.0 + 1,
                 d.1 + 1,
                 d.2 + 1,
@@ -1750,64 +1761,68 @@ pub fn write_parsed_topology(topo: &ParsedTopology, title: &str) -> String {
                 d.4 + 1
             );
         }
-        let _ = writeln!(o, "END");
+        o.push_str("END\n");
+    };
+    write_dihedrals(&mut o, "IMPDIHEDRALH\n#  NQHIH: number of improper dihedrals\n#         involving H atoms in the solute\n{n}\n#  IQH,JQH,KQH,LQH: atom sequence numbers\n#     of atoms forming an improper dihedral\n#  ICQH: improper dihedral type code\n#   IQH    JQH    KQH    LQH ICQH\n", &imph);
+    write_dihedrals(&mut o, "IMPDIHEDRAL\n#  NQHI: number of improper dihedrals NOT\n#    involving H atoms in solute\n{n}\n#  IQ,JQ,KQ,LQ: atom sequence numbers of atoms\n#    forming an improper dihedral\n#  ICQ: improper dihedral type code\n#    IQ     JQ     KQ     LQ  ICQ\n", &imp);
+    let _ = write!(o, "TORSDIHEDRALTYPE\n#  NPTY: number of dihedral types\n{}\n#  CP: force constant\n#  PD: phase-shift angle\n#  NP: multiplicity\n#       CP         PD  NP\n", topo.dihedral_parameters.len());
+    for (i, d) in topo.dihedral_parameters.iter().enumerate() {
+        marker(&mut o, i);
+        let _ = writeln!(o, "{:>10.5} {:>10.5} {:>3}", d.k, d.pd.to_degrees(), d.m);
     }
-    let _ = writeln!(o, "CROSSDIHEDRALH\n#  NPHIH: number of cross dihedrals involving H atoms in solute\n    0\nEND");
-    let _ = writeln!(o, "CROSSDIHEDRAL\n#  NPPC: number of cross dihedrals NOT involving H atoms in solute\n    0\nEND");
+    o.push_str("END\n");
+    write_dihedrals(&mut o, "DIHEDRALH\n#  NPHIH: number of dihedrals involving H atoms in solute\n{n}\n#  IPH, JPH, KPH, LPH: atom sequence numbers\n#    of atoms forming a dihedral\n#  ICPH: dihedral type code\n#   IPH    JPH    KPH    LPH ICPH\n", &dihh);
+    write_dihedrals(&mut o, "DIHEDRAL\n#  NPHI: number of dihedrals NOT involving H atoms in solute\n{n}\n#  IP, JP, KP, LP: atom sequence numbers\n#     of atoms forming a dihedral\n#  ICP: dihedral type code\n#    IP     JP     KP     LP  ICP\n", &dih);
+    o.push_str("CROSSDIHEDRALH\n#  NPHIH: number of cross dihedrals involving H atoms in solute\n0\n#  APH, BPH, CPH, DPH, EPH, FPH, GPH, HPH: atom sequence numbers\n#    of atoms forming a dihedral\n#  ICCH: dihedral type code\n#   APH    BPH    CPH    DPH    EPH    FPH    GPH    HPH ICCH\nEND\n");
+    o.push_str("CROSSDIHEDRAL\n#  NPPC: number of cross dihedrals NOT involving H atoms in solute\n0\n#  AP, BP, CP, DP, EP, FP, GP, HP: atom sequence numbers\n#     of atoms forming a dihedral\n#  ICC: dihedral type code\n#    AP     BP     CP     DP     EP     FP     GP     HP  ICC\nEND\n");
     let n_types = topo.atom_type_names.len();
-    let _ = writeln!(o, "LJPARAMETERS\n#  NRATT2: number of LJ interaction types = NRATT*(NRATT+1)/2\n{:5}\n#  IAC,JAC: integer (van der Waals) atom type code\n#  C12: r**(-12) term in nonbonded interactions\n#   C6: r**(-6) term in nonbonded interactions\n# CS12: r**(-12) term in 1-4 nonbonded interactions\n#  CS6: r**(-6) term in 1-4 nonbonded interactions\n# IAC  JAC           C12            C6          CS12           CS6", n_types * (n_types + 1) / 2);
-    for j in 0..n_types {
-        for i in 0..=j {
+    let _ = write!(o, "LJPARAMETERS\n#  NRATT2: number of LJ interaction types = NRATT*(NRATT+1)/2\n{}\n#  IAC,JAC: integer (van der Waals) atom type code\n#  C12: r**(-12) term in nonbonded interactions\n#   C6: r**(-6) term in nonbonded interactions\n# CS12: r**(-12) term in 1-4 nonbonded interactions\n#  CS6: r**(-6) term in 1-4 nonbonded interactions\n# IAC  JAC           C12            C6          CS12           CS6\n", n_types * (n_types + 1) / 2);
+    for i in 0..n_types {
+        for j in 0..=i {
             let lj = topo
                 .lj_parameters
-                .get(&(i, j))
-                .or_else(|| topo.lj_parameters.get(&(j, i)));
+                .get(&(j, i))
+                .or_else(|| topo.lj_parameters.get(&(i, j)));
             let (c6, c12, cs6, cs12) = lj
                 .map(|p| (p.c6, p.c12, p.cs6, p.cs12))
                 .unwrap_or((0.0, 0.0, 0.0, 0.0));
             let _ = writeln!(
                 o,
-                "{:5}{:5}{:15.6e}{:15.6e}{:15.6e}{:15.6e}",
-                i + 1,
+                "{:>5}{:>5}{:>14}{:>14}{:>14}{:>14}",
                 j + 1,
-                c12,
-                c6,
-                cs12,
-                cs6
+                i + 1,
+                cpp_e(c12, 6),
+                cpp_e(c6, 6),
+                cpp_e(cs12, 6),
+                cpp_e(cs6, 6)
             );
         }
+        o.push_str("#\n");
     }
-    let _ = writeln!(o, "END");
-    let _ = writeln!(o, "SOLUTEMOLECULES\n# NSPM: number of separate molecules in solute block\n# NSP[1...NSPM]: atom sequence number of last atom\n#                of the successive submolecules\n#      NSPM  NSP[1...NSPM]\n{:5}", topo.solute_molecules.len());
-    for chunk in topo.solute_molecules.chunks(10) {
-        let _ = writeln!(
-            o,
-            "{}",
-            chunk.iter().map(|m| format!("{:6}", m)).collect::<String>()
-        );
-    }
-    let _ = writeln!(o, "END");
+    o.push_str("END\n");
+    let write_groups = |o: &mut String, header: &str, groups: &[usize]| {
+        let _ = writeln!(o, "{header}{:>10}", groups.len());
+        for (i, g) in groups.iter().enumerate() {
+            let _ = write!(o, " {:>5}", g);
+            if (i + 1).is_multiple_of(10) {
+                o.push('\n');
+            }
+        }
+        if !groups.len().is_multiple_of(10) {
+            o.push('\n');
+        }
+        o.push_str("END\n");
+    };
+    write_groups(&mut o, "SOLUTEMOLECULES\n# NSPM: number of separate molecules in solute block\n# NSP[1...NSPM]: atom sequence number of last atom\n#                of the successive submolecules\n#      NSPM  NSP[1...NSPM]\n", &topo.solute_molecules);
     let temp: Vec<usize> = topo.temperature_groups.iter().map(|g| g + 1).collect();
-    for (name, what, groups) in [
-        ("TEMPERATUREGROUPS", "temperature", &temp),
-        ("PRESSUREGROUPS", "pressure", &topo.pressure_groups),
-    ] {
-        let _ = writeln!(o, "{name}\n# NSTM: number of {what} atom groups\n# NST[1...NSTM]: atom sequence number of last atom\n#                of the successive {what} atom groups\n#      NSTM  NST[1...NSTM]\n{:5}", groups.len());
-        for chunk in groups.chunks(10) {
-            let _ = writeln!(
-                o,
-                "{}",
-                chunk.iter().map(|m| format!("{:6}", m)).collect::<String>()
-            );
-        }
-        let _ = writeln!(o, "END");
-    }
-    let _ = writeln!(o, "LJEXCEPTIONS\n# This block defines special LJ-interactions based on atom numbers\n# This overrules the normal LJ-parameters (including 1-4s)\n# NEX: number of exceptions\n    0\nEND");
-    let _ = writeln!(o, "SOLVENTATOM\n#  NRAM: number of atoms per solvent molecule\n{:5}\n#     I: solvent atom sequence number\n#  IACS: integer (van der Waals) atom type code\n#  ANMS: atom name of solvent atom\n#  MASS: mass of solvent atom\n#   CGS: charge of solvent atom\n#  I  ANMS IACS      MASS        CGS", topo.solvent_atoms.len());
+    write_groups(&mut o, "TEMPERATUREGROUPS\n# NSTM: number of temperature atom groups\n# NST[1...NSTM]: atom sequence number of last atom\n#                of the successive temperature atom groups\n#      NSTM  NST[1...NSTM]\n", &temp);
+    write_groups(&mut o, "PRESSUREGROUPS\n# NSVM: number of pressure atom groups\n# NSV[1...NSVM]: atom sequence number of last atom\n#                of the successive pressure atom groups\n#      NSVM  NSV[1...NSVM]\n", &topo.pressure_groups);
+    o.push_str("LJEXCEPTIONS\n# This block defines special LJ-interactions based on atom numbers\n# This overrules the normal LJ-parameters (including 1-4 interactions)\n# NEX: number of exceptions\n0\n# AT1  AT2           C12            C6\nEND\n");
+    let _ = write!(o, "SOLVENTATOM\n#  NRAM: number of atoms per solvent molecule\n{}\n#     I: solvent atom sequence number\n#  IACS: integer (van der Waals) atom type code\n#  ANMS: atom name of solvent atom\n#  MASS: mass of solvent atom\n#   CGS: charge of solvent atom\n#  I  ANMS IACS      MASS        CGS\n", topo.solvent_atoms.len());
     for (idx, a) in topo.solvent_atoms.iter().enumerate() {
         let _ = writeln!(
             o,
-            "{:5} {:>5}{:5}{:11.5}{:11.5}",
+            "{:>4}  {:>4} {:>3} {:>10.5} {:>10.5}",
             idx + 1,
             a.name,
             a.iac + 1,
@@ -1815,12 +1830,12 @@ pub fn write_parsed_topology(topo: &ParsedTopology, title: &str) -> String {
             a.charge
         );
     }
-    let _ = writeln!(o, "END");
-    let _ = writeln!(o, "SOLVENTCONSTR\n#  NCONS: number of constraints\n{:5}\n#  ICONS, JCONS: atom sequence numbers forming constraint\n#   CONS constraint length\n#ICONS JCONS         CONS", topo.solvent_constraints.len());
+    o.push_str("END\n");
+    let _ = write!(o, "SOLVENTCONSTR\n#  NCONS: number of constraints\n{}\n#  ICONS, JCONS: atom sequence numbers forming constraint\n#   CONS constraint length\n#ICONS JCONS         CONS\n", topo.solvent_constraints.len());
     for c in &topo.solvent_constraints {
-        let _ = writeln!(o, "{:5}{:5}{:15.7}", c.i + 1, c.j + 1, c.length);
+        let _ = writeln!(o, "{:>5} {:>4} {:>14.7}", c.i + 1, c.j + 1, c.length);
     }
-    let _ = writeln!(o, "END");
+    o.push_str("END\n# end of topology file\n");
     o
 }
 

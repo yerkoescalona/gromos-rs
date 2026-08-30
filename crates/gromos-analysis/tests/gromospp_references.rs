@@ -469,3 +469,287 @@ fn gca_matches_gromospp() {
         }
     }
 }
+
+fn tmp_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "gromos_{tag}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn read(path: &std::path::Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+#[test]
+fn eds_update_1_matches_gromospp() {
+    let d = data("eds_update");
+    let dir = tmp_dir("eds1");
+    let f = |n: &str| d.join(n).to_string_lossy().into_owned();
+    let (er, ea, eb, ec, tree) = (
+        f("eR.dat"),
+        f("eA.dat"),
+        f("eB.dat"),
+        f("eC.dat"),
+        f("tree.dat"),
+    );
+    let cases: Vec<(Vec<&str>, &str, Option<&str>)> = vec![
+        (
+            vec!["@form", "1", "@s", "0.03"],
+            "u1_form1.gromospp.out",
+            None,
+        ),
+        (
+            vec!["@form", "2", "@s", "0.03", "0.04", "0.05"],
+            "u1_form2.gromospp.out",
+            None,
+        ),
+        (
+            vec![
+                "@form",
+                "3",
+                "@s",
+                "0.03",
+                "0.04",
+                "@update_tree",
+                "0",
+                "@tree",
+                &tree,
+            ],
+            "u1_form3t0.gromospp.out",
+            Some("u1_form3t0.tree_new.gromospp.dat"),
+        ),
+        (
+            vec![
+                "@form",
+                "3",
+                "@s",
+                "0.03",
+                "0.04",
+                "@update_tree",
+                "1",
+                "@tree",
+                &tree,
+            ],
+            "u1_form3t1.gromospp.out",
+            Some("u1_form3t1.tree_new.gromospp.dat"),
+        ),
+    ];
+    for (extra, reference, tree_ref) in cases {
+        let mut args = strs(&[
+            "@temp", "300", "@numstat", "3", "@vr", &er, "@vy", &ea, &eb, &ec, "@EiR", "0", "-5.4",
+            "4.3",
+        ]);
+        args.extend(strs(&extra));
+        let out = run(env!("CARGO_BIN_EXE_eds_update_1"), &args, Some(&dir));
+        assert_same_text(&out, &read(&d.join(reference)), 1e-5);
+        if let Some(t) = tree_ref {
+            assert_same_text(&read(&dir.join("tree_new.dat")), &read(&d.join(t)), 1e-5);
+        }
+    }
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn eds_update_2_matches_gromospp() {
+    let d = data("eds_update");
+    let f = |n: &str| d.join(n).to_string_lossy().into_owned();
+    let (er, ea, eb) = (f("eR.dat"), f("eA.dat"), f("eB.dat"));
+    for (extra, reference) in [
+        (
+            vec!["@update", "1", "@eunder", "-100"],
+            "u2_upd1.gromospp.out",
+        ),
+        (
+            vec!["@update", "1", "@eunder", "0"],
+            "u2_upd1b.gromospp.out",
+        ),
+        (
+            vec![
+                "@update", "2", "@eunder", "5", "@etrans", "2", "@scale", "1.0",
+            ],
+            "u2_upd2.gromospp.out",
+        ),
+    ] {
+        let mut args = strs(&[
+            "@temp", "300", "@vr", &er, "@vy", &ea, &eb, "@s", "0.03", "@s_old", "0.06", "@EiR",
+            "0", "-5.4",
+        ]);
+        args.extend(strs(&extra));
+        let out = run(env!("CARGO_BIN_EXE_eds_update_2"), &args, None);
+        assert_same_text(&out, &read(&d.join(reference)), 1e-5);
+    }
+}
+
+#[test]
+fn jepot_matches_gromospp() {
+    let d = data("jepot");
+    let f = |n: &str| d.join(n).to_string_lossy().into_owned();
+    let jv = data("jval")
+        .join("aladip.jval")
+        .to_string_lossy()
+        .into_owned();
+    let conf = shared()
+        .join("shared/aladip.conf")
+        .to_string_lossy()
+        .into_owned();
+    let (fin, res, one_jval, one_trs) = (f("fin.cnf"), f("res.trs"), f("one.jval"), f("one.trs"));
+    let topo_path = topo();
+    let cases: Vec<(Vec<&str>, &str)> = vec![
+        (
+            vec!["@jval", &jv, "@K", "0.5", "@ngrid", "8", "@fin", &fin],
+            "fin.gromospp.out",
+        ),
+        (
+            vec!["@jval", &jv, "@K", "0.5", "@ngrid", "8", "@restraj", &res],
+            "ts_all.gromospp.out",
+        ),
+        (
+            vec![
+                "@jval",
+                &jv,
+                "@K",
+                "0.5",
+                "@ngrid",
+                "8",
+                "@restraj",
+                &res,
+                "@timespec",
+                "SPEC",
+                "@timepts",
+                "2",
+                "@time",
+                "5",
+                "0.5",
+            ],
+            "ts_spec.gromospp.out",
+        ),
+        (
+            vec![
+                "@jval", &one_jval, "@K", "0.5", "@ngrid", "8", "@angles", "CURR", "@topo",
+                &topo_path, "@pbc", "r", "@postraj", &conf, "@restraj", &one_trs,
+            ],
+            "curr.gromospp.out",
+        ),
+    ];
+    for (args, reference) in cases {
+        let out = run(env!("CARGO_BIN_EXE_jepot"), &strs(&args), None);
+        assert_same_text(&out, &read(&d.join(reference)), 1e-6);
+    }
+}
+
+#[test]
+fn pocket_matches_gromospp() {
+    let d = data("pocket");
+    let trc_path = trc();
+    let center = read(&d.join("center.txt")).trim().to_string();
+    let conf = shared()
+        .join("shared/aladip.conf")
+        .to_string_lossy()
+        .into_owned();
+    let cases: Vec<(Vec<&str>, &str, Vec<&str>)> = vec![
+        (
+            vec![
+                "@protein",
+                "1:a",
+                "@radius",
+                "0.8",
+                "@vec_number_factor",
+                "2",
+                "@volume_and_area",
+                "@final_vector_coords",
+                "@traj",
+                &conf,
+            ],
+            "p1",
+            vec!["charges", "lengths", "volume", "area", "vector_coords"],
+        ),
+        (
+            vec![
+                "@protein",
+                "1:a",
+                "@reject",
+                "1:1-3",
+                "@radius",
+                "0.8",
+                "@vec_number_factor",
+                "3",
+                "@radH",
+                "0.05",
+                "@hemisphere",
+                "@volume_and_area",
+                "@traj",
+                &trc_path,
+            ],
+            "p2",
+            vec!["charges", "lengths", "volume", "area"],
+        ),
+    ];
+    for (extra, tag, files) in cases {
+        let dir = tmp_dir("pocket");
+        let mut args = strs(&["@topo", &topo(), "@pbc", "r", "@center", &center]);
+        args.extend(strs(&extra));
+        let out = run(env!("CARGO_BIN_EXE_pocket"), &args, Some(&dir));
+        assert_same_text(&out, &read(&d.join(format!("{tag}.gromospp.out"))), 1e-6);
+        for f in files {
+            assert_same_text(
+                &read(&dir.join(format!("{f}.txt"))),
+                &read(&d.join(format!("{tag}_{f}.gromospp.txt"))),
+                1e-6,
+            );
+        }
+        std::fs::remove_dir_all(dir).ok();
+    }
+}
+
+#[test]
+fn dfgrid_matches_gromospp() {
+    let d = data("dfgrid");
+    let dir = tmp_dir("dfgrid");
+    let args = strs(&[
+        "@topo",
+        &topo(),
+        "@pbc",
+        "r",
+        "@atom",
+        "1:1",
+        "@distatoms",
+        "1:12",
+        "1:6",
+        "@gridspacing",
+        "0.3",
+        "@proteinoffset",
+        "15",
+        "@proteincutoff",
+        "0.25",
+        "@proteinatoms",
+        "1:a",
+        "@max",
+        "3",
+        "@smooth",
+        "1",
+        "@protect",
+        "0.3",
+        "@frames",
+        "0",
+        "2",
+        "@traj",
+        &trc(),
+    ]);
+    let out = run(env!("CARGO_BIN_EXE_dfgrid"), &args, Some(&dir));
+    assert_same_text(&out, &read(&d.join("distatoms.gromospp.out")), 1e-5);
+    for f in ["grid00000", "grid00002"] {
+        // the title carries the trajectory path: compare from TIMESTEP on
+        let ours = read(&dir.join(format!("{f}.cnf")));
+        let theirs = read(&d.join(format!("{f}.gromospp.cnf")));
+        let from = |s: &str| s[s.find("TIMESTEP").unwrap()..].to_string();
+        assert_same_text(&from(&ours), &from(&theirs), 1e-7);
+    }
+    std::fs::remove_dir_all(dir).ok();
+}

@@ -1,0 +1,46 @@
+# ############### New EDS Parameters: #################
+iteration: 1
+iteration: 2
+iteration: 3
+iteration: 4
+iteration: 5
+iteration: 6
+iteration: 7
+iteration: 8
+iteration: 9
+iteration: 10
+iteration: 11
+iteration: 12
+iteration: 13
+iteration: 14
+iteration: 15
+iteration: 16
+iteration: 17
+iteration: 18
+iteration: 19
+iteration: 20
+iteration: 21
+iteration: 22
+iteration: 23
+iteration: 24
+iteration: 25
+iteration: 26
+iteration: 27
+iteration: 28
+iteration: 29
+iteration: 30
+iteration: 31
+iteration: 32
+iteration: 33
+iteration: 34
+iteration: 35
+iteration: 36
+iteration: 37
+# iterations: 37 of 300
+
+# new s parameters
+0.130503 0.0960234 0.252526 
+
+# new energy offsets: 
+0 15.0512 22.1997 
+

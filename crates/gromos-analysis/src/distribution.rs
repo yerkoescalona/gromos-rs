@@ -136,44 +136,9 @@ impl Distribution {
     }
 }
 
-/// C++ default stream formatting of a double with `precision` significant digits (`%g`):
-/// fixed when the exponent is in [−5, precision), scientific otherwise, trailing zeros dropped.
-pub fn cpp_g(x: f64, precision: usize) -> String {
-    if x == 0.0 {
-        return "0".to_string();
-    }
-    if !x.is_finite() {
-        return if x.is_nan() {
-            "nan".into()
-        } else if x > 0.0 {
-            "inf".into()
-        } else {
-            "-inf".into()
-        };
-    }
-    let p = precision.max(1);
-    // exponent after rounding to p significant digits
-    let sci = format!("{:.*e}", p - 1, x);
-    let (mant, ex) = sci.split_once('e').unwrap();
-    let exp: i32 = ex.parse().unwrap();
-    if exp < -4 || exp >= p as i32 {
-        let m = if mant.contains('.') {
-            mant.trim_end_matches('0').trim_end_matches('.')
-        } else {
-            mant
-        };
-        return format!("{m}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs());
-    }
-    let decimals = (p as i32 - 1 - exp).max(0) as usize;
-    let t = format!("{:.*}", decimals, x);
-    if t.contains('.') {
-        t.trim_end_matches('0').trim_end_matches('.').to_string()
-    } else {
-        t
-    }
-}
-
 /// Six significant digits — the stream default.
+pub use gromos_io::table::cpp_g;
+
 pub fn trim_float(x: f64) -> String {
     cpp_g(x, 6)
 }
