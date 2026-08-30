@@ -13,7 +13,7 @@ Phase 0  prerequisites & fixes  ──gate──▶  Phase 1  parity (same physi
                                                     │
                                                   gate
                                                     ▼
-Phase 4  MPI (blocked today)  ◀──gate──  Phase 3  threads  ◀──gate──  Phase 2  one core vs one core
+Phase 4  MPI (measured §6.3)  ◀──gate──  Phase 3  threads  ◀──gate──  Phase 2  one core vs one core
 ```
 
 Phase X (spin-off, future): the integrated GPU — a probe with numbers is at the end of this file;
