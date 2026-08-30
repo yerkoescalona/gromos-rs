@@ -46,7 +46,7 @@ PRINTOUT
 END
 WRITETRAJ
 #     NTWX     NTWSE      NTWV      NTWF      NTWE      NTWG      NTWB
-        10         0         0        10        10         0         0
+  10  0  10  10  10  0  0
 END
 CONSTRAINT
 #       NTC  NTCP  NTCP0(1)  NTCS  NTCS0(1)

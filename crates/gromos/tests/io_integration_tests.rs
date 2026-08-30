@@ -85,10 +85,10 @@ NONBONDED
 END
 
 INITIALISE
-#  NTIVEL  NTISHK  NTINHT  NTINHB  NTISHI     NTIRTC  NTICOM
-        1       0       0       0       0          0       0
-#  NTIR    NTIG      IG     TEMPI
-      0       0   12345  300.00
+#  NTIVEL  NTISHK  NTINHT  NTINHB  NTISHI  NTIRTC  NTICOM  NTISTI
+        1       0       0       0       0       0       0       0
+#      IG   TEMPI
+    12345  300.00
 END
 
 WRITETRAJ

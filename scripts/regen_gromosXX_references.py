@@ -52,6 +52,7 @@ def run_system(sys_dir: Path) -> bool:
         tre = tmp / "energies.tre"
         trf = tmp / "forces.trf"
         trc = tmp / "trajectory.trc"
+        trv = tmp / "velocities.trv"
         trg = tmp / "free_energy.trg"
         fin = tmp / "final.conf"
 
@@ -64,6 +65,7 @@ def run_system(sys_dir: Path) -> bool:
             "@tre", str(tre),
             "@trf", str(trf),
             "@trc", str(trc),
+            "@trv", str(trv),
             "@trg", str(trg),
         ]
 
@@ -99,6 +101,7 @@ def run_system(sys_dir: Path) -> bool:
             (tre, "energies.tre"),
             (trf, "forces.trf"),
             (trc, "trajectory.trc"),
+            (trv, "velocities.trv"),
             (fin, "final.conf"),
         ]:
             if src.exists():

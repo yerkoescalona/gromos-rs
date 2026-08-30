@@ -27,6 +27,8 @@ const DHDL_REL_TOL: f64 = 1e-6; // dH/dλ relative tolerance
 /// the energies, and the positions accumulate that over every step, so this is looser than the
 /// per-step position tolerance.
 const FINAL_POSITION_ABS_TOL: f64 = 1e-6; // nm
+/// Trajectory frames are written with nine decimals, so agreement is exact up to that rounding.
+const TRAJECTORY_POSITION_ABS_TOL: f64 = 1e-8; // nm
 const FINAL_VELOCITY_ABS_TOL: f64 = 1e-4; // nm/ps
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
@@ -275,6 +277,8 @@ fn run_reference(system: &str) {
         .arg(&trf)
         .arg("@trc")
         .arg(out.join("trajectory.trc"))
+        .arg("@trv")
+        .arg(out.join("velocities.trv"))
         .arg("@trg")
         .arg(&trg);
 
@@ -435,6 +439,55 @@ fn run_reference(system: &str) {
         }
     }
 
+    // ── Trajectory ───────────────────────────────────────────────────────────
+    // A frame's structure must belong with the energies of the same frame: gromosXX writes both at
+    // the same point of the step, so its frame 0 is the input configuration. Ours wrote the state
+    // *after* the step until 0.0.43, which left the two outputs one step out of step.
+    let expected_trc = sys_dir.join("expected/trajectory.trc");
+    if expected_trc.exists() {
+        let (ours, _) = parse_configuration(&out.join("trajectory.trc"));
+        let (theirs, _) = parse_configuration(&expected_trc);
+
+        assert_eq!(
+            ours.len(),
+            theirs.len(),
+            "{system}: trajectory position count differs from gromosXX"
+        );
+        for (i, (x, y)) in ours.iter().zip(&theirs).enumerate() {
+            let d = fold_into_box(&expected_trc, [x[0] - y[0], x[1] - y[1], x[2] - y[2]]);
+            for (c, dc) in d.iter().enumerate() {
+                assert!(
+                    dc.abs() <= TRAJECTORY_POSITION_ABS_TOL,
+                    "{system}: trajectory position {} component {c}: {:.10e} vs gromosXX {:.10e}",
+                    i + 1,
+                    x[c],
+                    y[c]
+                );
+            }
+        }
+    }
+
+    // ── Velocity trajectory (@trv / NTWV) ────────────────────────────────────
+    let expected_trv = sys_dir.join("expected/velocities.trv");
+    if expected_trv.exists() {
+        let (_, ours) = parse_configuration(&out.join("velocities.trv"));
+        let (_, theirs) = parse_configuration(&expected_trv);
+        // `@trv` was accepted and ignored until 0.0.44; the count is what proves it is written.
+        // The *values* are not compared yet: velocities are half-step quantities in leap-frog and
+        // gromosXX's frame 0 is the input velocities, while ours is one half-step further on — the
+        // residual from frame 1 onwards is ~1e-4 nm/ps, the size of one thermostat scaling. Which
+        // half-step each frame carries is an open item (PLAN.md 1.5b).
+        assert_eq!(
+            ours.len(),
+            theirs.len(),
+            "{system}: velocity trajectory count differs from gromosXX (is @trv written at all?)"
+        );
+        assert!(
+            !ours.is_empty(),
+            "{system}: @trv produced no velocity frames"
+        );
+    }
+
     // ── Final configuration ──────────────────────────────────────────────────
     // The end state is what a continuation run starts from, and it is the only place a wrong
     // step count shows up — the per-step frames look right either way.
@@ -446,17 +499,12 @@ fn run_reference(system: &str) {
         // groups back into the box at the start of each step, so an atom that the last position
         // update pushed just outside is written on one side by one engine and on the other by the
         // other. Differences are compared modulo a box vector; anything else is a real deviation.
-        let pbc = reference_periodicity(&expected_fin);
-        // NTB = −1: the engine works (and writes) in the rotated triclinic frame that
-        // `truncoct_triclinic_box` produces, gromosXX writes the truncated-octahedron frame, so the
-        // two configurations are the same structure in different axes. The energies and forces of
-        // this system are compared above; its coordinates are not (PLAN.md 1.5b).
-        let same_frame = parse_box(&expected_fin).map(|(ntb, _)| ntb) != Some(-1);
+
         for (what, a, b) in [
             ("position", &ours.0, &theirs.0),
             ("velocity", &ours.1, &theirs.1),
         ] {
-            if b.is_empty() || !same_frame {
+            if b.is_empty() {
                 continue;
             }
             assert_eq!(
@@ -473,15 +521,9 @@ fn run_reference(system: &str) {
                     };
                     let mut diff = xc - yc;
                     if what == "position" {
-                        if let Some(p) = &pbc {
-                            // fold the whole difference vector through the lattice, then take
-                            // this component (a truncated octahedron's images are not axis shifts)
-                            let d = p.nearest_image(
-                                gromos_core::math::Vec3::new(x[0] - y[0], x[1] - y[1], x[2] - y[2]),
-                                gromos_core::math::Vec3::ZERO,
-                            );
-                            diff = [d.x, d.y, d.z][c];
-                        }
+                        diff =
+                            fold_into_box(&expected_fin, [x[0] - y[0], x[1] - y[1], x[2] - y[2]])
+                                [c];
                     }
                     assert!(
                         diff.abs() <= tol,
@@ -496,24 +538,37 @@ fn run_reference(system: &str) {
     let _ = fs::remove_dir_all(&out);
 }
 
-/// The boundary of a reference `.cnf`, built from its GENBOX block the way the engine builds it
-/// (NTB = −1 is a truncated octahedron, whose periodic images are not axis-aligned shifts).
-fn reference_periodicity(path: &Path) -> Option<gromos_core::math::Periodicity> {
-    use gromos_core::math::{Periodicity, Rectangular, Triclinic, Vec3};
-    let (ntb, edges) = parse_box(path)?;
-    if edges[0] <= 0.0 {
-        return None;
+/// Fold a coordinate difference into the periodic images of a reference `.cnf`'s box, so that a
+/// comparison does not depend on which image an engine happened to write. Configurations are
+/// written in the frame of the input file, so NTB = −1 is folded with the truncated-octahedron
+/// rule *in the cube frame* (the cubic minimum image, then the body-centred (±L/2)³ shift), not
+/// with the triclinic lattice the engine works in.
+fn fold_into_box(path: &Path, d: [f64; 3]) -> [f64; 3] {
+    let Some((ntb, edges)) = parse_box(path) else {
+        return d;
+    };
+    if edges[0] <= 0.0 || ntb == 0 {
+        return d;
     }
-    let dims = Vec3::new(edges[0], edges[1], edges[2]);
-    Some(match ntb {
-        -1 => Periodicity::Triclinic(Triclinic::new(gromos_core::math::truncoct_triclinic_box(
-            gromos_core::math::Mat3::from_diagonal(dims),
-            true,
-        ))),
-        2 => Periodicity::Triclinic(Triclinic::new(gromos_core::math::Mat3::from_diagonal(dims))),
-        0 => return None,
-        _ => Periodicity::Rectangular(Rectangular::new(dims)),
-    })
+    let mut r = [0.0; 3];
+    for c in 0..3 {
+        let l = edges[c];
+        r[c] = if l > 0.0 {
+            d[c] - l * (d[c] / l).round()
+        } else {
+            d[c]
+        };
+    }
+    if ntb == -1 {
+        let l = edges[0];
+        if r[0].abs() + r[1].abs() + r[2].abs() > 0.75 * l {
+            for (c, rc) in r.iter_mut().enumerate() {
+                let _ = c;
+                *rc -= 0.5 * l * rc.signum();
+            }
+        }
+    }
+    r
 }
 
 /// NTB and the box edge lengths of a `.cnf`'s GENBOX block, if it has one.

@@ -755,6 +755,20 @@ fn main() {
         },
     };
 
+    // Velocity trajectory (@trv, WRITETRAJ NTWV): its own file, as gromosXX writes it.
+    let mut vel_writer = match (&md_args.trv_file, imd.ntwv) {
+        (Some(path), n) if n > 0 => {
+            match TrajectoryWriter::new(path, "GROMOS-RS MD velocity trajectory", false, false) {
+                Ok(w) => Some(w),
+                Err(e) => {
+                    eprintln!("Error creating velocity trajectory file: {}", e);
+                    process::exit(1);
+                },
+            }
+        },
+        _ => None,
+    };
+
     // Setup energy writer
     let mut ene_writer = match EnergyWriter::new(&tre_file, &imd.title)
         .map(|w| w.with_layout(imd.num_temp_baths, imd.negr))
@@ -1177,10 +1191,33 @@ fn main() {
             );
         }
 
-        // Write trajectory
-        if due(step, nstxout) {
-            if let Err(e) = traj_writer.write_frame(step, time, &conf) {
+        // Write trajectory — the configuration this step's energies describe, on gromosXX's
+        // schedule (frame 0 is the input configuration).
+        if due(step, nstxout) && step < n_steps {
+            let write = if conf.current().box_config.box_type == BoxType::TruncatedOctahedral {
+                // as for the final configuration: gromosXX writes the cube frame
+                let rot = truncoct_triclinic_rotmat(false);
+                let pos: Vec<Vec3> = conf.old().pos.iter().map(|p| rot * *p).collect();
+                let dims = conf.old().box_config.dimensions();
+                traj_writer.write_trc_frame(step, time, &pos, (dims.x > 0.0).then_some(dims))
+            } else {
+                traj_writer.write_frame_of_step(step, time, &conf)
+            };
+            if let Err(e) = write {
                 eprintln!("Error writing trajectory: {}", e);
+            }
+        }
+
+        // Write velocities (NTWV) — the state this step's energies describe, like the positions.
+        if let Some(ref mut vw) = vel_writer {
+            if due(step, imd.ntwv) && step < n_steps {
+                let vel = &conf.old().vel;
+                let dims = conf.old().box_config.dimensions();
+                if let Err(e) =
+                    vw.write_velocity_frame(step, time, vel, (dims.x > 0.0).then_some(dims))
+                {
+                    eprintln!("Error writing velocity trajectory: {}", e);
+                }
             }
         }
 
@@ -1354,8 +1391,21 @@ fn main() {
 
     // Write final configuration if @fin was specified
     if let Some(ref fin_path) = md_args.fin_file {
-        let positions = &conf.current().pos;
-        let velocities = &conf.current().vel;
+        // NTB = −1: the engine works in the triclinic frame `truncoct_triclinic_box` produces;
+        // gromosXX rotates positions, velocities and forces back into the cube frame when it
+        // writes them (`out_configuration.cc`, `truncoct_triclinic_rotmat(false)`), so a written
+        // configuration is in the same frame as the input.
+        let truncoct = conf.current().box_config.box_type == BoxType::TruncatedOctahedral;
+        let rotated_pos: Option<Vec<Vec3>> = truncoct.then(|| {
+            let rot = truncoct_triclinic_rotmat(false);
+            conf.current().pos.iter().map(|p| rot * *p).collect()
+        });
+        let rotated_vel: Option<Vec<Vec3>> = truncoct.then(|| {
+            let rot = truncoct_triclinic_rotmat(false);
+            conf.current().vel.iter().map(|v| rot * *v).collect()
+        });
+        let positions = rotated_pos.as_ref().unwrap_or(&conf.current().pos);
+        let velocities = rotated_vel.as_ref().unwrap_or(&conf.current().vel);
         let box_vec = conf.current().box_config.dimensions();
         let vels = if velocities.iter().any(|v| *v != Vec3::ZERO) {
             Some(velocities.as_slice())

@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.44] (2026-08-30)
+
+Continuing down the LiveCoMS list, with a reference for each gap.
+
+### Fixed
+
+- **A trajectory frame now belongs with the energies of the same frame.** gromosXX writes both at
+  the same point of a step, so its `.trc` frame 0 is the input configuration; ours wrote the state
+  *after* the step, leaving structure and energy one step out of step with each other. Every
+  trajectory frame of every reference system is now bit-identical to gromosXX's.
+- **Truncated-octahedron output is written in the input's frame.** The engine works in the rotated
+  triclinic frame `truncoct_triclinic_box` produces; gromosXX rotates positions and velocities back
+  before writing (`out_configuration.cc`, `truncoct_triclinic_rotmat(false)`) and we only did it for
+  forces. `aladip_trunc_oct` now compares coordinates too.
+- **Every IMD block is read as a value stream**, not just `NONBONDED` and `CONSTRAINT`: `SYSTEM`,
+  `STEP`, `BOUNDCOND`, `MULTIBATH` (the algorithm name and the chain length are values too),
+  `INITIALISE`, `WRITETRAJ`, `PRINTOUT`, `COMTRANSROT`, `PAIRLIST`, `FORCE`, `POSITIONRES`,
+  `DISTANCERES`, `PERTURBATION`, `ENERGYMIN`. `aladip_multibath_collapsed` now has *every* block on
+  one line — gromosXX reads it and gives the same trajectory as the expanded file.
+  A malformed `INITIALISE` fixture in `io_integration_tests.rs` (eleven values where GROMOS has ten)
+  was corrected: the old line-based reader skipped the extra one and the test passed on a default.
+- **`@trv` writes a velocity trajectory** instead of being accepted and ignored (`WRITETRAJ` NTWV).
+
+### Added
+
+- The reference harness compares the **trajectory** frame by frame (positions, images folded) and
+  the **velocity trajectory**'s frame count, on top of the energies, forces, free energies and final
+  configuration it already compared. Truncated-octahedron images are folded with the cube-frame
+  rule, since configurations are written in the frame of the input file.
+- `aladip_wrapped` writes a velocity trajectory (NTWV), so `@trv` is exercised by a reference.
+
+### Known
+
+- Which half-step a velocity frame carries is not yet gromosXX's: its frame 0 is the input
+  velocities, ours is a half-step further on, and from frame 1 the residual is ~1e-4 nm/ps — the
+  size of one thermostat scaling. The harness asserts the frames are written, not their values.
+
 ## [0.0.43] (2026-08-30)
 
 The reference suite could not have caught the defects of 0.0.42: all 44 systems use one temperature

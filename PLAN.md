@@ -235,9 +235,14 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
       (solute split across the boundary) — `gromosXX_references/README-livecoms.md`. The harness
       now also compares `expected/final.conf` and the frame count, which is what catches a wrong
       step count.
-- [ ] `.trc` frame 0 should be the initial configuration (gromosXX's schedule); `@trv` is ignored.
-- [ ] Convert the remaining IMD blocks to the value-stream reader (only NONBONDED and CONSTRAINT are
-      done; the rest are still line-indexed and will misread differently-wrapped files).
+- [x] `.trc` frame 0 is the initial configuration and a frame's structure belongs with its energies;
+      `@trv` writes a velocity trajectory; truncated-octahedron output is rotated back into the
+      input's frame (0.0.44, each covered by the reference harness).
+- [x] Every IMD block reads as a value stream (0.0.44); `aladip_multibath_collapsed` has every block
+      on one line.
+- [ ] Velocity frames carry a different half-step than gromosXX's (frame 0 should be the input
+      velocities; residual ~1e-4 nm/ps ≈ one thermostat scaling). The harness checks the frames are
+      written, not their values.
 - [ ] `atominfo` is built by both gromos-analysis and gromos-tools — one name, two programs.
 
 **1.6 — Restraints & special interactions** — distance done; dihedral next

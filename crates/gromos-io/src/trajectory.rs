@@ -71,14 +71,36 @@ impl TrajectoryWriter {
         })
     }
 
-    /// Write a trajectory frame from a Configuration.
+    /// Write a trajectory frame from a Configuration's *current* state.
     pub fn write_frame(
         &mut self,
         step: usize,
         time: f64,
         config: &Configuration,
     ) -> Result<(), IoError> {
-        let state = config.current();
+        self.write_state(step, time, config.current())
+    }
+
+    /// Write the frame a step's *energies* describe — the `old` buffer after the step's
+    /// double-buffer swap. gromosXX writes the configuration and the energies of a step at the
+    /// same point, so its trajectory starts at the input configuration and a frame's structure
+    /// belongs with the energies of the same frame. Writing `current` instead put the two one
+    /// step out of step with each other.
+    pub fn write_frame_of_step(
+        &mut self,
+        step: usize,
+        time: f64,
+        config: &Configuration,
+    ) -> Result<(), IoError> {
+        self.write_state(step, time, config.old())
+    }
+
+    fn write_state(
+        &mut self,
+        step: usize,
+        time: f64,
+        state: &gromos_core::configuration::State,
+    ) -> Result<(), IoError> {
         let dims = state.box_config.dimensions();
         let box_opt = if dims.x > 0.0 { Some(dims) } else { None };
         self.write_trc_frame(step, time, &state.pos, box_opt)?;
@@ -103,6 +125,36 @@ impl TrajectoryWriter {
             writeln!(self.writer, "END")?;
         }
 
+        Ok(())
+    }
+
+    /// Write a velocity frame: `TIMESTEP` + `VELOCITYRED` (+ `GENBOX`), the layout gromosXX
+    /// writes into the file named by `@trv`.
+    pub fn write_velocity_frame(
+        &mut self,
+        step: usize,
+        time: f64,
+        velocities: &[Vec3],
+        box_dims: Option<Vec3>,
+    ) -> Result<(), IoError> {
+        writeln!(self.writer, "TIMESTEP")?;
+        writeln!(self.writer, "{:>15}{:20.9}", step, time)?;
+        writeln!(self.writer, "END")?;
+        writeln!(self.writer, "VELOCITYRED")?;
+        for v in velocities {
+            writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", v.x, v.y, v.z)?;
+        }
+        writeln!(self.writer, "END")?;
+        if let Some(b) = box_dims {
+            writeln!(self.writer, "GENBOX")?;
+            writeln!(self.writer, "{:>8}", 1)?;
+            writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", b.x, b.y, b.z)?;
+            writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", 90.0, 90.0, 90.0)?;
+            writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", 0.0, 0.0, 0.0)?;
+            writeln!(self.writer, "{:15.9}{:15.9}{:15.9}", 0.0, 0.0, 0.0)?;
+            writeln!(self.writer, "END")?;
+        }
+        self.step_count += 1;
         Ok(())
     }
 

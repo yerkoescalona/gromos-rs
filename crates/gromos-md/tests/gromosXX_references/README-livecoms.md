@@ -20,7 +20,11 @@ gromosXX gives them **the same energies** — the wrapped configuration is a pur
 That equality is the property the third row tests: any interaction that skips the minimum image
 breaks it.
 
-The comparison in `test_gromosXX_references.rs` also covers the **final configuration** for every
+`aladip_wrapped` also writes a velocity trajectory (`WRITETRAJ` NTWV), so `@trv` — accepted and
+ignored until 0.0.44 — is exercised by a reference.
+
+The comparison in `test_gromosXX_references.rs` also covers the **trajectory** (frame by frame,
+positions, periodic images folded out) and the **final configuration** for every
 system (`expected/final.conf`, positions and velocities). That is where a wrong step count shows —
 the per-step frames look right either way — and it is how the NSTLIM+1 loop of 0.0.41 was found.
 Positions are compared modulo a periodic image, because which image a file records is not physics;

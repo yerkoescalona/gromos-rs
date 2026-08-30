@@ -481,122 +481,95 @@ fn parse_block(
             params.title = data_lines.join("\n");
         },
         "SYSTEM" => {
-            // Line 0: NPM NSM
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.npm = parse_usize(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.nsm = parse_usize(&v[1])?;
-                }
+            let mut t = Tokens::new("SYSTEM", data_lines);
+            if let Some(v) = t.next_usize("NPM")? {
+                params.npm = v;
+            }
+            if let Some(v) = t.next_usize("NSM")? {
+                params.nsm = v;
             }
         },
         "STEP" => {
-            // Line 0: NSTLIM T DT
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.nstlim = parse_usize(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.t0 = parse_f64(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.dt = parse_f64(&v[2])?;
-                }
+            let mut t = Tokens::new("STEP", data_lines);
+            if let Some(v) = t.next_usize("NSTLIM")? {
+                params.nstlim = v;
+            }
+            if let Some(v) = t.next_f64("T")? {
+                params.t0 = v;
+            }
+            if let Some(v) = t.next_f64("DT")? {
+                params.dt = v;
             }
         },
         "BOUNDCOND" => {
-            // Line 0: NTB NDFMIN
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.ntb = parse_i32(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.ndfmin = parse_i32(&v[1])?;
-                }
+            let mut t = Tokens::new("BOUNDCOND", data_lines);
+            if let Some(v) = t.next_i32("NTB")? {
+                params.ntb = v;
+            }
+            if let Some(v) = t.next_i32("NDFMIN")? {
+                params.ndfmin = v;
             }
         },
         "MULTIBATH" => {
-            // GROMOS format:
-            //   Line 0: algorithm name (e.g. "weak-coupling")
-            //   Line 1: NBATHS
-            //   Line 2: TEMP0 TAU (per bath, may have multiple values)
-            //   Line 3: DOFSET (number of DOF sets)
-            //   Line 4+: LAST COM-BATH IR-BATH (per DOF set)
+            // gromosXX reads this block as a value stream (`read_MULTIBATH`): the algorithm name
+            // (with the chain length right after it for nose-hoover-chains), then NBATHS, then
+            // TEMP0/TAU per bath, then DOFSET and LAST/COMBATH/IRBATH per set. Line breaks carry
+            // no meaning, so a file may put the whole block on one line.
             let mut bath = TempBathParameters::default();
-            if data_lines.is_empty() {
+            let mut t = Tokens::new("MULTIBATH", data_lines);
+            let Some(algorithm) = t.next_raw() else {
                 return Ok(());
-            }
-
-            let mut line_idx = 0;
-
-            // Line 0: algorithm (string like "weak-coupling" or number)
-            // Matches GROMOS in_parameter.cc logic:
-            //   "weak-coupling" / 0  → algorithm = 0  (Berendsen)
-            //   "nose-hoover"   / 1  → algorithm = 1  (NHC single)
-            //   "nose-hoover-chains" / 2 → reads next token as chain length N, algorithm = N
-            if line_idx < data_lines.len() {
-                let v0 = parse_values(&data_lines[line_idx]);
-                if let Some(first) = v0.first() {
-                    match first.as_str() {
-                        "weak-coupling" => {
-                            bath.algorithm = 0;
-                        },
-                        "nose-hoover" => {
-                            bath.algorithm = 1;
-                        },
-                        "nose-hoover-chains" => {
-                            // The chain length N follows on the same line, e.g. "nose-hoover-chains  3"
-                            let n = if v0.len() > 1 {
-                                parse_usize(&v0[1])?
-                            } else {
-                                3
-                            };
-                            let n = n.max(2); // chain length must be >= 2
-                            bath.algorithm = n as i32;
-                            bath.nhc_chain = n;
-                        },
-                        _ => {
-                            bath.algorithm = parse_i32(first)?;
-                        },
-                    }
-                }
-                line_idx += 1;
-            }
-
-            // The rest of the block is a token stream, as gromosXX reads it (in_parameter.cc
-            // reads `>> nbaths`, then `>> temp0 >> tau` per bath, then `>> dofset`, then
-            // `>> last >> com >> ir` per set) — the values may be laid out one bath per line
-            // (the check suite's inputs) or all on one line; line breaks carry no meaning.
-            let tokens: Vec<String> = data_lines[line_idx..]
-                .iter()
-                .flat_map(|l| parse_values(l))
-                .collect();
-            let mut next = tokens.iter();
-            let mut take = |what: &str| -> Result<&String, IoError> {
-                next.next().ok_or_else(|| {
-                    IoError::ParseError(format!("block MULTIBATH: missing value for {what}"))
-                })
             };
-            bath.num_bath_groups = parse_usize(take("NBATHS")?)?;
+            match algorithm.as_str() {
+                "weak-coupling" => bath.algorithm = 0,
+                "nose-hoover" => bath.algorithm = 1,
+                "nose-hoover-chains" => {
+                    // the chain length follows the name
+                    let n = t.next_usize("NUM")?.unwrap_or(3).max(2);
+                    bath.algorithm = n as i32;
+                    bath.nhc_chain = n;
+                },
+                other => bath.algorithm = parse_i32(other)?,
+            }
+            let Some(nbaths) = t.next_usize("NBATHS")? else {
+                return Err(IoError::ParseError(
+                    "block MULTIBATH: missing value for NBATHS".to_string(),
+                ));
+            };
+            bath.num_bath_groups = nbaths;
             bath.temp0.clear();
             bath.tau.clear();
-            for _ in 0..bath.num_bath_groups {
-                bath.temp0.push(parse_f64(take("TEMP0")?)?);
-                bath.tau.push(parse_f64(take("TAU")?)?);
+            for _ in 0..nbaths {
+                match (t.next_f64("TEMP0")?, t.next_f64("TAU")?) {
+                    (Some(temp0), Some(tau)) => {
+                        bath.temp0.push(temp0);
+                        bath.tau.push(tau);
+                    },
+                    _ => {
+                        return Err(IoError::ParseError(format!(
+                            "block MULTIBATH: NBATHS = {nbaths} but fewer TEMP0/TAU pairs follow"
+                        )))
+                    },
+                }
             }
-            let n_sets = parse_usize(take("DOFSET")?)?;
+            let n_sets = t.next_usize("DOFSET")?.unwrap_or(0);
             for _ in 0..n_sets {
-                bath.dof_sets.push([
-                    parse_usize(take("LAST")?)?,
-                    parse_usize(take("COM-BATH")?)?,
-                    parse_usize(take("IR-BATH")?)?,
-                ]);
+                match (
+                    t.next_usize("LAST")?,
+                    t.next_usize("COMBATH")?,
+                    t.next_usize("IRBATH")?,
+                ) {
+                    (Some(last), Some(com), Some(ir)) => bath.dof_sets.push([last, com, ir]),
+                    _ => {
+                        return Err(IoError::ParseError(format!(
+                            "block MULTIBATH: DOFSET = {n_sets} but fewer LAST/COMBATH/IRBATH \
+                             triplets follow"
+                        )))
+                    },
+                }
             }
-
+            bath.dof = vec![0; bath.num_bath_groups.max(1)];
+            params.num_temp_baths = bath.num_bath_groups;
             params.temp_bath = vec![bath];
         },
         "PRESSURESCALE" => {
@@ -741,66 +714,62 @@ fn parse_block(
             }
         },
         "FORCE" => {
-            // GROMOS format:
-            //   Line 0: bonds angles imp dih charge nonbonded (6 NTF values)
-            //   Line 1: NEGR NRE(1) NRE(2) ... NRE(NEGR)
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                for (i, tok) in v.iter().take(6).enumerate() {
-                    params.ntf[i] = parse_i32(tok)?;
+            // NTF(1..6), then NEGR and NEGR energy-group boundaries — a value stream, so the
+            // six flags and the group list may be wrapped anywhere.
+            let mut t = Tokens::new("FORCE", data_lines);
+            for i in 0..6 {
+                if let Some(v) = t.next_i32("NTF")? {
+                    params.ntf[i] = v;
                 }
             }
-            if data_lines.len() >= 2 {
-                let v = parse_values(&data_lines[1]);
-                if !v.is_empty() {
-                    params.negr = parse_usize(&v[0])?;
-                    params.nre = v[1..]
-                        .iter()
-                        .map(|s| parse_usize(s))
-                        .collect::<Result<Vec<_>, _>>()?;
+            if let Some(negr) = t.next_usize("NEGR")? {
+                params.negr = negr;
+                let mut nre = Vec::with_capacity(negr);
+                for _ in 0..negr {
+                    match t.next_usize("NRE")? {
+                        Some(v) => nre.push(v),
+                        None => break,
+                    }
                 }
+                params.nre = nre;
             }
         },
         "PAIRLIST" => {
-            // GROMOS format:
-            //   Line 0: ALGORITHM NSNB RCUTP RCUTL SIZE TYPE
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    // ALGORITHM: faithful to gromosXX in_parameter.cc:1419-1422
-                    //   "standard" / 0 → Standard_Pairlist_Algorithm
-                    //   "grid"     / 1 → Extended_Grid_Pairlist_Algorithm (production default)
-                    //   "grid_cell"/ 2 → Grid_Cell_Pairlist (Heinz & Hünenberger 2004)
-                    params.algorithm = match v[0].as_str() {
-                        "standard" => 0,
-                        "grid" => 1,
-                        "grid_cell" => 2,
-                        _ => parse_i32(&v[0])?,
-                    };
-                }
-                if v.len() >= 2 {
-                    params.nsnb = parse_usize(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.rcutp = parse_f64(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.rcutl = parse_f64(&v[3])?;
-                }
-                if v.len() >= 5 {
-                    // SIZE can be "auto" or a number
-                    params.size = match v[4].as_str() {
-                        "auto" => 0.0,
-                        _ => parse_f64(&v[4])?,
-                    };
-                }
-                if v.len() >= 6 {
-                    params.type_ = match v[5].as_str() {
-                        "chargegroup" => 0,
-                        "atomic" => 1,
-                        _ => parse_i32(&v[5])?,
-                    };
-                }
+            let mut t = Tokens::new("PAIRLIST", data_lines);
+            if let Some(raw) = t.next_raw() {
+                // ALGORITHM: faithful to gromosXX in_parameter.cc:1419-1422
+                //   "standard" / 0 → Standard_Pairlist_Algorithm
+                //   "grid"     / 1 → Extended_Grid_Pairlist_Algorithm (production default)
+                //   "grid_cell"/ 2 → Grid_Cell_Pairlist (Heinz & Hünenberger 2004)
+                params.algorithm = match raw.as_str() {
+                    "standard" => 0,
+                    "grid" => 1,
+                    "grid_cell" => 2,
+                    _ => parse_i32(&raw)?,
+                };
+            }
+            if let Some(v) = t.next_usize("NSNB")? {
+                params.nsnb = v;
+            }
+            if let Some(v) = t.next_f64("RCUTP")? {
+                params.rcutp = v;
+            }
+            if let Some(v) = t.next_f64("RCUTL")? {
+                params.rcutl = v;
+            }
+            if let Some(raw) = t.next_raw() {
+                // SIZE can be "auto" or a number
+                params.size = match raw.as_str() {
+                    "auto" => 0.0,
+                    _ => parse_f64(&raw)?,
+                };
+            }
+            if let Some(raw) = t.next_raw() {
+                params.type_ = match raw.as_str() {
+                    "chargegroup" => 0,
+                    "atomic" => 1,
+                    _ => parse_i32(&raw)?,
+                };
             }
         },
         "NONBONDED" => {
@@ -887,214 +856,152 @@ fn parse_block(
             }
         },
         "INITIALISE" => {
-            // GROMOS format:
-            //   Line 0: NTIVEL NTISHK NTINHT NTINHB
-            //   Line 1: NTISHI NTIRTC NTICOM
-            //   Line 2: NTISTI
-            //   Line 3: IG TEMPI
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.ntivel = parse_i32(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.ntishk = parse_i32(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.ntinht = parse_i32(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.ntinhb = parse_i32(&v[3])?;
+            let mut t = Tokens::new("INITIALISE", data_lines);
+            for (name, slot) in [
+                ("NTIVEL", &mut params.ntivel),
+                ("NTISHK", &mut params.ntishk),
+                ("NTINHT", &mut params.ntinht),
+                ("NTINHB", &mut params.ntinhb),
+                ("NTISHI", &mut params.ntishi),
+                ("NTIRTC", &mut params.ntirtc),
+                ("NTICOM", &mut params.nticom),
+                ("NTISTI", &mut params.ntisti),
+            ] {
+                if let Some(v) = t.next_i32(name)? {
+                    *slot = v;
                 }
             }
-            if data_lines.len() >= 2 {
-                let v = parse_values(&data_lines[1]);
-                if !v.is_empty() {
-                    params.ntishi = parse_i32(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.ntirtc = parse_i32(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.nticom = parse_i32(&v[2])?;
-                }
+            if let Some(raw) = t.next_raw() {
+                params.ig = raw.parse::<i64>().map_err(|_| {
+                    IoError::ParseError(format!(
+                        "block INITIALISE: IG expects an integer seed, found {raw:?}"
+                    ))
+                })?;
             }
-            // Line 2: NTISTI
-            if data_lines.len() >= 3 {
-                let v = parse_values(&data_lines[2]);
-                if let Some(first) = v.first() {
-                    params.ntisti = parse_i32(first)?;
-                }
-            }
-            if data_lines.len() >= 4 {
-                let v = parse_values(&data_lines[3]);
-                if !v.is_empty() {
-                    params.ig = v[0].parse::<i64>().map_err(|_| {
-                        IoError::ParseError(format!("expected an integer seed, found {:?}", v[0]))
-                    })?;
-                }
-                if v.len() >= 2 {
-                    params.tempi = parse_f64(&v[1])?;
-                }
+            if let Some(v) = t.next_f64("TEMPI")? {
+                params.tempi = v;
             }
         },
         "WRITETRAJ" => {
-            // GROMOS format:
-            //   Line 0: NTWX NTWSE NTWV NTWF NTWE NTWG NTWB
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.ntwx = parse_usize(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.ntwse = parse_usize(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.ntwv = parse_usize(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.ntwf = parse_usize(&v[3])?;
-                }
-                if v.len() >= 5 {
-                    params.ntwe = parse_usize(&v[4])?;
-                }
-                if v.len() >= 6 {
-                    params.ntwg = parse_usize(&v[5])?;
-                }
-                if v.len() >= 7 {
-                    params.ntwb = parse_usize(&v[6])?;
+            let mut t = Tokens::new("WRITETRAJ", data_lines);
+            for (name, slot) in [
+                ("NTWX", &mut params.ntwx),
+                ("NTWSE", &mut params.ntwse),
+                ("NTWV", &mut params.ntwv),
+                ("NTWF", &mut params.ntwf),
+                ("NTWE", &mut params.ntwe),
+                ("NTWG", &mut params.ntwg),
+                ("NTWB", &mut params.ntwb),
+            ] {
+                if let Some(v) = t.next_usize(name)? {
+                    *slot = v;
                 }
             }
         },
         "PRINTOUT" => {
-            // GROMOS format:
-            //   Line 0: NTPR NTPP
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.ntpr = parse_usize(&v[0])?;
-                }
-                if v.len() >= 2 {
-                    params.ntpp = parse_usize(&v[1])?;
-                }
+            let mut t = Tokens::new("PRINTOUT", data_lines);
+            if let Some(v) = t.next_usize("NTPR")? {
+                params.ntpr = v;
+            }
+            if let Some(v) = t.next_usize("NTPP")? {
+                params.ntpp = v;
             }
         },
         "COMTRANSROT" => {
-            // Line 0: NSCM
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.nscm = parse_i32(&v[0])?;
-                }
+            let mut t = Tokens::new("COMTRANSROT", data_lines);
+            if let Some(v) = t.next_i32("NSCM")? {
+                params.nscm = v;
             }
         },
         "POSITIONRES" => {
-            // GROMOS format:
-            //   Line 0: NTPOR NTPORB NTPORS CPOR
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.ntpor = parse_i32(&v[0])?;
+            let mut t = Tokens::new("POSITIONRES", data_lines);
+            for (name, slot) in [
+                ("NTPOR", &mut params.ntpor),
+                ("NTPORB", &mut params.ntporb),
+                ("NTPORS", &mut params.ntpors),
+            ] {
+                if let Some(v) = t.next_i32(name)? {
+                    *slot = v;
                 }
-                if v.len() >= 2 {
-                    params.ntporb = parse_i32(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.ntpors = parse_i32(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.cpor = parse_f64(&v[3])?;
-                }
+            }
+            if let Some(v) = t.next_f64("CPOR")? {
+                params.cpor = v;
             }
         },
         "DISTANCERES" => {
-            // GROMOS format (one data line):
-            //   NTDIR NTDIRA CDIR DIR0 TAUDIR FORCESCALE VDIR NTWDIR
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.ntdir = parse_i32(&v[0])?;
+            let mut t = Tokens::new("DISTANCERES", data_lines);
+            if let Some(v) = t.next_i32("NTDIR")? {
+                params.ntdir = v;
+            }
+            if let Some(v) = t.next_i32("NTDIRA")? {
+                params.ntdira = v;
+            }
+            for (name, slot) in [
+                ("CDIR", &mut params.cdir),
+                ("DIR0", &mut params.dir0),
+                ("TAUDIR", &mut params.taudir),
+            ] {
+                if let Some(v) = t.next_f64(name)? {
+                    *slot = v;
                 }
-                if v.len() >= 2 {
-                    params.ntdira = parse_i32(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.cdir = parse_f64(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.dir0 = parse_f64(&v[3])?;
-                }
-                if v.len() >= 5 {
-                    params.taudir = parse_f64(&v[4])?;
-                }
-                if v.len() >= 6 {
-                    params.forcescale = parse_i32(&v[5])?;
-                }
-                if v.len() >= 7 {
-                    params.vdir = parse_i32(&v[6])?;
-                }
-                if v.len() >= 8 {
-                    params.ntwdir = parse_i32(&v[7])?;
+            }
+            for (name, slot) in [
+                ("FORCESCALE", &mut params.forcescale),
+                ("VDIR", &mut params.vdir),
+                ("NTWDIR", &mut params.ntwdir),
+            ] {
+                if let Some(v) = t.next_i32(name)? {
+                    *slot = v;
                 }
             }
         },
         "PERTURBATION" => {
-            // GROMOS format: 8 values, possibly split over multiple non-comment lines:
-            //   NTG NRDGL RLAM DLAMT
-            //   ALPHLJ ALPHC NLAM NSCALE
-            let combined: Vec<String> = data_lines.iter().flat_map(|l| parse_values(l)).collect();
-            let v = &combined[..];
-            if !v.is_empty() {
-                params.ntg = parse_i32(&v[0])?;
+            let mut t = Tokens::new("PERTURBATION", data_lines);
+            if let Some(v) = t.next_i32("NTG")? {
+                params.ntg = v;
             }
-            if v.len() >= 2 {
-                params.nrdgl = parse_i32(&v[1])?;
+            if let Some(v) = t.next_i32("NRDGL")? {
+                params.nrdgl = v;
             }
-            if v.len() >= 3 {
-                params.rlam = parse_f64(&v[2])?;
+            for (name, slot) in [
+                ("RLAM", &mut params.rlam),
+                ("DLAMT", &mut params.dlamt),
+                ("ALPHLJ", &mut params.alphlj),
+                ("ALPHC", &mut params.alphc),
+            ] {
+                if let Some(v) = t.next_f64(name)? {
+                    *slot = v;
+                }
             }
-            if v.len() >= 4 {
-                params.dlamt = parse_f64(&v[3])?;
+            if let Some(v) = t.next_i32("NLAM")? {
+                params.nlam = v;
             }
-            if v.len() >= 5 {
-                params.alphlj = parse_f64(&v[4])?;
-            }
-            if v.len() >= 6 {
-                params.alphc = parse_f64(&v[5])?;
-            }
-            if v.len() >= 7 {
-                params.nlam = parse_i32(&v[6])?;
-            }
-            if v.len() >= 8 {
-                params.nscale = parse_i32(&v[7])?;
+            if let Some(v) = t.next_i32("NSCALE")? {
+                params.nscale = v;
             }
         },
         "ENERGYMIN" => {
-            // GROMOS format:
-            //   Line 0: NTEM NCYC DELE DX0 DXM NMIN FLIM
-            if let Some(line) = data_lines.first() {
-                let v = parse_values(line);
-                if !v.is_empty() {
-                    params.ntem = parse_i32(&v[0])?;
+            let mut t = Tokens::new("ENERGYMIN", data_lines);
+            if let Some(v) = t.next_i32("NTEM")? {
+                params.ntem = v;
+            }
+            if let Some(v) = t.next_usize("NCYC")? {
+                params.ncyc = v;
+            }
+            for (name, slot) in [
+                ("DELE", &mut params.dele),
+                ("DX0", &mut params.dx0),
+                ("DXM", &mut params.dxm),
+            ] {
+                if let Some(v) = t.next_f64(name)? {
+                    *slot = v;
                 }
-                if v.len() >= 2 {
-                    params.ncyc = parse_usize(&v[1])?;
-                }
-                if v.len() >= 3 {
-                    params.dele = parse_f64(&v[2])?;
-                }
-                if v.len() >= 4 {
-                    params.dx0 = parse_f64(&v[3])?;
-                }
-                if v.len() >= 5 {
-                    params.dxm = parse_f64(&v[4])?;
-                }
-                if v.len() >= 6 {
-                    params.nmin = parse_usize(&v[5])?;
-                }
-                if v.len() >= 7 {
-                    params.flim = parse_f64(&v[6])?;
-                }
+            }
+            if let Some(v) = t.next_usize("NMIN")? {
+                params.nmin = v;
+            }
+            if let Some(v) = t.next_f64("FLIM")? {
+                params.flim = v;
             }
         },
         _ => {
@@ -1347,11 +1254,6 @@ fn parse_f64(s: &str) -> Result<f64, IoError> {
 fn parse_i32(s: &str) -> Result<i32, IoError> {
     s.parse::<i32>()
         .map_err(|_| IoError::ParseError(format!("expected an integer, found {s:?}")))
-}
-
-fn parse_usize(s: &str) -> Result<usize, IoError> {
-    s.parse::<usize>()
-        .map_err(|_| IoError::ParseError(format!("expected a non-negative integer, found {s:?}")))
 }
 
 #[cfg(test)]
