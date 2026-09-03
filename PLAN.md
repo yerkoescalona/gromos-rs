@@ -15,8 +15,8 @@ References:
   bridge, unifying layered architecture) + differential-audit findings (known GROMOS bugs not to
   port, live divergences). PLAN.md = near-term execution; FUTURE.md = where we diverge on purpose.
 - **`PLAN_ARCHIVE.md`** — the full working notes of finished items (Dim 9a; 2.6–2.9 QM/MM + ML;
-  3.5–3.7 py-gromos). PLAN.md keeps one paragraph per finished item with its load-bearing decisions;
-  the archive keeps the traps, oracle numbers and rejected alternatives verbatim. `BENCHMARKING.md`
+  2.10 energy library profile; 3.5–3.7 py-gromos). PLAN.md keeps one paragraph per finished item
+  with its load-bearing decisions; the archive keeps the traps, oracle numbers and rejected alternatives verbatim. `BENCHMARKING.md`
   plays the same role for Priority 4; `CHANGELOG.md` is the per-version record.
 
 **Per-crate status, key files, and crate-specific rules live in each crate's stage contract:**
@@ -500,75 +500,34 @@ orchestrator reproduces as a fixed decomposition — it cannot be detected at ru
 - [ ] Not attempted: embedding for the trained net (needs the deferred charge channel); training on a real
       inner/buffer/outer zone (`t_06`); anything resembling chemical-accuracy validation.
 
-**2.10 — Energy library profile: same grammar, stricter rules, versioned** — spec written 2026-09-03
+**2.10 — Energy library profile: same grammar, stricter rules, versioned** ✓ implemented 0.0.47 (`PLAN_ARCHIVE.md` §2.10)
 
-> The `ene_ana` library is the right design for a research code — a researcher can re-partition a
-> system, recompute with a new topology and describe the resulting file without recompiling — and
-> it has one hole: nothing ties a library to the trajectory it is applied to. `ENER 26 2` instead of
-> `ENER 52 1` reads every value into the wrong slot and prints `totkin = −52.8` with no error;
-> `ENEVERSION`, the only guard, is hand-typed in both files (`out_configuration.cc:58`), only a
-> *warning* in gromos++ (`ene_ana.cc:463`), and the tutorial's stale library carries the same string
-> as md++'s current one. The fix is not a new format — that would forfeit the oracle and the
-> tutorials — but a **profile** of the existing one: every profile addition is a column-0 `#` line
-> (both upstream readers strip them; a new block would break gromos++'s strict block order,
-> `EnergyTraj.cc:454`), the layout is defined in code and everything else is derived from it, and a
-> library that disagrees with the file's fingerprint is refused with a diff.
->
-> **The spec is `docs/src/reference/energy-library.md`** (profile v1): grammar, canonical form and
-> SHA-256 fingerprint (names excluded, so renaming stays free), trajectory and library
-> self-description lines, the three reader tiers, the structural checks that hold for any
-> partitioning, the official library from `gromos-io`, provenance, versioning, refusal catalogue.
-> Steps below implement it; the spec's Status table is updated as each lands.
+> The `ene_ana` library is the right design for a research code — re-partition a system, recompute
+> with a new topology, describe the file without recompiling — with one hole: nothing tied a library
+> to the trajectory it was applied to, and `ENEVERSION`, the only guard, is hand-typed in both files
+> and only a *warning* in gromos++. The tutorial's stale library carries the same string as md++'s
+> current one and read every value into the wrong slot without an error. The fix is a **profile** of
+> the existing grammar, not a new format: every addition is a column-0 `#` line both upstream readers
+> strip. **The spec is `docs/src/reference/energy-library.md`** (profile v1); its Status table is the
+> authority on what is implemented.
 
-Options weighed for "who owns the official library" (recorded in the spec §5): ship the file and
-locate it at runtime (gromos++'s model — editable, unverified, the status quo); embed the file text
-(immutable, but writer and text can still disagree); **layout in code with library, fingerprints and
-a writer round-trip test derived from it** (chosen); signed distribution (wrong threat model — the
-danger is accident and drift, and a fingerprint line already makes any edit visible).
+Load-bearing decisions: the layout lives in code (`gromos_io::energy_traj::Schema`) and the official
+library (`crates/gromos-io/data/ene_ana.md++.lib`), the fingerprints, the writers' self-description
+and the round-trip test are all derived from it; names are excluded from the fingerprint so renaming
+stays free; tiers **a**/**b** have no override; the first-frame identity
+`ENER[1] = ENER[2] + ENER[3] + ENER[21]` is a *warning*, since a verified layout says where the values
+sit, not how the writer summed them. Pinning that identity to gromosXX's slot numbers showed our
+writers had put the special, SASA, constraint and distance-restraint totals two slots early since
+they were written (fixed, 0.0.47).
 
-- [ ] **Step 1 — Layout in code, fingerprint, official library (M).** `EnergyLayout` in
-      `gromos_io::energy_traj`: the 2023-04-15 `ENERTRJ`/`FRENERTRJ` declarations as data;
-      `canonical_form()` and `fingerprint()` per spec R2; `official_library()` generates the schema
-      sections and appends md++'s `VARIABLES` (embedded text, GPL-2 like ours). Checked-in copy at
-      `crates/gromos-io/data/ene_ana.md++.lib`, a test asserting it equals the generated one and
-      that its fingerprint equals md++'s `data/ene_ana.md++.lib`'s (so we prove we ship *their*
-      layout). `size` slots validated before allocation (R6, first two bullets — closes the
-      `f64 as usize` hazard). Mutation tests on the library text: reshape (`ENER 26 2`), shift
-      (`ENER 53`), dropped `size`, renamed subblock and size (must give the *same* fingerprint).
-      **Gate:** fingerprint of the checked-in library == fingerprint of md++'s; rename passes,
-      every other mutation changes the fingerprint; the ten gromos++ reference cases unchanged.
-- [ ] **Step 2 — Reader tiers and refusals (M).** `EnergyTraj::open` establishes the tier (R5)
-      and applies R6 on every frame, with the exact first lines of spec §3. `ene_ana @library`
-      becomes optional (official library when absent); a `VARIABLES`-only library is accepted.
-      `ext_ti_ana` reads `.trg` through `energy_traj` instead of its own parser, so it gets the
-      checks for free.
-      **Gate:** the tutorial's stale `ene_ana.md++.lib` against a gromosXX `.tre` fails at open
-      with the tier-**b** diff (`SPECIAL: library … x 12, built-in … x 13`) instead of
-      `BONDED[1][1] outside`; `ENER 26 2` fails on frame 1 by the invariant with no fingerprint and
-      at open with one; the reference cases still byte-identical to gromos++.
-- [ ] **Step 3 — Writers describe what they wrote (S).** `EnergyWriter` and `FreeEnergyWriter`
-      emit the R3 lines from `EnergyLayout` and the R8 provenance (writer version, topology hash
-      and path, energy-group ranges); a round-trip test writes a frame and reads it back under
-      tier **a**, so the hand-written writer is checked against the layout it claims.
-      **Gate:** gromos++ `ene_ana` (`.local/gromosPlsPls/gromos++/BUILD/programs`) on our `.tre`
-      gives byte-identical output before and after; `md`'s `.omd` header prints the fingerprint.
-- [ ] **Step 4 — `ene_ana @print_library [trajectory]` (S).** Prints the official library, or the
-      library a self-describing trajectory says it was written with (spec §4). The tutorial-1 notes
-      and `crates/gromos-analysis/tests/data/README.md` switch from the checkout's library to it.
-      **Gate:** `@print_library md.tre | ene_ana @library /dev/stdin …` reproduces the default run.
+- [x] Steps 1–4: layout + fingerprint + official library; reader tiers and refusals; self-describing
+      writers with provenance; `ene_ana @print_library` — every gate met (archive).
+- [ ] `ext_ti_ana` still reads `.trg` through the fixed-slot `read_free_energy_trajectory` and gets
+      none of the checks; ours is a trapezoid over ⟨dH/dλ⟩, not gromos++'s library-driven program.
+      Route it through `energy_traj` if it is ever made that port.
 - [ ] Later, Priority 3: expose `EnergyTraj` to py-gromos as a typed table (frame × term × group
       pair) — the re-partition workflow is a `group_by` there, which is where a richer derived
       language belongs rather than in the `.lib` (spec §5, last paragraph).
-
-**Assumptions**
-
-| # | Assumption | If wrong | Check |
-|---|---|---|---|
-| L1 | Column-0 `#` lines are dropped by both upstream readers wherever our files reach them (`Ginstream.cc:165-172`, `blockinput.cc:53-58`). | Our `.tre` breaks gromos++ → R3 lines move to the `TITLE` block text. | Step 3 gate runs the gromos++ build on our output. |
-| L2 | Subblock and size *names* carry no information about where a byte lands; only shapes, order and block names do. | A name that changes reading → it enters the canonical form (profile v2). | Step 1 rename-mutation test: same fingerprint, same values. |
-| L3 | md++'s `ENEVERSION` string does **not** identify a layout uniquely in the wild (the tutorial proves it). | — this is why tier **b** compares fingerprints, not strings, and why R6 exists for files with no self-description. | Tier-**b** gate in step 2 uses the stale tutorial library. |
-| L4 | The hand-written `EnergyWriter` sequence equals the 2023-04-15 layout; it is checked by round trip, not made layout-driven (a value→slot map would be more machinery than it saves). | A slot the writer fills and the layout lacks → the round-trip test fails, not the user. | Step 3 round-trip test under tier **a**. |
-| L5 | `sha2` (pure Rust, default features off) is an acceptable `gromos-io` dependency. | FNV-64 in-tree, spec R2 amended to say so. | `cargo tree -p gromos-io`. |
 
 ### Priority 3 — py-gromos API & education
 

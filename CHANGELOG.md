@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.47] (2026-09-03)
+
+**Energy library profile, version 1, implemented** — `docs/src/reference/energy-library.md`, all
+of it. Every `.tre`/`.trg` gromos-rs writes now carries a fingerprint of the layout it was written
+with, and `ene_ana` refuses a library that disagrees with the file it is applied to instead of
+reading every value into the wrong slot. gromos++ and gromosXX read the files unchanged.
+
+### Fixed
+
+- **`.tre`/`.trg` totals written two slots early.** `EnergyWriter` put the special-interaction
+  total at `ENER[19]`, SASA at `[20]`, the constraint total at `[22]` and the distance-restraint
+  total at `[23]`; the 2023-04-15 layout has them at `[21]`, `[22]`, `[24]` and `[25]` (`[19]` is
+  the lattice-sum surface term, `[20]` the self term; `out_configuration.cc:3074-3125`).
+  `FreeEnergyWriter` had the same offset for `dhdl_special`. Any `ene_ana` run on a gromos-rs
+  file read `totspecial`, `totdisres` and `totconstraint` as zero before. Found while pinning
+  the first-frame identity check to gromosXX's slot numbers. `EnergyFrame::special` now
+  means what gromosXX's `special_total` means — every special term, restraints included — and is
+  the value `ENER[1] = ENER[2] + ENER[3] + ENER[21]` needs.
+
+### Added
+
+- **Layout in code, fingerprinted** (`gromos_io::energy_traj::Schema`). The ENERTRJ and FRENERTRJ
+  layouts of `ENEVERSION 2023-04-15` are declared once, in the same grammar as a library; their
+  canonical form drops names and numbers the sizes by first occurrence, so a rename keeps the
+  fingerprint while a reshape, a shift or a dropped size changes it. The fingerprint of the layout
+  in code equals the one computed from md++'s own `data/ene_ana.md++.lib` (tested) and from
+  `sha256sum` of the canonical text by hand.
+- **Self-describing trajectories.** `md` writes `# energy-schema 1 ENERTRJ sha256:…` and one
+  `# energy-layout` line per declaration after `ENEVERSION`, then `# energy-provenance` lines with
+  the writer version, the topology's digest and path, and the energy-group ranges. Both upstream
+  readers skip `#` lines at column 0, so gromos++'s `ene_ana` output is byte-identical with and
+  without them. `md` prints the layout fingerprint in its parameter summary.
+- **Reader tiers** (`EnergyTraj::bind`). A self-described file is the authority for its layout
+  and a library that does not match it is refused with a per-declaration diff naming both sides
+  (`ENERGY03 ENER:   library 50 x 1,   file 52 x 1`); a file with a known `ENEVERSION` but no
+  self-description is checked against the built-in layout; anything else is read as the library
+  declares, with a warning that says so. The LiveCoMS tutorial's stale `ene_ana.md++.lib` is
+  refused at open under both tiers. Structural checks in every tier: a `size` that is not an
+  integer, changes between frames or exceeds what is left of the block; a subblock that overruns
+  its block; a gromosXX marker comment (`# baths`, …) falling inside a table; and, as a warning on
+  the first frame, the total-energy identity, a negative kinetic energy and a non-positive volume.
+- **The official library ships in `gromos-io`** (`crates/gromos-io/data/ene_ana.md++.lib`,
+  `energy_traj::OFFICIAL_LIBRARY`): generated from the layout in code with md++'s `VARIABLES`
+  verbatim, carrying `# energy-schema` lines that let a reader detect an edited schema section —
+  editing a `subblock` line makes the file refuse until the line is regenerated. A test keeps the
+  checked-in copy byte-equal to the generator (`UPDATE_OFFICIAL_LIBRARY=1` rewrites it). gromos++
+  produces identical output with it and with md++'s own. A library with only `VARIABLES` is valid.
+- **`ene_ana` without `@library`** uses the built-in one; `@print_library` prints it, and
+  `@print_library <trajectory>` generates a library from the file's self-description (or the
+  built-in layout for its `ENEVERSION`) for a reader that has none. Warnings — version mismatch
+  in gromos++'s words, unverified layout, first-frame identity — go to stderr. The gromos++
+  reference cases run against the built-in library now, not the md++ checkout's copy.
+
 ## [0.0.46] (2026-08-31)
 
 **LiveCoMS tutorial 1 (GB3, S² order-parameter restraining), end to end on its own files.** The

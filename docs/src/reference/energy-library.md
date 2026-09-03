@@ -27,9 +27,9 @@ The profile therefore states:
 | Part | State |
 |---|---|
 | §1 Grammar, reader, expression evaluation | implemented (`gromos_io::energy_traj`, 0.0.46), byte-identical to gromos++ on the reference cases |
-| §2 Canonical form, fingerprint, self-description lines | specified, not implemented |
-| §3 Reader tiers and refusals | specified, not implemented — today's reader behaves as gromos++ (`ENEVERSION` warning, token-count errors only) |
-| §4 Official library from `gromos-io` | specified, not implemented — the tests point at the md++ checkout's copy |
+| §2 Canonical form, fingerprint, self-description lines | implemented (0.0.47): `Schema::fingerprint`, `md` writes R3 and R8 lines, the fingerprint of the layout in code equals md++'s own library |
+| §3 Reader tiers and refusals | implemented (0.0.47): `EnergyTraj::bind`; the LiveCoMS tutorial's stale library is refused at open with the diff |
+| §4 Official library from `gromos-io` | implemented (0.0.47): `crates/gromos-io/data/ene_ana.md++.lib`, generated from the layout in code, `ene_ana` uses it without `@library`, `@print_library` prints it |
 
 Implementation is tracked in `PLAN.md` §2.10.
 
@@ -260,9 +260,23 @@ Independent of the library's origin, the reader must refuse a frame when:
   (checked before allocating);
 - the block carries marker comments (`# totals`, `# baths`, … — gromosXX writes them in every
   `ENERGY03`) and a marker falls *inside* a declared subblock's run of values rather than
-  between two declarations;
-- on the first frame, `ENER[1] ≠ ENER[2] + ENER[3]` beyond 1e-6 relative, `ENER[2] < 0`, or
-  `VOLUME[1] ≤ 0` when the block is present.
+  between two declarations.
+
+And on the first frame after binding, it must **warn** when:
+
+- `ENER[1] ≠ ENER[2] + ENER[3] + ENER[21]` beyond 1e-6 relative — md++ composes the total
+  energy as potential + kinetic + special (`energy.cc`, `Energy::calculate_totals`), and
+  writes the special total at slot 21 of `ENER`;
+- `ENER[2] < 0`;
+- `VOLUME[1] ≤ 0` when the block is present.
+
+The warning says why it matters for the tier in force: under **c** "the library's layout is
+unverified and may mislabel the values"; under **a**/**b** "the layout is verified, so the
+writer composed these totals inconsistently". It is a warning, not a refusal, because a
+verified layout is a fact about where the values sit while the identity is a fact about how
+the writer computed them: a file whose slots are proven right must stay readable even if its
+writer summed badly (gromos-rs' own `.tre` files before 0.0.47 wrote the special total two
+slots early and would otherwise be unreadable).
 
 *Why:* the first two turn an allocation or a silent shift into an error; the marker check
 catches every mis-sized subblock in a gromosXX file; the invariants are the only check that
@@ -339,11 +353,15 @@ The one thing removed is the ability to be silently wrong.
 | `size` not an integer / negative / changed | `size NAME: expected an integer, got …` | R6 |
 | subblock overruns the block | `subblock NAME: needs R x C values, block has …` | R6 |
 | marker inside a subblock | `"# baths" falls inside subblock ENER` | R6 |
-| first-frame invariant | `ENER[1] is not ENER[2] + ENER[3]: …` | R6 |
+| `size` in a later frame differs from the first | `size NAME: 3 in this frame, 2 in the first` | R6 |
+| `size` larger than what is left of the block | `size NAME: 40 rows, but only 13 values left in the block` | R6 |
+| no way to know the layout and no library | `no way to establish the layout` | R5 |
 
-Warnings, never refusals: tier **c** (`layout unverified: no self-description and ENEVERSION
-… is not known`); `ENEVERSION` present in one of library and file but not the other (gromos++
-behaviour, kept).
+Warnings, never refusals: tier **c** (`layout unverified: <file> (ENEVERSION …) is read as
+<library> declares it`); the first-frame invariants (`ENERTRJ first frame: ENER[1] is not
+ENER[2] + ENER[3] + ENER[21]: … vs …; …`, R6); `ENEVERSION` present in one of library and file
+but not the other, or different (gromos++'s `Version number mismatch!`/`missing!` text, kept).
+Warnings go to stderr; the analysis output is unchanged.
 
 ## 4. Workflows
 

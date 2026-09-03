@@ -4,9 +4,13 @@
 //! `_print_energyred_helper`, and `_print_volumepressurered`), so gromos++ `ene_ana` reads the file
 //! with the current `ene_ana.md++.lib` (`totene`, `totkin`, `totpot`, `totlj`, `totcrf`, …):
 //!
+//! * after `ENEVERSION`, the profile's self-description — `# energy-schema` plus one
+//!   `# energy-layout` line per declaration, and `# energy-provenance` when the caller gives it
+//!   ([`with_provenance`](EnergyWriter::with_provenance)) — all comment lines to gromosXX and
+//!   gromos++ (`docs/src/reference/energy-library.md`).
 //! * `ENERGY03`: the 52 `# totals` in gromosXX order (total, kinetic, potential, covalent, bond,
-//!   angle, improper, dihedral, cross-dihedral, nonbonded, LJ, CRF, lattice-sum slots, …, special,
-//!   SASA, constraints, distance restraints, …), then `# baths` (kinetic energy per temperature
+//!   angle, improper, dihedral, cross-dihedral, nonbonded, LJ, CRF, lattice-sum slots, …, special
+//!   at 21, SASA 22, constraints 24, distance restraints 25), then `# baths` (kinetic energy per temperature
 //!   bath — the engine tracks the total per bath, so the COM / internal-rotation split is written
 //!   as zeros), `# bonded` per energy group (the engine tracks bonded totals, not per group: group
 //!   1 carries them), `# nonbonded` per group pair (LJ and CRF from the engine's own per-group
@@ -22,6 +26,7 @@
 //! [`read_energy_trajectory_native`] reads this layout (and gromosXX's own files); [`EnergyReader`]
 //! still reads the one-block `ENERTRJ` layout this crate wrote before 0.0.34.
 
+use crate::energy_traj::{builtin_schema, self_description_lines, Provenance};
 use crate::IoError;
 use gromos_core::configuration::Energy;
 use std::fs::File;
@@ -92,9 +97,10 @@ pub struct EnergyFrame {
     pub extra: Vec<f64>,
     /// MD step number (`TIMESTEP` block).
     pub step: usize,
-    /// Special-interaction total (position restraints etc.; `ENERGY03` slot 18).
+    /// Sum of every special-interaction energy, restraints included — gromosXX's
+    /// `special_total`, `ENER[21]`; the total is kinetic + potential + this.
     pub special: f64,
-    /// SASA solvation energy (slot 19).
+    /// SASA solvation energy (`ENER[22]`).
     pub sasa: f64,
     /// Kinetic energy per temperature bath (`# baths`).
     pub bath_kinetic: Vec<f64>,
@@ -211,7 +217,7 @@ impl EnergyFrame {
             coul_self: 0.0,
             shake: energy.constraint_total,
             restraint: energy.distanceres_total,
-            special: energy.special_total,
+            special: energy.special_total + energy.distanceres_total,
             sasa: energy.sasa_total,
             bath_kinetic: energy.kinetic_energy.clone(),
             group_lj: energy.lj_energy.clone(),
@@ -229,6 +235,10 @@ pub struct EnergyWriter {
     n_groups: usize,
 }
 
+/// The gromosXX layout this writer emits; the `ENEVERSION` block and the built-in schema
+/// (`energy_traj::builtin_schema`) are both keyed by it.
+pub const ENE_VERSION: &str = "2023-04-15";
+
 /// Number of entries in an `ENERGY03` `# totals` section (gromosXX `Energy`, 2023-04-15 layout).
 const N_TOTALS: usize = 52;
 
@@ -244,14 +254,30 @@ impl EnergyWriter {
         writeln!(writer, "\n\tenergy trajectory")?;
         writeln!(writer, "END")?;
         writeln!(writer, "ENEVERSION")?;
-        writeln!(writer, "\t2023-04-15")?;
+        writeln!(writer, "\t{ENE_VERSION}")?;
         writeln!(writer, "END")?;
+        let schema = builtin_schema(ENE_VERSION, "ENERTRJ").expect("the layout this writer emits");
+        for line in self_description_lines(&schema) {
+            writeln!(writer, "{line}")?;
+        }
         Ok(Self {
             writer,
             frame_count: 0,
             n_baths: 1,
             n_groups: 1,
         })
+    }
+
+    /// Record what the run was (`# energy-provenance` lines). Must precede the first frame.
+    pub fn with_provenance(mut self, provenance: &Provenance) -> Result<Self, IoError> {
+        debug_assert_eq!(
+            self.frame_count, 0,
+            "provenance goes before the first frame"
+        );
+        for line in provenance.lines() {
+            writeln!(self.writer, "{line}")?;
+        }
+        Ok(self)
     }
 
     /// The number of temperature baths and energy groups of the run.
@@ -287,10 +313,10 @@ impl EnergyWriter {
         totals[10] = frame.lj;
         totals[11] = frame.coul_real;
         totals[13] = frame.coul_recip;
-        totals[18] = frame.special;
-        totals[19] = frame.sasa;
-        totals[21] = frame.shake;
-        totals[22] = frame.restraint;
+        totals[20] = frame.special;
+        totals[21] = frame.sasa;
+        totals[23] = frame.shake;
+        totals[24] = frame.restraint;
         for v in totals {
             writeln!(w, "{}", num(v))?;
         }
@@ -453,10 +479,10 @@ pub fn read_energy_trajectory_native<P: AsRef<Path>>(path: P) -> Result<Vec<Ener
                             lj: at(10),
                             coul_real: at(11),
                             coul_recip: at(13),
-                            special: at(18),
-                            sasa: at(19),
-                            shake: at(21),
-                            restraint: at(22),
+                            special: at(20),
+                            sasa: at(21),
+                            shake: at(23),
+                            restraint: at(24),
                             ..Default::default()
                         });
                     },
@@ -741,5 +767,64 @@ mod tests {
 
         let result = writer.finalize();
         assert!(result.is_ok());
+    }
+
+    /// What this writer emits is read back under tier a — the file's own layout, verified —
+    /// with the official library, and satisfies the first-frame identity with a non-zero
+    /// special energy (the slot it lands in is the one `ene_ana`'s `totspecial` reads).
+    #[test]
+    fn written_file_describes_itself_and_adds_up() {
+        use crate::energy_traj::{read_preamble, EnergyTraj, Tier, OFFICIAL_LIBRARY};
+        let path =
+            std::env::temp_dir().join(format!("gromos_tre_roundtrip_{}.tre", std::process::id()));
+        let mut writer = EnergyWriter::new(&path, "roundtrip")
+            .unwrap()
+            .with_layout(2, 2)
+            .with_provenance(&Provenance {
+                writer: "gromos-rs test".into(),
+                topology: Some(("sha256:00".into(), "x.top".into())),
+                energy_groups: vec![(1, 10), (11, 30)],
+            })
+            .unwrap();
+        let mut frame = EnergyFrame::new(0.002, 150.0, -300.0, 298.15);
+        frame.step = 1;
+        frame.special = 7.5;
+        frame.restraint = 2.5;
+        frame.shake = 0.25;
+        frame.total = frame.kinetic + frame.potential + frame.special;
+        frame.volume = 27.0;
+        writer.write_frame(&frame).unwrap();
+        writer.finalize().unwrap();
+
+        let mut reader = crate::gz::TextReader::open(&path).unwrap();
+        let pre = read_preamble(&mut reader).unwrap();
+        assert_eq!(pre.version.as_deref(), Some(ENE_VERSION));
+        assert_eq!(pre.schema, builtin_schema(ENE_VERSION, "ENERTRJ"));
+        assert_eq!(pre.writer(), Some("gromos-rs test"));
+        assert_eq!(
+            pre.provenance[2],
+            ("energy-groups".to_string(), "1-10 11-30".to_string())
+        );
+
+        let mut lib = EnergyTraj::from_library(OFFICIAL_LIBRARY).unwrap();
+        assert_eq!(
+            lib.bind("ENERTRJ", &pre, "official", "roundtrip.tre")
+                .unwrap(),
+            Tier::SelfDescribed
+        );
+        assert!(lib.read_frame(&mut reader, "ENERTRJ").unwrap());
+        assert_eq!(lib.drain_warnings(), Vec::<String>::new());
+        assert_eq!(lib.value("totene").unwrap(), -142.5);
+        assert_eq!(lib.value("totspecial").unwrap(), 7.5);
+        assert_eq!(lib.value("totdisres").unwrap(), 2.5);
+        assert_eq!(lib.value("totconstraint").unwrap(), 0.25);
+        assert_eq!(lib.value("boxvol").unwrap(), 27.0);
+
+        let back = read_energy_trajectory_native(&path).unwrap();
+        assert_eq!(
+            (back[0].special, back[0].restraint, back[0].shake),
+            (7.5, 2.5, 0.25)
+        );
+        std::fs::remove_file(&path).ok();
     }
 }

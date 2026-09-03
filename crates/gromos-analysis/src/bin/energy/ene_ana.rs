@@ -2,8 +2,11 @@
 //! (gromos++ `ene_ana`, `programs/ene_ana.cc`).
 //!
 //! The layout of a `.tre`/`.trg` is not built in: `@library` declares it and names the
-//! properties, which is what lets one library file span GROMOS versions. See
-//! `gromos_io::energy_traj`.
+//! properties, which is what lets one library file span GROMOS versions. Without `@library`
+//! the one `gromos-io` ships is used. Before a file is read its layout is checked against the
+//! library — from the file's own self-description, or from the built-in layout for its
+//! `ENEVERSION` — and a mismatch is refused with a diff (`gromos_io::energy_traj`, and
+//! `docs/src/reference/energy-library.md`).
 //!
 //! Each `@prop` is written as a `<prop>.dat` time series and summarised on stdout as
 //! average / rmsd / error estimate. The error estimate is gromos++'s block-averaging one,
@@ -11,7 +14,9 @@
 
 use gromos_analysis::args::{fail, Arguments};
 use gromos_core::stat::Stat;
-use gromos_io::energy_traj::EnergyTraj;
+use gromos_io::energy_traj::{
+    builtin_schema, library_text, official_variables, read_preamble, EnergyTraj, OFFICIAL_LIBRARY,
+};
 use gromos_io::gz::TextReader;
 use gromos_io::table::cpp_g;
 use gromos_io::topology::{build_topology, read_topology_file};
@@ -21,9 +26,11 @@ const USAGE: &str = "# ene_ana
 \t@en_files    <energy files> (and/or)
 \t@fr_files    <free energy files>
 \t@prop        <properties to monitor>
-\t@library     <library for property names> [print]
+\t[@library    <library for property names> [print]] (default: the library gromos-io ships)
 \t[@topo       <molecular topology file> (for MASS and NUMMOL)]
-\t[@time       <t and dt> (overwrites TIME in the trajectory files)]";
+\t[@time       <t and dt> (overwrites TIME in the trajectory files)]
+\t[@print_library [<trajectory>]] (write the library to stdout and stop: the built-in one,
+\t             or one generated from the layout the trajectory describes itself with)";
 
 fn main() {
     if let Err(e) = run() {
@@ -45,15 +52,17 @@ struct Sequence {
     next: usize,
     reader: Option<TextReader>,
     kind: &'static str,
+    lib_name: String,
 }
 
 impl Sequence {
-    fn new(files: Vec<String>, kind: &'static str) -> Self {
+    fn new(files: Vec<String>, kind: &'static str, lib_name: &str) -> Self {
         Sequence {
             files,
             next: 0,
             reader: None,
             kind,
+            lib_name: lib_name.to_string(),
         }
     }
 
@@ -71,15 +80,22 @@ impl Sequence {
                 self.next += 1;
                 let mut reader = TextReader::open(path)
                     .map_err(|e| format!("{}: cannot open {path}: {e}", self.kind))?;
-                skip_preamble(&mut reader, path)?;
+                let preamble = read_preamble(&mut reader).map_err(|e| format!("{path}: {e}"))?;
+                etrj.bind(self.kind, &preamble, &self.lib_name, path)?;
+                for w in etrj.drain_warnings() {
+                    eprintln!("{w}");
+                }
                 self.reader = Some(reader);
             }
             let reader = self.reader.as_mut().unwrap();
             let file = &self.files[self.next - 1];
-            if etrj
+            let more = etrj
                 .read_frame(reader, self.kind)
-                .map_err(|e| format!("{file}: {e}"))?
-            {
+                .map_err(|e| format!("{file}: {e}"))?;
+            for w in etrj.drain_warnings() {
+                eprintln!("{w}");
+            }
+            if more {
                 return Ok(true);
             }
             self.reader = None;
@@ -87,46 +103,64 @@ impl Sequence {
     }
 }
 
-/// A trajectory opens with a `TITLE` and may carry an `ENEVERSION`; frames start after them.
-/// gromos++ consumes both in `Ginstream::open` before the first `read_frame`.
-fn skip_preamble(reader: &mut TextReader, path: &str) -> Result<Option<String>, String> {
-    let mut version = None;
-    let mut line = String::new();
-    loop {
-        let mut peeked = String::new();
-        if reader.read_line(&mut peeked).map_err(|e| e.to_string())? == 0 {
-            return Ok(version);
-        }
-        let name = peeked.split('#').next().unwrap_or("").trim().to_string();
-        if name.is_empty() {
-            continue;
-        }
-        if name != "TITLE" && name != "ENEVERSION" {
-            reader.unread_line(&peeked);
-            return Ok(version);
-        }
-        let mut body = String::new();
-        loop {
-            if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 {
-                return Err(format!("{path}: no END in {name} block"));
-            }
-            let l = line.split('#').next().unwrap_or("").trim();
-            if l == "END" {
-                break;
-            }
-            body.push_str(l);
-        }
-        if name == "ENEVERSION" {
-            version = Some(body.split_whitespace().collect());
-        }
-    }
+/// `@print_library [trajectory]`: the library for the built-in layout, or for the layout a
+/// trajectory declares for itself (its `VARIABLES` are md++'s either way).
+fn print_library(trajectory: Option<&str>) -> Result<String, String> {
+    let Some(path) = trajectory else {
+        return Ok(OFFICIAL_LIBRARY.to_string());
+    };
+    let mut reader = TextReader::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let pre = read_preamble(&mut reader).map_err(|e| format!("{path}: {e}"))?;
+    let version = pre.version.clone().unwrap_or_default();
+    let (schemas, origin) = match (&pre.schema, pre.version.as_deref()) {
+        (Some(schema), _) => (vec![schema.clone()], "the self-description of"),
+        (None, Some(v)) if builtin_schema(v, "ENERTRJ").is_some() => (
+            ["ENERTRJ", "FRENERTRJ"]
+                .iter()
+                .filter_map(|t| builtin_schema(v, t))
+                .collect(),
+            "the built-in layout for the ENEVERSION of",
+        ),
+        _ => {
+            return Err(format!(
+                "{path}: no self-description, and ENEVERSION {} has no built-in layout",
+                pre.version.as_deref().unwrap_or("NONE")
+            ))
+        },
+    };
+    let title = format!(
+        "  ene_ana library generated from {origin} {path}\n  \
+         schema from the trajectory; VARIABLES from md++"
+    );
+    Ok(library_text(
+        &title,
+        &version,
+        &schemas,
+        &official_variables(),
+    ))
 }
 
 fn run() -> Result<(), String> {
     let args = Arguments::parse(
-        &["topo", "time", "en_files", "fr_files", "prop", "library"],
+        &[
+            "topo",
+            "time",
+            "en_files",
+            "fr_files",
+            "prop",
+            "library",
+            "print_library",
+        ],
         USAGE,
     )?;
+
+    if args.has("print_library") {
+        print!(
+            "{}",
+            print_library(args.values("print_library").first().map(String::as_str))?
+        );
+        return Ok(());
+    }
 
     // gromos++ only switches to a user time when both t0 and dt are given.
     let tv = args.values("time");
@@ -158,17 +192,23 @@ fn run() -> Result<(), String> {
         return Err(format!("no properties to follow:\n{USAGE}"));
     }
     let library = args.values("library");
-    let Some(lib_path) = library.first() else {
-        return Err(format!("no library file specified:\n{USAGE}"));
+    let print_library = library.iter().any(|s| s == "print");
+    let lib_path = library.iter().find(|s| *s != "print");
+    let (lib_name, lib_text) = match lib_path {
+        Some(path) => {
+            let text = std::io::read_to_string(
+                gromos_io::gz::open_text(path)
+                    .map_err(|e| format!("failed to open library file {path}: {e}"))?,
+            )
+            .map_err(|e| format!("{path}: {e}"))?;
+            (path.clone(), text)
+        },
+        None => (
+            "<built-in library>".to_string(),
+            OFFICIAL_LIBRARY.to_string(),
+        ),
     };
-    let print_library = library.get(1).is_some_and(|s| s == "print");
-
-    let lib_text = std::io::read_to_string(
-        gromos_io::gz::open_text(lib_path)
-            .map_err(|e| format!("failed to open library file {lib_path}: {e}"))?,
-    )
-    .map_err(|e| format!("{lib_path}: {e}"))?;
-    let mut etrj = EnergyTraj::from_library(&lib_text)?;
+    let mut etrj = EnergyTraj::from_library(&lib_text).map_err(|e| format!("{lib_name}: {e}"))?;
 
     // gromos++ takes MASS and NUMMOL from the topology, for densit/Hvap and friends.
     if args.has("topo") {
@@ -189,8 +229,8 @@ fn run() -> Result<(), String> {
         }
     }
 
-    let mut en = Sequence::new(en_files, "ENERTRJ");
-    let mut fr = Sequence::new(fr_files, "FRENERTRJ");
+    let mut en = Sequence::new(en_files, "ENERTRJ", &lib_name);
+    let mut fr = Sequence::new(fr_files, "FRENERTRJ", &lib_name);
     let do_en = !en.is_empty();
     let do_fr = !fr.is_empty();
 

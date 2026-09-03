@@ -771,9 +771,28 @@ fn main() {
         _ => None,
     };
 
+    // What the energy trajectories record about this run: the writer, the topology's digest
+    // and the energy-group partition (`# energy-provenance` lines, read back by ene_ana).
+    let provenance = gromos_io::energy_traj::Provenance {
+        writer: format!("gromos-rs md {}", env!("CARGO_PKG_VERSION")),
+        topology: gromos_io::energy_traj::sha256_file(&md_args.topo_file)
+            .ok()
+            .map(|digest| (digest, md_args.topo_file.clone())),
+        energy_groups: imd
+            .nre
+            .iter()
+            .scan(0usize, |first, &last| {
+                let range = (*first + 1, last);
+                *first = last;
+                Some(range)
+            })
+            .collect(),
+    };
+
     // Setup energy writer
     let mut ene_writer = match EnergyWriter::new(&tre_file, &imd.title)
         .map(|w| w.with_layout(imd.num_temp_baths, imd.negr))
+        .and_then(|w| w.with_provenance(&provenance))
     {
         Ok(w) => w,
         Err(e) => {
@@ -874,6 +893,7 @@ fn main() {
             .unwrap_or_else(|| "md.trg".to_string());
         match FreeEnergyWriter::new(&trg_path, &imd.title)
             .map(|w| w.with_layout(imd.num_temp_baths, imd.negr))
+            .and_then(|w| w.with_provenance(&provenance))
         {
             Ok(w) => {
                 println!("  Free-energy output: {}", trg_path);
@@ -889,6 +909,16 @@ fn main() {
     };
 
     // Parameters summary
+    let energy_layout =
+        gromos_io::energy_traj::builtin_schema(gromos_io::energy::ENE_VERSION, "ENERTRJ")
+            .map(|s| {
+                format!(
+                    "ENEVERSION {} {}",
+                    gromos_io::energy::ENE_VERSION,
+                    s.fingerprint()
+                )
+            })
+            .unwrap_or_default();
     if is_minimization {
         println!("Energy Minimization Parameters:");
         println!("  Max steps:     {}", n_steps);
@@ -896,6 +926,7 @@ fn main() {
         println!("  Step size:     {} nm (max {})", imd.dx0, imd.dxm);
         println!("  Traj output:   {}", trc_file);
         println!("  Energy output: {}", tre_file);
+        println!("  Energy layout: {}", energy_layout);
         println!();
 
         println!("╔══════════════════════════════════════════════════════════════╗");
@@ -916,6 +947,7 @@ fn main() {
         println!("  Temperature:   {} K", temperature);
         println!("  Traj output:   {}", trc_file);
         println!("  Energy output: {}", tre_file);
+        println!("  Energy layout: {}", energy_layout);
         println!();
 
         println!("╔══════════════════════════════════════════════════════════════╗");

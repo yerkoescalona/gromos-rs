@@ -11,7 +11,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.0.46"
+version = "0.0.47"
 edition = "2021"
 authors = ["Yerko Escalona"]
 license = "GPL-2.0-or-later"
@@ -38,6 +38,9 @@ pyo3-gromos = { path = "crates/pyo3-gromos" }
 
 # gzip: gromosXX/gromos++ read every input through igzstream/Ginstream
 flate2 = "1.0"
+
+# energy-trajectory layout fingerprints (docs/src/reference/energy-library.md, R2)
+sha2 = "0.10"
 
 # ============================================================
 # SIMD and math

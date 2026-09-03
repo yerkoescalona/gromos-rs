@@ -10,11 +10,17 @@
 //! totals per term, not per energy group); numbers are printed with Rust's `e` exponent
 //! (`1.5e-2`, not `1.500000000e-02`), which every GROMOS reader parses.
 //!
+//! After `ENEVERSION` the writer adds the profile's self-description (`# energy-schema`,
+//! `# energy-layout`, optionally `# energy-provenance`): comment lines to every other reader
+//! (`docs/src/reference/energy-library.md`).
+//!
 //! The reader accepts this layout and the one-line `FREEENERGY03` block older files carry.
 //!
 //! dH/dλ (kJ/mol) is the thermodynamic-integration integrand at the current λ. Integrate
 //! ⟨dH/dλ⟩_λ over λ with `ext_ti_ana` to get ΔG.
 
+use crate::energy::ENE_VERSION;
+use crate::energy_traj::{builtin_schema, self_description_lines, Provenance};
 use crate::IoError;
 use std::fs::File;
 use std::io::{BufRead, BufWriter, Write};
@@ -206,13 +212,26 @@ impl FreeEnergyWriter {
         writeln!(writer, "\n\tfree energy trajectory")?;
         writeln!(writer, "END")?;
         writeln!(writer, "ENEVERSION")?;
-        writeln!(writer, "\t2023-04-15")?;
+        writeln!(writer, "\t{ENE_VERSION}")?;
         writeln!(writer, "END")?;
+        let schema =
+            builtin_schema(ENE_VERSION, "FRENERTRJ").expect("the layout this writer emits");
+        for line in self_description_lines(&schema) {
+            writeln!(writer, "{line}")?;
+        }
         Ok(Self {
             writer,
             n_baths: 1,
             n_groups: 1,
         })
+    }
+
+    /// Record what the run was (`# energy-provenance` lines). Must precede the first frame.
+    pub fn with_provenance(mut self, provenance: &Provenance) -> Result<Self, IoError> {
+        for line in provenance.lines() {
+            writeln!(self.writer, "{line}")?;
+        }
+        Ok(self)
     }
 
     /// The number of temperature baths and energy groups of the run (sizes of the per-bath
@@ -246,7 +265,7 @@ impl FreeEnergyWriter {
         totals[9] = nonbonded;
         totals[10] = frame.dhdl_lj;
         totals[11] = frame.dhdl_crf;
-        totals[18] = frame.dhdl_special;
+        totals[20] = frame.dhdl_special;
         for v in totals {
             writeln!(w, "{:>18.9e}", v)?;
         }

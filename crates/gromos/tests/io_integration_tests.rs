@@ -221,7 +221,9 @@ fn test_energy_writer_integration() {
     // gromosXX's native layout (0.0.34): TIMESTEP + ENERGY03 + VOLUMEPRESSURE03 per frame
     assert!(content.contains("ENERGY03"));
     assert!(content.contains("VOLUMEPRESSURE03"));
-    assert_eq!(content.matches("TIMESTEP").count(), 10);
+    // the self-description in the header names the TIMESTEP block too: count block openers, not
+    // substring hits
+    assert_eq!(content.lines().filter(|l| *l == "TIMESTEP").count(), 10);
     assert_eq!(writer.frame_count(), 10);
 
     fs::remove_file(path).ok();

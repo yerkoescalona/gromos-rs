@@ -829,15 +829,10 @@ fn ene_ana_case(name: &str, extra: &[&str]) {
     ));
     std::fs::create_dir_all(&dir).unwrap();
 
+    // no `@library`: the built-in one, which `gromos-io` derives from the same 2023-04-15 layout
+    // md++ ships (`official_library_is_generated_from_the_layout` keeps the two equal)
     let tre = shared().join("aladip_solvated/expected/energies.tre");
-    let lib = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.local/gromosXX/md++/data/ene_ana.md++.lib");
-    let mut args: Vec<String> = vec![
-        "@en_files".into(),
-        tre.to_string_lossy().into_owned(),
-        "@library".into(),
-        lib.to_string_lossy().into_owned(),
-    ];
+    let mut args: Vec<String> = vec!["@en_files".into(), tre.to_string_lossy().into_owned()];
     args.extend(extra.iter().map(|s| {
         match *s {
             "%TRE%" => tre.to_string_lossy().into_owned(),

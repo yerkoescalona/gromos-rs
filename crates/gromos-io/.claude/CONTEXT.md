@@ -19,6 +19,11 @@ Parsers + writers for every GROMOS file format used in the workspace.
 - PDB: `write_pdb_positions(path, title, positions, box, topology)` ✓
 - G96: `write_g96(path, title, positions, velocities, box, topology)` ✓
 - Free energy: `FreeEnergyWriter` (FREEENERGY03), `read_free_energy_trajectory` ✓
+- Energy library profile ✓ (`docs/src/reference/energy-library.md`): `energy_traj.rs` holds the
+  2023-04-15 ENERTRJ/FRENERTRJ layouts in code, fingerprints them (`Schema::fingerprint`), reads
+  ene_ana `.lib` files and `.tre`/`.trg` blocks against them (`EnergyTraj::bind`, tiers a/b/c), and
+  generates the official library `data/ene_ana.md++.lib` (`OFFICIAL_LIBRARY`, `include_str!`).
+  Writers self-describe (`# energy-schema`/`# energy-layout`) and record provenance.
 - MTB, IFP, IMD, PTP parsers ✓; position restraints (.por/.rpr) ✓
 
 ## Key files
@@ -28,6 +33,8 @@ src/trajectory.rs  — TrajectoryReader + TrajectoryWriter (write_trc_frame)
 src/g96.rs         — write_g96, G96Writer
 src/pdb.rs         — write_pdb_positions
 src/free_energy.rs — FreeEnergyWriter, read_free_energy_trajectory
+src/energy_traj.rs — Schema, EnergyTraj (library-driven .tre/.trg reader), official library
+data/ene_ana.md++.lib — generated; `UPDATE_OFFICIAL_LIBRARY=1 cargo test -p gromos-io --lib energy_traj` rewrites it
 src/imd.rs         — IMD parameter file parser
 ```
 
@@ -38,6 +45,10 @@ src/imd.rs         — IMD parameter file parser
 - **PERTURBATION block is multi-line:** splits NTG/NRDGL/RLAM/DLAMT on line 1 and ALPHLJ/ALPHC/NLAM/NSCALE
   on line 2. Always combine `data_lines` before tokenising. Bug: `data_lines.first()` silently dropped line 2.
 - **Energy output:** full f64 scientific notation for exact comparison.
+- **Energy layout lives in code, not in the data file:** `data/ene_ana.md++.lib` is generated from
+  `energy_traj::LAYOUTS` and a test keeps the checked-in copy byte-equal. A layout change is a new
+  ENEVERSION, never an edit of the 2023-04-15 entry; a library whose `# energy-schema` line no longer
+  matches its blocks is refused.
 
 ## Crate-specific rules
 - **ALL parsing/writing lives here.** No file format code in binaries or other crates.
