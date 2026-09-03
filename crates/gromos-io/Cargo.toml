@@ -15,6 +15,7 @@ log = { workspace = true }
 
 # Binary I/O
 byteorder = { workspace = true }
+flate2 = { workspace = true }
 chrono = { workspace = true }
 
 # Serialization

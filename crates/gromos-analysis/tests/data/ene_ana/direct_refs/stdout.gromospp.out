@@ -1,0 +1,6 @@
+# WARNING: One of the values is a NaN,
+#   the data provided are not enough to 
+#   give a sensible error estimate
+  property         average            rmsd      error est.
+   ENER[1]       137.02056     0.854084704            -nan
+  ENER[11]     -7.25476455      7.30445888            -nan

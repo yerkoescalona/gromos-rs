@@ -5,7 +5,7 @@
 
 use gromos_core::math::Vec3;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 use std::path::Path;
 
 /// A single atom record from a PDB file
@@ -184,8 +184,8 @@ pub struct PDBStructure {
 impl PDBStructure {
     /// Read a PDB file
     pub fn read_pdb<P: AsRef<Path>>(path: P) -> Result<Self, String> {
-        let file = File::open(path).map_err(|e| format!("Cannot open PDB file: {}", e))?;
-        let reader = BufReader::new(file);
+        let reader =
+            crate::gz::open_text(path).map_err(|e| format!("Cannot open PDB file: {}", e))?;
 
         let mut structure = PDBStructure::default();
         let mut current_residue: Option<PDBResidue> = None;

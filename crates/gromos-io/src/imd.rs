@@ -35,8 +35,7 @@
 
 use crate::IoError;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 /// GROMOS simulation parameters from .imd file
@@ -418,9 +417,9 @@ impl Default for TempBathParameters {
 /// In positional format, comment lines starting with `#` describe fields,
 /// and the following data line contains values in that order.
 pub fn read_imd_file<P: AsRef<Path>>(path: P) -> Result<ImdParameters, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    parse_imd(BufReader::new(file))
+    parse_imd(reader)
 }
 
 /// Parse `.imd` text held in memory (same grammar as [`read_imd_file`]).

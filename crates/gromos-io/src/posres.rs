@@ -9,8 +9,7 @@
 //! When NTPORB=0, reference positions come from the startup configuration.
 //! When NTPORB=1, reference positions come from the @refpos file.
 
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 use gromos_core::math::Vec3;
@@ -32,9 +31,8 @@ pub struct PosResEntry {
 /// GROMOS convention: first 17 characters per line are ignored,
 /// then atom number (1-based) is read.
 pub fn read_posresspec<P: AsRef<Path>>(path: P) -> Result<Vec<usize>, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
 
     let mut atoms = Vec::new();
     let mut in_block = false;
@@ -77,9 +75,8 @@ pub fn read_posresspec<P: AsRef<Path>>(path: P) -> Result<Vec<usize>, IoError> {
 /// Returns reference positions for ALL atoms in the system, indexed by atom number.
 /// Same format as POSITION block in coordinate files.
 pub fn read_refpos<P: AsRef<Path>>(path: P) -> Result<Vec<Vec3>, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
 
     let mut positions = Vec::new();
     let mut in_block = false;

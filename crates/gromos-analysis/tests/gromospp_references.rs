@@ -753,3 +753,135 @@ fn dfgrid_matches_gromospp() {
     }
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// `rmsd` and `rmsf` take two independent atom sets — the frame is superimposed using
+/// `@atomsfit` and the deviation/fluctuation measured over `@atomsrmsd`/`@atomsrmsf` — and a
+/// reference that is either `@ref` or the trajectory's first frame. Each combination is
+/// compared against gromos++ (`tests/data/{rmsd,rmsf}/README` rows).
+fn structural_case(bin: &str, tool: &str, expected: &str, extra: &[&str]) {
+    let topo = shared().join("shared/aladip.topo");
+    let traj = shared().join("aladip_solvated/expected/trajectory.trc");
+    let mut args: Vec<String> = vec![
+        "@topo".into(),
+        topo.to_string_lossy().into_owned(),
+        "@pbc".into(),
+        "r".into(),
+    ];
+    args.extend(extra.iter().map(|s| {
+        if *s == "%REF%" {
+            shared()
+                .join("aladip_solvated/expected/final.conf")
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            (*s).to_string()
+        }
+    }));
+    args.push("@traj".into());
+    args.push(traj.to_string_lossy().into_owned());
+    let out = run(bin, &args, None);
+    let theirs = std::fs::read_to_string(data(tool).join(expected)).unwrap();
+    assert_same_text(&out, &theirs, 1e-5);
+}
+
+#[test]
+fn rmsd_matches_gromospp() {
+    let bin = env!("CARGO_BIN_EXE_rmsd");
+    structural_case(bin, "rmsd", "fit_all.gromospp.out", &["@atomsrmsd", "1:a"]);
+    structural_case(
+        bin,
+        "rmsd",
+        "fit_separate.gromospp.out",
+        &["@atomsrmsd", "1:3-8", "@atomsfit", "1:a"],
+    );
+    structural_case(
+        bin,
+        "rmsd",
+        "ref_conf.gromospp.out",
+        &["@atomsrmsd", "1:a", "@ref", "%REF%", "@time", "5", "0.5"],
+    );
+}
+
+#[test]
+fn rmsf_matches_gromospp() {
+    let bin = env!("CARGO_BIN_EXE_rmsf");
+    structural_case(bin, "rmsf", "fit_all.gromospp.out", &["@atomsrmsf", "1:a"]);
+    structural_case(
+        bin,
+        "rmsf",
+        "fit_separate.gromospp.out",
+        &["@atomsrmsf", "1:3-8", "@atomsfit", "1:a", "@ref", "%REF%"],
+    );
+}
+
+/// `ene_ana` reads a `.tre` according to `@library`'s declaration of it, so the reference cases
+/// cover a plain run, `@time`, a `@topo`-derived constant (`densit` needs MASS), direct
+/// `SUBBLOCK[i]` references and a two-file sequence. stdout *and* every `<prop>.dat` are
+/// compared (`tests/data/ene_ana` rows in the README).
+fn ene_ana_case(name: &str, extra: &[&str]) {
+    let dir = std::env::temp_dir().join(format!(
+        "gromos_ene_ana_{name}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let tre = shared().join("aladip_solvated/expected/energies.tre");
+    let lib = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.local/gromosXX/md++/data/ene_ana.md++.lib");
+    let mut args: Vec<String> = vec![
+        "@en_files".into(),
+        tre.to_string_lossy().into_owned(),
+        "@library".into(),
+        lib.to_string_lossy().into_owned(),
+    ];
+    args.extend(extra.iter().map(|s| {
+        match *s {
+            "%TRE%" => tre.to_string_lossy().into_owned(),
+            "%TOPO%" => shared()
+                .join("shared/aladip.topo")
+                .to_string_lossy()
+                .into_owned(),
+            other => other.to_string(),
+        }
+    }));
+    let out = run(env!("CARGO_BIN_EXE_ene_ana"), &args, Some(&dir));
+
+    let expected = data("ene_ana").join(name);
+    let theirs = std::fs::read_to_string(expected.join("stdout.gromospp.out")).unwrap();
+    // gromos++'s NaN warning goes to stderr and is part of the stored output
+    let warning = "# WARNING: One of the values is a NaN,\n#   the data provided are not enough to \n#   give a sensible error estimate\n";
+    let ours = if theirs.starts_with(warning) {
+        format!("{warning}{out}")
+    } else {
+        out
+    };
+    assert_same_text(&ours, &theirs, 1e-5);
+
+    for entry in std::fs::read_dir(&expected).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "dat") {
+            let file = path.file_name().unwrap();
+            let ours = std::fs::read_to_string(dir.join(file))
+                .unwrap_or_else(|e| panic!("{name}: our {file:?} missing: {e}"));
+            let theirs = std::fs::read_to_string(&path).unwrap();
+            assert_same_text(&ours, &theirs, 1e-5);
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ene_ana_matches_gromospp() {
+    ene_ana_case("plain", &["@prop", "totene", "totpot", "totkin"]);
+    ene_ana_case("usertime", &["@prop", "totene", "@time", "5", "0.5"]);
+    ene_ana_case(
+        "topo_densit",
+        &["@prop", "densit", "totene", "@topo", "%TOPO%"],
+    );
+    ene_ana_case("direct_refs", &["@prop", "ENER[1]", "ENER[11]"]);
+    ene_ana_case("two_files", &["@en_files", "%TRE%", "@prop", "totene"]);
+}

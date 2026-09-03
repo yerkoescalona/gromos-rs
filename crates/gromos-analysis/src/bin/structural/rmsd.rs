@@ -1,213 +1,184 @@
-//! rmsd — Root Mean Square Deviation (gromos-rs-compatible).
+//! rmsd — atom-positional root-mean-square deviation from a reference structure
+//! (gromos++ `rmsd`, `programs/rmsd.cc`).
 //!
-//! Usage:
-//!   rmsd @topo <topology> @traj <trajectory>
-//!        [@ref <frame_spec>] [@atomspec <spec>] [@nofit] [@pbc]
-//!
-//!   @topo      Topology file (.top/.topo)
-//!   @traj      Trajectory file (.trc)
-//!   @ref       Reference frame: "first" (default), "last", or 0-based integer
-//!   @atomspec  gromos-rs AtomSpecifier for fit+RMSD atoms (default: all)
-//!              e.g. "1:a", "1:CA,N,C", "1:res(1-10:a)"
-//!   @nofit     Skip rotational fit (translation-only centering still applied)
-//!   @pbc       Gather molecules before computing RMSD (default: off)
-//!
-//! Output:
-//!   # time(ps)  RMSD(nm)
-//!     0.000     0.000000
-//!     0.002     0.012345
+//! The fit and the RMSD are taken over two independent atom sets: the frame is superimposed on
+//! the reference using `@atomsfit` (defaulting to `@atomsrmsd`), and the deviation is then
+//! measured over `@atomsrmsd`. Both sets are shifted by the *fit* set's centre of geometry
+//! before the rotation, as gromos++ does (`rmsd.cc:337`).
 
-use gromos_analysis::fit::{rmsd, superimpose};
-use gromos_core::{gather::gather_molecules, math::Periodicity, selection::AtomSelection};
-use gromos_io::{
-    gromos_args,
-    topology::{build_topology, read_topology_file},
-    trajectory::TrajectoryReader,
-};
-use std::process;
+use gromos_analysis::args::{fail, Arguments};
+use gromos_analysis::fit::rmsd_after_fit;
+use gromos_analysis::pbc::Pbc;
+use gromos_analysis::property::PropertyContainer;
+use gromos_analysis::time::Time;
+use gromos_core::{selection::AtomSelection, Topology};
+use gromos_io::coordinate::read_coordinates;
+use gromos_io::topology::{build_topology, read_topology_file, solvate_to_atoms};
+use gromos_io::trajectory::TrajectoryReader;
 
-fn print_usage() {
-    eprintln!("rmsd — Root Mean Square Deviation");
-    eprintln!();
-    eprintln!(
-        "Usage: rmsd @topo <top> @traj <trc> [@ref <frame>] [@atomspec <spec>] [@nofit] [@pbc]"
-    );
-    eprintln!();
-    eprintln!("  @topo      Topology (.top/.topo)");
-    eprintln!("  @traj      Trajectory (.trc)");
-    eprintln!("  @ref       Reference: 'first' (default), 'last', or 0-based integer");
-    eprintln!("  @atomspec  AtomSpecifier for fit + RMSD (default: 1:a = all solute)");
-    eprintln!("  @nofit     Skip rotational fit");
-    eprintln!("  @pbc       Gather molecules before RMSD");
-}
+const USAGE: &str = "# rmsd
+\t@topo       <molecular topology file>
+\t@pbc        <boundary type> [<gathermethod>]
+\t@time       <time and dt>
+\t@atomsrmsd  <atoms to consider for rmsd>
+\t[@atomsfit  <atoms to consider for fit>]
+\t[@prop      <properties>]
+\t[@ref       <reference coordinates (if absent, the first frame of @traj is reference)>]
+\t[@printatoms  <print list of selected atoms>]
+\t@traj       <trajectory files>";
 
 fn main() {
-    let args = gromos_args();
-
-    if args.len() < 2 || args.contains(&"--help".to_string()) {
-        print_usage();
-        process::exit(if args.len() < 2 { 1 } else { 0 });
+    if let Err(e) = run() {
+        fail(&e);
     }
+}
 
-    let mut topo_file = None;
-    let mut traj_file = None;
-    let mut ref_spec = "first".to_string();
-    let mut atomspec = "1:a".to_string();
-    let mut do_fit = true;
-    let mut do_pbc = false;
+/// The atoms named by every value of `key`, unioned (gromos++ adds one specifier per value).
+fn select(args: &Arguments, key: &str, topo: &Topology) -> Result<Vec<usize>, String> {
+    let spec = args.values(key).join(";");
+    AtomSelection::from_string(&spec, topo)
+        .map(|s| s.indices().to_vec())
+        .map_err(|e| format!("@{key} '{spec}': {e}"))
+}
 
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--topo" => {
-                i += 1;
-                topo_file = Some(args[i].clone());
-            },
-            "--traj" => {
-                i += 1;
-                traj_file = Some(args[i].clone());
-            },
-            "--ref" => {
-                i += 1;
-                ref_spec = args[i].clone();
-            },
-            "--atomspec" => {
-                i += 1;
-                atomspec = args[i].clone();
-            },
-            "--nofit" => {
-                do_fit = false;
-            },
-            "--pbc" => {
-                do_pbc = true;
-            },
-            other if other.starts_with("--") => {
-                eprintln!("Unknown argument: {other}");
-                process::exit(1);
-            },
-            _ => {},
+fn run() -> Result<(), String> {
+    let args = Arguments::parse(
+        &[
+            "topo",
+            "pbc",
+            "time",
+            "atomsrmsd",
+            "atomsfit",
+            "prop",
+            "ref",
+            "traj",
+            "printatoms",
+            "reftopo",
+            "refpbc",
+        ],
+        USAGE,
+    )?;
+    for unported in ["reftopo", "refpbc"] {
+        if args.has(unported) {
+            return Err(format!(
+                "@{unported} is not ported — the reference must use @topo"
+            ));
         }
-        i += 1;
+    }
+    if !args.has("atomsrmsd") && !args.has("prop") {
+        return Err("No rmsd atoms or property specified!".into());
     }
 
-    let topo_file = topo_file.unwrap_or_else(|| {
-        eprintln!("Error: @topo required");
-        process::exit(1);
-    });
-    let traj_file = traj_file.unwrap_or_else(|| {
-        eprintln!("Error: @traj required");
-        process::exit(1);
-    });
+    let mut time = Time::from_args(&args)?;
+    let mut topo =
+        build_topology(read_topology_file(args.value("topo")?).map_err(|e| format!("@topo: {e}"))?);
 
-    // Load topology
-    let topo_data = read_topology_file(&topo_file).unwrap_or_else(|e| {
-        eprintln!("Error reading topology: {e}");
-        process::exit(1);
-    });
-    let topo = build_topology(topo_data);
-
-    // Resolve atom selection
-    let sel = AtomSelection::from_string(&atomspec, &topo).unwrap_or_else(|e| {
-        eprintln!("Error in @atomspec '{atomspec}': {e}");
-        process::exit(1);
-    });
-    let fit_indices: Vec<usize> = sel.indices().to_vec();
-    eprintln!(
-        "# topology: {} atoms, {} selected by '{atomspec}'",
-        topo.num_atoms(),
-        fit_indices.len()
-    );
-
-    // Read all trajectory frames
-    let mut reader = TrajectoryReader::new(&traj_file).unwrap_or_else(|e| {
-        eprintln!("Error opening trajectory: {e}");
-        process::exit(1);
-    });
-    let frames = reader.read_all_frames().unwrap_or_else(|e| {
-        eprintln!("Error reading trajectory: {e}");
-        process::exit(1);
-    });
-    if frames.is_empty() {
-        eprintln!("Error: no frames in trajectory");
-        process::exit(1);
+    let trajectories = args.values("traj");
+    if trajectories.is_empty() {
+        return Err("@traj: no trajectory files given".into());
     }
-    eprintln!("# frames: {}", frames.len());
 
-    // Choose reference frame
-    let ref_idx = match ref_spec.to_lowercase().as_str() {
-        "first" => 0,
-        "last" => frames.len() - 1,
-        s => s.parse::<usize>().unwrap_or_else(|_| {
-            eprintln!("Error: invalid @ref '{s}' — use 'first', 'last', or integer");
-            process::exit(1);
-        }),
+    // gromos++ reads every atom of every frame (`select("ALL")`).
+    if let Some(frame) = TrajectoryReader::new(&trajectories[0])
+        .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+        .read_frame()
+        .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+    {
+        solvate_to_atoms(&mut topo, frame.positions.len()).map_err(|e| e.to_string())?;
+    }
+
+    let pbc = Pbc::from_args(&args)?;
+
+    // Reference: @ref, else the first frame of the first trajectory.
+    let (mut reference, ref_box) = if args.has("ref") {
+        let path = args.value("ref")?;
+        let conf = read_coordinates(path).map_err(|e| format!("@ref {path}: {e}"))?;
+        (conf.positions, conf.box_dims)
+    } else {
+        let frame = TrajectoryReader::new(&trajectories[0])
+            .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+            .read_frame()
+            .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+            .ok_or_else(|| format!("@traj {}: no frames", trajectories[0]))?;
+        (frame.positions, frame.box_dims)
     };
-    if ref_idx >= frames.len() {
-        eprintln!(
-            "Error: @ref {ref_idx} out of range (0..{})",
-            frames.len() - 1
-        );
-        process::exit(1);
-    }
-    eprintln!(
-        "# reference frame: {ref_idx} (t={:.4} ps)",
-        frames[ref_idx].time
-    );
+    let ref_periodicity = pbc.periodicity(ref_box);
+    pbc.gather(&topo, &mut reference, &ref_periodicity);
 
-    // Reference positions (gather if PBC, then use as-is — reference is fixed)
-    let mut reference = frames[ref_idx].positions.clone();
-    if do_pbc {
-        let periodicity = {
-            let b = frames[ref_idx].box_dims;
-            if b.x > 0.0 {
-                Periodicity::Rectangular(gromos_core::math::Rectangular::new(b))
-            } else {
-                Periodicity::Vacuum(gromos_core::math::Vacuum)
-            }
-        };
-        gather_molecules(
-            &mut reference,
-            &topo.molecules,
-            &periodicity,
-            gromos_core::math::Vec3::ZERO,
-        );
-    }
-
-    // Output header
-    println!(
-        "# rmsd: topo={topo_file} traj={traj_file} ref={ref_idx} atoms={} fit={do_fit}",
-        fit_indices.len()
-    );
-    println!("# {:>12}  {:>14}", "time(ps)", "RMSD(nm)");
-
-    // Compute RMSD per frame
-    for frame in &frames {
-        let mut pos = frame.positions.clone();
-
-        if do_pbc {
-            let periodicity = {
-                let b = frame.box_dims;
-                if b.x > 0.0 {
-                    Periodicity::Rectangular(gromos_core::math::Rectangular::new(b))
-                } else {
-                    Periodicity::Vacuum(gromos_core::math::Vacuum)
-                }
-            };
-            gather_molecules(
-                &mut pos,
-                &topo.molecules,
-                &periodicity,
-                gromos_core::math::Vec3::ZERO,
+    let rmsd_atoms = if args.has("atomsrmsd") {
+        select(&args, "atomsrmsd", &topo)?
+    } else {
+        Vec::new()
+    };
+    let fit_atoms = if args.has("atomsfit") {
+        select(&args, "atomsfit", &topo)?
+    } else {
+        if args.has("atomsrmsd") {
+            println!("# @atomsrmsd atoms are taken for fit.");
+        }
+        rmsd_atoms.clone()
+    };
+    if args.has("printatoms") {
+        for (i, a) in fit_atoms.iter().enumerate() {
+            let r = rmsd_atoms.get(i).copied();
+            eprintln!(
+                "# fit {:>6} {:<5} | rmsd {}",
+                a + 1,
+                topo.atom_name(*a).unwrap_or("?"),
+                r.map_or("-".to_string(), |r| format!(
+                    "{:>6} {}",
+                    r + 1,
+                    topo.atom_name(r).unwrap_or("?")
+                ))
             );
         }
-
-        let d = if do_fit {
-            superimpose(&mut pos, &reference, &fit_indices, None);
-            rmsd(&pos, &reference, &fit_indices)
-        } else {
-            rmsd(&pos, &reference, &fit_indices)
-        };
-
-        println!("{:14.6}  {:14.9}", frame.time, d);
     }
+
+    let mut props = if args.has("prop") {
+        Some((
+            PropertyContainer::parse(args.values("prop"), &topo)?,
+            PropertyContainer::parse(args.values("prop"), &topo)?,
+        ))
+    } else {
+        None
+    };
+    let ref_prop = props
+        .as_mut()
+        .map(|(r, _)| r.calc(&reference, &ref_periodicity));
+
+    let mut out = String::new();
+    for traj in trajectories {
+        let mut reader = TrajectoryReader::new(traj).map_err(|e| format!("@traj {traj}: {e}"))?;
+        while let Some(frame) = reader.read_frame().map_err(|e| format!("{traj}: {e}"))? {
+            let t = time.next(frame.time);
+            let periodicity = pbc.periodicity(frame.box_dims);
+            let mut pos = frame.positions;
+            pbc.gather(&topo, &mut pos, &periodicity);
+
+            let r_prop = match (&mut props, &ref_prop) {
+                (Some((_, sys)), Some(refv)) => {
+                    let v = sys.calc(&pos, &periodicity);
+                    let n = refv.len().max(1) as f64;
+                    let sum: f64 = refv.iter().zip(&v).map(|(a, b)| (a - b) * (a - b)).sum();
+                    Some((sum / n).sqrt())
+                },
+                _ => None,
+            };
+            // rmsd_after_fit superimposes on `fit_atoms` and measures over `rmsd_atoms`,
+            // which is gromos++'s FastRotationalFit::fit + ::rmsd pair.
+            let r = (!rmsd_atoms.is_empty())
+                .then(|| rmsd_after_fit(&mut pos, &reference, &fit_atoms, &rmsd_atoms, None));
+
+            out.push_str(&Time::fmt(t));
+            match (r, r_prop) {
+                (Some(r), Some(rp)) => out.push_str(&format!("{r:15.9}{rp:15.9}")),
+                (Some(r), None) => out.push_str(&format!("{r:10.5}")),
+                (None, Some(rp)) => out.push_str(&format!("{rp:15.9}")),
+                (None, None) => {},
+            }
+            out.push('\n');
+        }
+    }
+    print!("{out}");
+    Ok(())
 }

@@ -1,321 +1,257 @@
-//! ener_ana - Analyze energy trajectory files
+//! ene_ana — averages and time series of properties from energy trajectories
+//! (gromos++ `ene_ana`, `programs/ene_ana.cc`).
 //!
-//! Usage: ener_ana @traj <energy_file> [@stats] [@plot]
+//! The layout of a `.tre`/`.trg` is not built in: `@library` declares it and names the
+//! properties, which is what lets one library file span GROMOS versions. See
+//! `gromos_io::energy_traj`.
 //!
-//! Analyzes GROMOS energy trajectory files (.tre) and provides statistics
-//! including averages, standard deviations, minima, and maxima for all energy components.
+//! Each `@prop` is written as a `<prop>.dat` time series and summarised on stdout as
+//! average / rmsd / error estimate. The error estimate is gromos++'s block-averaging one,
+//! which needs more than 200 frames — with fewer, gromos++ prints `-nan` and so do we.
 
-use gromos_io::energy::EnergyReader;
-use std::env;
-use std::process;
+use gromos_analysis::args::{fail, Arguments};
+use gromos_core::stat::Stat;
+use gromos_io::energy_traj::EnergyTraj;
+use gromos_io::gz::TextReader;
+use gromos_io::table::cpp_g;
+use gromos_io::topology::{build_topology, read_topology_file};
+use std::fmt::Write as _;
 
-fn print_usage() {
-    eprintln!("ener_ana - Energy trajectory analysis");
-    eprintln!();
-    eprintln!("Usage: ener_ana @traj <energy_file> [@stats] [@components <list>]");
-    eprintln!();
-    eprintln!("Arguments:");
-    eprintln!("  @traj         Input energy trajectory file (.tre)");
-    eprintln!("  @stats        Show detailed statistics (default: true)");
-    eprintln!("  @components   Energy components to analyze (default: all)");
-    eprintln!("                Available: kinetic, potential, total, temp, volume, pressure,");
-    eprintln!(
-        "                          bond, angle, improper, dihedral, lj, coul, shake, restraint"
-    );
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!("  ener_ana @traj output.tre");
-    eprintln!("  ener_ana @traj output.tre @components kinetic,potential,total");
-}
-
-#[derive(Debug)]
-struct EnergyStats {
-    count: usize,
-    mean: f64,
-    std_dev: f64,
-    min: f64,
-    max: f64,
-}
-
-impl EnergyStats {
-    fn from_values(values: &[f64]) -> Self {
-        if values.is_empty() {
-            return Self {
-                count: 0,
-                mean: 0.0,
-                std_dev: 0.0,
-                min: 0.0,
-                max: 0.0,
-            };
-        }
-
-        let count = values.len();
-        let mean = values.iter().sum::<f64>() / count as f64;
-
-        let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / count as f64;
-        let std_dev = variance.sqrt();
-
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-        Self {
-            count,
-            mean,
-            std_dev,
-            min,
-            max,
-        }
-    }
-
-    fn print(&self, label: &str, unit: &str) {
-        println!(
-            "  {:20} {:12.4} ± {:10.4} {} (min: {:10.4}, max: {:10.4})",
-            label, self.mean, self.std_dev, unit, self.min, self.max
-        );
-    }
-}
-
-#[derive(Debug)]
-struct AnalysisArgs {
-    traj_file: String,
-    show_stats: bool,
-    components: Vec<String>,
-}
-
-fn parse_args(args: Vec<String>) -> Result<AnalysisArgs, String> {
-    let mut traj_file = None;
-    let mut show_stats = true;
-    let mut components = Vec::new();
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "@traj" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @traj".to_string());
-                }
-                traj_file = Some(args[i].clone());
-            },
-            "@stats" => {
-                show_stats = true;
-            },
-            "@components" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @components".to_string());
-                }
-                components = args[i].split(',').map(|s| s.trim().to_string()).collect();
-            },
-            _ => {
-                return Err(format!("Unknown argument: {}", args[i]));
-            },
-        }
-        i += 1;
-    }
-
-    let traj_file = traj_file.ok_or("Missing required argument @traj")?;
-
-    // If no components specified, use all
-    if components.is_empty() {
-        components = vec![
-            "kinetic".to_string(),
-            "potential".to_string(),
-            "total".to_string(),
-            "temperature".to_string(),
-            "volume".to_string(),
-            "pressure".to_string(),
-            "bond".to_string(),
-            "angle".to_string(),
-            "improper".to_string(),
-            "dihedral".to_string(),
-            "lj".to_string(),
-            "coul".to_string(),
-            "shake".to_string(),
-            "restraint".to_string(),
-        ];
-    }
-
-    Ok(AnalysisArgs {
-        traj_file,
-        show_stats,
-        components,
-    })
-}
+const USAGE: &str = "# ene_ana
+\t@en_files    <energy files> (and/or)
+\t@fr_files    <free energy files>
+\t@prop        <properties to monitor>
+\t@library     <library for property names> [print]
+\t[@topo       <molecular topology file> (for MASS and NUMMOL)]
+\t[@time       <t and dt> (overwrites TIME in the trajectory files)]";
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
-        print_usage();
-        process::exit(if args.len() < 2 { 1 } else { 0 });
+    if let Err(e) = run() {
+        fail(&e);
     }
+}
 
-    // Parse arguments
-    let parsed_args = match parse_args(args) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            eprintln!();
-            print_usage();
-            process::exit(1);
-        },
-    };
-
-    println!("ener_ana - Energy trajectory analysis");
-    println!("  Energy file: {}", parsed_args.traj_file);
-    println!();
-
-    // Open energy reader
-    let mut reader = match EnergyReader::new(&parsed_args.traj_file) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error opening energy file: {}", e);
-            process::exit(1);
-        },
-    };
-
-    println!("  Title: {}", reader.title());
-    println!();
-
-    // Read all frames
-    println!("  Reading energy frames...");
-    let frames = match reader.read_all_frames() {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error reading energy frames: {}", e);
-            process::exit(1);
-        },
-    };
-
-    println!("  Total frames: {}", frames.len());
-    println!();
-
-    if frames.is_empty() {
-        eprintln!("Warning: No energy frames found in file");
-        process::exit(0);
+/// gromos++ writes these with `precision(9)` and no `fixed`, i.e. C++ default `%g`.
+fn num(x: f64) -> String {
+    if x.is_nan() {
+        return format!("{:>15}", "-nan");
     }
+    format!("{:>15}", cpp_g(x, 9))
+}
 
-    // Collect values for each component
-    let times: Vec<f64> = frames.iter().map(|f| f.time).collect();
-    let kinetics: Vec<f64> = frames.iter().map(|f| f.kinetic).collect();
-    let potentials: Vec<f64> = frames.iter().map(|f| f.potential).collect();
-    let totals: Vec<f64> = frames.iter().map(|f| f.total).collect();
-    let temperatures: Vec<f64> = frames.iter().map(|f| f.temperature).collect();
-    let volumes: Vec<f64> = frames.iter().map(|f| f.volume).collect();
-    let pressures: Vec<f64> = frames.iter().map(|f| f.pressure).collect();
-    let bonds: Vec<f64> = frames.iter().map(|f| f.bond).collect();
-    let angles: Vec<f64> = frames.iter().map(|f| f.angle).collect();
-    let impropers: Vec<f64> = frames.iter().map(|f| f.improper).collect();
-    let dihedrals: Vec<f64> = frames.iter().map(|f| f.dihedral).collect();
-    let ljs: Vec<f64> = frames.iter().map(|f| f.lj).collect();
-    let couls: Vec<f64> = frames
-        .iter()
-        .map(|f| f.coul_real + f.coul_recip + f.coul_self)
-        .collect();
-    let shakes: Vec<f64> = frames.iter().map(|f| f.shake).collect();
-    let restraints: Vec<f64> = frames.iter().map(|f| f.restraint).collect();
+/// The `@en_files`/`@fr_files` list as one stream of frames.
+struct Sequence {
+    files: Vec<String>,
+    next: usize,
+    reader: Option<TextReader>,
+    kind: &'static str,
+}
 
-    // Time range
-    let time_stats = EnergyStats::from_values(&times);
-    println!("Time range:");
-    println!("  Start:  {:10.4} ps", time_stats.min);
-    println!("  End:    {:10.4} ps", time_stats.max);
-    println!("  Frames: {}", time_stats.count);
-    println!();
-
-    // Statistics for requested components
-    if parsed_args.show_stats {
-        println!("Energy statistics:");
-        println!();
-
-        for component in &parsed_args.components {
-            match component.as_str() {
-                "kinetic" => {
-                    let stats = EnergyStats::from_values(&kinetics);
-                    stats.print("Kinetic", "kJ/mol");
-                },
-                "potential" => {
-                    let stats = EnergyStats::from_values(&potentials);
-                    stats.print("Potential", "kJ/mol");
-                },
-                "total" => {
-                    let stats = EnergyStats::from_values(&totals);
-                    stats.print("Total", "kJ/mol");
-                },
-                "temperature" | "temp" => {
-                    let stats = EnergyStats::from_values(&temperatures);
-                    stats.print("Temperature", "K     ");
-                },
-                "volume" => {
-                    let stats = EnergyStats::from_values(&volumes);
-                    stats.print("Volume", "nm³   ");
-                },
-                "pressure" => {
-                    let stats = EnergyStats::from_values(&pressures);
-                    stats.print("Pressure", "bar   ");
-                },
-                "bond" => {
-                    let stats = EnergyStats::from_values(&bonds);
-                    stats.print("Bond", "kJ/mol");
-                },
-                "angle" => {
-                    let stats = EnergyStats::from_values(&angles);
-                    stats.print("Angle", "kJ/mol");
-                },
-                "improper" => {
-                    let stats = EnergyStats::from_values(&impropers);
-                    stats.print("Improper", "kJ/mol");
-                },
-                "dihedral" => {
-                    let stats = EnergyStats::from_values(&dihedrals);
-                    stats.print("Dihedral", "kJ/mol");
-                },
-                "lj" => {
-                    let stats = EnergyStats::from_values(&ljs);
-                    stats.print("Lennard-Jones", "kJ/mol");
-                },
-                "coul" | "coulomb" => {
-                    let stats = EnergyStats::from_values(&couls);
-                    stats.print("Coulomb (total)", "kJ/mol");
-                },
-                "shake" => {
-                    let stats = EnergyStats::from_values(&shakes);
-                    stats.print("SHAKE", "kJ/mol");
-                },
-                "restraint" => {
-                    let stats = EnergyStats::from_values(&restraints);
-                    stats.print("Restraint", "kJ/mol");
-                },
-                _ => {
-                    eprintln!("Warning: Unknown component '{}'", component);
-                },
-            }
+impl Sequence {
+    fn new(files: Vec<String>, kind: &'static str) -> Self {
+        Sequence {
+            files,
+            next: 0,
+            reader: None,
+            kind,
         }
-
-        println!();
     }
 
-    // Energy conservation check
-    let total_drift = totals.last().unwrap() - totals.first().unwrap();
-    let total_avg = totals.iter().sum::<f64>() / totals.len() as f64;
-    let drift_percent = (total_drift / total_avg.abs()) * 100.0;
+    fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
 
-    println!("Energy conservation:");
-    println!("  Initial total: {:12.4} kJ/mol", totals.first().unwrap());
-    println!("  Final total:   {:12.4} kJ/mol", totals.last().unwrap());
-    println!(
-        "  Drift:         {:12.4} kJ/mol ({:.6}%)",
-        total_drift, drift_percent
-    );
-    println!();
+    /// Read the next frame, opening the next file when the current one runs out.
+    fn read_frame(&mut self, etrj: &mut EnergyTraj) -> Result<bool, String> {
+        loop {
+            if self.reader.is_none() {
+                let Some(path) = self.files.get(self.next) else {
+                    return Ok(false);
+                };
+                self.next += 1;
+                let mut reader = TextReader::open(path)
+                    .map_err(|e| format!("{}: cannot open {path}: {e}", self.kind))?;
+                skip_preamble(&mut reader, path)?;
+                self.reader = Some(reader);
+            }
+            let reader = self.reader.as_mut().unwrap();
+            let file = &self.files[self.next - 1];
+            if etrj
+                .read_frame(reader, self.kind)
+                .map_err(|e| format!("{file}: {e}"))?
+            {
+                return Ok(true);
+            }
+            self.reader = None;
+        }
+    }
+}
 
-    if drift_percent.abs() > 0.1 {
-        println!("  WARNING: Energy drift exceeds 0.1%");
+/// A trajectory opens with a `TITLE` and may carry an `ENEVERSION`; frames start after them.
+/// gromos++ consumes both in `Ginstream::open` before the first `read_frame`.
+fn skip_preamble(reader: &mut TextReader, path: &str) -> Result<Option<String>, String> {
+    let mut version = None;
+    let mut line = String::new();
+    loop {
+        let mut peeked = String::new();
+        if reader.read_line(&mut peeked).map_err(|e| e.to_string())? == 0 {
+            return Ok(version);
+        }
+        let name = peeked.split('#').next().unwrap_or("").trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        if name != "TITLE" && name != "ENEVERSION" {
+            reader.unread_line(&peeked);
+            return Ok(version);
+        }
+        let mut body = String::new();
+        loop {
+            if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 {
+                return Err(format!("{path}: no END in {name} block"));
+            }
+            let l = line.split('#').next().unwrap_or("").trim();
+            if l == "END" {
+                break;
+            }
+            body.push_str(l);
+        }
+        if name == "ENEVERSION" {
+            version = Some(body.split_whitespace().collect());
+        }
+    }
+}
+
+fn run() -> Result<(), String> {
+    let args = Arguments::parse(
+        &["topo", "time", "en_files", "fr_files", "prop", "library"],
+        USAGE,
+    )?;
+
+    // gromos++ only switches to a user time when both t0 and dt are given.
+    let tv = args.values("time");
+    let mut t0: f64 = tv
+        .first()
+        .map(|s| s.parse().map_err(|_| "@time: t is not numeric".to_string()))
+        .transpose()?
+        .unwrap_or(0.0);
+    let dt: f64 = tv
+        .get(1)
+        .map(|s| {
+            s.parse::<f64>()
+                .map_err(|_| "@time: dt is not numeric".to_string())
+        })
+        .transpose()?
+        .unwrap_or(1.0);
+    let usertime = tv.len() >= 2;
+    if usertime {
+        t0 -= dt;
+    }
+
+    let en_files: Vec<String> = args.values("en_files").to_vec();
+    let fr_files: Vec<String> = args.values("fr_files").to_vec();
+    if en_files.is_empty() && fr_files.is_empty() {
+        return Err(format!("no data specified:\n{USAGE}"));
+    }
+    let props: Vec<String> = args.values("prop").to_vec();
+    if props.is_empty() {
+        return Err(format!("no properties to follow:\n{USAGE}"));
+    }
+    let library = args.values("library");
+    let Some(lib_path) = library.first() else {
+        return Err(format!("no library file specified:\n{USAGE}"));
+    };
+    let print_library = library.get(1).is_some_and(|s| s == "print");
+
+    let lib_text = std::io::read_to_string(
+        gromos_io::gz::open_text(lib_path)
+            .map_err(|e| format!("failed to open library file {lib_path}: {e}"))?,
+    )
+    .map_err(|e| format!("{lib_path}: {e}"))?;
+    let mut etrj = EnergyTraj::from_library(&lib_text)?;
+
+    // gromos++ takes MASS and NUMMOL from the topology, for densit/Hvap and friends.
+    if args.has("topo") {
+        let path = args.value("topo")?;
+        let topo = build_topology(read_topology_file(path).map_err(|e| format!("@topo: {e}"))?);
+        etrj.add_constant("NUMMOL", topo.molecules.len() as f64);
+        let mass: f64 = (0..topo.num_solute_atoms())
+            .filter_map(|i| topo.mass.get(i))
+            .sum();
+        etrj.add_constant("MASS", mass);
     } else {
-        println!("  Energy is well conserved");
+        etrj.add_constant("MASS", 0.0);
     }
 
-    println!();
-    println!("Analysis complete!");
+    if print_library {
+        for name in etrj.variable_names() {
+            println!("{name}");
+        }
+    }
+
+    let mut en = Sequence::new(en_files, "ENERTRJ");
+    let mut fr = Sequence::new(fr_files, "FRENERTRJ");
+    let do_en = !en.is_empty();
+    let do_fr = !fr.is_empty();
+
+    let mut stats: Vec<Stat> = vec![Stat::new(); props.len()];
+    let mut times: Vec<f64> = Vec::new();
+
+    loop {
+        if do_en && !en.read_frame(&mut etrj)? {
+            if do_fr && fr.read_frame(&mut etrj)? {
+                eprintln!("# WARNING: frames left over in free energy trajectory,");
+                eprintln!("#   they will be disregarded.");
+            }
+            break;
+        }
+        if do_fr && !fr.read_frame(&mut etrj)? {
+            if do_en {
+                eprintln!("# WARNING: frames left over in energy trajectory,");
+                eprintln!("#   they will be disregarded.");
+            }
+            break;
+        }
+        for (s, p) in stats.iter_mut().zip(&props) {
+            s.add(etrj.value(p)?);
+        }
+        if usertime {
+            t0 += dt;
+        } else {
+            t0 = etrj.value("TIME[2]")?;
+        }
+        times.push(t0);
+    }
+
+    if stats.iter().any(|s| s.ee_strict().is_nan()) {
+        eprintln!("# WARNING: One of the values is a NaN,");
+        eprintln!("#   the data provided are not enough to ");
+        eprintln!("#   give a sensible error estimate");
+    }
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{:>10} {:>15} {:>15} {:>15}",
+        "property", "average", "rmsd", "error est."
+    );
+    for (s, p) in stats.iter().zip(&props) {
+        let mut series = String::new();
+        let _ = writeln!(series, "#{:>14} {:>15}", "time", p);
+        for (t, v) in times.iter().zip(s.values()) {
+            let _ = writeln!(series, "{} {}", num(*t), num(*v));
+        }
+        std::fs::write(format!("{p}.dat"), series).map_err(|e| format!("{p}.dat: {e}"))?;
+
+        let _ = writeln!(
+            out,
+            "{:>10} {} {} {}",
+            p,
+            num(s.ave()),
+            num(s.rmsd_strict()),
+            num(s.ee_strict())
+        );
+    }
+    print!("{out}");
+    Ok(())
 }

@@ -140,16 +140,54 @@ fn assert_same(ours: &ParsedTopology, theirs: &ParsedTopology) {
         theirs.angle_parameters.len(),
         "angle types"
     );
+    for (i, (a, b)) in ours
+        .angle_parameters
+        .iter()
+        .zip(&theirs.angle_parameters)
+        .enumerate()
+    {
+        assert!(
+            close(a.k_cosine, b.k_cosine)
+                && close(a.k_harmonic, b.k_harmonic)
+                && close(a.theta0, b.theta0),
+            "angle type {}: {a:?} vs {b:?}",
+            i + 1
+        );
+    }
     assert_eq!(
         ours.dihedral_parameters.len(),
         theirs.dihedral_parameters.len(),
         "dihedral types"
     );
+    for (i, (a, b)) in ours
+        .dihedral_parameters
+        .iter()
+        .zip(&theirs.dihedral_parameters)
+        .enumerate()
+    {
+        assert!(
+            close(a.k, b.k) && close(a.pd.cos(), b.pd.cos()) && a.m == b.m,
+            "dihedral type {}: {a:?} vs {b:?}",
+            i + 1
+        );
+    }
     assert_eq!(
         ours.improper_dihedral_parameters.len(),
         theirs.improper_dihedral_parameters.len(),
         "improper types"
     );
+    for (i, (a, b)) in ours
+        .improper_dihedral_parameters
+        .iter()
+        .zip(&theirs.improper_dihedral_parameters)
+        .enumerate()
+    {
+        assert!(
+            close(a.k, b.k) && (a.q0 - b.q0).abs() < 1e-5,
+            "improper type {}: {a:?} vs {b:?}",
+            i + 1
+        );
+    }
     assert_eq!(
         ours.lj_parameters.len(),
         theirs.lj_parameters.len(),

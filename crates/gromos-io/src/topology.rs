@@ -32,7 +32,7 @@ use gromos_core::topology::{
 };
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 /// Parsed solvent atom template
@@ -87,9 +87,8 @@ pub struct ParsedTopology {
 
 /// Read GROMOS topology file
 pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
 
     let mut lines = reader.lines();
 

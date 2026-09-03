@@ -20,6 +20,7 @@
 - [IMD Input Blocks](reference/imd-blocks.md)
 - [Topology Format](reference/topology.md)
 - [Trajectory Formats](reference/trajectory.md)
+- [Energy Library Profile](reference/energy-library.md)
 
 ---
 

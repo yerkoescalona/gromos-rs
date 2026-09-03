@@ -6,8 +6,7 @@
 
 use crate::IoError;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 /// Parsed mk_script template library.
@@ -57,9 +56,8 @@ fn default_filename(kind: &str) -> String {
 
 /// Parse a GROMOS mk_script template library file.
 pub fn read_script_template<P: AsRef<Path>>(path: P) -> Result<ScriptTemplate, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
 
     let mut filenames = HashMap::new();
     let mut misc = HashMap::new();

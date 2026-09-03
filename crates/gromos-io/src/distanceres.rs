@@ -4,8 +4,7 @@
 //! Only virtual atom type 0 (explicit atom) is supported; other types are
 //! logged as warnings and skipped.
 
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 use gromos_core::topology::{DistanceRestraintSpec, PerturbedDistanceRestraintSpec};
@@ -25,9 +24,8 @@ pub fn read_distanceres<P: AsRef<Path>>(
     ),
     IoError,
 > {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
 
     let mut unperturbed = Vec::new();
     let mut perturbed = Vec::new();

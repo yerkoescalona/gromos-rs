@@ -28,8 +28,7 @@
 use crate::IoError;
 use gromos_core::configuration::{Box as SimBox, Configuration};
 use gromos_core::math::Vec3;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 /// Raw coordinate data read from a .conf/.cnf/.g96 file.
@@ -51,9 +50,8 @@ pub struct CoordinateData {
 /// Handles POSITION, POSITIONRED, VELOCITY, VELOCITYRED, BOX, and GENBOX blocks.
 /// Returns raw data without constructing a Configuration object.
 pub fn read_coordinates<P: AsRef<Path>>(path: P) -> Result<CoordinateData, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
 
     let mut positions = Vec::new();
     let mut velocities = Vec::new();
@@ -256,9 +254,8 @@ pub fn format_g96(title: &str, atoms: &[G96Atom], box_dims: Option<Vec3>) -> Str
 }
 
 pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
-    let reader = BufReader::new(file);
 
     let mut atoms = Vec::new();
     let mut box_dims = Vec3::ZERO;

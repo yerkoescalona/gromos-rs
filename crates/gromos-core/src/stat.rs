@@ -79,6 +79,22 @@ impl Stat {
         self.msd().sqrt()
     }
 
+    /// gromos++ `Stat::msd` exactly: `<x²> − <x>²` with no clamp, so a constant series comes
+    /// out very slightly negative and [`Self::rmsd_strict`] is then `NaN` — which is what
+    /// gromos++ prints. [`Self::msd`] clamps at zero instead; programs that reproduce
+    /// gromos++ output use these.
+    pub fn msd_strict(&self) -> f64 {
+        let n = self.vals.len() as f64;
+        let mean = self.ave();
+        let sq_mean: f64 = self.vals.iter().map(|&x| x * x).sum::<f64>() / n;
+        sq_mean - mean * mean
+    }
+
+    /// √(`msd_strict`) — `NaN` for a constant series, as gromos++ prints it.
+    pub fn rmsd_strict(&self) -> f64 {
+        self.msd_strict().sqrt()
+    }
+
     /// Minimum value.
     pub fn min(&self) -> f64 {
         self.vals.iter().cloned().fold(f64::INFINITY, f64::min)

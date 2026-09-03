@@ -1,413 +1,166 @@
-//! rmsf - Root Mean Square Fluctuation Calculator
+//! rmsf — atom-positional root-mean-square fluctuation about the average structure
+//! (gromos++ `rmsf`, `programs/rmsf.cc`).
 //!
-//! Calculates RMSF to measure atomic flexibility and dynamics.
-//! Shows which atoms/residues are most mobile during the simulation.
+//! Every frame is superimposed on the reference using `@atomsfit` (defaulting to `@atomsrmsf`);
+//! ⟨r⟩ and ⟨r²⟩ are then accumulated over `@atomsrmsf` and the fluctuation is
+//! `sqrt(⟨r²⟩ − ⟨r⟩²)`.
 
-use gromos_core::math::Vec3;
-use gromos_core::selection::AtomSelection;
-use gromos_io::topology::{build_topology, read_topology_file};
+use gromos_analysis::args::{fail, Arguments};
+use gromos_analysis::fit::superimpose;
+use gromos_analysis::pbc::Pbc;
+use gromos_core::{math::Vec3, selection::AtomSelection, Topology};
+use gromos_io::coordinate::read_coordinates;
+use gromos_io::pdb::PDBAtom;
+use gromos_io::topology::{build_topology, read_topology_file, solvate_to_atoms};
 use gromos_io::trajectory::TrajectoryReader;
-use indicatif::{ProgressBar, ProgressStyle};
-use std::env;
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::process;
+use std::fmt::Write as _;
 
-fn new_progress_bar(total: usize) -> ProgressBar {
-    let pb = ProgressBar::new(total as u64);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "  [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({eta})",
-        )
-        .unwrap(),
-    );
-    pb
-}
-
-fn print_usage() {
-    eprintln!("rmsf - Root Mean Square Fluctuation Calculator");
-    eprintln!();
-    eprintln!("Usage:");
-    eprintln!("  rmsf @topo <topology> @traj <trajectory> [@options]");
-    eprintln!();
-    eprintln!("Arguments:");
-    eprintln!("  @topo     Molecular topology file");
-    eprintln!("  @traj     Trajectory file (.trc)");
-    eprintln!("  @atoms    Atom selection (default: all)");
-    eprintln!("            Formats: 'all', '1-10', '1,5,10-20'");
-    eprintln!("                     '1:1-10' (mol 1, atoms 1-10)");
-    eprintln!("                     'r:1-5' (residues 1-5)");
-    eprintln!("                     'a:CA' (all CA atoms)");
-    eprintln!("  @out      Output file (default: rmsf.dat)");
-    eprintln!("  @skip     Skip first N frames (default: 0)");
-    eprintln!("  @every    Use every Nth frame (default: 1)");
-    eprintln!("  @verbose  Verbose output (0=normal, 1=verbose)");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!("  rmsf @topo system.top @traj md.trc");
-    eprintln!("  rmsf @topo system.top @traj md.trc @atoms a:CA @skip 100");
-    eprintln!("  rmsf @topo system.top @traj md.trc @atoms r:1-10 @every 10");
-    eprintln!();
-    eprintln!("Output:");
-    eprintln!("  Column 1: Atom index");
-    eprintln!("  Column 2: RMSF (nm)");
-}
-
-#[derive(Debug)]
-struct RmsfArgs {
-    topo_file: String,
-    traj_file: String,
-    atom_spec: String,
-    output_file: String,
-    skip: usize,
-    every: usize,
-    verbose: usize,
-}
-
-impl Default for RmsfArgs {
-    fn default() -> Self {
-        Self {
-            topo_file: String::new(),
-            traj_file: String::new(),
-            atom_spec: "all".to_string(),
-            output_file: "rmsf.dat".to_string(),
-            skip: 0,
-            every: 1,
-            verbose: 0,
-        }
-    }
-}
-
-fn parse_args(args: Vec<String>) -> Result<RmsfArgs, String> {
-    let mut rmsf_args = RmsfArgs::default();
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "@topo" | "@topology" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @topo".to_string());
-                }
-                rmsf_args.topo_file = args[i].clone();
-            },
-            "@traj" | "@trajectory" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @traj".to_string());
-                }
-                rmsf_args.traj_file = args[i].clone();
-            },
-            "@atoms" | "@atom" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @atoms".to_string());
-                }
-                rmsf_args.atom_spec = args[i].clone();
-            },
-            "@out" | "@output" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @out".to_string());
-                }
-                rmsf_args.output_file = args[i].clone();
-            },
-            "@skip" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @skip".to_string());
-                }
-                rmsf_args.skip = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @skip: {}", args[i]))?;
-            },
-            "@every" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @every".to_string());
-                }
-                rmsf_args.every = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @every: {}", args[i]))?;
-            },
-            "@verbose" | "@v" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing value for @verbose".to_string());
-                }
-                rmsf_args.verbose = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid value for @verbose: {}", args[i]))?;
-            },
-            _ => {
-                return Err(format!("Unknown argument: {}", args[i]));
-            },
-        }
-        i += 1;
-    }
-
-    if rmsf_args.topo_file.is_empty() {
-        return Err("Missing required argument: @topo".to_string());
-    }
-    if rmsf_args.traj_file.is_empty() {
-        return Err("Missing required argument: @traj".to_string());
-    }
-
-    Ok(rmsf_args)
-}
-
-fn calculate_rmsf(
-    traj_reader: &mut TrajectoryReader,
-    atom_selection: Option<&[usize]>,
-    skip: usize,
-    every: usize,
-) -> Result<(Vec<usize>, Vec<f64>), String> {
-    log::info!("Calculating RMSF");
-
-    // Read all frames
-    log::info!("Reading all frames from trajectory");
-    let all_frames = traj_reader
-        .read_all_frames()
-        .map_err(|e| format!("Failed to read frames: {}", e))?;
-
-    if all_frames.is_empty() {
-        return Err("Empty trajectory".to_string());
-    }
-
-    let total_frames = all_frames.len();
-    let n_atoms = all_frames[0].positions.len();
-    log::info!("Total frames in trajectory: {}", total_frames);
-    log::debug!("Number of atoms: {}", n_atoms);
-
-    // Determine which atoms to analyze
-    let atoms: Vec<usize> = match atom_selection {
-        Some(sel) => {
-            // Validate selection
-            for &idx in sel {
-                if idx >= n_atoms {
-                    return Err(format!(
-                        "Atom index {} out of range (max {})",
-                        idx + 1,
-                        n_atoms
-                    ));
-                }
-            }
-            sel.to_vec()
-        },
-        None => (0..n_atoms).collect(),
-    };
-
-    log::info!("Analyzing {} atoms", atoms.len());
-    log::info!(
-        "Skipping first {} frames, using every {} frame",
-        skip,
-        every
-    );
-
-    // First pass: Calculate average positions
-    let mut avg_pos = vec![Vec3::ZERO; atoms.len()];
-    let mut frames_used = 0;
-
-    let progress = new_progress_bar(total_frames);
-    log::debug!("Pass 1: Calculating average positions");
-
-    for (frame_idx, frame) in all_frames.iter().enumerate() {
-        progress.set_position((frame_idx + 1) as u64);
-
-        if frame_idx < skip {
-            continue;
-        }
-
-        if !(frame_idx - skip).is_multiple_of(every) {
-            continue;
-        }
-
-        for (i, &atom_idx) in atoms.iter().enumerate() {
-            avg_pos[i] += frame.positions[atom_idx];
-        }
-
-        frames_used += 1;
-    }
-
-    if frames_used == 0 {
-        return Err("No frames were processed".to_string());
-    }
-
-    log::info!("Processed {} frames", frames_used);
-
-    // Normalize averages
-    for pos in &mut avg_pos {
-        *pos /= frames_used as f64;
-    }
-
-    // Second pass: Calculate fluctuations
-    let mut rmsf = vec![0.0f64; atoms.len()];
-
-    let progress = new_progress_bar(total_frames);
-    log::debug!("Pass 2: Calculating fluctuations");
-
-    for (frame_idx, frame) in all_frames.iter().enumerate() {
-        progress.set_position((frame_idx + 1) as u64);
-
-        if frame_idx < skip {
-            continue;
-        }
-
-        if !(frame_idx - skip).is_multiple_of(every) {
-            continue;
-        }
-
-        for (i, &atom_idx) in atoms.iter().enumerate() {
-            let deviation = frame.positions[atom_idx] - avg_pos[i];
-            rmsf[i] += deviation.length_squared();
-        }
-    }
-
-    // Calculate RMSF = sqrt(<deviation^2>)
-    for fluct in &mut rmsf {
-        *fluct = (*fluct / frames_used as f64).sqrt();
-    }
-
-    Ok((atoms, rmsf))
-}
+const USAGE: &str = "# rmsf
+\t@topo        <molecular topology file>
+\t@pbc         <boundary type> [<gathermethod>]
+\t@atomsrmsf   <atoms to consider for rmsf>
+\t[@atomsfit   <atoms to consider for fit>]
+\t[@ref        <reference coordinates (if absent, the first frame of @traj is reference)>]
+\t[@outpdb     <write average structure in pdb format with rmsf values in the b-factor column>]
+\t@traj        <trajectory files>";
 
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
+    if let Err(e) = run() {
+        fail(&e);
+    }
+}
 
-    if args.is_empty() || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
-        print_usage();
-        return;
+/// The atoms named by every value of `key`, unioned (gromos++ adds one specifier per value).
+fn select(args: &Arguments, key: &str, topo: &Topology) -> Result<Vec<usize>, String> {
+    let spec = args.values(key).join(";");
+    AtomSelection::from_string(&spec, topo)
+        .map(|s| s.indices().to_vec())
+        .map_err(|e| format!("@{key} '{spec}': {e}"))
+}
+
+fn run() -> Result<(), String> {
+    let args = Arguments::parse(
+        &[
+            "topo",
+            "pbc",
+            "atomsrmsf",
+            "atomsfit",
+            "ref",
+            "outpdb",
+            "traj",
+        ],
+        USAGE,
+    )?;
+
+    let mut topo =
+        build_topology(read_topology_file(args.value("topo")?).map_err(|e| format!("@topo: {e}"))?);
+    let trajectories = args.values("traj");
+    if trajectories.is_empty() {
+        return Err("@traj: no trajectory files given".into());
+    }
+    if let Some(frame) = TrajectoryReader::new(&trajectories[0])
+        .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+        .read_frame()
+        .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+    {
+        solvate_to_atoms(&mut topo, frame.positions.len()).map_err(|e| e.to_string())?;
     }
 
-    let rmsf_args = match parse_args(args) {
-        Ok(args) => args,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            eprintln!();
-            print_usage();
-            process::exit(1);
-        },
-    };
+    let pbc = Pbc::from_args(&args)?;
 
-    let filter = if rmsf_args.verbose > 0 {
-        "debug"
+    let (mut reference, ref_box) = if args.has("ref") {
+        let path = args.value("ref")?;
+        let conf = read_coordinates(path).map_err(|e| format!("@ref {path}: {e}"))?;
+        (conf.positions, conf.box_dims)
     } else {
-        "info"
+        let frame = TrajectoryReader::new(&trajectories[0])
+            .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+            .read_frame()
+            .map_err(|e| format!("@traj {}: {e}", trajectories[0]))?
+            .ok_or_else(|| format!("@traj {}: no frames", trajectories[0]))?;
+        (frame.positions, frame.box_dims)
     };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(filter)).init();
+    let ref_periodicity = pbc.periodicity(ref_box);
+    pbc.gather(&topo, &mut reference, &ref_periodicity);
 
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║              RMSF - Root Mean Square Fluctuation             ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
-
-    // Read topology
-    log::info!("Reading topology: {}", rmsf_args.topo_file);
-    let blocks = match read_topology_file(&rmsf_args.topo_file) {
-        Ok(blocks) => blocks,
-        Err(e) => {
-            eprintln!("Error reading topology: {}", e);
-            process::exit(1);
-        },
-    };
-
-    let topo = build_topology(blocks);
-    log::info!("  Total atoms: {}", topo.num_atoms());
-
-    // Parse atom selection using AtomSelection (GROMOS++ compatible)
-    let atom_selection = match AtomSelection::from_string(&rmsf_args.atom_spec, &topo) {
-        Ok(sel) => sel,
-        Err(e) => {
-            eprintln!(
-                "Error parsing atom selection '{}': {}",
-                rmsf_args.atom_spec, e
-            );
-            process::exit(1);
-        },
+    let rmsf_atoms = select(&args, "atomsrmsf", &topo)?;
+    if rmsf_atoms.is_empty() {
+        return Err("No atoms specified for RMSF calculation".into());
+    }
+    let fit_atoms = if args.has("atomsfit") {
+        select(&args, "atomsfit", &topo)?
+    } else {
+        println!("# @atomsrmsf atoms are taken for fit.");
+        rmsf_atoms.clone()
     };
 
-    log::info!("  Selected atoms: {}", atom_selection.len());
+    let mut sum_pos = vec![Vec3::ZERO; rmsf_atoms.len()];
+    let mut sum_sq = vec![0.0f64; rmsf_atoms.len()];
+    let mut n_frames = 0usize;
 
-    log::info!("Reading trajectory: {}", rmsf_args.traj_file);
-
-    let mut traj_reader = match TrajectoryReader::new(&rmsf_args.traj_file) {
-        Ok(reader) => reader,
-        Err(e) => {
-            eprintln!("Error opening trajectory: {}", e);
-            process::exit(1);
-        },
-    };
-
-    println!("Analyzing: {} selected atoms", atom_selection.len());
-    println!("Output:    {}", rmsf_args.output_file);
-    println!();
-
-    log::info!("Calculating RMSF...");
-
-    let (atoms, rmsf) = match calculate_rmsf(
-        &mut traj_reader,
-        Some(atom_selection.indices()),
-        rmsf_args.skip,
-        rmsf_args.every,
-    ) {
-        Ok(result) => result,
-        Err(e) => {
-            eprintln!("Error calculating RMSF: {}", e);
-            process::exit(1);
-        },
-    };
-
-    // Write output
-    log::info!("Writing output to: {}", rmsf_args.output_file);
-
-    let file = match File::create(&rmsf_args.output_file) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error creating output file: {}", e);
-            process::exit(1);
-        },
-    };
-
-    let mut writer = BufWriter::new(file);
-
-    writeln!(writer, "# Root Mean Square Fluctuation (RMSF)").unwrap();
-    writeln!(writer, "# Trajectory: {}", rmsf_args.traj_file).unwrap();
-    writeln!(writer, "# Atoms analyzed: {}", atoms.len()).unwrap();
-    writeln!(writer, "#").unwrap();
-    writeln!(writer, "# Column 1: Atom index").unwrap();
-    writeln!(writer, "# Column 2: RMSF (nm)").unwrap();
-    writeln!(writer, "#").unwrap();
-
-    for (atom_idx, fluct) in atoms.iter().zip(rmsf.iter()) {
-        writeln!(writer, "{:6} {:12.6}", atom_idx + 1, fluct).unwrap();
+    for traj in trajectories {
+        let mut reader = TrajectoryReader::new(traj).map_err(|e| format!("@traj {traj}: {e}"))?;
+        while let Some(frame) = reader.read_frame().map_err(|e| format!("{traj}: {e}"))? {
+            let periodicity = pbc.periodicity(frame.box_dims);
+            let mut pos = frame.positions;
+            pbc.gather(&topo, &mut pos, &periodicity);
+            if !fit_atoms.is_empty() {
+                superimpose(&mut pos, &reference, &fit_atoms, None);
+            }
+            for (k, &a) in rmsf_atoms.iter().enumerate() {
+                sum_pos[k] += pos[a];
+                sum_sq[k] += pos[a].length_squared();
+            }
+            n_frames += 1;
+        }
+    }
+    if n_frames == 0 {
+        return Err("@traj: no frames".into());
     }
 
-    writer.flush().unwrap();
+    let n = n_frames as f64;
+    let mut out = String::from("#\n#  at          rmsf name\n");
+    let mut average = Vec::with_capacity(rmsf_atoms.len());
+    let mut fluctuation = Vec::with_capacity(rmsf_atoms.len());
+    for (k, &a) in rmsf_atoms.iter().enumerate() {
+        let mean = sum_pos[k] / n;
+        let f = (sum_sq[k] / n - mean.length_squared()).max(0.0).sqrt();
+        let _ = writeln!(
+            out,
+            "{:5}{:14.8} {:>4}",
+            k + 1,
+            f,
+            topo.atom_name(a).unwrap_or("?")
+        );
+        average.push(mean);
+        fluctuation.push(f);
+    }
+    print!("{out}");
 
-    // Calculate statistics
-    let avg_rmsf = rmsf.iter().sum::<f64>() / rmsf.len() as f64;
-    let max_rmsf = rmsf.iter().cloned().fold(0.0f64, f64::max);
-    let min_rmsf = rmsf.iter().cloned().fold(f64::MAX, f64::min);
-
-    let max_idx = rmsf
-        .iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-        .map(|(idx, _)| atoms[idx])
-        .unwrap();
-
-    println!();
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║                     RMSF Calculation Complete                ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
-    println!("Statistics:");
-    println!("  Average RMSF: {:.4} nm", avg_rmsf);
-    println!("  Min RMSF:     {:.4} nm", min_rmsf);
-    println!("  Max RMSF:     {:.4} nm (atom {})", max_rmsf, max_idx + 1);
-    println!();
-    println!("Output written to: {}", rmsf_args.output_file);
-    println!();
-
-    log::info!("RMSF calculation complete");
+    if let Some(path) = args
+        .values("outpdb")
+        .first()
+        .cloned()
+        .or_else(|| args.has("outpdb").then(|| "aver.pdb".to_string()))
+    {
+        let mut pdb = String::from("REMARK Average structure\n");
+        for (k, &a) in rmsf_atoms.iter().enumerate() {
+            let atom = PDBAtom {
+                serial: k + 1,
+                name: topo.atom_name(a).unwrap_or("X").to_string(),
+                resname: topo.residue_name(a).unwrap_or("UNK").to_string(),
+                chain: " ".to_string(),
+                resnum: topo.residue_nr(a).unwrap_or(1) as i32,
+                coord: average[k],
+                occupancy: 1.0,
+                bfactor: fluctuation[k],
+                element: String::new(),
+            };
+            pdb.push_str(&atom.to_pdb_line(false));
+            pdb.push('\n');
+        }
+        pdb.push_str("END\n");
+        std::fs::write(&path, pdb).map_err(|e| format!("@outpdb {path}: {e}"))?;
+    }
+    Ok(())
 }

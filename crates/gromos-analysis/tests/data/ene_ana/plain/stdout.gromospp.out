@@ -1,0 +1,7 @@
+# WARNING: One of the values is a NaN,
+#   the data provided are not enough to 
+#   give a sensible error estimate
+  property         average            rmsd      error est.
+    totene       137.02056     0.854084704            -nan
+    totpot     -52.8236575      12.9070329            -nan
+    totkin      189.844217      12.8134045            -nan

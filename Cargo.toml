@@ -11,7 +11,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.0.45"
+version = "0.0.46"
 edition = "2021"
 authors = ["Yerko Escalona"]
 license = "GPL-2.0-or-later"
@@ -35,6 +35,9 @@ gromos-tools = { path = "crates/gromos-tools" }
 gromos = { path = "crates/gromos" }
 # PyO3 bindings (low-level)
 pyo3-gromos = { path = "crates/pyo3-gromos" }
+
+# gzip: gromosXX/gromos++ read every input through igzstream/Ginstream
+flate2 = "1.0"
 
 # ============================================================
 # SIMD and math

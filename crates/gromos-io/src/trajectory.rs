@@ -36,7 +36,7 @@ use crate::IoError;
 use gromos_core::configuration::Configuration;
 use gromos_core::math::Vec3;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 /// GROMOS trajectory writer
@@ -246,7 +246,7 @@ pub struct TrajectoryFrame {
 /// Reads trajectory files frame by frame, parsing POSITIONRED, VELOCITYRED, FORCERED,
 /// LATTICESHIFTS, and GENBOX blocks.
 pub struct TrajectoryReader {
-    reader: BufReader<File>,
+    reader: crate::gz::TextReader,
     title: String,
     frames_read: usize,
     buffer: String,
@@ -262,8 +262,7 @@ impl TrajectoryReader {
     /// * `Ok(TrajectoryReader)` - Successfully opened the file
     /// * `Err(IoError)` - Failed to open or parse the header
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, IoError> {
-        let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
+        let mut reader = crate::gz::TextReader::open(path)?;
         let mut buffer = String::new();
 
         // Read TITLE block
@@ -346,7 +345,7 @@ impl TrajectoryReader {
     // Helper functions for reading blocks
 
     fn read_title_block(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
     ) -> Result<String, IoError> {
         buffer.clear();
@@ -376,7 +375,7 @@ impl TrajectoryReader {
     }
 
     fn read_timestep_block(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
         position_header_seen: &mut bool,
     ) -> Result<Option<(usize, f64)>, IoError> {
@@ -442,7 +441,7 @@ impl TrajectoryReader {
     }
 
     fn read_position_block(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
         header_seen: bool,
     ) -> Result<Vec<Vec3>, IoError> {
@@ -496,16 +495,15 @@ impl TrajectoryReader {
     }
 
     fn try_read_velocity_block(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
     ) -> Result<Option<Vec<Vec3>>, IoError> {
-        buffer.clear();
-        let position = reader.stream_position()?;
-        reader.read_line(buffer)?;
-
+        if reader.read_line(buffer)? == 0 {
+            return Ok(None);
+        }
         if !buffer.trim().starts_with("VELOCITY") {
-            // Not a velocity block, rewind
-            reader.seek(std::io::SeekFrom::Start(position))?;
+            // not our block — put the line back for the next reader
+            reader.unread_line(&buffer.clone());
             return Ok(None);
         }
 
@@ -548,16 +546,15 @@ impl TrajectoryReader {
     }
 
     fn try_read_force_block(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
     ) -> Result<Option<Vec<Vec3>>, IoError> {
-        buffer.clear();
-        let position = reader.stream_position()?;
-        reader.read_line(buffer)?;
-
+        if reader.read_line(buffer)? == 0 {
+            return Ok(None);
+        }
         if !buffer.trim().starts_with("FORCE") {
-            // Not a force block, rewind
-            reader.seek(std::io::SeekFrom::Start(position))?;
+            // not our block — put the line back for the next reader
+            reader.unread_line(&buffer.clone());
             return Ok(None);
         }
 
@@ -600,16 +597,15 @@ impl TrajectoryReader {
     }
 
     fn try_read_lattice_shifts(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
     ) -> Result<Option<Vec<(i32, i32, i32)>>, IoError> {
-        buffer.clear();
-        let position = reader.stream_position()?;
-        reader.read_line(buffer)?;
-
+        if reader.read_line(buffer)? == 0 {
+            return Ok(None);
+        }
         if !buffer.trim().starts_with("LATTICESHIFTS") {
-            // Not a lattice shifts block, rewind
-            reader.seek(std::io::SeekFrom::Start(position))?;
+            // not our block — put the line back for the next reader
+            reader.unread_line(&buffer.clone());
             return Ok(None);
         }
 
@@ -648,7 +644,7 @@ impl TrajectoryReader {
     // TODO: wire up when GENBOX block reading is needed for box reshaping
     #[allow(dead_code)]
     fn read_genbox_block(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
     ) -> Result<Vec3, IoError> {
         buffer.clear();
@@ -689,17 +685,15 @@ impl TrajectoryReader {
 
     /// Try to read GENBOX; return Vec3::ZERO if missing (vacuum trajectory).
     fn try_read_genbox_block(
-        reader: &mut BufReader<File>,
+        reader: &mut crate::gz::TextReader,
         buffer: &mut String,
     ) -> Result<Vec3, IoError> {
-        let pos = reader.stream_position()?;
-        buffer.clear();
         if reader.read_line(buffer)? == 0 {
             return Ok(Vec3::ZERO);
         }
         if !buffer.trim().starts_with("GENBOX") {
-            // Not GENBOX — rewind and return zero box (vacuum)
-            reader.seek(std::io::SeekFrom::Start(pos))?;
+            // not GENBOX — put the line back and report a zero box (vacuum)
+            reader.unread_line(&buffer.clone());
             return Ok(Vec3::ZERO);
         }
         // gromosXX writes NTB, then the box lengths, angles, Euler angles and origin; older

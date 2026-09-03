@@ -17,7 +17,7 @@
 
 use crate::IoError;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 
 /// One frame of free-energy derivative data.
@@ -63,9 +63,8 @@ impl FreeEnergyFrame {
 pub fn read_free_energy_trajectory<P: AsRef<Path>>(
     path: P,
 ) -> Result<Vec<FreeEnergyFrame>, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|e| IoError::FileNotFound(format!("{}: {e}", path.as_ref().display())))?;
-    let reader = BufReader::new(file);
 
     #[derive(PartialEq)]
     enum Block {

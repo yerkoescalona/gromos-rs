@@ -9,6 +9,29 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+/// The 24-character label a GROMOS96 position line carries before the coordinates
+/// (`out_configuration.cc:982`): residue number, residue name, atom name, atom number.
+pub fn position_prefix(resnum: usize, resname: &str, atomname: &str, atomnum: usize) -> String {
+    format!("{resnum:>5} {resname:<5} {atomname:<6}{atomnum:>6}")
+}
+
+/// Labels for atom `i` as gromosXX writes them: a solute atom carries its own residue
+/// number, a solvent atom carries the number of the solvent molecule it belongs to
+/// (`out_configuration.cc:1015`) — not its index inside that molecule.
+fn atom_label(topo: &Topology, i: usize) -> (usize, &str, &str) {
+    let Some(a) = topo.moltype_atom(i) else {
+        return (1, "UNK", "AT");
+    };
+    let n_solute = topo.num_solute_atoms();
+    let resnum = if i < n_solute {
+        a.residue_nr
+    } else {
+        let per_molecule = topo.atoms_per_solvent().max(1);
+        (i - n_solute) / per_molecule + 1
+    };
+    (resnum, a.residue_name.as_str(), a.name.as_str())
+}
+
 /// Write a GROMOS96 format file
 pub struct G96Writer {
     pub writer: BufWriter<File>,
@@ -46,24 +69,20 @@ impl G96Writer {
         topology: Option<&Topology>,
     ) -> Result<(), String> {
         writeln!(self.writer, "POSITION").map_err(|e| format!("Write error: {}", e))?;
+        writeln!(self.writer, "# first 24 chars ignored")
+            .map_err(|e| format!("Write error: {}", e))?;
 
         for (i, pos) in positions.iter().enumerate() {
-            let (resnum, resname, atomname) = if let Some(topo) = topology {
-                let _n_solute = topo.num_solute_atoms();
-                if let Some(a) = topo.moltype_atom(i) {
-                    (a.residue_nr + 1, a.residue_name.as_str(), a.name.as_str())
-                } else {
-                    (1, "UNK", "AT")
-                }
-            } else {
-                (1, "UNK", "AT")
-            };
-            let atomnum = i + 1;
+            let (resnum, resname, atomname) =
+                topology.map_or((1, "UNK", "AT"), |topo| atom_label(topo, i));
 
             writeln!(
                 self.writer,
-                "{:>5} {:<5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                resnum, resname, atomname, atomnum, pos.x, pos.y, pos.z
+                "{}{:15.9}{:15.9}{:15.9}",
+                position_prefix(resnum, resname, atomname, i + 1),
+                pos.x,
+                pos.y,
+                pos.z
             )
             .map_err(|e| format!("Write error: {}", e))?;
         }
@@ -113,11 +132,8 @@ impl G96Writer {
         for (i, atom) in atoms.iter().enumerate() {
             writeln!(
                 self.writer,
-                "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                atom.res_num,
-                atom.res_name,
-                atom.atom_name,
-                i + 1,
+                "{}{:15.9}{:15.9}{:15.9}",
+                position_prefix(atom.res_num, &atom.res_name, &atom.atom_name, i + 1),
                 atom.pos.x,
                 atom.pos.y,
                 atom.pos.z
@@ -140,11 +156,8 @@ impl G96Writer {
         for (i, atom) in atoms.iter().enumerate() {
             writeln!(
                 self.writer,
-                "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                atom.res_num,
-                atom.res_name,
-                atom.atom_name,
-                i + 1,
+                "{}{:15.9}{:15.9}{:15.9}",
+                position_prefix(atom.res_num, &atom.res_name, &atom.atom_name, i + 1),
                 atom.pos.x,
                 atom.pos.y,
                 atom.pos.z
@@ -167,11 +180,8 @@ impl G96Writer {
         for (i, atom) in atoms.iter().enumerate() {
             writeln!(
                 self.writer,
-                "{:>5} {:5} {:>5}{:7}{:15.9}{:15.9}{:15.9}",
-                atom.res_num,
-                atom.res_name,
-                atom.atom_name,
-                i + 1,
+                "{}{:15.9}{:15.9}{:15.9}",
+                position_prefix(atom.res_num, &atom.res_name, &atom.atom_name, i + 1),
                 atom.pos.x,
                 atom.pos.y,
                 atom.pos.z

@@ -81,7 +81,10 @@ def test_recipe_and_plan_are_exposed_and_ordered():
     plan = json.loads(sim.plan_json)
     kinds = [entry["kind"] for entry in plan]
     # GROMOS step order, one entry per algorithm, and it matches what actually runs.
-    assert kinds[0] == "forcefield" or kinds[:2] == ["remove_com", "forcefield"]
+    # gromosXX's head is the optional COM removal, then the lattice-shift tracker for any
+    # non-vacuum boundary, then the forcefield (`create_md_sequence.cc:108-131`).
+    head = [k for k in kinds[:3] if k in ("remove_com", "lattice_shift")]
+    assert kinds[: len(head) + 1] == [*head, "forcefield"], kinds
     assert kinds[-1] == "energy_calculation"
     assert kinds.index("leap_frog_velocity") < kinds.index("leap_frog_position")
     assert len(kinds) == len(sim.algorithm_names)

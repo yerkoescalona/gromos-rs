@@ -25,7 +25,7 @@
 use crate::IoError;
 use gromos_core::configuration::Energy;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 
 /// Energy component identifiers (GROMOS convention)
@@ -400,9 +400,8 @@ impl EnergyWriter {
 /// files): the `# totals` of every `ENERGY03` block, the time from the preceding `TIMESTEP`,
 /// volume / pressure / temperature from `VOLUMEPRESSURE03`. Comment lines are skipped.
 pub fn read_energy_trajectory_native<P: AsRef<Path>>(path: P) -> Result<Vec<EnergyFrame>, IoError> {
-    let file = File::open(path.as_ref())
+    let reader = crate::gz::open_text(path.as_ref())
         .map_err(|e| IoError::FileNotFound(format!("{}: {e}", path.as_ref().display())))?;
-    let reader = BufReader::new(file);
     #[derive(PartialEq)]
     enum Block {
         None,
@@ -537,7 +536,7 @@ pub fn write_energy_frame<P: AsRef<Path>>(
 
 /// GROMOS energy file reader
 pub struct EnergyReader {
-    reader: BufReader<File>,
+    reader: Box<dyn BufRead>,
     title: String,
     frames_read: usize,
 }
@@ -545,8 +544,7 @@ pub struct EnergyReader {
 impl EnergyReader {
     /// Open an energy trajectory file for reading
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, IoError> {
-        let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
+        let mut reader = crate::gz::open_text(path)?;
 
         // Read TITLE block
         let title = Self::read_title_block(&mut reader)?;
@@ -668,7 +666,7 @@ impl EnergyReader {
     }
 
     /// Read TITLE block
-    fn read_title_block(reader: &mut BufReader<File>) -> Result<String, IoError> {
+    fn read_title_block(reader: &mut dyn BufRead) -> Result<String, IoError> {
         let mut line = String::new();
         let mut title_lines = Vec::new();
         let mut in_title = false;

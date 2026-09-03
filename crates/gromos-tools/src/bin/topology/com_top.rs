@@ -8,13 +8,8 @@
 //! Parameters and solvent are taken from the topology indicated by @param/@solv.
 
 use clap::Parser;
-use gromos_core::topology::{
-    AngleParameters, BondParameters, DihedralParameters, ImproperDihedralParameters, LJParameters,
-};
 use gromos_io::gromos_args;
-use gromos_io::topology::{
-    read_topology_file, ParsedSolventAtom, ParsedSolventConstraint, ParsedTopology,
-};
+use gromos_io::topology::{read_topology_file, write_parsed_topology, ParsedTopology};
 use std::collections::HashMap;
 use std::process;
 /// Combine multiple GROMOS topology files.
@@ -128,35 +123,7 @@ fn main() {
     let combined = combine_topologies(&specs, &file_cache, &param_file, &solv_file);
 
     // Write to stdout
-    write_combined(&combined, &title);
-}
-
-/// Combined topology ready for output
-struct CombinedTopology {
-    atom_names: Vec<String>,
-    residue_numbers: Vec<usize>,
-    residue_names: Vec<String>,
-    atom_type_names: Vec<String>,
-    masses: Vec<f64>,
-    charges: Vec<f64>,
-    iac: Vec<usize>,
-    chargegroup_codes: Vec<usize>,
-    exclusions: Vec<Vec<usize>>,
-    one_four_pairs: Vec<Vec<usize>>,
-    bonds: Vec<(usize, usize, usize)>,
-    bond_parameters: Vec<BondParameters>,
-    angles: Vec<(usize, usize, usize, usize)>,
-    angle_parameters: Vec<AngleParameters>,
-    proper_dihedrals: Vec<(usize, usize, usize, usize, usize)>,
-    dihedral_parameters: Vec<DihedralParameters>,
-    improper_dihedrals: Vec<(usize, usize, usize, usize, usize)>,
-    improper_dihedral_parameters: Vec<ImproperDihedralParameters>,
-    lj_parameters: HashMap<(usize, usize), LJParameters>,
-    temperature_groups: Vec<usize>,
-    pressure_groups: Vec<usize>,
-    solvent_atoms: Vec<ParsedSolventAtom>,
-    solvent_constraints: Vec<ParsedSolventConstraint>,
-    solute_molecules: Vec<usize>,
+    print!("{}", write_parsed_topology(&combined, &title));
 }
 
 fn combine_topologies(
@@ -164,11 +131,13 @@ fn combine_topologies(
     file_cache: &HashMap<String, ParsedTopology>,
     param_file: &str,
     solv_file: &str,
-) -> CombinedTopology {
+) -> ParsedTopology {
     let param_topo = &file_cache[param_file];
     let solv_topo = &file_cache[solv_file];
 
-    let mut combined = CombinedTopology {
+    let mut combined = ParsedTopology {
+        physical_constants: param_topo.physical_constants,
+        n_atoms: 0,
         atom_names: Vec::new(),
         residue_numbers: Vec::new(),
         residue_names: Vec::new(),
@@ -283,355 +252,14 @@ fn combine_topologies(
         }
     }
 
+    combined.n_atoms = combined.masses.len();
+
     eprintln!(
         "Combined topology: {} atoms, {} residues, {} molecules",
-        combined.masses.len(),
+        combined.n_atoms,
         combined.residue_names.len(),
         combined.solute_molecules.len()
     );
 
     combined
-}
-
-fn write_combined(topo: &CombinedTopology, title: &str) {
-    let n_atoms = topo.masses.len();
-
-    // TITLE
-    println!("TITLE");
-    print!("{}", title);
-    println!("END");
-
-    // PHYSICALCONSTANTS
-    println!("PHYSICALCONSTANTS");
-    println!("# FPEPSI");
-    println!("{:15.7}", gromos_core::units::four_pi_eps_i);
-    println!("# HBAR");
-    println!("{:15.7}", gromos_core::units::hBar);
-    println!("# SPDL");
-    println!("{:15.3}", gromos_core::units::spd_l);
-    println!("# BOLTZ");
-    println!("{:15.8}", gromos_core::units::kB);
-    println!("END");
-
-    // TOPVERSION
-    println!("TOPVERSION");
-    println!("2.0");
-    println!("END");
-
-    // ATOMTYPENAME
-    println!("ATOMTYPENAME");
-    println!("# NRATT: number of atom types");
-    println!("{:5}", topo.atom_type_names.len());
-    println!("# TYPE: atom type names");
-    for name in &topo.atom_type_names {
-        println!("{}", name);
-    }
-    println!("END");
-
-    // RESNAME
-    println!("RESNAME");
-    println!("# NRAA2: number of residue names");
-    println!("{:5}", topo.residue_names.len());
-    println!("# AANM: residue names");
-    for name in &topo.residue_names {
-        println!("{}", name);
-    }
-    println!("END");
-
-    // SOLUTEATOM
-    println!("SOLUTEATOM");
-    println!("#   NRP: number of solute atoms");
-    println!("{:6}", n_atoms);
-    println!("#  ATNM: atom number");
-    println!("#  MRES: residue number");
-    println!("#  PANM: atom name");
-    println!("#   IAC: integer atom code");
-    println!("#  MASS: mass");
-    println!("#    CG: charge");
-    println!("#   CGC: charge group code");
-    println!("#   INE: number of excluded atoms");
-    println!("# INE14: number of 1-4 interactions");
-    println!("#  ATNM  MRES  PANM   IAC      MASS        CG  CGC   INE");
-    println!("#                                                     INE14");
-
-    // gromos++ OutTopology layout: INE and its list on the atom line, INE14 and its list on
-    // the next, six indices per line.
-    let list = |prefix_width: usize, items: &[usize]| {
-        for (k, x) in items.iter().enumerate() {
-            if k % 6 == 0 && k != 0 {
-                println!();
-                print!("{:width$}", "", width = prefix_width);
-            }
-            print!(" {:5}", x + 1);
-        }
-        println!();
-    };
-    for i in 0..n_atoms {
-        let mut excls: Vec<usize> = topo.exclusions.get(i).cloned().unwrap_or_default();
-        excls.sort();
-        let mut pairs: Vec<usize> = topo.one_four_pairs.get(i).cloned().unwrap_or_default();
-        pairs.sort();
-        print!(
-            "{:6} {:4} {:4} {:3} {:8.5} {:8.5} {:2} {:5}",
-            i + 1,
-            topo.residue_numbers[i],
-            topo.atom_names[i],
-            topo.iac[i] + 1, // 0-based inside, 1-based in the file
-            topo.masses[i],
-            topo.charges[i],
-            topo.chargegroup_codes[i],
-            excls.len()
-        );
-        list(47, &excls);
-        print!("{:46}{}", "", pairs.len());
-        list(45, &pairs);
-    }
-    println!("END");
-
-    // BONDSTRETCHTYPE
-    println!("BONDSTRETCHTYPE");
-    println!("# NBTY: number of bond types");
-    println!("{:5}", topo.bond_parameters.len());
-    println!("#  CB     HB     B0");
-    for bp in &topo.bond_parameters {
-        println!(
-            "{:15.7e}{:15.7e}{:13.7e}",
-            bp.k_quartic, bp.k_harmonic, bp.r0
-        );
-    }
-    println!("END");
-
-    // Separate bonds into BONDH/BOND by H involvement
-    let (bondh, bond): (Vec<_>, Vec<_>) = topo
-        .bonds
-        .iter()
-        .partition(|&&(i, j, _)| topo.masses[i] < 2.0 || topo.masses[j] < 2.0);
-
-    println!("BONDH");
-    println!("# NBAH: number of bonds involving H atoms");
-    println!("{:5}", bondh.len());
-    println!("#  IB   JB  ICB");
-    for &&(i, j, t) in &bondh {
-        println!("{:5}{:5}{:5}", i + 1, j + 1, t + 1);
-    }
-    println!("END");
-
-    println!("BOND");
-    println!("# NBA: number of bonds not involving H atoms");
-    println!("{:5}", bond.len());
-    println!("#  IB   JB  ICB");
-    for &&(i, j, t) in &bond {
-        println!("{:5}{:5}{:5}", i + 1, j + 1, t + 1);
-    }
-    println!("END");
-
-    // BONDANGLEBENDTYPE
-    println!("BONDANGLEBENDTYPE");
-    println!("# NTTY: number of angle types");
-    println!("{:5}", topo.angle_parameters.len());
-    println!("#   CT     CHT     T0");
-    for ap in &topo.angle_parameters {
-        println!(
-            "{:15.7e}{:15.7e}{:13.7e}",
-            ap.k_cosine, ap.k_harmonic, ap.theta0
-        );
-    }
-    println!("END");
-
-    // Separate angles
-    let (angleh, angle): (Vec<_>, Vec<_>) = topo.angles.iter().partition(|&&(i, j, k, _)| {
-        topo.masses[i] < 2.0 || topo.masses[j] < 2.0 || topo.masses[k] < 2.0
-    });
-
-    println!("BONDANGLEH");
-    println!("# NTHEH: number of angles involving H atoms");
-    println!("{:5}", angleh.len());
-    println!("#  IT   JT   KT  ICT");
-    for &&(i, j, k, t) in &angleh {
-        println!("{:5}{:5}{:5}{:5}", i + 1, j + 1, k + 1, t + 1);
-    }
-    println!("END");
-
-    println!("BONDANGLE");
-    println!("# NTHE: number of angles not involving H atoms");
-    println!("{:5}", angle.len());
-    println!("#  IT   JT   KT  ICT");
-    for &&(i, j, k, t) in &angle {
-        println!("{:5}{:5}{:5}{:5}", i + 1, j + 1, k + 1, t + 1);
-    }
-    println!("END");
-
-    // IMPDIHEDRALTYPECODE
-    println!("IMPDIHEDRALTYPE");
-    println!("# NQTY: number of improper dihedral types");
-    println!("{:5}", topo.improper_dihedral_parameters.len());
-    println!("#  CQ     Q0");
-    for ip in &topo.improper_dihedral_parameters {
-        println!("{:15.7e}{:13.4}", ip.k, ip.q0);
-    }
-    println!("END");
-
-    // Separate impropers
-    let (impdihedralh, impdihedral): (Vec<_>, Vec<_>) =
-        topo.improper_dihedrals
-            .iter()
-            .partition(|&&(i, j, k, l, _)| {
-                topo.masses[i] < 2.0
-                    || topo.masses[j] < 2.0
-                    || topo.masses[k] < 2.0
-                    || topo.masses[l] < 2.0
-            });
-
-    println!("IMPDIHEDRALH");
-    println!("# NQHIH: number of improper dihedrals involving H");
-    println!("{:5}", impdihedralh.len());
-    println!("#  IQ   JQ   KQ   LQ  ICQ");
-    for &&(i, j, k, l, t) in &impdihedralh {
-        println!("{:5}{:5}{:5}{:5}{:5}", i + 1, j + 1, k + 1, l + 1, t + 1);
-    }
-    println!("END");
-
-    println!("IMPDIHEDRAL");
-    println!("# NQHI: number of improper dihedrals not involving H");
-    println!("{:5}", impdihedral.len());
-    println!("#  IQ   JQ   KQ   LQ  ICQ");
-    for &&(i, j, k, l, t) in &impdihedral {
-        println!("{:5}{:5}{:5}{:5}{:5}", i + 1, j + 1, k + 1, l + 1, t + 1);
-    }
-    println!("END");
-
-    // TORSDIHEDRALTYPECODE
-    println!("TORSDIHEDRALTYPE");
-    println!("# NPTY: number of dihedral types");
-    println!("{:5}", topo.dihedral_parameters.len());
-    println!("#   CP     PD    NP");
-    for dp in &topo.dihedral_parameters {
-        println!("{:15.7e}{:10.1}{:5}", dp.k, dp.pd, dp.m);
-    }
-    println!("END");
-
-    // Separate dihedrals
-    let (dihedralh, dihedral): (Vec<_>, Vec<_>) =
-        topo.proper_dihedrals.iter().partition(|&&(i, j, k, l, _)| {
-            topo.masses[i] < 2.0
-                || topo.masses[j] < 2.0
-                || topo.masses[k] < 2.0
-                || topo.masses[l] < 2.0
-        });
-
-    println!("DIHEDRALH");
-    println!("# NPHIH: number of dihedrals involving H");
-    println!("{:5}", dihedralh.len());
-    println!("#  IP   JP   KP   LP  ICP");
-    for &&(i, j, k, l, t) in &dihedralh {
-        println!("{:5}{:5}{:5}{:5}{:5}", i + 1, j + 1, k + 1, l + 1, t + 1);
-    }
-    println!("END");
-
-    println!("DIHEDRAL");
-    println!("# NPHI: number of dihedrals not involving H");
-    println!("{:5}", dihedral.len());
-    println!("#  IP   JP   KP   LP  ICP");
-    for &&(i, j, k, l, t) in &dihedral {
-        println!("{:5}{:5}{:5}{:5}{:5}", i + 1, j + 1, k + 1, l + 1, t + 1);
-    }
-    println!("END");
-
-    // LJPARAMETERS
-    if !topo.lj_parameters.is_empty() {
-        let n_types = topo.atom_type_names.len();
-        let n_pairs = n_types * (n_types + 1) / 2;
-        println!("CROSSDIHEDRALH");
-        println!("#  NPHIH: number of cross dihedrals involving H atoms in solute");
-        println!("    0");
-        println!("END");
-        println!("CROSSDIHEDRAL");
-        println!("#  NPPC: number of cross dihedrals NOT involving H atoms in solute");
-        println!("    0");
-        println!("END");
-        println!("LJPARAMETERS");
-        println!("# NRATT2: number of LJ parameter pairs");
-        println!("{:5}", n_pairs);
-        println!("#  IAC  JAC    C12          C6           CS12         CS6");
-        for i in 1..=n_types {
-            for j in i..=n_types {
-                if let Some(lj) = topo
-                    .lj_parameters
-                    .get(&(i - 1, j - 1))
-                    .or_else(|| topo.lj_parameters.get(&(j - 1, i - 1)))
-                {
-                    println!(
-                        "{:5}{:5}{:15.7e}{:15.7e}{:15.7e}{:15.7e}",
-                        i, j, lj.c12, lj.c6, lj.cs12, lj.cs6
-                    );
-                }
-            }
-        }
-        println!("END");
-    }
-
-    // SOLUTEMOLECULES
-    println!("SOLUTEMOLECULES");
-    println!("# NSPM: number of separate molecules");
-    println!("{:5}", topo.solute_molecules.len());
-    println!("# NSP: atom sequence number of last atom");
-    for &mol_last in &topo.solute_molecules {
-        println!("{:5}", mol_last);
-    }
-    println!("END");
-
-    // TEMPERATUREGROUPS
-    println!("TEMPERATUREGROUPS");
-    println!("# NSTM: number of temperature atom groups");
-    println!("{:5}", topo.temperature_groups.len());
-    println!("# NST: atom sequence number of last atom");
-    for &tg in &topo.temperature_groups {
-        println!("{:5}", tg + 1); // stored 0-based, output 1-based
-    }
-    println!("END");
-
-    // PRESSUREGROUPS
-    println!("PRESSUREGROUPS");
-    println!("# NSTM: number of pressure atom groups");
-    println!("{:5}", topo.pressure_groups.len());
-    println!("# NST: atom sequence number of last atom");
-    for &pg in &topo.pressure_groups {
-        println!("{:5}", pg);
-    }
-    println!("END");
-
-    println!("LJEXCEPTIONS");
-    println!("# NEX: number of exceptions");
-    println!("    0");
-    println!("END");
-    // SOLVENTATOM
-    if !topo.solvent_atoms.is_empty() {
-        println!("SOLVENTATOM");
-        println!("# NRAM: number of atoms per solvent molecule");
-        println!("{:5}", topo.solvent_atoms.len());
-        println!("#     I  ANMS   IACS  MASS     CGS");
-        for (idx, sa) in topo.solvent_atoms.iter().enumerate() {
-            println!(
-                "{:5} {:>5}{:5}{:10.5}{:12.5}",
-                idx + 1,
-                sa.name,
-                sa.iac + 1,
-                sa.mass,
-                sa.charge
-            );
-        }
-        println!("END");
-    }
-
-    // SOLVENTCONSTR
-    if !topo.solvent_constraints.is_empty() {
-        println!("SOLVENTCONSTR");
-        println!("# NCONS: number of constraints");
-        println!("{:5}", topo.solvent_constraints.len());
-        println!("#  IC   JC       CC");
-        for sc in &topo.solvent_constraints {
-            println!("{:5}{:5}{:15.7e}", sc.i + 1, sc.j + 1, sc.length);
-        }
-        println!("END");
-    }
 }

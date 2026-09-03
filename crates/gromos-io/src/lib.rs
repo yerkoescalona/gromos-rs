@@ -15,9 +15,11 @@ pub mod distanceres;
 pub mod dlg;
 pub mod energy;
 pub mod energy_binary;
+pub mod energy_traj;
 pub mod force;
 pub mod free_energy;
 pub mod g96;
+pub mod gz;
 pub mod ifp;
 pub mod imd;
 pub mod imd_write;
@@ -113,8 +115,9 @@ pub fn gromos_args() -> Vec<String> {
             match std::fs::read_to_string(&raw[i]) {
                 Ok(content) => {
                     for line in content.lines() {
-                        let line = line.trim();
-                        if line.is_empty() || line.starts_with('#') {
+                        // gromos++ erases everything from the first '#' on (Arguments.cc:170)
+                        let line = line.split('#').next().unwrap_or("").trim();
+                        if line.is_empty() {
                             continue;
                         }
                         for token in line.split_whitespace() {

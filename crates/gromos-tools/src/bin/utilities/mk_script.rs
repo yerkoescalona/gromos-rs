@@ -16,7 +16,7 @@
 
 use gromos_io::gromos_args;
 use gromos_io::jobs::read_joblist;
-use gromos_io::mk_script::{apply_job_overrides, generate_run_script, MkScriptConfig};
+use gromos_io::mk_script::{apply_job_overrides, generate_run_script, MkScriptConfig, WriteTraj};
 use gromos_io::script_template::read_script_template;
 use std::collections::HashMap;
 use std::fs;
@@ -214,7 +214,13 @@ fn main() {
             }
 
             // Generate run script
-            let script = generate_run_script(&config, &template, job, prev);
+            let script = generate_run_script(
+                &config,
+                &template,
+                job,
+                prev,
+                &WriteTraj::from_imd(&modified_imd),
+            );
             let script_name = template.expanded_filename("script", &mk_args.system, job.job_id);
             if let Err(e) = fs::write(&script_name, &script) {
                 eprintln!("Error writing script '{}': {}", script_name, e);
@@ -260,7 +266,13 @@ fn main() {
                 process::exit(1);
             }
 
-            let script = generate_run_script(&config, &template, &dummy_job, prev.as_ref());
+            let script = generate_run_script(
+                &config,
+                &template,
+                &dummy_job,
+                prev.as_ref(),
+                &WriteTraj::from_imd(&base_imd),
+            );
             let script_name = template.expanded_filename("script", &mk_args.system, num);
             if let Err(e) = fs::write(&script_name, &script) {
                 eprintln!("Error writing script '{}': {}", script_name, e);

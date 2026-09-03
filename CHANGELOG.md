@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.46] (2026-08-31)
+
+**LiveCoMS tutorial 1 (GB3, S² order-parameter restraining), end to end on its own files.** The
+whole chain up to the production run works from the tutorial's own `.arg` and `.imd` files:
+`make_top` → `com_top` → `pdb2g96` → vacuum `ENERGYMIN` → `sim_box` → solvent `ENERGYMIN` with
+position restraints → `ion` → `mk_script` → thermalisation → production MD, plus `rmsd`, `rmsf` and
+`ene_ana` on the result. `ORDERPARAMRES` — the restraint the tutorial exists to demonstrate — is
+still unported and refused by name.
+
+### Fixed
+
+- **`com_top` wrote force-field type blocks in internal units.** `BONDANGLEBENDTYPE`,
+  `IMPDIHEDRALTYPE` and `TORSDIHEDRALTYPE` came out in radians and kJ·mol⁻¹·rad⁻² instead of the
+  file convention (degrees, per degree²), and lossily — the dihedral phase π was written `3.1`.
+  Every topology `com_top` produced therefore had wrong angle, improper and dihedral parameters:
+  the GB3 + 2 Na⁺ system started at an improper energy of 1.3×10⁷ kJ/mol and SHAKE failed at step 0.
+  `com_top` had hand-rolled its own 340-line writer; it now builds a `ParsedTopology` and uses
+  `write_parsed_topology`, which converts. Its `CombinedTopology` mirror struct is gone.
+- **The topology reference tests compared angle/dihedral/improper parameter *counts*, never their
+  values** — which is why the above survived. They compare the values now, and fail on the old
+  `com_top` (`theta0` 0.0274 rad where gromos++ has 1.5708).
+- **`mk_script` silently dropped every `MULTIBATH` override.** A data line that is a bare integer —
+  `MULTIBATH`'s `ALGORITHM`, `NBATHS` and `DOFSET` each sit alone on one — was taken for a block
+  name and reset the data-line counter, so `TEMP0[i]` never reached the temperature line. The GB3
+  thermalisation ran all five of its jobs at 60 K instead of 60 → 120 → 180 → 240 → 300 K. A block
+  name is now only recognised outside a block. `TAU[i]` is supported too, as in gromos++.
+- **The `.cnf` writer numbered residues wrongly.** It wrote `residue_nr + 1` — gromosXX stores the
+  number 0-based and adds one on output, ours is already 1-based — so GB3's first residue came out
+  as `2 MET`; and every solvent atom carried its index *within* its molecule (2, 3, 4 repeating)
+  where gromosXX writes the solvent molecule's number. The column layout and the
+  `# first 24 chars ignored` marker now match `out_configuration.cc:982` exactly.
+- **`@f` argument files kept inline comments.** gromos++ erases everything from the first `#` on a
+  line (`Arguments.cc:170`); we only skipped whole-line comments, so `@bin /path/md # for MPI …`
+  passed `#`, `for` and `MPI` through as values.
+
+### Added
+
+- **Transparent gzip on every text input** (`gromos_io::gz`). gromosXX reads its inputs through
+  `igzstream` and gromos++ through `Ginstream`, both on zlib's `gzopen`, which reads plain files
+  too — so the decision is made on the gzip magic bytes, not the file name. Topologies,
+  coordinates, trajectories, energy trajectories, IMD files, position/distance restraints, PDB
+  files, job lists and script templates all go through it. The trajectory reader's optional-block
+  lookahead used `seek`, which a gzip stream cannot do; it is a one-line pushback now.
+- **`mk_script` compresses what it produced**, as gromos++ does (`mk_script.cc:3853`), and picks
+  its output flags from the `WRITETRAJ` switches instead of always passing `@trc @tre`. Together
+  with the reader change this is why every analysis input in the GROMOS tutorials is a `.gz`.
+- **`rmsd` and `rmsf` on the gromos++ command line**, byte-identical to it. Two independent atom
+  sets (`@atomsrmsd`/`@atomsrmsf` for the measurement, `@atomsfit` for the superposition, both
+  shifted by the *fit* set's centre of geometry), `@ref` as a coordinate file falling back to the
+  trajectory's first frame, several `@traj`, `@pbc <type> [gather]`, `@time`; `@prop` for `rmsd`
+  and `@outpdb` for `rmsf`. `@reftopo`/`@refpbc` are refused by name rather than ignored. Five
+  reference cases against gromos++.
+- **`ene_ana` reads the library that describes the trajectory** (`gromos_io::energy_traj`, a port
+  of `utils::EnergyTraj` and `gmath::Expression`): `ENERTRJ`/`FRENERTRJ` declarations with
+  `block`/`subblock`/`size` and the `matrix_` expansion, `VARIABLES` arithmetic over the resulting
+  tables, and `@en_files`/`@fr_files`/`@prop`/`@library [print]`/`@topo`/`@time` on top. stdout and
+  every `<prop>.dat` match gromos++ exactly on five reference cases. gromos++'s operator
+  associativity is reproduced deliberately — it splits at the rightmost `+`/`-` but the *leftmost*
+  `*`/`/`, so `a / b / c` is `a / (b / c)` — and documented at the module head.
+- **`Stat::rmsd_strict`/`msd_strict`**: gromos++ does not clamp `⟨x²⟩ − ⟨x⟩²` at zero, so a constant
+  series prints `-nan` where our clamped `rmsd` gives `0`. Programs that reproduce gromos++ output
+  use the strict pair, as they already did for `ee_strict`.
+- **`sim_box` accepts `@f`**: it parsed `env::args()` by hand and rejected the argument-file form
+  every tutorial uses. It now uses the shared `Arguments`, with byte-identical output.
+- **Energy library profile, version 1, specified** (`docs/src/reference/energy-library.md`): the
+  `ene_ana` library grammar as gromos++ defines it, plus the stricter rules gromos-rs will hold
+  itself to — a layout fingerprint derived from the schema (names excluded), trajectories and
+  libraries that describe themselves in `#` lines both upstream readers ignore, three reader tiers
+  that refuse a library disagreeing with the file it is applied to, and the official library
+  generated from the layout in code. Motivated by the tutorial's stale library, which carries the
+  same `ENEVERSION` as md++'s current one and reads every value into the wrong slot without an
+  error. Specification only in this release; implementation is PLAN.md §2.10.
+
+### Changed
+
+- The `gromos` facade crate builds an `rlib` only. Its `cdylib`/`staticlib` wrote
+  `target/libgromos.{so,a}` — the same paths py-gromos's extension module writes — and a
+  `cargo test --workspace` raced on them, after which the compiler reported "multiple different
+  versions of crate `gromos_core`". The suite alternated between passing and failing to build with
+  no code change; it is deterministic now. Nothing consumed a C library from the facade.
+
 ## [0.0.45] (2026-08-30)
 
 **The first LiveCoMS tutorial runs on gromos-rs**: tutorial 4 (GaMD), all four of its input files,

@@ -16,58 +16,14 @@
 //! Reference: `tests/sim_box_reference.rs` reproduces gromos++'s output for methanol in SPC.
 
 use gromos::math::Vec3;
+use gromos_io::args::Arguments;
 use gromos_io::{read_g96_labeled, G96Atom};
-use std::env;
 use std::process;
 
+const USAGE: &str = "sim_box - Solvate a solute in a box of pre-equilibrated solvent\n\nUsage: sim_box @topo <topology> @pbc <r|t> @pos <solute.cnf> @solvent <solvent.g96> \\\n               [@minwall <distance>] [@thresh <distance>] [@boxsize]\n\nArguments:\n  @topo      Molecular topology file\n  @pbc       Periodic boundary conditions:\n             r = rectangular box\n             t = truncated octahedron (not yet implemented)\n  @pos       Input coordinate file for the solute\n  @solvent   Input coordinate file for pre-equilibrated solvent\n  @minwall   Minimum solute-to-wall distance (nm)\n             - 1 value: cubic box\n             - 3 values: rectangular box (x y z)\n  @thresh    Minimum solvent-to-solute distance (default: 0.23 nm)\n  @boxsize   Use box dimensions from solute coordinate file\n\nDescription:\n  Solvates a solute molecule in a pre-equilibrated solvent box.\n  The solvent configuration should contain a BOX block.\n\n  Box sizing options:\n  1. @boxsize: Use box from solute file\n  2. @minwall: Calculate box from solute extent + minwall distance\n\n  Solvent removal criteria:\n  - Solvent molecule center of geometry must be:\n    a) Inside the target box\n    b) At least @thresh distance from any solute atom\n\nExamples:\n  # Cubic box with 1.4 nm minimum wall distance\n  sim_box @topo system.top @pbc r @pos solute.cnf @solvent h2o.g96 @minwall 1.4\n\n  # Use box size from solute file\n  sim_box @topo system.top @pbc r @pos solute.cnf @solvent h2o.g96 @boxsize\n\n  # Rectangular box with different wall distances\n  sim_box @topo system.top @pbc r @pos solute.cnf @solvent h2o.g96 @minwall 1.0 1.5 2.0\n\nOutput:\n  GROMOS96 format to stdout containing solvated system";
+
 fn print_usage() {
-    eprintln!("sim_box - Solvate a solute in a box of pre-equilibrated solvent");
-    eprintln!();
-    eprintln!(
-        "Usage: sim_box @topo <topology> @pbc <r|t> @pos <solute.cnf> @solvent <solvent.g96> \\"
-    );
-    eprintln!("               [@minwall <distance>] [@thresh <distance>] [@boxsize]");
-    eprintln!();
-    eprintln!("Arguments:");
-    eprintln!("  @topo      Molecular topology file");
-    eprintln!("  @pbc       Periodic boundary conditions:");
-    eprintln!("             r = rectangular box");
-    eprintln!("             t = truncated octahedron (not yet implemented)");
-    eprintln!("  @pos       Input coordinate file for the solute");
-    eprintln!("  @solvent   Input coordinate file for pre-equilibrated solvent");
-    eprintln!("  @minwall   Minimum solute-to-wall distance (nm)");
-    eprintln!("             - 1 value: cubic box");
-    eprintln!("             - 3 values: rectangular box (x y z)");
-    eprintln!("  @thresh    Minimum solvent-to-solute distance (default: 0.23 nm)");
-    eprintln!("  @boxsize   Use box dimensions from solute coordinate file");
-    eprintln!();
-    eprintln!("Description:");
-    eprintln!("  Solvates a solute molecule in a pre-equilibrated solvent box.");
-    eprintln!("  The solvent configuration should contain a BOX block.");
-    eprintln!();
-    eprintln!("  Box sizing options:");
-    eprintln!("  1. @boxsize: Use box from solute file");
-    eprintln!("  2. @minwall: Calculate box from solute extent + minwall distance");
-    eprintln!();
-    eprintln!("  Solvent removal criteria:");
-    eprintln!("  - Solvent molecule center of geometry must be:");
-    eprintln!("    a) Inside the target box");
-    eprintln!("    b) At least @thresh distance from any solute atom");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!("  # Cubic box with 1.4 nm minimum wall distance");
-    eprintln!("  sim_box @topo system.top @pbc r @pos solute.cnf @solvent h2o.g96 @minwall 1.4");
-    eprintln!();
-    eprintln!("  # Use box size from solute file");
-    eprintln!("  sim_box @topo system.top @pbc r @pos solute.cnf @solvent h2o.g96 @boxsize");
-    eprintln!();
-    eprintln!("  # Rectangular box with different wall distances");
-    eprintln!(
-        "  sim_box @topo system.top @pbc r @pos solute.cnf @solvent h2o.g96 @minwall 1.0 1.5 2.0"
-    );
-    eprintln!();
-    eprintln!("Output:");
-    eprintln!("  GROMOS96 format to stdout containing solvated system");
+    eprintln!("{USAGE}");
 }
 
 #[derive(Debug)]
@@ -95,99 +51,47 @@ impl Default for SimBoxArgs {
     }
 }
 
-fn parse_args(args: Vec<String>) -> Result<SimBoxArgs, String> {
-    let mut sb_args = SimBoxArgs::default();
+fn parse_args(usage: &str) -> Result<SimBoxArgs, String> {
+    let args = Arguments::parse(
+        &[
+            "topo", "pbc", "pos", "solvent", "minwall", "thresh", "boxsize",
+        ],
+        usage,
+    )?;
 
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "@topo" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing topology file for @topo".to_string());
-                }
-                sb_args.topo = args[i].clone();
-            },
-            "@pbc" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing boundary type for @pbc".to_string());
-                }
-                let pbc_str = args[i].clone();
-                if pbc_str.len() != 1 {
-                    return Err(format!("Invalid @pbc: {}", pbc_str));
-                }
-                sb_args.pbc = pbc_str.chars().next().unwrap();
-                if sb_args.pbc != 'r' && sb_args.pbc != 't' {
-                    return Err(format!(
-                        "Invalid @pbc: {} (must be 'r' or 't')",
-                        sb_args.pbc
-                    ));
-                }
-            },
-            "@pos" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing solute file for @pos".to_string());
-                }
-                sb_args.pos = args[i].clone();
-            },
-            "@solvent" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing solvent file for @solvent".to_string());
-                }
-                sb_args.solvent = args[i].clone();
-            },
-            "@minwall" => {
-                // Read 1 or 3 values
-                loop {
-                    i += 1;
-                    if i >= args.len() || args[i].starts_with('@') {
-                        i -= 1;
-                        break;
-                    }
-                    let val: f64 = args[i]
-                        .parse()
-                        .map_err(|_| format!("Invalid @minwall value: {}", args[i]))?;
-                    sb_args.minwall.push(val);
-                }
-                if sb_args.minwall.len() != 1 && sb_args.minwall.len() != 3 {
-                    return Err(format!(
-                        "@minwall requires 1 or 3 values, got {}",
-                        sb_args.minwall.len()
-                    ));
-                }
-            },
-            "@thresh" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err("Missing threshold for @thresh".to_string());
-                }
-                sb_args.thresh = args[i]
-                    .parse()
-                    .map_err(|_| format!("Invalid @thresh: {}", args[i]))?;
-            },
-            "@boxsize" => {
-                sb_args.use_boxsize = true;
-            },
-            _ => {
-                return Err(format!("Unknown argument: {}", args[i]));
-            },
+    let mut sb_args = SimBoxArgs {
+        topo: args.value("topo")?.to_string(),
+        pos: args.value("pos")?.to_string(),
+        solvent: args.value("solvent")?.to_string(),
+        thresh: args.get("thresh", 0.23)?,
+        use_boxsize: args.has("boxsize"),
+        ..Default::default()
+    };
+
+    if args.has("pbc") {
+        let pbc = args.value("pbc")?;
+        if pbc.len() != 1 {
+            return Err(format!("Invalid @pbc: {pbc}"));
         }
-        i += 1;
+        sb_args.pbc = pbc.chars().next().unwrap();
+        if sb_args.pbc != 'r' && sb_args.pbc != 't' {
+            return Err(format!("Invalid @pbc: {pbc} (must be 'r' or 't')"));
+        }
     }
 
-    // Validate
-    if sb_args.topo.is_empty() {
-        return Err("Missing required argument: @topo".to_string());
+    for v in args.values("minwall") {
+        sb_args.minwall.push(
+            v.parse()
+                .map_err(|_| format!("Invalid @minwall value: {v}"))?,
+        );
     }
-    if sb_args.pos.is_empty() {
-        return Err("Missing required argument: @pos".to_string());
+    if !sb_args.minwall.is_empty() && sb_args.minwall.len() != 1 && sb_args.minwall.len() != 3 {
+        return Err(format!(
+            "@minwall requires 1 or 3 values, got {}",
+            sb_args.minwall.len()
+        ));
     }
-    if sb_args.solvent.is_empty() {
-        return Err("Missing required argument: @solvent".to_string());
-    }
+
     if !sb_args.use_boxsize && sb_args.minwall.is_empty() {
         return Err("Either @boxsize or @minwall must be specified".to_string());
     }
@@ -248,14 +152,12 @@ fn nearest_image(r: Vec3, box_dims: Vec3) -> Vec3 {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 || args[1] == "-h" || args[1] == "--help" {
+    if std::env::args().len() < 2 {
         print_usage();
-        process::exit(if args.len() < 2 { 1 } else { 0 });
+        process::exit(1);
     }
 
-    let sb_args = match parse_args(args) {
+    let sb_args = match parse_args(USAGE) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("Error: {}", e);
