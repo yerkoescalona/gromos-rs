@@ -88,7 +88,12 @@ fn main() {
 
     for (wi, path) in trg_files.iter().enumerate() {
         let frames = match read_free_energy_trajectory(path) {
-            Ok(f) => f,
+            Ok(traj) => {
+                for w in traj.warnings {
+                    eprintln!("{w}");
+                }
+                traj.frames
+            },
             Err(e) => {
                 eprintln!("Error reading {path}: {e}");
                 process::exit(1);

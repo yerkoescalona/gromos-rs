@@ -518,6 +518,21 @@ enum Expr {
 
 /// The `# energy-schema` / `# energy-layout` lines a writer puts after `ENEVERSION`
 /// (profile R3): the file's own verifiable statement of its layout.
+/// The energy-group pair a row of a `matrix_NUM_ENERGY_GROUPS` subblock holds, 0-based.
+/// gromosXX writes them `for i in 0..n { for j in i..n }` — upper triangle, row by row,
+/// diagonal included (`out_configuration.cc:3148`). `None` past the last pair.
+pub fn group_pair(row: usize, n_groups: usize) -> Option<(usize, usize)> {
+    let mut r = row;
+    for i in 0..n_groups {
+        let width = n_groups - i;
+        if r < width {
+            return Some((i, i + r));
+        }
+        r -= width;
+    }
+    None
+}
+
 pub fn self_description_lines(schema: &Schema) -> Vec<String> {
     let mut out = vec![format!(
         "# energy-schema {PROFILE_VERSION} {} {}",
@@ -925,6 +940,26 @@ impl EnergyTraj {
 
     pub fn version(&self) -> Option<&str> {
         self.version.as_deref()
+    }
+
+    /// The subblock currently held, as `[row][column]` — the shape the library declares, so
+    /// `NONBONDED` is one row per energy-group *pair* in gromosXX's order ([`group_pair`]).
+    /// `None` if the library does not declare it.
+    pub fn table(&self, subblock: &str) -> Option<&[Vec<f64>]> {
+        self.data.get(subblock).map(|t| t.as_slice())
+    }
+
+    /// The subblock names the library declares, sorted.
+    pub fn subblock_names(&self) -> Vec<&str> {
+        let mut v: Vec<&str> = self.data.keys().map(|s| s.as_str()).collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// The value of a `size` in the frame currently held (`NUM_ENERGY_GROUPS`, `NUM_BATHS`,
+    /// and the `matrix_` forms).
+    pub fn size(&self, name: &str) -> Option<usize> {
+        self.sizes.get(name).copied()
     }
 
     /// The names a library declared, for `@library print`.

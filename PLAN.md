@@ -278,6 +278,37 @@ exists since 2.6 — `gromos-core/src/spatial_index.rs`, used by the QM/ML provi
          on a healthy converging run. Neither upstream has them; they need an EM calibration.
       5. `gch` and ~100 other analysis binaries still parse `env::args()` by hand and reject `@f`.
 
+**1.5c — LiveCoMS tutorial 2 (double decoupling: ASA in water and bound to PLA2, TI)** — opened
+2026-09-04. The equilibration input runs on the tutorial's own files, step-0 energies identical to
+md++ 2023-04-15 (`.local/gromosXX/md++/BUILD/program/md` is a working oracle — use it).
+- [x] **Charge groups are gathered on reading a configuration** (`gather_chargegroups`,
+      `Configuration::init` → `periodicity.gather_chargegroups`). Every GROMOS tool writes a
+      configuration with the molecules put *back into the box*, so a charge group straddles the
+      boundary and its centre of geometry lands in empty space; the charge-group pairlist then
+      classifies the wrong neighbours as far away. On the tutorial's ASA box that put 189 486
+      kJ/mol of spurious LJ into the long-range solute set and SHAKE died at step 0. No reference
+      system had a split charge group, so nothing caught it. With the gather, our energies equal
+      md++'s exactly and 20 steps track it to 4×10⁻¹⁶ nm.
+- [x] **SHAKE says which constraint it could not satisfy** (`ConstraintResult::worst`) — the
+      message that made the above findable in one run instead of by bisection.
+- [x] **`ROTTRANS` modelled** (`RottransConstraints`, `AlgorithmSpec::Rottrans`, IMD RTC/RTCLAST):
+      the six rigid-body degrees of freedom of atoms `1..=RTCLAST` constrained after SHAKE, per
+      `rottrans.cc`. Unit-tested on its defining property (a rigid-body kick is removed, internal
+      motion is not). **Not bit-exact against md++ yet:** the step-0 potential energy matches to
+      the printed precision, the kinetic energy to 1.6×10⁻⁶ relative, and 20 steps track to ~10⁻⁵
+      — the reference orientation `init` stores differs slightly and the last piece is unfound.
+      md++'s own `ROTTRANSREFPOS` output is the oracle for it (`_read_rottrans`); ours is not
+      written or read yet, so `NTIRTC = 0` (continue from the configuration) is unsupported.
+- [ ] A gromosXX reference system with a `ROTTRANS` block — until then `rottrans` is exempted in
+      py-gromos's `UNCOVERED_KINDS`, and the bit-exactness above is unpinned.
+- [ ] `PRECALCLAM` — the TI production runs need it (81 λ points), and gromos++'s `ext_ti_ana`
+      (a different program from ours: it predicts dH/dλ at non-simulated λ from the
+      `FREEPRECALCLAM` table) is what the tutorial's analysis step uses.
+- [ ] The final configuration is written one box vector off for the charge groups whose gathered
+      first atom is negative (5 of 3585 atoms on the ASA system). md++ translates each charge group
+      into the *positive* box on output, by its first atom (`out_configuration.cc:966`); we write
+      the raw positions. Same configuration, different image — no energy differs.
+
 **1.6 — Restraints & special interactions** — distance done; dihedral next
 - [x] Distance restraints — `nacl_1water_distres` passes (NTDIR=2, CDIR*w0, instantaneous).
   Physics in `gromos-forces/restraints.rs`, wired into `Forcefield`. Perturbed variant
@@ -522,12 +553,19 @@ they were written (fixed, 0.0.47).
 
 - [x] Steps 1–4: layout + fingerprint + official library; reader tiers and refusals; self-describing
       writers with provenance; `ene_ana @print_library` — every gate met (archive).
-- [ ] `ext_ti_ana` still reads `.trg` through the fixed-slot `read_free_energy_trajectory` and gets
-      none of the checks; ours is a trapezoid over ⟨dH/dλ⟩, not gromos++'s library-driven program.
-      Route it through `energy_traj` if it is ever made that port.
-- [ ] Later, Priority 3: expose `EnergyTraj` to py-gromos as a typed table (frame × term × group
-      pair) — the re-partition workflow is a `group_by` there, which is where a richer derived
-      language belongs rather than in the `.lib` (spec §5, last paragraph).
+- [x] `.trg` reading goes through the library (0.0.47): `read_free_energy_trajectory` binds the
+      built-in library and returns a `FreeEnergyTrajectory` (frames + layout warnings), so
+      `ext_ti_ana` and the FEP reference harness get the tier checks. A `.trg` one value short of
+      the layout it claims is now an error, not dH/dλ from the wrong slot. The pre-0.0.33
+      one-line `FREEENERGY03` block keeps its own path, with no checks.
+- [x] `EnergyTraj` exposed to py-gromos as a typed table (0.0.47): `gromos.EnergyTrajectory`
+      reads a `.tre`/`.trg` through the library and keeps the shape it declares — `table(name)`
+      is `(n_frames, rows, cols)`, `group_pairs` names the rows of `NONBONDED` in gromosXX's
+      order, `to_long(name)` is the tidy form a `group_by` wants. The per-pair LJ sums to
+      `totlj`, which is the re-partition workflow.
+- [ ] Ours is *not* gromos++'s `ext_ti_ana`: theirs predicts dH/dλ at non-simulated λ from the
+      `PRECALCLAM` table (de Ruiter & Oostenbrink 2016), ours is a trapezoid over ⟨dH/dλ⟩ across
+      windows. Porting theirs is part of 1.5c (tutorial 2's analysis step).
 
 ### Priority 3 — py-gromos API & education
 

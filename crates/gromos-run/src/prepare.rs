@@ -12,7 +12,10 @@ use std::path::PathBuf;
 
 use gromos_core::{
     configuration::{Box as SimBox, Configuration},
-    math::{truncoct_triclinic, truncoct_triclinic_box, Mat3, Vec3},
+    gather::gather_chargegroups,
+    math::{
+        truncoct_triclinic, truncoct_triclinic_box, Mat3, Periodicity, Rectangular, Triclinic, Vec3,
+    },
     random::generate_velocities,
     units::PhysicalConstants,
     validation::{
@@ -215,6 +218,17 @@ pub fn prepare_system(
                 }
             }
         }
+    }
+
+    // 3c. Make every charge group whole around its first atom, as gromosXX does on reading a
+    //     configuration. A `.cnf` written with the molecules put back into the box has charge
+    //     groups split across the boundary; the pairlist works on their centres of geometry.
+    if imd.ntb != 0 && box_dims.x > 0.0 {
+        let pbc = match truncoct_box {
+            Some(b) => Periodicity::Triclinic(Triclinic::new(b)),
+            None => Periodicity::Rectangular(Rectangular::new(box_dims)),
+        };
+        gather_chargegroups(&mut positions, &topology.chargegroups, &pbc);
     }
 
     // 4. Topology validation (fatal stops; errors and warnings are reported).

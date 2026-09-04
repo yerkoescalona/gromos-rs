@@ -56,8 +56,10 @@ impl Algorithm for ShakeAlgorithm {
             let result = shake_positions(topo, conf, sim.dt, &self.params);
             if !result.converged {
                 return Err(format!(
-                    "SHAKE failed to converge shaking initial positions after {} iterations",
-                    result.iterations
+                    "SHAKE failed to converge shaking initial positions after {} iterations \
+                     ({})",
+                    result.iterations,
+                    result.worst_constraint()
                 ));
             }
 
@@ -66,8 +68,10 @@ impl Algorithm for ShakeAlgorithm {
                 let result = shake_velocities(topo, conf, sim.dt, &self.params);
                 if !result.converged {
                     return Err(format!(
-                        "SHAKE failed to converge shaking initial velocities after {} iterations",
-                        result.iterations
+                        "SHAKE failed to converge shaking initial velocities after {} \
+                         iterations ({})",
+                        result.iterations,
+                        result.worst_constraint()
                     ));
                 }
             }
@@ -91,8 +95,9 @@ impl Algorithm for ShakeAlgorithm {
             Ok(())
         } else {
             Err(format!(
-                "SHAKE failed to converge after {} iterations",
-                result.iterations
+                "SHAKE failed to converge after {} iterations ({})",
+                result.iterations,
+                result.worst_constraint()
             ))
         }
     }

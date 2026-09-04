@@ -25,6 +25,7 @@ use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
 
 pub mod algorithm_sequence;
+pub mod energy_traj;
 #[cfg(feature = "ml")]
 pub mod ml_potential;
 pub mod parameters;
@@ -365,6 +366,8 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFrame>()?;
     m.add_function(wrap_pyfunction!(rmsd, m)?)?;
     m.add_function(wrap_pyfunction!(rdf, m)?)?;
+    // .tre/.trg read through the energy library, with its shape kept (PLAN.md 2.10)
+    energy_traj::register_energy_traj(m)?;
     // Interactive simulation API
     simulation::register_simulation(m)?;
     // Compositional types

@@ -48,7 +48,9 @@ pub use energy::read_energy_trajectory_native;
 pub use energy::{EnergyBlock, EnergyFrame, EnergyReader, EnergyWriter};
 pub use energy_binary::{BinaryEnergyReader, BinaryEnergyWriter};
 pub use force::ForceWriter;
-pub use free_energy::{read_free_energy_trajectory, FreeEnergyFrame, FreeEnergyWriter};
+pub use free_energy::{
+    read_free_energy_trajectory, FreeEnergyFrame, FreeEnergyTrajectory, FreeEnergyWriter,
+};
 pub use g96::{write_por, write_rpr};
 pub use imd::{
     parse_imd_str, ImdParameters, NonbondedExtra, PressureParameters, TempBathParameters,

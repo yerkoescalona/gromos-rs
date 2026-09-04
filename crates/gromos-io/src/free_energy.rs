@@ -14,16 +14,21 @@
 //! `# energy-layout`, optionally `# energy-provenance`): comment lines to every other reader
 //! (`docs/src/reference/energy-library.md`).
 //!
-//! The reader accepts this layout and the one-line `FREEENERGY03` block older files carry.
+//! The reader goes through the energy library, so a file that does not match the layout it
+//! claims is refused instead of yielding dH/dλ from the wrong slot; the one-line `FREEENERGY03`
+//! block older files carry is still read, on its own path.
 //!
 //! dH/dλ (kJ/mol) is the thermodynamic-integration integrand at the current λ. Integrate
 //! ⟨dH/dλ⟩_λ over λ with `ext_ti_ana` to get ΔG.
 
 use crate::energy::ENE_VERSION;
-use crate::energy_traj::{builtin_schema, self_description_lines, Provenance};
+use crate::energy_traj::{
+    builtin_schema, read_preamble, self_description_lines, EnergyTraj, Provenance, OFFICIAL_LIBRARY,
+};
+use crate::gz::TextReader;
 use crate::IoError;
 use std::fs::File;
-use std::io::{BufRead, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 /// One frame of free-energy derivative data.
@@ -56,135 +61,124 @@ impl FreeEnergyFrame {
     }
 }
 
+/// A `.trg` file as read: its frames and whatever the layout check had to say about them.
+#[derive(Debug, Clone, Default)]
+pub struct FreeEnergyTrajectory {
+    pub frames: Vec<FreeEnergyFrame>,
+    /// Layout warnings, in the words the profile gives them
+    /// (`docs/src/reference/energy-library.md`) — an unverified layout, a version mismatch.
+    /// Empty for a file whose layout is established.
+    pub warnings: Vec<String>,
+}
+
 /// Read every frame of a `.trg` file, in either layout:
 ///
-/// * gromosXX's `FREEENERDERIVS03` (`# lambda`, then `# totals` in ENERGY03 order — total,
-///   kinetic, potential, covalent, bond, angle, improper, dihedral, cross-dihedral, nonbonded,
-///   LJ, CRF, …; the time comes from the preceding `TIMESTEP` block), which is what the
-///   native binary writes and what this crate's writer now emits;
+/// * gromosXX's `FREEENERDERIVS03`, read through the energy library like `ene_ana` reads it:
+///   the file's own self-description if it has one, else the built-in layout for its
+///   `ENEVERSION`, else the official library on trust with a warning. A file that does not
+///   match the layout it claims is an error here rather than dH/dλ from the wrong slot
+///   (`docs/src/reference/energy-library.md`).
 /// * the one-line `FREEENERGY03` block this crate wrote before 0.0.33 (time, λ, per-term
-///   dH/dλ, total), so older files keep reading.
+///   dH/dλ, total), so older files keep reading. It predates the profile and gets none of
+///   its checks; nothing writes it any more.
 ///
-/// Tolerates extra comment lines and blank lines. Returns frames in order.
+/// Returns frames in order.
 pub fn read_free_energy_trajectory<P: AsRef<Path>>(
     path: P,
-) -> Result<Vec<FreeEnergyFrame>, IoError> {
-    let reader = crate::gz::open_text(path.as_ref())
-        .map_err(|e| IoError::FileNotFound(format!("{}: {e}", path.as_ref().display())))?;
+) -> Result<FreeEnergyTrajectory, IoError> {
+    let path = path.as_ref();
+    let mut reader = TextReader::open(path)
+        .map_err(|e| IoError::FileNotFound(format!("{}: {e}", path.display())))?;
+    let fail = |e: String| IoError::FormatError(format!("{}: {e}", path.display()));
 
-    #[derive(PartialEq)]
-    enum Block {
-        None,
-        Timestep,
-        Legacy,
-        Derivs,
+    let preamble = read_preamble(&mut reader).map_err(fail)?;
+    if peek_block(&mut reader).map_err(IoError::Io)?.as_deref() == Some("FREEENERGY03") {
+        return Ok(FreeEnergyTrajectory {
+            frames: read_legacy_free_energy(&mut reader).map_err(IoError::Io)?,
+            warnings: Vec::new(),
+        });
     }
-    let mut frames = Vec::new();
-    let mut block = Block::None;
-    let mut section = String::new();
-    let mut step = 0usize;
-    let mut time = 0.0;
-    let mut lambda = 0.0;
-    let mut totals: Vec<f64> = Vec::new();
 
-    for line in reader.lines() {
-        let line = line.map_err(IoError::Io)?;
+    let mut etrj = EnergyTraj::from_library(OFFICIAL_LIBRARY)
+        .map_err(|e| IoError::FormatError(format!("built-in energy library: {e}")))?;
+    etrj.bind(
+        "FRENERTRJ",
+        &preamble,
+        "<built-in library>",
+        &path.display().to_string(),
+    )
+    .map_err(fail)?;
+
+    let mut frames = Vec::new();
+    let mut warnings = etrj.drain_warnings();
+    while etrj.read_frame(&mut reader, "FRENERTRJ").map_err(fail)? {
+        let at = |i: usize| etrj.value(&format!("FREEENER[{i}]")).unwrap_or(0.0);
+        frames.push(FreeEnergyFrame {
+            step: etrj.value("TIME[1]").unwrap_or(0.0) as usize,
+            time: etrj.value("TIME[2]").unwrap_or(0.0),
+            lambda: etrj.value("RLAM[1]").unwrap_or(0.0),
+            dhdl_total: at(1),
+            dhdl_bond: at(5),
+            dhdl_angle: at(6),
+            dhdl_improper: at(7),
+            dhdl_dihedral: at(8),
+            dhdl_lj: at(11),
+            dhdl_crf: at(12),
+            dhdl_special: at(21),
+        });
+        warnings.extend(etrj.drain_warnings());
+    }
+    Ok(FreeEnergyTrajectory { frames, warnings })
+}
+
+/// The name of the block the reader is positioned on, put back for the next reader.
+fn peek_block(reader: &mut TextReader) -> std::io::Result<Option<String>> {
+    let mut line = String::new();
+    while reader.read_line(&mut line)? > 0 {
+        let t = line.trim();
+        if !t.is_empty() {
+            reader.unread_line(&line);
+            return Ok(Some(t.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// The one-line `FREEENERGY03` block: `time λ bond angle improper dihedral lj crf total`, or
+/// the three-value `time λ total` form. Predates the profile; no layout check applies.
+fn read_legacy_free_energy(reader: &mut TextReader) -> std::io::Result<Vec<FreeEnergyFrame>> {
+    let mut frames = Vec::new();
+    let mut inside = false;
+    let mut line = String::new();
+    while reader.read_line(&mut line)? > 0 {
         let t = line.trim();
         match t {
-            "TIMESTEP" => {
-                block = Block::Timestep;
-                continue;
-            },
-            "FREEENERGY03" => {
-                block = Block::Legacy;
-                continue;
-            },
-            "FREEENERDERIVS03" => {
-                block = Block::Derivs;
-                section.clear();
-                totals.clear();
-                continue;
-            },
-            "END" => {
-                if block == Block::Derivs {
-                    let at = |i: usize| totals.get(i).copied().unwrap_or(0.0);
-                    frames.push(FreeEnergyFrame {
-                        step,
-                        time,
-                        lambda,
-                        dhdl_total: at(0),
-                        dhdl_bond: at(4),
-                        dhdl_angle: at(5),
-                        dhdl_improper: at(6),
-                        dhdl_dihedral: at(7),
-                        dhdl_lj: at(10),
-                        dhdl_crf: at(11),
-                        dhdl_special: 0.0,
-                    });
-                }
-                block = Block::None;
-                continue;
-            },
-            _ => {},
-        }
-        if t.is_empty() {
-            continue;
-        }
-        match block {
-            Block::Timestep => {
-                let vals: Vec<f64> = t
+            "FREEENERGY03" => inside = true,
+            "END" => inside = false,
+            _ if !inside || t.is_empty() || t.starts_with('#') => {},
+            _ => {
+                let v: Vec<f64> = t
                     .split_whitespace()
                     .filter_map(|s| s.parse().ok())
                     .collect();
-                if vals.len() >= 2 {
-                    step = vals[0] as usize;
-                    time = vals[1];
-                }
-            },
-            Block::Legacy => {
-                if t.starts_with('#') {
-                    continue;
-                }
-                let vals: Vec<f64> = t
-                    .split_whitespace()
-                    .filter_map(|s| s.parse().ok())
-                    .collect();
-                if vals.len() >= 9 {
+                if v.len() >= 9 {
                     frames.push(FreeEnergyFrame {
                         step: 0,
-                        time: vals[0],
-                        lambda: vals[1],
-                        dhdl_bond: vals[2],
-                        dhdl_angle: vals[3],
-                        dhdl_improper: vals[4],
-                        dhdl_dihedral: vals[5],
-                        dhdl_lj: vals[6],
-                        dhdl_crf: vals[7],
+                        time: v[0],
+                        lambda: v[1],
+                        dhdl_bond: v[2],
+                        dhdl_angle: v[3],
+                        dhdl_improper: v[4],
+                        dhdl_dihedral: v[5],
+                        dhdl_lj: v[6],
+                        dhdl_crf: v[7],
                         dhdl_special: 0.0,
-                        dhdl_total: vals[8],
+                        dhdl_total: v[8],
                     });
-                } else if vals.len() == 3 {
-                    frames.push(FreeEnergyFrame::new(vals[0], vals[1], vals[2]));
+                } else if v.len() == 3 {
+                    frames.push(FreeEnergyFrame::new(v[0], v[1], v[2]));
                 }
             },
-            Block::Derivs => {
-                if let Some(name) = t.strip_prefix('#') {
-                    section = name.trim().to_string();
-                    continue;
-                }
-                match section.as_str() {
-                    "lambda" => {
-                        if let Some(v) = t.split_whitespace().next().and_then(|s| s.parse().ok()) {
-                            lambda = v;
-                        }
-                    },
-                    "totals" => {
-                        totals.extend(t.split_whitespace().filter_map(|s| s.parse::<f64>().ok()))
-                    },
-                    _ => {},
-                }
-            },
-            Block::None => {},
         }
     }
     Ok(frames)
@@ -337,13 +331,69 @@ mod tests {
                 .unwrap();
             w.flush().unwrap();
         }
-        let frames = read_free_energy_trajectory(&p).unwrap();
+        let traj = read_free_energy_trajectory(&p).unwrap();
+        let frames = traj.frames;
+        // written with the profile's self-description, so the layout is established, not assumed
+        assert!(traj.warnings.is_empty(), "{:?}", traj.warnings);
         assert_eq!(frames.len(), 2);
         assert!((frames[0].time - 0.002).abs() < 1e-12);
         assert!((frames[0].lambda - 0.25).abs() < 1e-12);
         assert!((frames[0].dhdl_total + 12.5).abs() < 1e-9);
         assert!((frames[0].dhdl_lj + 10.0).abs() < 1e-9);
         assert!((frames[1].dhdl_total + 11.0).abs() < 1e-9);
+        std::fs::remove_file(p).ok();
+    }
+
+    /// The one-line block this crate wrote before 0.0.33: no `ENEVERSION`, no schema, its own
+    /// path through the reader.
+    #[test]
+    fn the_pre_0_0_33_block_still_reads() {
+        let p = std::env::temp_dir().join(format!("gromos_trg_legacy_{}.trg", std::process::id()));
+        std::fs::write(
+            &p,
+            "TITLE\n\tan old file\nEND\nFREEENERGY03\n# time lambda ...\n\
+             0.0 0.5 1.0 2.0 3.0 4.0 5.0 6.0 21.0\n\
+             0.002 0.5 1.0 2.0 3.0 4.0 5.0 6.0 23.0\nEND\n",
+        )
+        .unwrap();
+        let traj = read_free_energy_trajectory(&p).unwrap();
+        assert_eq!(traj.frames.len(), 2);
+        assert!((traj.frames[1].dhdl_total - 23.0).abs() < 1e-9);
+        assert!((traj.frames[0].dhdl_lj - 5.0).abs() < 1e-9);
+        std::fs::remove_file(p).ok();
+    }
+
+    /// A `.trg` that claims a layout it does not have is refused, where the fixed-slot reader
+    /// used to hand back dH/dλ from whatever landed in the slot.
+    #[test]
+    fn a_shifted_table_is_refused_not_misread() {
+        let p = std::env::temp_dir().join(format!("gromos_trg_short_{}.trg", std::process::id()));
+        {
+            let mut w = FreeEnergyWriter::new(&p, "one total short").unwrap();
+            w.write_frame(&FreeEnergyFrame::new(0.002, 0.25, -12.5))
+                .unwrap();
+            w.flush().unwrap();
+        }
+        let text = std::fs::read_to_string(&p).unwrap();
+        let mut values = 0;
+        let short: String = text
+            .lines()
+            .filter(|l| {
+                let keep = l.trim().starts_with('#') || l.trim().parse::<f64>().is_err() || {
+                    values += 1;
+                    values != 53 // one value of FREEENER dropped (RLAM is value 1)
+                };
+                keep
+            })
+            .fold(String::new(), |mut acc, l| {
+                acc.push_str(l);
+                acc.push('\n');
+                acc
+            });
+        std::fs::write(&p, short).unwrap();
+
+        let err = read_free_energy_trajectory(&p).unwrap_err().to_string();
+        assert!(err.contains("falls inside subblock FREEENER"), "{err}");
         std::fs::remove_file(p).ok();
     }
 }

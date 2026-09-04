@@ -45,6 +45,7 @@ pub const MODELLED_BLOCKS: &[&str] = &[
     "PAIRLIST",
     "NONBONDED",
     "POSITIONRES",
+    "ROTTRANS",
     "DISTANCERES",
     "PERTURBATION",
     "ENERGYMIN",
@@ -246,6 +247,16 @@ pub fn write_imd(params: &ImdParameters, n_atoms: Option<usize>) -> String {
         block(&mut out, "POSITIONRES", |o| {
             o.push_str("#   NTPOR  NTPORB  NTPORS    CPOR\n");
             row(o, vals![p.ntpor, p.ntporb, p.ntpors, p.cpor]);
+        });
+    }
+
+    if present("ROTTRANS") || p.rtc != 0 {
+        block(&mut out, "ROTTRANS", |o| {
+            o.push_str(
+                "#     RTC  RTCLAST
+",
+            );
+            row(o, vals![p.rtc, p.rtclast]);
         });
     }
 

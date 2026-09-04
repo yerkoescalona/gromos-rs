@@ -194,6 +194,55 @@ pub struct ConstraintResult {
     pub converged: bool,
     pub iterations: usize,
     pub max_error: f64,
+    /// The constraint furthest from its length when the iteration stopped: atoms (0-based),
+    /// the distance reached and the distance wanted, both nm. `None` when every constraint
+    /// converged.
+    pub worst: Option<(usize, usize, f64, f64)>,
+}
+
+impl ConstraintResult {
+    /// `atom 12 - atom 13: 0.9421 nm, wants 0.1000 nm` — what to put after "did not converge".
+    pub fn worst_constraint(&self) -> String {
+        match self.worst {
+            None => "no constraint was left unsatisfied".to_string(),
+            Some((i, j, got, want)) => format!(
+                "atom {} - atom {}: {got:.4} nm, wants {want:.4} nm",
+                i + 1,
+                j + 1
+            ),
+        }
+    }
+}
+
+/// The constraint furthest from its length, as `(error, (i, j, distance, length))`.
+fn worst_unsatisfied<'a>(
+    conf: &Configuration,
+    pbc: &Periodicity,
+    constraints: impl Iterator<Item = &'a (usize, usize, f64)>,
+) -> (f64, Option<(usize, usize, f64, f64)>) {
+    let mut max_error = 0.0;
+    let mut worst = None;
+    for &(i, j, length) in constraints {
+        let (error, distance) = constraint_error(conf, pbc, i, j, length);
+        if error > max_error {
+            max_error = error;
+            worst = Some((i, j, distance, length));
+        }
+    }
+    (max_error, worst)
+}
+
+/// How far the constraint between `i` and `j` is from its length, and the distance it reached.
+fn constraint_error(
+    conf: &Configuration,
+    pbc: &Periodicity,
+    i: usize,
+    j: usize,
+    length: f64,
+) -> (f64, f64) {
+    let r = pbc.nearest_image(conf.current().pos[i], conf.current().pos[j]);
+    let d = r.dot(r).sqrt();
+    ((d - length).abs(), d)
 }
 
 /// The minimum-image convention of the current box. gromosXX's SHAKE takes the constraint vector
@@ -312,6 +361,7 @@ pub fn shake(
             converged: true,
             iterations: 0,
             max_error: 0.0,
+            worst: None,
         };
     }
 
@@ -411,10 +461,21 @@ pub fn shake(
             (conf.current().pos[atom] - conf.old().pos[atom]) * (1.0 / dt);
     }
 
+    let (max_error, worst) = if converged {
+        (0.0, None)
+    } else {
+        worst_unsatisfied(
+            conf,
+            &pbc,
+            solute_constraints.iter().chain(solvent_constraints.iter()),
+        )
+    };
+
     ConstraintResult {
         converged,
         iterations: iteration,
-        max_error: 0.0,
+        max_error,
+        worst,
     }
 }
 
@@ -435,6 +496,7 @@ pub fn shake_buffered(
             converged: true,
             iterations: 0,
             max_error: 0.0,
+            worst: None,
         };
     }
 
@@ -523,10 +585,24 @@ pub fn shake_buffered(
             (conf.current().pos[atom] - conf.old().pos[atom]) * (1.0 / dt);
     }
 
+    let (max_error, worst) = if converged {
+        (0.0, None)
+    } else {
+        worst_unsatisfied(
+            conf,
+            &pbc,
+            buffers
+                .solute_constraints
+                .iter()
+                .chain(buffers.solvent_constraints.iter()),
+        )
+    };
+
     ConstraintResult {
         converged,
         iterations: iteration,
-        max_error: 0.0,
+        max_error,
+        worst,
     }
 }
 
@@ -830,6 +906,7 @@ pub fn perturbed_shake(
         converged: max_error <= tolerance_sq,
         iterations: iteration,
         max_error: max_error.sqrt(),
+        worst: None,
     }
 }
 
@@ -859,6 +936,7 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
             converged: true,
             iterations: 0,
             max_error: 0.0,
+            worst: None,
         };
     }
 
@@ -1070,6 +1148,7 @@ pub fn settle(topo: &Topology, conf: &mut Configuration, dt: f64) -> ConstraintR
         converged: error_count == 0,
         iterations: 1,
         max_error,
+        worst: None,
     }
 }
 
@@ -1292,6 +1371,7 @@ pub fn lincs(
             converged: true,
             iterations: 0,
             max_error: 0.0,
+            worst: None,
         };
     }
 
@@ -1431,6 +1511,7 @@ pub fn lincs(
         converged: max_error < 1e-3, // Slightly relaxed convergence criterion
         iterations: params.order,
         max_error,
+        worst: None,
     }
 }
 
@@ -1485,6 +1566,7 @@ pub fn lincs_buffered(
             .order
             .max(buffers.solvent_params.order),
         max_error,
+        worst: None,
     }
 }
 
@@ -1654,6 +1736,7 @@ pub fn angle_constraints(
         converged: max_error <= tolerance_sq,
         iterations: iteration,
         max_error: max_error.sqrt(),
+        worst: None,
     }
 }
 
@@ -1784,6 +1867,7 @@ pub fn perturbed_angle_constraints(
         converged: max_error <= tolerance_sq,
         iterations: iteration,
         max_error: max_error.sqrt(),
+        worst: None,
     }
 }
 
@@ -1804,9 +1888,26 @@ mod tests {
             converged: true,
             iterations: 5,
             max_error: 1e-6,
+            worst: None,
         };
         assert!(result.converged);
         assert_eq!(result.iterations, 5);
+        assert_eq!(
+            result.worst_constraint(),
+            "no constraint was left unsatisfied"
+        );
+
+        let failed = ConstraintResult {
+            converged: false,
+            iterations: 1000,
+            max_error: 0.8171,
+            worst: Some((11, 12, 0.9421, 0.125)),
+        };
+        // atoms are 1-based in the message, as in every GROMOS file
+        assert_eq!(
+            failed.worst_constraint(),
+            "atom 12 - atom 13: 0.9421 nm, wants 0.1250 nm"
+        );
     }
 
     #[test]

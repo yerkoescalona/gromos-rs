@@ -27,6 +27,8 @@ from .gromos import (
     AlgorithmSequence,
     Configuration,
     Energy,
+    # .tre/.trg read through the energy library, shape kept
+    EnergyTrajectory,
     Frame,
     InputParameters,  # deprecated: Recipe.from_imd / Recipe.nve|nvt|npt|minimize
     Plan,
@@ -110,6 +112,7 @@ __all__ = [
     "XtbPotential",
     # Timeseries
     "EnergyTimeseries",
+    "EnergyTrajectory",
     # Meta
     "__version__",
 ]

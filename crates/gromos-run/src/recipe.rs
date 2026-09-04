@@ -421,6 +421,10 @@ pub struct ConstraintsSpec {
     pub solvent_shake_tolerance: f64,
     /// NTCS0 for LINCS
     pub lincs_order_solvent: usize,
+    /// ROTTRANS RTCLAST when RTC = 1: the six rigid-body degrees of freedom of atoms
+    /// `1..=rottrans_last` are constrained. `None` = no ROTTRANS block, or RTC = 0.
+    #[serde(default)]
+    pub rottrans_last: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -901,6 +905,7 @@ impl RunRecipe {
                 solvent_algorithm: ConstraintAlgorithm::from_code(imd.ntcs, "NTCS")?,
                 solvent_shake_tolerance: imd.ntcs0,
                 lincs_order_solvent: imd.lincs_order_solvent,
+                rottrans_last: (imd.rtc != 0 && imd.rtclast > 0).then_some(imd.rtclast),
             },
             ensemble: Ensemble {
                 thermostat,
@@ -991,6 +996,8 @@ impl RunRecipe {
             t0: r.control.t0,
             dt: r.control.dt,
             ntb: r.boundary.kind.ntb(),
+            rtc: i32::from(r.constraints.rottrans_last.is_some()),
+            rtclast: r.constraints.rottrans_last.unwrap_or(0),
             ndfmin: r.boundary.ndfmin,
             num_temp_baths: temp_bath.len(),
             temp_bath,

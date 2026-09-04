@@ -31,8 +31,8 @@ use gromos_integrators::{
         BerendsenBarostat, BerendsenBarostatParams, BerendsenThermostat, BerendsenThermostatParams,
         EnergyCalculation, Forcefield, LatticeShift, LeapFrogPosition, LeapFrogVelocity,
         LincsAlgorithm, NoseHooverThermostat, PressureCalculation, RemoveCOMMotion,
-        SettleAlgorithm, ShakeAlgorithm, SteepestDescentAlgorithm, TemperatureCalculation,
-        VirialType,
+        RottransConstraints, SettleAlgorithm, ShakeAlgorithm, SteepestDescentAlgorithm,
+        TemperatureCalculation, VirialType,
     },
     constraints::ShakeParameters,
 };
@@ -512,6 +512,7 @@ pub fn instantiate(
                 *constrain_solute,
                 *constrain_solvent,
             ))),
+            AlgorithmSpec::Rottrans { last } => seq.push(Box::new(RottransConstraints::new(*last))),
             AlgorithmSpec::SteepestDescent {
                 tolerance,
                 step0,

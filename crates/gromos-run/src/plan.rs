@@ -149,6 +149,12 @@ pub enum AlgorithmSpec {
         constrain_solute: bool,
         constrain_solvent: bool,
     },
+    /// ROTTRANS — constrain the six rigid-body degrees of freedom of the first `last` atoms.
+    /// Runs immediately after the distance constraints, as gromosXX creates it
+    /// (`create_constraints.cc:294`).
+    Rottrans {
+        last: usize,
+    },
     SteepestDescent {
         tolerance: f64,
         step0: f64,
@@ -230,6 +236,7 @@ impl AlgorithmSpec {
         "shake",
         "settle",
         "lincs",
+        "rottrans",
         "steepest_descent",
         "temperature_calculation",
         "pressure_calculation",
@@ -250,6 +257,7 @@ impl AlgorithmSpec {
             AlgorithmSpec::Shake { .. } => "shake",
             AlgorithmSpec::Settle => "settle",
             AlgorithmSpec::Lincs { .. } => "lincs",
+            AlgorithmSpec::Rottrans { .. } => "rottrans",
             AlgorithmSpec::SteepestDescent { .. } => "steepest_descent",
             AlgorithmSpec::TemperatureCalculation { .. } => "temperature_calculation",
             AlgorithmSpec::PressureCalculation { .. } => "pressure_calculation",
@@ -317,6 +325,7 @@ impl AlgorithmSpec {
                 constrain_solute: true,
                 constrain_solvent: false,
             },
+            AlgorithmSpec::Rottrans { last: 1 },
             AlgorithmSpec::SteepestDescent {
                 tolerance: 0.1,
                 step0: 0.01,
@@ -382,6 +391,12 @@ impl AlgorithmSpec {
                 ..NONE
             },
             "shake" | "settle" | "lincs" => KindRules {
+                unique: true,
+                after: &["forcefield"],
+                before: &["temperature_calculation", "energy_calculation"],
+                ..NONE
+            },
+            "rottrans" => KindRules {
                 unique: true,
                 after: &["forcefield"],
                 before: &["temperature_calculation", "energy_calculation"],
@@ -717,6 +732,9 @@ pub fn build_plan(
                 constrain_solute: sel.solute_lincs,
                 constrain_solvent: sel.solvent_lincs,
             });
+        }
+        if let Some(last) = recipe.constraints.rottrans_last {
+            plan.push(AlgorithmSpec::Rottrans { last });
         }
     };
 

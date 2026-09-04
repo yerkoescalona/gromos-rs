@@ -145,8 +145,12 @@ struct FreeEnergyFrame {
 }
 
 fn parse_freeenergy03(path: &Path) -> Vec<FreeEnergyFrame> {
-    gromos_io::read_free_energy_trajectory(path)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    let traj = gromos_io::read_free_energy_trajectory(path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    for w in &traj.warnings {
+        eprintln!("{}: {w}", path.display());
+    }
+    traj.frames
         .into_iter()
         .map(|f| FreeEnergyFrame {
             time: f.time,

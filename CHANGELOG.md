@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.48] (2026-09-04)
+
+**LiveCoMS tutorial 2 (double decoupling: ASA in water and bound to PLA2) started.** Its
+equilibration input runs on the tutorial's own files with step-0 energies identical to md++
+2023-04-15, and a 20-step run tracks md++'s trajectory to 4×10⁻¹⁶ nm. Two things it took: the
+charge-group gathering below, and modelling `ROTTRANS`. The TI production runs still need
+`PRECALCLAM`.
+
+### Fixed
+
+- **Charge groups are gathered on reading a configuration** (`gromos_core::gather::
+  gather_chargegroups`), as gromosXX does in `Configuration::init`. Every GROMOS tool writes a
+  configuration with the molecules put *back into the box*, so a charge group straddles the
+  boundary; its centre of geometry — which the charge-group pairlist uses as the cutoff unit —
+  then lands in empty space and the wrong neighbours are classified as far away. On the LiveCoMS
+  tutorial-2 system that put 189 486 kJ/mol of spurious Lennard-Jones energy into the long-range
+  solute set and SHAKE failed at step 0. With the gather, the step-0 energies equal md++'s exactly
+  and a 20-step run tracks its trajectory to 4×10⁻¹⁶ nm. No reference system had a split charge
+  group, which is why nothing caught it; a twin-range chargegroup cutoff (`RCUTP` < `RCUTL`) is
+  what makes it fatal rather than merely wrong.
+
+### Added
+
+- **`ROTTRANS` — roto-translational constraints** (`RottransConstraints`, `rottrans.cc`): the six
+  rigid-body degrees of freedom of atoms `1..=RTCLAST` constrained after SHAKE, so a solute
+  neither drifts nor tumbles once its position restraints are released. `RTC`/`RTCLAST` are read
+  and written; the algorithm is in the plan as `rottrans`. It is *not* bit-exact against md++
+  yet: the step-0 potential energy matches to the printed precision and the kinetic energy to
+  1.6×10⁻⁶ relative, but the reference orientation `init` stores differs slightly. `NTIRTC = 0`
+  (continue from the configuration's `ROTTRANSREFPOS`) is unsupported — the block is neither read
+  nor written.
+- **SHAKE names the constraint it could not satisfy**: `SHAKE failed to converge after 1000
+  iterations (atom 1 - atom 2: 2.5806 nm, wants 0.1250 nm)` instead of the iteration count alone
+  (`ConstraintResult::worst`). This is what made the charge-group bug findable in one run.
+- **`gromos.EnergyTrajectory`** — a `.tre`/`.trg` read from Python through the energy library,
+  keeping the shape the library declares rather than only the scalar totals `Simulation.run()`
+  reports: `table("NONBONDED")` is `(n_frames, n_pairs, 6)`, `group_pairs` names its rows as the
+  energy-group pairs in gromosXX's order, `to_long()` is the tidy form a `group_by` wants, and
+  `warnings` says which tier established the layout. The per-pair Lennard-Jones column sums to
+  `totlj`, which is the re-partition workflow the library exists for (PLAN.md 2.10).
+- **`.trg` files are read through the library too**: `read_free_energy_trajectory` binds the
+  built-in one and returns a `FreeEnergyTrajectory` (frames plus layout warnings), so `ext_ti_ana`
+  and the FEP reference harness get the tier checks — a `.trg` one value short of the layout it
+  claims is an error now, not dH/dλ from the wrong slot. `dhdl_special` is read (it was hard-wired
+  to zero). The pre-0.0.33 one-line `FREEENERGY03` block keeps its own path, without checks.
+
 ## [0.0.47] (2026-09-03)
 
 **Energy library profile, version 1, implemented** — `docs/src/reference/energy-library.md`, all

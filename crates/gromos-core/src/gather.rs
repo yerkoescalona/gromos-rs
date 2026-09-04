@@ -135,6 +135,73 @@ pub fn gather_molecules(
     }
 }
 
+/// Make every charge group whole around its own first atom, as gromosXX does when it reads a
+/// configuration (`math::Periodicity::gather_chargegroups`, called from `Configuration::init`
+/// for every periodic box).
+///
+/// The first atom is put into the box, then every atom of the group is placed at its nearest
+/// image of *that*. A configuration written with the molecules put back into the box — what
+/// every GROMOS tool produces — has charge groups split across the boundary; their centre of
+/// geometry then lands in empty space, and a charge-group-based pairlist built on it classifies
+/// the wrong neighbours as far away. Gathering first is what makes the centre meaningful.
+///
+/// "Into the box" is gromosXX's `Periodicity::put_into_box` — the nearest image of the origin,
+/// i.e. the `[-L/2, L/2]` range, not this crate's `[0, L)` `put_into_box`. Which image a group
+/// sits in changes no energy or force, but it *is* what a roto-translational constraint stores
+/// as its reference orientation, so the convention has to be the one gromosXX uses.
+///
+/// A no-op for a configuration whose charge groups are already whole and inside the box.
+pub fn gather_chargegroups(
+    positions: &mut [Vec3],
+    chargegroups: &[crate::topology::ChargeGroup],
+    periodicity: &Periodicity,
+) {
+    for cg in chargegroups {
+        let atoms = &cg.atoms;
+        let Some(&first) = atoms.first() else {
+            continue;
+        };
+        let anchor = into_box(periodicity, positions[first]);
+        for &a in atoms {
+            positions[a] = anchor + periodicity.nearest_image(positions[a], anchor);
+        }
+    }
+}
+
+/// gromosXX's `Periodicity::put_into_box`: the nearest image of the origin, so each component
+/// lands in `[-L/2, L/2]` (`periodicity.cc:38`). This crate's `Periodicity::put_into_box` uses
+/// the `[0, L)` convention instead, which is a different image of the same point.
+fn into_box(periodicity: &Periodicity, v: Vec3) -> Vec3 {
+    periodicity.nearest_image(v, Vec3::ZERO)
+}
+
+/// Translate every charge group so that its centre of geometry (its first atom, for solvent) is
+/// inside the box — gromosXX `put_chargegroups_into_box` (`periodicity.cc:58`). Unlike
+/// [`gather_chargegroups`] this never changes a group's internal geometry; it only chooses the
+/// image the whole group sits in.
+pub fn put_chargegroups_into_box(
+    positions: &mut [Vec3],
+    chargegroups: &[crate::topology::ChargeGroup],
+    n_solute_chargegroups: usize,
+    periodicity: &Periodicity,
+) {
+    for (k, cg) in chargegroups.iter().enumerate() {
+        let Some(&first) = cg.atoms.first() else {
+            continue;
+        };
+        // solute: the centre of geometry; solvent: the first atom, as gromosXX does
+        let v = if k < n_solute_chargegroups {
+            cg.center_of_geometry(positions)
+        } else {
+            positions[first]
+        };
+        let trans = into_box(periodicity, v) - v;
+        for &a in &cg.atoms {
+            positions[a] += trans;
+        }
+    }
+}
+
 /// Centre of geometry of a set of atoms.
 pub fn centre_of_geometry(positions: &[Vec3], indices: &[usize]) -> Vec3 {
     if indices.is_empty() {

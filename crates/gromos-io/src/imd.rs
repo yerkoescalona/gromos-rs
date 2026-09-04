@@ -147,6 +147,10 @@ pub struct ImdParameters {
     pub ntpors: i32,
     /// Position restraint force constant (kJ mol⁻¹ nm⁻²)
     pub cpor: f64,
+    /// ROTTRANS: RTC — roto-translational constraints on (1) or off (0)
+    pub rtc: i32,
+    /// ROTTRANS: RTCLAST — last atom (1-based) of the constrained group
+    pub rtclast: usize,
 
     // DISTANCERES block
     /// NTDIR: -2=time-avg+force, -1=time-avg, 0=off, 1=instantaneous, 2=instantaneous+w0
@@ -384,6 +388,8 @@ impl Default for ImdParameters {
             dxm: 0.05,
             flim: 0.0,
             ntirtc: 0,
+            rtc: 0,
+            rtclast: 0,
             ntisti: 0,
             ntwse: 0,
             ntwg: 0,
@@ -921,6 +927,15 @@ fn parse_block(
             let mut t = Tokens::new("COMTRANSROT", data_lines);
             if let Some(v) = t.next_i32("NSCM")? {
                 params.nscm = v;
+            }
+        },
+        "ROTTRANS" => {
+            let mut t = Tokens::new("ROTTRANS", data_lines);
+            if let Some(v) = t.next_i32("RTC")? {
+                params.rtc = v;
+            }
+            if let Some(v) = t.next_usize("RTCLAST")? {
+                params.rtclast = v;
             }
         },
         "POSITIONRES" => {

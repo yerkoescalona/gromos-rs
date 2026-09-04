@@ -12,6 +12,7 @@ __all__ = [
     "AlgorithmSequence",
     "Configuration",
     "Energy",
+    "EnergyTrajectory",
     "Frame",
     "InputParameters",
     "MissingFeatureError",
@@ -85,6 +86,67 @@ class Energy:
     @property
     def coulomb(self) -> float: ...
     def __repr__(self) -> str: ...
+
+# =============================================================================
+# EnergyTrajectory
+# =============================================================================
+
+@final
+class EnergyTrajectory:
+    """A `.tre`/`.trg` read through the energy library, with the shape it declares.
+
+    The layout is established before any value is believed: the file's own
+    self-description if it has one, else the built-in layout for its `ENEVERSION`,
+    else the library on trust — `warnings` says which
+    (`docs/src/reference/energy-library.md`).
+    """
+
+    def __new__(
+        cls,
+        path: str,
+        library: str | None = None,
+        properties: list[str] | None = None,
+        free_energy: bool = False,
+    ) -> Self: ...
+    def __len__(self) -> int: ...
+    def __repr__(self) -> str: ...
+    def __getitem__(self, name: str, /) -> npt.NDArray[np.float64]:
+        """One requested property over every frame."""
+        ...
+
+    @property
+    def times(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def steps(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def warnings(self) -> list[str]: ...
+    @property
+    def version(self) -> str | None: ...
+    @property
+    def profile_version(self) -> int: ...
+    @property
+    def n_energy_groups(self) -> int: ...
+    @property
+    def n_baths(self) -> int: ...
+    @property
+    def subblocks(self) -> list[str]: ...
+    @property
+    def group_pairs(self) -> list[tuple[int, int]]:
+        """The 0-based energy-group pair of each row of a `matrix_`-sized subblock."""
+        ...
+
+    def table(self, name: str) -> npt.NDArray[np.float64]:
+        """One subblock over every frame: `(n_frames, rows, cols)`."""
+        ...
+
+    def to_long(self, name: str) -> dict[str, npt.NDArray[Any]]:
+        """Tidy columns of one subblock: frame, time, row, col, group_i, group_j, value."""
+        ...
+
+    def to_dict(self) -> dict[str, npt.NDArray[np.float64]]: ...
+    def last(self, name: str) -> npt.NDArray[np.float64]:
+        """The last frame of a subblock, `(rows, cols)`."""
+        ...
 
 # =============================================================================
 # Frame
@@ -216,6 +278,7 @@ _AlgorithmKind = Literal[
     "shake",
     "settle",
     "lincs",
+    "rottrans",
     "steepest_descent",
     "temperature_calculation",
     "pressure_calculation",
