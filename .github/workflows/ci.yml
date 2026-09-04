@@ -158,7 +158,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Unix only — see the note in test-rust.yml.
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -193,14 +194,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build Rust release (Unix with all features)
-        if: matrix.os != 'windows-latest'
+      - name: Build Rust release (all features)
         run: cargo build --release --workspace --all-features
-        continue-on-error: true
-
-      - name: Build Rust release (Windows without MPI/FFTW)
-        if: matrix.os == 'windows-latest'
-        run: cargo build --release --workspace --features simd,mimalloc
         continue-on-error: true
 
       - name: Install uv
@@ -209,16 +204,9 @@ jobs:
       - name: Install maturin
         run: uv pip install --system maturin
 
-      - name: Build Python wheel (Unix with all features)
-        if: matrix.os != 'windows-latest'
+      - name: Build Python wheel (all features)
         working-directory: py-gromos
         run: maturin build --release --features gromos-rs/use-fftw,gromos-rs/use-mpi
-        continue-on-error: true
-
-      - name: Build Python wheel (Windows without MPI/FFTW)
-        if: matrix.os == 'windows-latest'
-        working-directory: py-gromos
-        run: maturin build --release
         continue-on-error: true
 
       - name: Upload wheels

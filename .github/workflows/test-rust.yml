@@ -32,7 +32,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Unix only. gromos++ names output files after atom specifiers (`MIN_1:1.dat`), and
+        # `:` cannot exist in a Windows filename, so a faithful port cannot run there.
+        os: [ubuntu-latest, macos-latest]
         rust: [stable]
         include:
           - os: ubuntu-latest
@@ -76,44 +78,20 @@ jobs:
         run: cargo fmt --all -- --check
         continue-on-error: true
 
-      - name: Clippy (Unix with all features)
-        if: matrix.os != 'windows-latest'
+      - name: Clippy (all features)
         run: cargo clippy --workspace --all-features --all-targets -- -W warnings -A clippy::upper_case_acronyms -A non_snake_case
         continue-on-error: true
 
-      - name: Clippy (Windows without MPI/FFTW)
-        if: matrix.os == 'windows-latest'
-        run: cargo clippy --workspace --features simd,mimalloc --all-targets -- -W warnings -A clippy::upper_case_acronyms -A non_snake_case
-        continue-on-error: true
-
-      - name: Build (Unix with all features)
-        if: matrix.os != 'windows-latest'
+      - name: Build (all features)
         run: cargo build --workspace --all-features
         continue-on-error: true
 
-      - name: Build (Windows without MPI/FFTW)
-        if: matrix.os == 'windows-latest'
-        run: cargo build --workspace --features simd,mimalloc
-        continue-on-error: true
-
-      - name: Test (Unix with all features)
-        if: matrix.os != 'windows-latest'
+      - name: Test (all features)
         run: cargo test --workspace --all-features -- --nocapture
         continue-on-error: true
 
-      - name: Test (Windows without MPI/FFTW)
-        if: matrix.os == 'windows-latest'
-        run: cargo test --workspace --features simd,mimalloc -- --nocapture
-        continue-on-error: true
-
-      - name: Test (release mode, Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Test (release mode)
         run: cargo test --workspace --all-features --release
-        continue-on-error: true
-
-      - name: Test (release mode, Windows)
-        if: matrix.os == 'windows-latest'
-        run: cargo test --workspace --features simd,mimalloc --release
         continue-on-error: true
 
       - name: Doc tests

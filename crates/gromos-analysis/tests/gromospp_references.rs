@@ -123,6 +123,7 @@ fn mdf_matches_gromospp() {
         .collect::<Vec<_>>(),
         Some(&dir),
     );
+    // The `:` is gromos++'s atom specifier, in its output filenames and so in ours.
     for name in ["MIN_1:1", "MIN_1:6"] {
         let ours = std::fs::read_to_string(dir.join(format!("{name}.dat"))).unwrap();
         let theirs =
