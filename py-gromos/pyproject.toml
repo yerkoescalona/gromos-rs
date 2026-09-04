@@ -153,6 +153,9 @@ ignore = [
     "ARG",  # Unused function args in tests
     "S101", # Use of assert detected
 ]
+# A design sketch: minimize() and equilibrate() raise NotImplementedError, so the
+# parameters that are the point of the sketch read as unused.
+"python/gromos/system_builder.py" = ["ARG002"]
 [tool.ruff.lint.isort]
 known-first-party = ["gromos"]
 

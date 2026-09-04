@@ -384,9 +384,7 @@ class Recipe:
     @staticmethod
     def nve(dt: float, steps: int, constraints: str = "none") -> Recipe: ...
     @staticmethod
-    def nvt(
-        dt: float, steps: int, temperature: float, constraints: str = "none"
-    ) -> Recipe: ...
+    def nvt(dt: float, steps: int, temperature: float, constraints: str = "none") -> Recipe: ...
     @staticmethod
     def npt(
         dt: float,
@@ -526,13 +524,9 @@ class Simulation:
         ml_buffer: str | None = None,
     ) -> Self: ...
     @staticmethod
-    def from_files(
-        topo_file: str, conf_file: str, input_file: str
-    ) -> Simulation: ...
+    def from_files(topo_file: str, conf_file: str, input_file: str) -> Simulation: ...
     @staticmethod
-    def from_bundle(
-        path: str, allow_passthrough: list[str] | None = None
-    ) -> Simulation:
+    def from_bundle(path: str, allow_passthrough: list[str] | None = None) -> Simulation:
         """Everything from a run bundle (``input.toml``): topology, coordinates, recipe."""
         ...
     @staticmethod
@@ -545,9 +539,7 @@ class Simulation:
         """Deprecated: ``Simulation(System(topo, conf), recipe, plan=sequence)``."""
         ...
     def step(self, n_steps: int) -> None: ...
-    def run(
-        self, n_steps: int, ene_freq: int = 100
-    ) -> npt.NDArray[np.float64]: ...
+    def run(self, n_steps: int, ene_freq: int = 100) -> npt.NDArray[np.float64]: ...
     @property
     def time(self) -> float: ...
     @property
@@ -675,7 +667,6 @@ def rmsd(
     positions: npt.NDArray[np.float32],
     reference: npt.NDArray[np.float32],
 ) -> float: ...
-
 def rdf(
     positions: npt.NDArray[np.float32],
     group1: list[int],
@@ -693,12 +684,8 @@ class SchNetPotential:
     """A trained SchNetPack 2 TorchScript model, to be attached to a
     `Simulation`'s QM/ML zone via `ml_potential=`/`ml_region=`/`ml_buffer=`."""
 
-    def __new__(
-        cls, model_path: str, cutoff: float, elements: list[int]
-    ) -> Self: ...
-    def evaluate(
-        self, positions: npt.NDArray[np.float64]
-    ) -> tuple[float, npt.NDArray[np.float64]]:
+    def __new__(cls, model_path: str, cutoff: float, elements: list[int]) -> Self: ...
+    def evaluate(self, positions: npt.NDArray[np.float64]) -> tuple[float, npt.NDArray[np.float64]]:
         """Real model energy (kJ/mol) and forces (kJ/mol/nm) for an Nx3
         positions array (nm) — a standalone call, not via a Simulation."""
         ...
@@ -718,9 +705,7 @@ class XtbPotential:
         charge: int = 0,
         multiplicity: int = 1,
     ) -> Self: ...
-    def evaluate(
-        self, positions: npt.NDArray[np.float64]
-    ) -> tuple[float, npt.NDArray[np.float64]]:
+    def evaluate(self, positions: npt.NDArray[np.float64]) -> tuple[float, npt.NDArray[np.float64]]:
         """Real xtb energy (kJ/mol) and forces (kJ/mol/nm) for an Nx3
         positions array (nm) — isolated cluster, vacuum, Embedding::None."""
         ...

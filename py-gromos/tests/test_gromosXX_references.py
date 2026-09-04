@@ -361,7 +361,7 @@ def test_reference_energies(system_name):
         f"{system_name}: frame count mismatch: {len(actual)} vs {n_expected}"
     )
 
-    for i, (act, exp) in enumerate(zip(actual, expected)):
+    for i, (act, exp) in enumerate(zip(actual, expected, strict=True)):
         for key in ["total", "kinetic", "potential"]:
             a, e = act[key], exp[key]
             if abs(e) > 1e-10:
@@ -420,7 +420,7 @@ def test_reference_positions(system_name):
         f"{system_name}: position frame count mismatch: {len(actual)} vs {n_expected}"
     )
 
-    for i, (act, exp) in enumerate(zip(actual, expected)):
+    for i, (act, exp) in enumerate(zip(actual, expected, strict=True)):
         diff = act - exp
         # Apply minimum image convention for periodic systems
         if box_dims.min() > 0:
@@ -470,7 +470,7 @@ def test_reference_forces(system_name):
         f"{system_name}: force frame count mismatch: {len(actual)} vs {n_expected}"
     )
 
-    for i, (act, exp) in enumerate(zip(actual, expected)):
+    for i, (act, exp) in enumerate(zip(actual, expected, strict=True)):
         diff = np.abs(act - exp)
         max_diff = diff.max()
         assert max_diff < FORCE_ABS_TOL, f"{system_name} frame {i}: max force diff = {max_diff:.2e}"
@@ -511,9 +511,9 @@ def test_system_constructor_matches_file_constructor():
     assert sim_new.kinetic_energy == pytest.approx(sim_old.kinetic_energy, rel=ENERGY_REL_TOL), (
         f"kinetic energy: {sim_new.kinetic_energy} vs {sim_old.kinetic_energy}"
     )
-    assert sim_new.potential_energy == pytest.approx(sim_old.potential_energy, rel=ENERGY_REL_TOL), (
-        f"potential energy: {sim_new.potential_energy} vs {sim_old.potential_energy}"
-    )
+    assert sim_new.potential_energy == pytest.approx(
+        sim_old.potential_energy, rel=ENERGY_REL_TOL
+    ), f"potential energy: {sim_new.potential_energy} vs {sim_old.potential_energy}"
 
 
 def test_factory_nvt_properties():
@@ -536,9 +536,7 @@ def test_factory_constraints_knob():
     assert InputParameters.nve(0.001, 10, constraints="hbonds").constraints == "hbonds"
 
     assert InputParameters.nvt(0.001, 10, 300.0, constraints="allbonds").ntc == 3
-    assert (
-        InputParameters.npt(0.001, 10, 300.0, 1.0, constraints="hbonds").ntc == 2
-    )
+    assert InputParameters.npt(0.001, 10, 300.0, 1.0, constraints="hbonds").ntc == 2
 
     with pytest.raises(ValueError):
         InputParameters.nve(0.001, 10, constraints="bogus")
@@ -622,7 +620,11 @@ def test_steepest_descent_via_algorithm_sequence():
 
     seq_direct = AlgorithmSequence.minimize(system.topology, params)
     seq_auto = AlgorithmSequence.from_parameters(system.topology, params)
-    assert seq_direct.kinds == seq_auto.kinds == ["forcefield", "steepest_descent", "energy_calculation"]
+    assert (
+        seq_direct.kinds
+        == seq_auto.kinds
+        == ["forcefield", "steepest_descent", "energy_calculation"]
+    )
 
     sim = Simulation.from_sequence(system.topology, system.configuration, params, seq_auto)
     frames = sim.run(30, ene_freq=1)

@@ -6,10 +6,10 @@ Quick start
 >>> from gromos import System, Recipe, Simulation
 >>>
 >>> system = System.from_files("water_216.topo", "equilibrated.cnf")
->>> recipe = Recipe.nvt(dt=0.002, steps=1000, temperature=300.0)   # or Recipe.from_imd("run.imd")
->>> sim    = Simulation(system, recipe)
+>>> recipe = Recipe.nvt(dt=0.002, steps=1000, temperature=300.0)  # or Recipe.from_imd("run.imd")
+>>> sim = Simulation(system, recipe)
 >>> sim.step(1000)
->>> print(sim.total_energy)   # kJ/mol
+>>> print(sim.total_energy)  # kJ/mol
 
 The recipe is the one description of a run — the same data a GROMOS ``.imd`` file carries,
 grouped by concern (``recipe.control``, ``.ensemble``, ``.constraints`` …), plus additive
@@ -68,7 +68,6 @@ from .exceptions import MissingFeatureError, PlanError, RecipeError, RunError
 # `gromos.analysis` (subprocess wrappers around gromos++ programs, mostly stubs) and
 # `gromos.system_builder` (design sketch) stay importable explicitly — `import gromos.analysis` —
 # but are not part of the default namespace.
-
 # ── Energy timeseries wrapper for Simulation.run() ────────────────────────────
 from .timeseries import EnergyTimeseries
 

@@ -21,7 +21,6 @@ determinism at a fixed thread count is measured by ``scripts/kernel_determinism.
 (BENCHMARKING.md).
 """
 
-
 from __future__ import annotations
 
 import re
@@ -146,7 +145,9 @@ def _assert_identical(label: str, a, b) -> None:
 @pytest.mark.parametrize("system_name", [pytest.param(s, id=s) for s in REFERENCE_SYSTEMS])
 def test_same_path_twice(system_name):
     """Determinism baseline (A3): the same construction path twice must be bit-identical."""
-    _assert_identical(f"{system_name}: path A vs path A", _run_path_a(system_name), _run_path_a(system_name))
+    _assert_identical(
+        f"{system_name}: path A vs path A", _run_path_a(system_name), _run_path_a(system_name)
+    )
 
 
 @pytest.mark.parametrize("system_name", [pytest.param(s, id=s) for s in REFERENCE_SYSTEMS])
@@ -201,7 +202,9 @@ def test_every_kind_has_a_parity_case():
     stale = set(UNCOVERED_KINDS) - registry
     assert not stale, f"UNCOVERED_KINDS names kinds the engine no longer has: {sorted(stale)}"
     no_longer_needed = set(UNCOVERED_KINDS) & covered
-    assert not no_longer_needed, f"remove from UNCOVERED_KINDS, now covered: {sorted(no_longer_needed)}"
+    assert not no_longer_needed, (
+        f"remove from UNCOVERED_KINDS, now covered: {sorted(no_longer_needed)}"
+    )
     missing = registry - covered - set(UNCOVERED_KINDS)
     assert not missing, f"algorithm kinds no reference system exercises: {sorted(missing)}"
 

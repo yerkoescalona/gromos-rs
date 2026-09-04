@@ -48,7 +48,8 @@ DISTRES = REF_DIR / "nacl_1water_distres"
 def _paths(system_dir: Path) -> tuple[str, str, str]:
     inputs = _parse_input_toml(system_dir)
     return tuple(
-        str((system_dir / inputs[key]).resolve()) for key in ("topology", "configuration", "parameters")
+        str((system_dir / inputs[key]).resolve())
+        for key in ("topology", "configuration", "parameters")
     )
 
 
@@ -99,7 +100,9 @@ def test_diagnostics_report_absent_blocks():
     topo, conf, params = _load(NOBATH)
     sim = Simulation(topo, conf, params)
     notes = sim.diagnostics
-    assert any("MULTIBATH block absent" in n and "no temperature coupling" in n for n in notes), notes
+    assert any("MULTIBATH block absent" in n and "no temperature coupling" in n for n in notes), (
+        notes
+    )
     # …and the plan indeed has no thermostat.
     kinds = [e["kind"] for e in json.loads(sim.plan_json)]
     assert "thermostat" not in kinds
@@ -154,8 +157,17 @@ def test_recipe_round_trips_losslessly():
     assert pickle.loads(pickle.dumps(recipe)) == recipe
     # The groups are plain dicts of the recipe's own fields; the .imd is what gromosXX runs.
     assert set(recipe.to_dict()) >= {
-        "version", "title", "system", "control", "boundary", "forcefield", "constraints",
-        "ensemble", "outputs", "execution", "inputs",
+        "version",
+        "title",
+        "system",
+        "control",
+        "boundary",
+        "forcefield",
+        "constraints",
+        "ensemble",
+        "outputs",
+        "execution",
+        "inputs",
     }
     assert recipe.control["steps"] > 0 and recipe.control["dt"] > 0
     assert recipe.control == recipe.to_dict()["control"]
@@ -316,7 +328,9 @@ def test_deprecated_forms_warn_and_are_translations():
     distrest = str((DISTRES / inputs["distrest"]).resolve())
     topo_d, conf_d, params_d = _paths(DISTRES)
     with pytest.warns(DeprecationWarning, match="with_inputs"):
-        shimmed = Simulation(System.from_files(topo_d, conf_d), Recipe.from_imd(params_d), distrest=distrest)
+        shimmed = Simulation(
+            System.from_files(topo_d, conf_d), Recipe.from_imd(params_d), distrest=distrest
+        )
     assert shimmed.recipe.inputs["distrest"] == distrest
     assert shimmed.recipe == Recipe.from_imd(params_d).with_inputs(distrest=distrest)
 

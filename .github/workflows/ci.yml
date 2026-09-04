@@ -55,7 +55,6 @@ jobs:
         run: |
           uv run ruff check python/ tests/
           uv run ruff format --check python/ tests/
-        continue-on-error: true
 
   lint:
     name: Lint
@@ -103,7 +102,6 @@ jobs:
       - name: Lint Python
         working-directory: py-gromos
         run: uv run ruff check python/ tests/
-        continue-on-error: true
 
   test-integration:
     name: Integration Tests

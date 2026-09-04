@@ -16,7 +16,7 @@ globally via `gromos.timeseries.config.dataframe_backend = "pandas"`.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Union
 
 import numpy as np
 
@@ -62,9 +62,9 @@ class EnergyTimeseries:
     array([...])
     >>> ts.block_average("total", block_size=5)
     (mean, error)
-    >>> ts.plot("bond", "angle")          # plotly by default
+    >>> ts.plot("bond", "angle")  # plotly by default
     >>> ts.plot("total", backend="matplotlib")
-    >>> ts.to_dataframe()                 # polars by default
+    >>> ts.to_dataframe()  # polars by default
     """
 
     def __init__(self, array: np.ndarray):
@@ -87,7 +87,7 @@ class EnergyTimeseries:
         """The raw `(n_frames, 13)` numpy array."""
         return self._array
 
-    def to_dataframe(self, backend: Union[str, None] = None) -> Union["object", Dict[str, np.ndarray]]:
+    def to_dataframe(self, backend: str | None = None) -> Union["object", dict[str, np.ndarray]]:
         """Return a dataframe of the timeseries.
 
         `backend` is one of `"polars"`, `"pandas"`, `"dict"` (default:
@@ -95,7 +95,9 @@ class EnergyTimeseries:
         """
         backend = backend or config.dataframe_backend
         if backend not in DATAFRAME_BACKENDS:
-            raise ValueError(f"unknown dataframe backend: {backend!r}, expected one of {DATAFRAME_BACKENDS}")
+            raise ValueError(
+                f"unknown dataframe backend: {backend!r}, expected one of {DATAFRAME_BACKENDS}"
+            )
 
         if backend == "polars":
             try:
@@ -119,7 +121,7 @@ class EnergyTimeseries:
 
         return {col: self._array[:, i] for i, col in enumerate(COLUMNS)}
 
-    def plot(self, *components: str, backend: Union[str, None] = None):
+    def plot(self, *components: str, backend: str | None = None):
         """Plot one or more energy components against time.
 
         `backend` is one of `"plotly"`, `"matplotlib"` (default:
@@ -148,7 +150,12 @@ class EnergyTimeseries:
             fig = go.Figure()
             for component in components:
                 fig.add_trace(
-                    go.Scatter(x=time, y=self._array[:, COLUMNS.index(component)], mode="lines", name=component)
+                    go.Scatter(
+                        x=time,
+                        y=self._array[:, COLUMNS.index(component)],
+                        mode="lines",
+                        name=component,
+                    )
                 )
             fig.update_layout(xaxis_title="time (ps)", yaxis_title="energy (kJ/mol)")
             return fig
@@ -183,9 +190,7 @@ class EnergyTimeseries:
         values = self._array[:, COLUMNS.index(component)]
         n_blocks = len(values) // block_size
         if n_blocks < 1:
-            raise ValueError(
-                f"not enough frames ({len(values)}) for block_size={block_size}"
-            )
+            raise ValueError(f"not enough frames ({len(values)}) for block_size={block_size}")
 
         blocks = values[: n_blocks * block_size].reshape(n_blocks, block_size)
         block_means = blocks.mean(axis=1)

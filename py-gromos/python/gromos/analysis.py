@@ -21,10 +21,9 @@ Categories
 """
 
 import subprocess
-import os
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Tuple
+
 import numpy as np
 
 
@@ -44,7 +43,7 @@ def _find_gromos_bin() -> Path:
 
 
 def _run_gromos_program(
-    program: str, args: List[str], capture_output: bool = True
+    program: str, args: list[str], capture_output: bool = True
 ) -> subprocess.CompletedProcess:
     """Run a GROMOS program and return the result."""
     bin_dir = _find_gromos_bin()
@@ -61,7 +60,7 @@ def _run_gromos_program(
         raise FileNotFoundError(
             f"GROMOS program '{program}' not found. "
             "Make sure gromos-rs is built with 'cargo build --release'"
-        )
+        ) from None
 
 
 # ==============================================================================
@@ -73,8 +72,8 @@ def rmsd(
     trajectory: str,
     reference_frame: int = 0,
     atom_selection: str = "all",
-    output: Optional[str] = None,
-) -> Dict[str, np.ndarray]:
+    output: str | None = None,
+) -> dict[str, np.ndarray]:
     """
     Calculate RMSD (Root Mean Square Deviation) over trajectory.
 
@@ -98,9 +97,8 @@ def rmsd(
     --------
     >>> result = gromos.analysis.rmsd("md.trc", reference_frame=0)
     >>> import matplotlib.pyplot as plt
-    >>> plt.plot(result['time'], result['rmsd'])
+    >>> plt.plot(result["time"], result["rmsd"])
     """
-    from .gromos import calculate_rmsd as _native_rmsd
 
     # Use native implementation if available
     # For now, use the existing binding
@@ -108,8 +106,8 @@ def rmsd(
 
 
 def rmsf(
-    trajectory: str, atom_selection: str = "all", skip_frames: int = 0, output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    trajectory: str, atom_selection: str = "all", skip_frames: int = 0, output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Calculate RMSF (Root Mean Square Fluctuation).
 
@@ -129,14 +127,13 @@ def rmsf(
     dict
         Dictionary with 'atom_indices' and 'rmsf' arrays
     """
-    from .gromos import calculate_rmsf as _native_rmsf
 
     raise NotImplementedError("Use gromos.calculate_rmsf() for now")
 
 
 def cluster(
-    trajectory: str, cutoff: float = 0.15, method: str = "gromos", output: Optional[str] = None
-) -> Dict:
+    trajectory: str, cutoff: float = 0.15, method: str = "gromos", output: str | None = None
+) -> dict:
     """
     Perform trajectory clustering.
 
@@ -171,7 +168,7 @@ def cluster(
     return {"clusters": [], "centers": [], "populations": [], "output": result.stdout}
 
 
-def distmat(trajectory: str, output: Optional[str] = None) -> np.ndarray:
+def distmat(trajectory: str, output: str | None = None) -> np.ndarray:
     """
     Calculate pairwise RMSD distance matrix.
 
@@ -191,21 +188,21 @@ def distmat(trajectory: str, output: Optional[str] = None) -> np.ndarray:
     --------
     >>> dist_matrix = gromos.analysis.distmat("md.trc")
     >>> import matplotlib.pyplot as plt
-    >>> plt.imshow(dist_matrix, cmap='viridis')
+    >>> plt.imshow(dist_matrix, cmap="viridis")
     """
     args = ["@traj", trajectory]
     if output:
         args.extend(["@output", output])
 
-    result = _run_gromos_program("distmat", args)
+    _run_gromos_program("distmat", args)
 
     # Would parse the output file to return numpy array
     return np.array([[]])
 
 
 def rgyr(
-    trajectory: str, atom_selection: str = "all", output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    trajectory: str, atom_selection: str = "all", output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Calculate radius of gyration over trajectory.
 
@@ -223,12 +220,11 @@ def rgyr(
     dict
         Dictionary with 'time' and 'rgyr' arrays
     """
-    from .gromos import calculate_rgyr as _native_rgyr
 
     raise NotImplementedError("Use gromos.calculate_rgyr() for now")
 
 
-def dssp(trajectory: str, output: Optional[str] = None) -> Dict:
+def dssp(trajectory: str, output: str | None = None) -> dict:
     """
     Calculate secondary structure using DSSP algorithm.
 
@@ -272,8 +268,8 @@ def hbond(
     trajectory: str,
     distance_cutoff: float = 0.25,
     angle_cutoff: float = 135.0,
-    output: Optional[str] = None,
-) -> Dict:
+    output: str | None = None,
+) -> dict:
     """
     Analyze hydrogen bonds in trajectory.
 
@@ -313,8 +309,8 @@ def rdf(
     atom_selection2: str,
     bin_width: float = 0.002,
     max_distance: float = 1.5,
-    output: Optional[str] = None,
-) -> Dict[str, np.ndarray]:
+    output: str | None = None,
+) -> dict[str, np.ndarray]:
     """
     Calculate radial distribution function g(r).
 
@@ -341,7 +337,7 @@ def rdf(
     Examples
     --------
     >>> rdf_ow_ow = gromos.analysis.rdf("md.trc", "OW", "OW")
-    >>> plt.plot(rdf_ow_ow['r'], rdf_ow_ow['g_r'])
+    >>> plt.plot(rdf_ow_ow["r"], rdf_ow_ow["g_r"])
     >>> plt.xlabel("r (nm)")
     >>> plt.ylabel("g(r)")
     """
@@ -367,8 +363,8 @@ def rdf(
 
 
 def contactnum(
-    trajectory: str, cutoff: float = 0.6, output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    trajectory: str, cutoff: float = 0.6, output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Calculate number of contacts over trajectory.
 
@@ -401,8 +397,8 @@ def contactnum(
 
 
 def sasa(
-    trajectory: str, probe_radius: float = 0.14, output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    trajectory: str, probe_radius: float = 0.14, output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Calculate solvent-accessible surface area (SASA).
 
@@ -423,7 +419,7 @@ def sasa(
     Examples
     --------
     >>> sasa_data = gromos.analysis.sasa("md.trc", probe_radius=0.14)
-    >>> plt.plot(sasa_data['time'], sasa_data['total_sasa'])
+    >>> plt.plot(sasa_data["time"], sasa_data["total_sasa"])
     >>> plt.ylabel("SASA (nm²)")
     """
     args = ["@traj", trajectory, "@probe", str(probe_radius)]
@@ -444,8 +440,8 @@ def iondens(
     trajectory: str,
     grid_spacing: float = 0.1,
     ion_selection: str = "NA+",
-    output: Optional[str] = None,
-) -> Dict:
+    output: str | None = None,
+) -> dict:
     """
     Calculate ion density distribution.
 
@@ -474,7 +470,7 @@ def iondens(
     return {"density": np.array([[[]]]), "grid_spacing": grid_spacing, "output": result.stdout}
 
 
-def epsilon(trajectory: str, output: Optional[str] = None) -> Dict:
+def epsilon(trajectory: str, output: str | None = None) -> dict:
     """
     Calculate dielectric constant (epsilon).
 
@@ -504,7 +500,7 @@ def epsilon(trajectory: str, output: Optional[str] = None) -> Dict:
 # ==============================================================================
 
 
-def diffus(trajectory: str, atom_selection: str = "all", output: Optional[str] = None) -> Dict:
+def diffus(trajectory: str, atom_selection: str = "all", output: str | None = None) -> dict:
     """
     Calculate diffusion coefficients.
 
@@ -541,7 +537,7 @@ def diffus(trajectory: str, atom_selection: str = "all", output: Optional[str] =
     }
 
 
-def visco(trajectory: str, output: Optional[str] = None) -> Dict:
+def visco(trajectory: str, output: str | None = None) -> dict:
     """
     Calculate viscosity from pressure tensor.
 
@@ -567,8 +563,8 @@ def visco(trajectory: str, output: Optional[str] = None) -> Dict:
 
 
 def tcf(
-    trajectory: str, property_type: str = "vacf", output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    trajectory: str, property_type: str = "vacf", output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Calculate time correlation functions.
 
@@ -595,7 +591,7 @@ def tcf(
     return {"time": np.array([]), "tcf": np.array([]), "output": result.stdout}
 
 
-def dipole(trajectory: str, output: Optional[str] = None) -> Dict[str, np.ndarray]:
+def dipole(trajectory: str, output: str | None = None) -> dict[str, np.ndarray]:
     """
     Calculate total dipole moment over trajectory.
 
@@ -627,7 +623,7 @@ def dipole(trajectory: str, output: Optional[str] = None) -> Dict[str, np.ndarra
     }
 
 
-def rot_rel(trajectory: str, atom_selection: str, output: Optional[str] = None) -> Dict:
+def rot_rel(trajectory: str, atom_selection: str, output: str | None = None) -> dict:
     """
     Calculate rotational relaxation times.
 
@@ -660,8 +656,8 @@ def rot_rel(trajectory: str, atom_selection: str, output: Optional[str] = None) 
 
 
 def ene_ana(
-    energy_file: str, properties: Optional[List[str]] = None, output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    energy_file: str, properties: list[str] | None = None, output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Analyze energy trajectory.
 
@@ -682,7 +678,7 @@ def ene_ana(
     Examples
     --------
     >>> energies = gromos.analysis.ene_ana("md.tre")
-    >>> plt.plot(energies['time'], energies['total_energy'])
+    >>> plt.plot(energies["time"], energies["total_energy"])
     >>> plt.xlabel("Time (ps)")
     >>> plt.ylabel("Energy (kJ/mol)")
     """
@@ -703,7 +699,7 @@ def ene_ana(
     }
 
 
-def pot_aver(trajectory: str, topology: str, output: Optional[str] = None) -> Dict:
+def pot_aver(trajectory: str, topology: str, output: str | None = None) -> dict:
     """
     Calculate potential energy averages.
 
@@ -731,8 +727,8 @@ def pot_aver(trajectory: str, topology: str, output: Optional[str] = None) -> Di
 
 
 def int_ener(
-    trajectory: str, group1: str, group2: str, output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    trajectory: str, group1: str, group2: str, output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Calculate interaction energy between two groups.
 
@@ -767,11 +763,11 @@ def int_ener(
 
 
 def bar(
-    forward_work: Union[str, np.ndarray],
-    reverse_work: Union[str, np.ndarray],
+    forward_work: str | np.ndarray,
+    reverse_work: str | np.ndarray,
     temperature: float = 300.0,
-    output: Optional[str] = None,
-) -> Dict:
+    output: str | None = None,
+) -> dict:
     """
     Calculate free energy using Bennett Acceptance Ratio (BAR).
 
@@ -816,7 +812,7 @@ def bar(
     return {"delta_g": 0.0, "error": 0.0, "convergence": True, "output": result.stdout}
 
 
-def ext_ti_ana(ti_files: List[str], output: Optional[str] = None) -> Dict:
+def ext_ti_ana(ti_files: list[str], output: str | None = None) -> dict:
     """
     Analyze extended thermodynamic integration (TI) results.
 
@@ -847,7 +843,7 @@ def ext_ti_ana(ti_files: List[str], output: Optional[str] = None) -> Dict:
     }
 
 
-def m_widom(trajectory: str, topology: str, output: Optional[str] = None) -> Dict:
+def m_widom(trajectory: str, topology: str, output: str | None = None) -> dict:
     """
     Calculate excess chemical potential using Widom insertion.
 
@@ -875,8 +871,8 @@ def m_widom(trajectory: str, topology: str, output: Optional[str] = None) -> Dic
 
 
 def reweight(
-    trajectory: str, bias_potential: str, temperature: float = 300.0, output: Optional[str] = None
-) -> Dict:
+    trajectory: str, bias_potential: str, temperature: float = 300.0, output: str | None = None
+) -> dict:
     """
     Reweight biased trajectory to unbiased ensemble.
 
@@ -910,7 +906,7 @@ def reweight(
 # ==============================================================================
 
 
-def xray_map(trajectory: str, resolution: float = 2.0, output: Optional[str] = None) -> Dict:
+def xray_map(trajectory: str, resolution: float = 2.0, output: str | None = None) -> dict:
     """
     Calculate electron density map for X-ray refinement.
 
@@ -937,7 +933,7 @@ def xray_map(trajectory: str, resolution: float = 2.0, output: Optional[str] = N
     return {"density_map": np.array([[[]]]), "resolution": resolution, "output": result.stdout}
 
 
-def noe(trajectory: str, noe_restraints: str, output: Optional[str] = None) -> Dict:
+def noe(trajectory: str, noe_restraints: str, output: str | None = None) -> dict:
     """
     Analyze NOE (Nuclear Overhauser Effect) restraint violations.
 
@@ -975,8 +971,8 @@ def noe(trajectory: str, noe_restraints: str, output: Optional[str] = None) -> D
 
 
 def structure_factor(
-    trajectory: str, q_max: float = 5.0, output: Optional[str] = None
-) -> Dict[str, np.ndarray]:
+    trajectory: str, q_max: float = 5.0, output: str | None = None
+) -> dict[str, np.ndarray]:
     """
     Calculate X-ray/neutron structure factor S(q).
 
@@ -1003,7 +999,7 @@ def structure_factor(
     return {"q": np.array([]), "s_q": np.array([]), "output": result.stdout}
 
 
-def r_factor(trajectory: str, experimental_data: str, output: Optional[str] = None) -> Dict:
+def r_factor(trajectory: str, experimental_data: str, output: str | None = None) -> dict:
     """
     Calculate R-factor for X-ray refinement.
 
@@ -1087,7 +1083,7 @@ _SIMPLE_PROGRAMS = [
 ]
 
 
-def run_program(program: str, args: List[str]) -> str:
+def run_program(program: str, args: list[str]) -> str:
     """
     Generic wrapper to run any GROMOS program.
 
@@ -1105,7 +1101,7 @@ def run_program(program: str, args: List[str]) -> str:
 
     Examples
     --------
-    >>> output = gromos.analysis.run_program('hbond', ['@traj', 'md.trc'])
+    >>> output = gromos.analysis.run_program("hbond", ["@traj", "md.trc"])
     >>> print(output)
     """
     result = _run_gromos_program(program, args)

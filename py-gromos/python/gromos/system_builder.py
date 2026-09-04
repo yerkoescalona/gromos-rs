@@ -69,9 +69,12 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Optional, Sequence, Union
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # ---------------------------------------------------------------------------
 # Internal helpers — binary discovery
@@ -122,8 +125,7 @@ def _find_bin(name: str, env_var: str) -> Path:
         return Path(found)
 
     raise FileNotFoundError(
-        f"Cannot find '{name}'. Set {env_var} or build gromos-rs with "
-        f"'cargo build --release'."
+        f"Cannot find '{name}'. Set {env_var} or build gromos-rs with 'cargo build --release'."
     )
 
 
@@ -224,40 +226,42 @@ class ForceField:
 
     Inspect available building blocks:
 
-    >>> ff.building_blocks()   # doctest: +SKIP
+    >>> ff.building_blocks()  # doctest: +SKIP
     ['ALA', 'GLY', 'PRO', 'SER', ..., 'SPC', 'NA+', 'CL-']
     """
 
     def __init__(
         self,
-        name_or_ifp: Union[str, Path],
-        mtb: Union[None, str, Path, list] = None,
-        ff_dir: Union[None, str, Path] = None,
+        name_or_ifp: str | Path,
+        mtb: None | str | Path | list = None,
+        ff_dir: None | str | Path = None,
     ) -> None:
         p = Path(name_or_ifp)
         if p.suffix == ".ifp" and p.exists():
             self.name = p.stem
             self.ifp = p
-            self.mtb_files = [Path(m) for m in (mtb if isinstance(mtb, list) else [mtb])] if mtb else []
+            self.mtb_files = (
+                [Path(m) for m in (mtb if isinstance(mtb, list) else [mtb])] if mtb else []
+            )
         else:
             self.name = str(name_or_ifp)
             self.ifp, self.mtb_files = self._resolve_named(self.name, ff_dir, mtb)
 
         # Resolve gromospp binaries once
         self._make_top = _find_bin("make_top", _GROMOS_ENV_PP)
-        self._com_top  = _find_bin("com_top",  _GROMOS_ENV_PP)
-        self._sim_box  = _find_bin("sim_box",  _GROMOS_ENV_PP)
-        self._ran_box  = _find_bin("ran_box",  _GROMOS_ENV_PP)
-        self._ion_bin  = _find_bin("ion",      _GROMOS_ENV_PP)
-        self._gch      = _find_bin("gch",      _GROMOS_ENV_PP)
-        self._pdb2g96  = _find_bin("pdb2g96",  _GROMOS_ENV_PP)
-        self._md       = _find_bin("md",       _GROMOS_ENV_XX)
+        self._com_top = _find_bin("com_top", _GROMOS_ENV_PP)
+        self._sim_box = _find_bin("sim_box", _GROMOS_ENV_PP)
+        self._ran_box = _find_bin("ran_box", _GROMOS_ENV_PP)
+        self._ion_bin = _find_bin("ion", _GROMOS_ENV_PP)
+        self._gch = _find_bin("gch", _GROMOS_ENV_PP)
+        self._pdb2g96 = _find_bin("pdb2g96", _GROMOS_ENV_PP)
+        self._md = _find_bin("md", _GROMOS_ENV_XX)
 
     # ------------------------------------------------------------------
     # Building-block algebra
     # ------------------------------------------------------------------
 
-    def molecule(self, sequence: Sequence[str]) -> "MoleculeTopology":
+    def molecule(self, sequence: Sequence[str]) -> MoleculeTopology:
         """Create a molecule topology from a building-block sequence.
 
         Calls ``make_top`` internally.  The result owns its own ``.top`` file
@@ -288,7 +292,7 @@ class ForceField:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")             # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> ala_gly = ff.molecule(["STA", "ALA", "GLY", "END"])
         >>> ala_gly.n_atoms
         21
@@ -297,7 +301,7 @@ class ForceField:
         """
         return MoleculeTopology._from_ff(self, sequence)
 
-    def solvent(self, name: str = "SPC") -> "MoleculeTopology":
+    def solvent(self, name: str = "SPC") -> MoleculeTopology:
         """Return the solvent building block as a MoleculeTopology.
 
         Parameters
@@ -312,7 +316,7 @@ class ForceField:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")             # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> spc = ff.solvent("SPC")
         >>> spc.n_atoms
         3
@@ -333,11 +337,13 @@ class ForceField:
             with mtb.open() as f:
                 for line in f:
                     stripped = line.strip()
-                    if stripped.startswith("MTBUILDBLSOLUTE") or stripped.startswith("MTBUILDBLSOLVENT"):
+                    if stripped.startswith("MTBUILDBLSOLUTE") or stripped.startswith(
+                        "MTBUILDBLSOLVENT"
+                    ):
                         pass  # next non-comment line is the code
         return codes  # TODO: implement parser
 
-    def __getitem__(self, code: str) -> "BuildingBlock":
+    def __getitem__(self, code: str) -> BuildingBlock:
         """Return a single building block by code.
 
         Parameters
@@ -352,7 +358,7 @@ class ForceField:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")             # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> ff["ALA"].n_atoms
         10
         >>> ff["ALA"].charge
@@ -370,7 +376,7 @@ class ForceField:
     def _resolve_named(
         self,
         name: str,
-        ff_dir: Optional[Union[str, Path]],
+        ff_dir: str | Path | None,
         extra_mtb,
     ) -> tuple[Path, list[Path]]:
         candidates = []
@@ -386,7 +392,7 @@ class ForceField:
             workspace / "gromos96",
         ]
 
-        ifp: Optional[Path] = None
+        ifp: Path | None = None
         mtb_files: list[Path] = []
 
         for base in candidates:
@@ -450,24 +456,24 @@ class BuildingBlock:
 
     Examples
     --------
-    >>> ff = ForceField("54a7")             # doctest: +SKIP
+    >>> ff = ForceField("54a7")  # doctest: +SKIP
     >>> bb = ff["GLY"]
     >>> bb.code
     'GLY'
-    >>> bb.n_atoms          # triggers lazy mtb parse   # doctest: +SKIP
+    >>> bb.n_atoms  # triggers lazy mtb parse   # doctest: +SKIP
     7
     """
 
     code: str
     ff: ForceField
-    n_atoms: Optional[int] = field(default=None, repr=False)
-    charge: Optional[int] = field(default=None, repr=False)
+    n_atoms: int | None = field(default=None, repr=False)
+    charge: int | None = field(default=None, repr=False)
 
     @property
-    def atom_count(self) -> Optional[int]:
+    def atom_count(self) -> int | None:
         return self.n_atoms
 
-    def __add__(self, other: "BuildingBlock") -> "MoleculeTopology":
+    def __add__(self, other: BuildingBlock) -> MoleculeTopology:
         """Concatenate two building blocks into the start of a molecule.
 
         Parameters
@@ -482,7 +488,7 @@ class BuildingBlock:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")                     # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> mol = ff["STA"] + ff["ALA"] + ff["END"]
         >>> mol.sequence
         ['STA', 'ALA', 'END']
@@ -542,7 +548,7 @@ class MoleculeTopology:
 
     Examples
     --------
-    >>> ff = ForceField("54a7")                     # doctest: +SKIP
+    >>> ff = ForceField("54a7")  # doctest: +SKIP
     >>> ala = ff.molecule(["STA", "ALA", "END"])
     >>> gly = ff.molecule(["STA", "GLY", "END"])
 
@@ -558,7 +564,7 @@ class MoleculeTopology:
         top_file: Path,
         sequence: list[str],
         ff: ForceField,
-        _workdir: Optional[Path] = None,
+        _workdir: Path | None = None,
     ) -> None:
         self.top_file = top_file
         self.sequence = sequence
@@ -571,7 +577,7 @@ class MoleculeTopology:
     # Algebra
     # ------------------------------------------------------------------
 
-    def __mul__(self, n: int) -> "SystemTopology":
+    def __mul__(self, n: int) -> SystemTopology:
         """Replicate this molecule *n* times.
 
         Parameters
@@ -586,13 +592,13 @@ class MoleculeTopology:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")                 # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> spc = ff.solvent("SPC")
         >>> water_box = spc * 216
         """
         return SystemTopology(molecules=[(self, n)], ff=self.ff)
 
-    def __add__(self, other: "Union[MoleculeTopology, SystemTopology]") -> "SystemTopology":
+    def __add__(self, other: MoleculeTopology | SystemTopology) -> SystemTopology:
         """Add another molecule or system topology.
 
         Parameters
@@ -605,10 +611,10 @@ class MoleculeTopology:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")                 # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> protein = ff.molecule(["STA", "ALA", "GLY", "END"])
-        >>> solvent  = ff.solvent("SPC")
-        >>> system   = protein * 10 + solvent * 500
+        >>> solvent = ff.solvent("SPC")
+        >>> system = protein * 10 + solvent * 500
         """
         left = SystemTopology(molecules=[(self, 1)], ff=self.ff)
         return left + other
@@ -617,7 +623,7 @@ class MoleculeTopology:
     # Coordinate building
     # ------------------------------------------------------------------
 
-    def build_coordinates(self, seed: int = 42) -> "Configuration":
+    def build_coordinates(self, seed: int = 42) -> Configuration:
         """Generate initial coordinates for this molecule.
 
         Calls ``pdb2g96`` → ``gca`` → ``gch`` in a managed temp directory.
@@ -641,7 +647,7 @@ class MoleculeTopology:
 
         Examples
         --------
-        >>> ff  = ForceField("54a7")                # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> mol = ff.molecule(["STA", "ALA", "END"])
         >>> conf = mol.build_coordinates(seed=123)
         >>> conf.n_atoms
@@ -656,9 +662,9 @@ class MoleculeTopology:
     def minimize(
         self,
         steps: int = 50_000,
-        conf: Optional["Configuration"] = None,
+        conf: Configuration | None = None,
         seed: int = 42,
-    ) -> "Configuration":
+    ) -> Configuration:
         """Energy-minimise this molecule.
 
         Builds coordinates if *conf* is ``None``, then runs steepest-descent
@@ -688,8 +694,8 @@ class MoleculeTopology:
 
         The three-stage minimisation sequence from vsomm_modeler::
 
-            ["", "min_", 50000, 0, 0],   # no charges, no SHAKE
-            ["min_", "min2_", 50000, 1, 0],  # charges, no SHAKE
+            (["", "min_", 50000, 0, 0],)  # no charges, no SHAKE
+            (["min_", "min2_", 50000, 1, 0],)  # charges, no SHAKE
             ["min2_", "min3_", 50000, 1, 3]  # charges + SHAKE
 
         is reproduced by calling ``minimize(steps=50000)`` — it internally
@@ -697,10 +703,10 @@ class MoleculeTopology:
 
         Examples
         --------
-        >>> ff  = ForceField("54a7")                # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> mol = ff.molecule(["STA", "ALA", "END"])
         >>> min_conf = mol.minimize(steps=50_000)
-        >>> min_conf.potential_energy           # kJ/mol   # doctest: +SKIP
+        >>> min_conf.potential_energy  # kJ/mol   # doctest: +SKIP
         -312.7
         """
         if conf is None:
@@ -712,20 +718,17 @@ class MoleculeTopology:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _from_ff(cls, ff: ForceField, sequence: list[str]) -> "MoleculeTopology":
+    def _from_ff(cls, ff: ForceField, sequence: list[str]) -> MoleculeTopology:
         workdir = Path(tempfile.mkdtemp(prefix="gromos_mol_"))
         top_out = workdir / "mol.top"
         mtb_arg = ff._mtb_arg()
         seq_arg = " ".join(sequence)
-        cmd = (
-            f"{ff._make_top} @build {mtb_arg} @param {ff.ifp} "
-            f"@seq {seq_arg} > {top_out}"
-        )
+        cmd = f"{ff._make_top} @build {mtb_arg} @param {ff.ifp} @seq {seq_arg} > {top_out}"
         _run(cmd, workdir)
         return cls(top_file=top_out, sequence=list(sequence), ff=ff, _workdir=workdir)
 
     @classmethod
-    def _from_sequence(cls, ff: ForceField, codes: list[str]) -> "MoleculeTopology":
+    def _from_sequence(cls, ff: ForceField, codes: list[str]) -> MoleculeTopology:
         return cls._from_ff(ff, codes)
 
     def _read_n_atoms(self) -> int:
@@ -804,9 +807,9 @@ class SystemTopology:
 
     Examples
     --------
-    >>> ff      = ForceField("54a7")                # doctest: +SKIP
+    >>> ff = ForceField("54a7")  # doctest: +SKIP
     >>> protein = ff.molecule(["STA", "ALA", "GLY", "END"])
-    >>> spc     = ff.solvent("SPC")
+    >>> spc = ff.solvent("SPC")
 
     Algebra:
 
@@ -821,25 +824,25 @@ class SystemTopology:
 
     def __init__(
         self,
-        molecules: list[tuple["MoleculeTopology", int]],
+        molecules: list[tuple[MoleculeTopology, int]],
         ff: ForceField,
-        solvent: Optional["MoleculeTopology"] = None,
+        solvent: MoleculeTopology | None = None,
         n_solvent: int = 0,
-        ions: Optional[list[tuple[str, int]]] = None,
+        ions: list[tuple[str, int]] | None = None,
     ) -> None:
         self.molecules = molecules
         self.ff = ff
         self._solvent = solvent
         self._n_solvent = n_solvent
         self._ions: list[tuple[str, int]] = ions or []
-        self._top_file: Optional[Path] = None
-        self._workdir: Optional[Path] = None
+        self._top_file: Path | None = None
+        self._workdir: Path | None = None
 
     # ------------------------------------------------------------------
     # Algebra
     # ------------------------------------------------------------------
 
-    def __add__(self, other: Union["MoleculeTopology", "SystemTopology"]) -> "SystemTopology":
+    def __add__(self, other: MoleculeTopology | SystemTopology) -> SystemTopology:
         """Combine two topologies.
 
         Parameters
@@ -850,13 +853,10 @@ class SystemTopology:
         -------
         SystemTopology
         """
-        if isinstance(other, MoleculeTopology):
-            extra = [(other, 1)]
-        else:
-            extra = other.molecules
+        extra = [(other, 1)] if isinstance(other, MoleculeTopology) else other.molecules
         return SystemTopology(molecules=self.molecules + extra, ff=self.ff)
 
-    def __mul__(self, n: int) -> "SystemTopology":
+    def __mul__(self, n: int) -> SystemTopology:
         """Scale all molecule counts by *n*.
 
         Parameters
@@ -876,12 +876,12 @@ class SystemTopology:
     def solvate(
         self,
         solvent: str = "SPC",
-        n: Optional[int] = None,
+        n: int | None = None,
         density: float = 900.0,
-        boxsize: Optional[tuple[float, float, float]] = None,
+        boxsize: tuple[float, float, float] | None = None,
         seed: int = 42,
         debug: bool = False,
-    ) -> "SolvatedSystem":
+    ) -> SolvatedSystem:
         """Add solvent molecules to the system.
 
         Calls ``ran_box`` or ``sim_box`` internally (depending on whether
@@ -922,7 +922,7 @@ class SystemTopology:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")                     # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> protein = ff.molecule(["STA", "ALA", "END"])
         >>> solvated = (protein * 5).solvate("SPC", density=900, seed=42)
         >>> solvated.n_solvent
@@ -943,7 +943,7 @@ class SystemTopology:
         self,
         ion: str = "Na+",
         seed: int = 42,
-    ) -> "SystemTopology":
+    ) -> SystemTopology:
         """Add counter-ions to neutralise the system charge.
 
         Parameters
@@ -967,7 +967,7 @@ class SystemTopology:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")                     # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
         >>> charged_system = ff.molecule(["STA", "ASP", "END"]) * 5
         >>> neutral = charged_system.neutralize("Na+")
         >>> neutral.charge
@@ -983,7 +983,7 @@ class SystemTopology:
     # System-level topology file
     # ------------------------------------------------------------------
 
-    def top_file(self, workdir: Optional[Path] = None) -> Path:
+    def top_file(self, workdir: Path | None = None) -> Path:
         """Build and return the combined ``.top`` file (calls ``com_top``).
 
         Parameters
@@ -1003,9 +1003,7 @@ class SystemTopology:
             workdir = Path(tempfile.mkdtemp(prefix="gromos_sys_"))
             self._workdir = workdir
         out = workdir / "system.top"
-        topo_arg = " ".join(
-            " ".join([str(mol.top_file)] * n) for mol, n in self.molecules
-        )
+        topo_arg = " ".join(" ".join([str(mol.top_file)] * n) for mol, n in self.molecules)
         cmd = f"{self.ff._com_top} @topo {topo_arg} @param 1 @solv 1 > {out}"
         _run(cmd, workdir)
         self._top_file = out
@@ -1027,8 +1025,7 @@ class SystemTopology:
 
     def __repr__(self) -> str:
         mol_summary = ", ".join(
-            f"{mol.sequence[0] if mol.sequence else '?'}×{n}"
-            for mol, n in self.molecules
+            f"{mol.sequence[0] if mol.sequence else '?'}×{n}" for mol, n in self.molecules
         )
         return f"SystemTopology([{mol_summary}], n_atoms={self.n_atoms}, charge={self.charge:+d})"
 
@@ -1087,13 +1084,13 @@ class SolvatedSystem:
 
     Examples
     --------
-    >>> ff      = ForceField("54a7")                    # doctest: +SKIP
+    >>> ff = ForceField("54a7")  # doctest: +SKIP
     >>> protein = ff.molecule(["STA", "ALA", "END"])
     >>> solvated = (protein * 5).solvate("SPC", density=900, seed=42)
     >>> solvated.n_atoms
     0
     >>> runner = solvated.minimize()
-    >>> runner.potential_energy                         # doctest: +SKIP
+    >>> runner.potential_energy  # doctest: +SKIP
     -12345.6
     """
 
@@ -1103,7 +1100,7 @@ class SolvatedSystem:
         solvent: MoleculeTopology,
         n_solvent: int,
         density: float,
-        boxsize: Optional[tuple[float, float, float]],
+        boxsize: tuple[float, float, float] | None,
         seed: int,
         debug: bool,
     ) -> None:
@@ -1114,9 +1111,9 @@ class SolvatedSystem:
         self.boxsize = boxsize
         self.seed = seed
         self.debug = debug
-        self._workdir: Optional[Path] = None
-        self._top_file: Optional[Path] = None
-        self._conf_file: Optional[Path] = None
+        self._workdir: Path | None = None
+        self._top_file: Path | None = None
+        self._conf_file: Path | None = None
 
     @property
     def n_solute_atoms(self) -> int:
@@ -1133,11 +1130,11 @@ class SolvatedSystem:
     def ionize(
         self,
         ion: str = "Na+",
-        seed: Optional[int] = None,
+        seed: int | None = None,
         potential_cutoff: float = 1.4,
         min_dist: float = 0.25,
         random_placement: bool = False,
-    ) -> "SolvatedSystem":
+    ) -> SolvatedSystem:
         """Place counter-ions into the solvated box.
 
         Parameters
@@ -1164,7 +1161,7 @@ class SolvatedSystem:
         self,
         steps: int = 50_000,
         n_threads: int = 1,
-    ) -> "MDResult":
+    ) -> MDResult:
         """Minimise the solvated system.
 
         Parameters
@@ -1182,9 +1179,9 @@ class SolvatedSystem:
 
     def equilibrate(
         self,
-        stages: Optional[list[dict]] = None,
+        stages: list[dict] | None = None,
         n_threads: int = 1,
-    ) -> "MDResult":
+    ) -> MDResult:
         """Run the multi-stage equilibration protocol.
 
         Parameters
@@ -1195,8 +1192,8 @@ class SolvatedSystem:
 
                 [
                     {"steps": 2_000_000, "temperature": 420, "ntivel": 1},
-                    {"steps":   500_000, "temperature": 360, "ntivel": 0},
-                    {"steps":   500_000, "temperature": 300, "ntivel": 0},
+                    {"steps": 500_000, "temperature": 360, "ntivel": 0},
+                    {"steps": 500_000, "temperature": 300, "ntivel": 0},
                 ]
 
         n_threads : int, default 1
@@ -1208,8 +1205,8 @@ class SolvatedSystem:
         """
         default_stages = [
             {"steps": 2_000_000, "temperature": 420, "ntivel": 1},
-            {"steps":   500_000, "temperature": 360, "ntivel": 0},
-            {"steps":   500_000, "temperature": 300, "ntivel": 0},
+            {"steps": 500_000, "temperature": 360, "ntivel": 0},
+            {"steps": 500_000, "temperature": 300, "ntivel": 0},
         ]
         stages = stages or default_stages
         raise NotImplementedError("System equilibration — to be implemented")
@@ -1219,11 +1216,11 @@ class SolvatedSystem:
         steps: int,
         dt: float = 0.002,
         temperature: float = 300.0,
-        pressure: Optional[float] = None,
+        pressure: float | None = None,
         n_threads: int = 1,
         traj_freq: int = 100,
         ene_freq: int = 100,
-    ) -> "MDResult":
+    ) -> MDResult:
         """Run production MD.
 
         Parameters
@@ -1250,8 +1247,8 @@ class SolvatedSystem:
 
         Examples
         --------
-        >>> ff = ForceField("54a7")                         # doctest: +SKIP
-        >>> solvated = ...                                  # doctest: +SKIP
+        >>> ff = ForceField("54a7")  # doctest: +SKIP
+        >>> solvated = ...  # doctest: +SKIP
         >>> result = solvated.run(steps=1_000_000, temperature=300)
         >>> df = result.energies.to_dataframe()
         >>> df["total"].mean()
@@ -1306,7 +1303,7 @@ class Configuration:
 
     Examples
     --------
-    >>> conf = Configuration("min_system.cnf")      # doctest: +SKIP
+    >>> conf = Configuration("min_system.cnf")  # doctest: +SKIP
     >>> conf.n_atoms
     648
     >>> conf.positions.shape
@@ -1317,14 +1314,14 @@ class Configuration:
            [0. , 0. , 3.1]])
     """
 
-    def __init__(self, cnf_file: Union[str, Path]) -> None:
+    def __init__(self, cnf_file: str | Path) -> None:
         self.cnf_file = Path(cnf_file)
         if not self.cnf_file.exists():
             raise FileNotFoundError(self.cnf_file)
-        self.potential_energy: Optional[float] = None
-        self._positions: Optional[np.ndarray] = None
-        self._velocities: Optional[np.ndarray] = None
-        self._box: Optional[np.ndarray] = None
+        self.potential_energy: float | None = None
+        self._positions: np.ndarray | None = None
+        self._velocities: np.ndarray | None = None
+        self._box: np.ndarray | None = None
 
     @property
     def n_atoms(self) -> int:
@@ -1349,7 +1346,7 @@ class Configuration:
             self._box = np.zeros((3, 3))
         return self._box
 
-    def to_pdb(self, output: Union[str, Path], pbc: str = "r") -> Path:
+    def to_pdb(self, output: str | Path, pbc: str = "r") -> Path:
         """Write a PDB file using ``frameout``.
 
         Parameters
@@ -1409,15 +1406,15 @@ class EnergyTimeseries:
 
     Examples
     --------
-    >>> result = solvated.run(steps=10000)                  # doctest: +SKIP
+    >>> result = solvated.run(steps=10000)  # doctest: +SKIP
     >>> ts = result.energies
     >>> ts.components
     ['total', 'kinetic', 'potential', 'lj', 'crf', 'bond', ...]
     >>> ts["total"].mean()
     -48231.4
-    >>> ts.plot("total", "kinetic")                         # doctest: +SKIP
+    >>> ts.plot("total", "kinetic")  # doctest: +SKIP
     >>> df = ts.to_dataframe()
-    >>> type(df)                                            # doctest: +SKIP
+    >>> type(df)  # doctest: +SKIP
     <class 'polars.DataFrame'>
     """
 
@@ -1442,18 +1439,20 @@ class EnergyTimeseries:
 
         Examples
         --------
-        >>> ts.to_dataframe().describe()                    # doctest: +SKIP
+        >>> ts.to_dataframe().describe()  # doctest: +SKIP
         shape: (9, 8)
         ┌──────────┬───────────┬──────────┬── ...
         """
         cols = {"time": self.time, **self._data}
         try:
             import polars as pl
+
             return pl.DataFrame(cols)
         except ImportError:
             pass
         try:
             import pandas as pd
+
             return pd.DataFrame(cols)
         except ImportError:
             pass
@@ -1470,6 +1469,7 @@ class EnergyTimeseries:
             Passed to ``matplotlib.pyplot.plot``.
         """
         import matplotlib.pyplot as plt
+
         keys = list(components) or ["total"]
         fig, ax = plt.subplots()
         for k in keys:
@@ -1501,10 +1501,7 @@ class EnergyTimeseries:
         return float(blocks.mean()), float(blocks.std() / np.sqrt(n_blocks))
 
     def __repr__(self) -> str:
-        return (
-            f"EnergyTimeseries(n_frames={len(self.time)}, "
-            f"components={self.components})"
-        )
+        return f"EnergyTimeseries(n_frames={len(self.time)}, components={self.components})"
 
 
 # ---------------------------------------------------------------------------
@@ -1538,12 +1535,7 @@ class MDResult:
     **Method chaining**: :class:`MDResult` intentionally mirrors the
     :class:`SolvatedSystem` API so that runs can be chained::
 
-        result = (
-            solvated
-            .minimize(steps=50_000)
-            .equilibrate()
-            .run(steps=1_000_000, temperature=300)
-        )
+        result = solvated.minimize(steps=50_000).equilibrate().run(steps=1_000_000, temperature=300)
         df = result.energies.to_dataframe()
 
     Each step returns an :class:`MDResult`; calling ``.equilibrate()`` on an
@@ -1551,21 +1543,21 @@ class MDResult:
 
     Examples
     --------
-    >>> result = solvated.run(steps=10_000)                 # doctest: +SKIP
+    >>> result = solvated.run(steps=10_000)  # doctest: +SKIP
     >>> result.energies["total"].mean()
     -48231.4
     >>> result.conf.n_atoms
     648
     >>> df = result.energies.to_dataframe()
-    >>> df.write_csv("energies.csv")                        # polars   # doctest: +SKIP
+    >>> df.write_csv("energies.csv")  # polars   # doctest: +SKIP
     """
 
     def __init__(
         self,
         conf: Configuration,
-        energies: Optional[EnergyTimeseries],
-        traj_file: Optional[Path],
-        tre_file: Optional[Path],
+        energies: EnergyTimeseries | None,
+        traj_file: Path | None,
+        tre_file: Path | None,
         imd_file: Path,
         n_steps: int,
     ) -> None:
@@ -1576,7 +1568,7 @@ class MDResult:
         self.imd_file = imd_file
         self.n_steps = n_steps
 
-    def equilibrate(self, **kwargs) -> "MDResult":
+    def equilibrate(self, **kwargs) -> MDResult:
         """Continue with an equilibration stage from the current configuration.
 
         Returns
@@ -1585,7 +1577,7 @@ class MDResult:
         """
         raise NotImplementedError
 
-    def run(self, steps: int, **kwargs) -> "MDResult":
+    def run(self, steps: int, **kwargs) -> MDResult:
         """Continue with a production run from the current configuration.
 
         Returns
@@ -1629,8 +1621,10 @@ def build_system(
     molecules : list of dict
         Each dict has ``"sequence"`` (list of str) and ``"n"`` (int)::
 
-            [{"sequence": ["STA", "ALA", "GLY", "END"], "n": 10},
-             {"sequence": ["STA", "PRO", "END"], "n": 5}]
+            [
+                {"sequence": ["STA", "ALA", "GLY", "END"], "n": 10},
+                {"sequence": ["STA", "PRO", "END"], "n": 5},
+            ]
 
     solvent : str, default ``"SPC"``
         Solvent code.
@@ -1653,9 +1647,10 @@ def build_system(
     -----
     This function is equivalent to::
 
-        ff  = ForceField(forcefield)
-        sys = sum((ff.molecule(m["sequence"]) * m["n"] for m in molecules),
-                  start=SystemTopology([], ff))
+        ff = ForceField(forcefield)
+        sys = sum(
+            (ff.molecule(m["sequence"]) * m["n"] for m in molecules), start=SystemTopology([], ff)
+        )
         return sys.neutralize(ion, seed=seed).solvate(solvent, density=density, seed=seed)
 
     For programmatic use (e.g. GA-optimised sequences, dynamic n values) prefer
@@ -1665,7 +1660,7 @@ def build_system(
     --------
     Reproduce the vsomm_modeler use case in ~5 lines:
 
-    >>> solvated = build_system(           # doctest: +SKIP
+    >>> solvated = build_system(  # doctest: +SKIP
     ...     forcefield="54a7",
     ...     molecules=[{"sequence": ["STA", "ALA", "GLY", "END"], "n": 200}],
     ...     solvent="SPC",
@@ -1674,7 +1669,7 @@ def build_system(
     ...     seed=42,
     ... )
     >>> result = solvated.minimize().equilibrate().run(steps=1_000_000)
-    >>> result.energies.to_dataframe().write_csv("energies.csv")   # doctest: +SKIP
+    >>> result.energies.to_dataframe().write_csv("energies.csv")  # doctest: +SKIP
     """
     ff = ForceField(forcefield)
     mols: list[tuple[MoleculeTopology, int]] = [
