@@ -4,20 +4,22 @@ on:
   push:
     branches:
       - main
-      - 'claude/**'
+      - ci
     paths:
       - 'py-gromos/**'
-      - 'gromos-rs/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/test-python.yml'
   pull_request:
     paths:
       - 'py-gromos/**'
-      - 'gromos-rs/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/test-python.yml'
+
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,6 +28,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # .cargo/config.toml compiles with `-C target-cpu=native`, which is right on one
+  # machine and wrong across a fleet: GitHub runners differ in CPU, and an artefact or
+  # proc-macro dylib built on one and restored from cache on another dies with SIGILL.
+  # RUSTFLAGS overrides the config file, so CI builds portable code.
+  RUSTFLAGS: "-C target-cpu=generic"
 
 jobs:
   test:
@@ -69,9 +76,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-python-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-python-v2-${{ hashFiles('**/Cargo.toml', '**/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-python-v2-
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -86,8 +93,8 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         working-directory: py-gromos
         run: |
-          uv run ruff check python/ tests/ examples/
-          uv run ruff format --check python/ tests/ examples/
+          uv run ruff check python/ tests/
+          uv run ruff format --check python/ tests/
         continue-on-error: true
 
       - name: Clippy (Rust bindings)
@@ -149,7 +156,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-import-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-import-v2-${{ hashFiles('**/Cargo.toml', '**/rust-toolchain.toml') }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -166,9 +173,16 @@ jobs:
       - name: Install maturin
         run: uv pip install maturin numpy
 
+      # A wheel, not `maturin develop`: develop installs the pyproject's dependency
+      # groups (PEP 735) through `pip install --group`, which needs pip >= 25.1 — newer
+      # than the pip a venv gets from ensurepip here — and would pull in the very dev
+      # tooling this job exists to do without. Debug on purpose: whether the extension
+      # imports is not a question an optimised build answers any better.
       - name: Build and install py-gromos
         working-directory: py-gromos
-        run: maturin develop --release
+        run: |
+          maturin build --out dist
+          uv pip install --no-deps dist/*.whl
 
       - name: Test import
         run: |
@@ -205,49 +219,3 @@ jobs:
       - name: Run benchmarks
         working-directory: py-gromos
         run: uv run pytest tests/ --benchmark-only || echo "No benchmarks available"
-
-  examples:
-    name: Run Examples
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfftw3-dev libopenmpi-dev
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-examples-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Sync Python dependencies (builds extension via maturin)
-        working-directory: py-gromos
-        run: uv sync --all-groups
-
-      - name: Run examples
-        working-directory: py-gromos
-        run: |
-          for example in examples/*.py; do
-            echo "Running $example..."
-            uv run python "$example" || exit 1
-          done

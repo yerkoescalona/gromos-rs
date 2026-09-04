@@ -15,7 +15,6 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   - `analysis.py` — Python-side analysis helpers (calls gromos-analysis via pyo3)
   - `gromos.pyi` — type stubs for IDE support
 - `notebooks/` — Jupyter notebooks (education + demonstration)
-- `examples/` — standalone Python scripts (17 scripts)
 - `tests/` — Python-level integration tests
 
 ## Status
@@ -73,7 +72,6 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
 - Remaining P3 items:
   - [ ] `analysis.py` expose gromos-analysis to Python
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
-  - [ ] Rewrite `examples/` (17 scripts) on the new API
 
 ## Key files
 ```
@@ -87,7 +85,6 @@ stubtest_allowlist_no_ml.txt     — the ml-only names, for stubtest on a defaul
 tests/test_gromosXX_references.py, test_front_end_parity.py, test_recipe.py, test_xtb_term.py
 docs/                            — mkdocs (user-guide/recipe.md is the concept page)
 notebooks/                       — 01 load & inspect, 02 short MD (on Recipe); 00 is a superseded mockup
-examples/                        — standalone scripts (older API; PLAN.md P3 item to rewrite)
 pyproject.toml                   — package metadata (maturin)
 ```
 

@@ -12,6 +12,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # .cargo/config.toml compiles with `-C target-cpu=native`, which would bake the build
+  # runner's instruction set into a published wheel and crash with SIGILL on any user
+  # whose CPU is older. RUSTFLAGS overrides the config file, so wheels stay portable.
+  RUSTFLAGS: "-C target-cpu=generic"
 
 jobs:
   create-release:

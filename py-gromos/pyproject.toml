@@ -153,10 +153,6 @@ ignore = [
     "ARG",  # Unused function args in tests
     "S101", # Use of assert detected
 ]
-"examples/**/*.py" = [
-    "T201", # print found
-]
-
 [tool.ruff.lint.isort]
 known-first-party = ["gromos"]
 

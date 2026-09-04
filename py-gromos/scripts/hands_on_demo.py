@@ -389,7 +389,7 @@ You've seen:
 ✓ Complete system setup
 
 Next steps:
-- Try the examples in py-gromos/examples/
+- Try the notebooks in py-gromos/notebooks/
 - Read the notebooks in py-gromos/notebooks/
 - Check the API reference: py-gromos/API_REFERENCE.md
 - Run actual MD simulations with the GROMOS-RS binaries

@@ -473,7 +473,6 @@ Used by: Polars, PyO3, GROMOS-RS, and many others!
 
     print("\nFor more details, see:")
     print("  - Notebooks: py-gromos/notebooks/")
-    print("  - Examples: py-gromos/examples/")
     print("  - API Reference: py-gromos/API_REFERENCE.md")
     print("  - Polars: https://github.com/pola-rs/polars")
     print("  - PyO3: https://pyo3.rs")

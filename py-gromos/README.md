@@ -91,7 +91,7 @@ python/gromos/          the package: __init__.py (the module contract), gromos.p
                         system_builder.py (design sketch)
 tests/                  test_gromosXX_references.py, test_front_end_parity.py, test_recipe.py,
                         test_xtb_term.py, test_simulation*.py, ...
-docs/                   mkdocs site        notebooks/   Jupyter        examples/   scripts (older API)
+docs/                   mkdocs site        notebooks/   Jupyter notebooks
 ../crates/pyo3-gromos   the Rust binding   ../crates/gromos-run   the run builder both entry points use
 ```
 

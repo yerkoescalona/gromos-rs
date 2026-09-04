@@ -4,8 +4,10 @@ on:
   push:
     branches:
       - main
-      - 'claude/**'
+      - ci
   pull_request:
+
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +16,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # .cargo/config.toml compiles with `-C target-cpu=native`, which is right on one
+  # machine and wrong across a fleet: GitHub runners differ in CPU, and an artefact or
+  # proc-macro dylib built on one and restored from cache on another dies with SIGILL.
+  # RUSTFLAGS overrides the config file, so CI builds portable code.
+  RUSTFLAGS: "-C target-cpu=generic"
 
 jobs:
   format-check:
@@ -46,8 +53,8 @@ jobs:
       - name: Check Python formatting
         working-directory: py-gromos
         run: |
-          uv run ruff check python/ tests/ examples/
-          uv run ruff format --check python/ tests/ examples/
+          uv run ruff check python/ tests/
+          uv run ruff format --check python/ tests/
         continue-on-error: true
 
   lint:
@@ -75,7 +82,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-lint-v2-${{ hashFiles('**/Cargo.toml', '**/rust-toolchain.toml') }}
 
       - name: Clippy (Rust)
         run: make lint-rust
@@ -95,7 +102,7 @@ jobs:
 
       - name: Lint Python
         working-directory: py-gromos
-        run: uv run ruff check python/ tests/ examples/
+        run: uv run ruff check python/ tests/
         continue-on-error: true
 
   test-integration:
@@ -129,9 +136,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-integration-v2-${{ hashFiles('**/Cargo.toml', '**/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-integration-v2-
 
       - name: Run Rust tests
         run: cargo test --workspace --all-features
@@ -192,7 +199,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-release-v2-${{ hashFiles('**/Cargo.toml', '**/rust-toolchain.toml') }}
 
       - name: Build Rust release (all features)
         run: cargo build --release --workspace --all-features
