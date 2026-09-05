@@ -47,10 +47,11 @@ DISTRES = REF_DIR / "nacl_1water_distres"
 
 def _paths(system_dir: Path) -> tuple[str, str, str]:
     inputs = _parse_input_toml(system_dir)
-    return tuple(
+    topo, conf, params = (
         str((system_dir / inputs[key]).resolve())
         for key in ("topology", "configuration", "parameters")
     )
+    return topo, conf, params
 
 
 def _load(system_dir: Path):

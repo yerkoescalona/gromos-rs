@@ -44,7 +44,7 @@ def _find_gromos_bin() -> Path:
 
 def _run_gromos_program(
     program: str, args: list[str], capture_output: bool = True
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run a GROMOS program and return the result."""
     bin_dir = _find_gromos_bin()
     program_path = bin_dir / program if bin_dir else program
@@ -310,7 +310,7 @@ def rdf(
     bin_width: float = 0.002,
     max_distance: float = 1.5,
     output: str | None = None,
-) -> dict[str, np.ndarray]:
+) -> dict[str, np.ndarray | str]:
     """
     Calculate radial distribution function g(r).
 
@@ -364,7 +364,7 @@ def rdf(
 
 def contactnum(
     trajectory: str, cutoff: float = 0.6, output: str | None = None
-) -> dict[str, np.ndarray]:
+) -> dict[str, np.ndarray | str]:
     """
     Calculate number of contacts over trajectory.
 
@@ -398,7 +398,7 @@ def contactnum(
 
 def sasa(
     trajectory: str, probe_radius: float = 0.14, output: str | None = None
-) -> dict[str, np.ndarray]:
+) -> dict[str, np.ndarray | str]:
     """
     Calculate solvent-accessible surface area (SASA).
 
@@ -564,7 +564,7 @@ def visco(trajectory: str, output: str | None = None) -> dict:
 
 def tcf(
     trajectory: str, property_type: str = "vacf", output: str | None = None
-) -> dict[str, np.ndarray]:
+) -> dict[str, np.ndarray | str]:
     """
     Calculate time correlation functions.
 
@@ -591,7 +591,7 @@ def tcf(
     return {"time": np.array([]), "tcf": np.array([]), "output": result.stdout}
 
 
-def dipole(trajectory: str, output: str | None = None) -> dict[str, np.ndarray]:
+def dipole(trajectory: str, output: str | None = None) -> dict[str, np.ndarray | str]:
     """
     Calculate total dipole moment over trajectory.
 
@@ -657,7 +657,7 @@ def rot_rel(trajectory: str, atom_selection: str, output: str | None = None) -> 
 
 def ene_ana(
     energy_file: str, properties: list[str] | None = None, output: str | None = None
-) -> dict[str, np.ndarray]:
+) -> dict[str, np.ndarray | str]:
     """
     Analyze energy trajectory.
 
@@ -728,7 +728,7 @@ def pot_aver(trajectory: str, topology: str, output: str | None = None) -> dict:
 
 def int_ener(
     trajectory: str, group1: str, group2: str, output: str | None = None
-) -> dict[str, np.ndarray]:
+) -> dict[str, np.ndarray | str]:
     """
     Calculate interaction energy between two groups.
 
@@ -972,7 +972,7 @@ def noe(trajectory: str, noe_restraints: str, output: str | None = None) -> dict
 
 def structure_factor(
     trajectory: str, q_max: float = 5.0, output: str | None = None
-) -> dict[str, np.ndarray]:
+) -> dict[str, np.ndarray | str]:
     """
     Calculate X-ray/neutron structure factor S(q).
 
@@ -1125,7 +1125,8 @@ def _create_simple_wrapper(prog_name: str):
         return run_program(prog_name, arg_list)
 
     wrapper.__name__ = prog_name
-    wrapper.__doc__ = wrapper.__doc__.format(prog_name=prog_name)
+    if wrapper.__doc__:  # None under `python -OO`, which strips docstrings
+        wrapper.__doc__ = wrapper.__doc__.format(prog_name=prog_name)
     return wrapper
 
 

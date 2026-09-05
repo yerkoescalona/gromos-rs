@@ -718,7 +718,7 @@ class MoleculeTopology:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _from_ff(cls, ff: ForceField, sequence: list[str]) -> MoleculeTopology:
+    def _from_ff(cls, ff: ForceField, sequence: Sequence[str]) -> MoleculeTopology:
         workdir = Path(tempfile.mkdtemp(prefix="gromos_mol_"))
         top_out = workdir / "mol.top"
         mtb_arg = ff._mtb_arg()

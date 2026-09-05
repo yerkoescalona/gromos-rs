@@ -75,7 +75,7 @@ class EnergyTimeseries:
         self._array = array
 
     def __len__(self) -> int:
-        return self._array.shape[0]
+        return int(self._array.shape[0])
 
     def __getattr__(self, name: str) -> np.ndarray:
         if name in COLUMNS:
@@ -117,7 +117,8 @@ class EnergyTimeseries:
                     "pandas is required for to_dataframe(backend='pandas'); install it with "
                     "`pip install pandas` or use backend='polars'/'dict'"
                 ) from e
-            return pd.DataFrame(self._array, columns=list(COLUMNS))
+            frame: object = pd.DataFrame(self._array, columns=list(COLUMNS))
+            return frame
 
         return {col: self._array[:, i] for i, col in enumerate(COLUMNS)}
 
