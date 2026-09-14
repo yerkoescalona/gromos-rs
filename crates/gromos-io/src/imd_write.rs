@@ -6,7 +6,7 @@
 //! (`raw_blocks` entries such as GAMD, EDS, QMMM, …) are re-emitted verbatim after the modelled
 //! ones, so a read → write round trip loses nothing.
 //!
-//! Two rules learnt from feeding the output to the real gromosXX (PLAN.md 3.9 A7):
+//! Two rules learnt from feeding the output to the real gromosXX (3.9 A7):
 //! - values are always separated by whitespace, never packed into fixed-width columns — a
 //!   number wider than its column (`1e-10` prints as `0.0000000001`) would fuse with its
 //!   neighbour and gromosXX would read `20.0000000001` for `NA2CLC`;

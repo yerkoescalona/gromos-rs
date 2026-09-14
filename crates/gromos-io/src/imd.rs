@@ -1066,7 +1066,7 @@ fn parse_block(
 /// - `"allbonds"` → NTC=3 (SHAKE-constrain all solute bonds)
 ///
 /// This only sets NTC (solute constraints). Solvent rigidity (SETTLE, `NTCS`)
-/// is orthogonal and unaffected — see PLAN.md P3.5.
+/// is orthogonal and unaffected — see P3.5.
 pub fn ntc_from_constraints(constraints: &str) -> Result<i32, String> {
     match constraints {
         "none" => Ok(1),

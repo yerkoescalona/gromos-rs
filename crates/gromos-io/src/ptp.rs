@@ -485,7 +485,7 @@ impl PtpWriter {
         writeln!(self.file, "TITLE\n{title}\nEND")?;
         self.write_perturbed_atoms(topology_a, topology_b, alpha_lj, alpha_crf)?;
         // The other blocks gromos++ `make_pt_top` writes, empty: this writer perturbs atom
-        // parameters only (PLAN.md: bonded perturbations come from gromos++ or by hand).
+        // parameters only (: bonded perturbations come from gromos++ or by hand).
         for (block, what, cols) in [
             (
                 "PERTATOMPAIR",

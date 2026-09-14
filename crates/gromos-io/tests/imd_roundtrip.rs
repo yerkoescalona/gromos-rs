@@ -1,4 +1,4 @@
-//! `.imd` read → write → read must be lossless (PLAN.md 3.9 G3, step 2).
+//! `.imd` read → write → read must be lossless (3.9 G3, step 2).
 //!
 //! For every gromosXX reference input: parse, render with `write_imd`, parse again, and
 //! compare every modelled field exactly. Blocks the parser does not model must survive

@@ -89,7 +89,12 @@ pub struct ParsedTopology {
 pub fn read_topology_file<P: AsRef<Path>>(path: P) -> Result<ParsedTopology, IoError> {
     let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
+    parse_topology(reader)
+}
 
+/// [`read_topology_file`] over an already-open reader — for callers holding the text, not a path
+/// (a program that built a topology in memory and reads it back, the Python binding).
+pub fn parse_topology(reader: impl BufRead) -> Result<ParsedTopology, IoError> {
     let mut lines = reader.lines();
 
     let mut n_atoms = 0;
@@ -1298,7 +1303,7 @@ pub fn build_topology(parsed: ParsedTopology) -> Topology {
         topo.solvent_atom_template.len()
     );
 
-    // Dim 10: populate solute MoleculeType + MoleculeInstance now that solute.atoms
+    // Populate the solute MoleculeType + MoleculeInstance now that solute.atoms
     // and the flat arrays are both fully built.
     topo.init_solute_moltype();
 

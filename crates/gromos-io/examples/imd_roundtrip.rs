@@ -1,6 +1,6 @@
 //! Read a GROMOS `.imd` and write it back through `write_imd` — the tool
 //! `scripts/roundtrip_imd_gromosXX.py` uses to prove gromosXX accepts what gromos-rs writes
-//! (PLAN.md 3.9 assumption A7).
+//! (3.9 assumption A7).
 //!
 //! Usage: `imd_roundtrip <input.imd> <output.imd> [n_atoms]`
 

@@ -40,8 +40,10 @@ pub mod trajectory;
 pub mod trajectory_binary;
 
 // Re-export commonly used types
+pub use args::{run_main, Arguments, Program, Status};
 pub use coordinate::{
-    read_coordinates, read_g96_labeled, CoordinateData, G96Atom, LabeledCoordinateData,
+    parse_g96_labeled, read_coordinates, read_g96_labeled, CoordinateData, G96Atom,
+    LabeledCoordinateData,
 };
 pub use dlg::{DlgWriter, LambdaDerivativeFrame};
 pub use energy::read_energy_trajectory_native;
@@ -102,39 +104,35 @@ impl std::error::Error for IoError {}
 /// Converts `@key` → `--key` and expands `@f argfile` contents inline.
 /// Blank lines and `#` comments in argfiles are skipped.
 /// This allows using clap with the standard GROMOS argument syntax.
-pub fn gromos_args() -> Vec<String> {
-    let raw: Vec<String> = std::env::args().collect();
-    let mut expanded = vec![raw[0].clone()];
+///
+/// The process-free half of [`gromos_args`]: the caller supplies argv and gets an error back
+/// instead of an exit, so an in-process caller (a `Program`'s `run`, the Python binding) and the
+/// command line expand `@f` identically.
+pub fn normalize(raw: Vec<String>) -> Result<Vec<String>, String> {
+    let mut expanded = vec![raw.first().cloned().unwrap_or_default()];
 
     let mut i = 1;
     while i < raw.len() {
         if raw[i] == "@f" {
             i += 1;
             if i >= raw.len() {
-                eprintln!("Error: @f requires a filename");
-                std::process::exit(1);
+                return Err("Error: @f requires a filename".to_string());
             }
-            match std::fs::read_to_string(&raw[i]) {
-                Ok(content) => {
-                    for line in content.lines() {
-                        // gromos++ erases everything from the first '#' on (Arguments.cc:170)
-                        let line = line.split('#').next().unwrap_or("").trim();
-                        if line.is_empty() {
-                            continue;
-                        }
-                        for token in line.split_whitespace() {
-                            if let Some(key) = token.strip_prefix('@') {
-                                expanded.push(format!("--{}", key));
-                            } else {
-                                expanded.push(token.to_string());
-                            }
-                        }
+            let content = std::fs::read_to_string(&raw[i])
+                .map_err(|e| format!("Error: cannot read argfile '{}': {}", raw[i], e))?;
+            for line in content.lines() {
+                // gromos++ erases everything from the first '#' on (Arguments.cc:170)
+                let line = line.split('#').next().unwrap_or("").trim();
+                if line.is_empty() {
+                    continue;
+                }
+                for token in line.split_whitespace() {
+                    if let Some(key) = token.strip_prefix('@') {
+                        expanded.push(format!("--{}", key));
+                    } else {
+                        expanded.push(token.to_string());
                     }
-                },
-                Err(e) => {
-                    eprintln!("Error: cannot read argfile '{}': {}", raw[i], e);
-                    std::process::exit(1);
-                },
+                }
             }
         } else if let Some(key) = raw[i].strip_prefix('@') {
             expanded.push(format!("--{}", key));
@@ -143,5 +141,69 @@ pub fn gromos_args() -> Vec<String> {
         }
         i += 1;
     }
-    expanded
+    Ok(expanded)
+}
+
+/// [`normalize`] over the process arguments; a bad `@f` prints and exits 1, as gromos++ does.
+pub fn gromos_args() -> Vec<String> {
+    normalize(std::env::args().collect()).unwrap_or_else(|e| args::fail(&e))
+}
+
+#[cfg(test)]
+mod normalize_tests {
+    use super::normalize;
+
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn at_keys_become_long_flags_and_values_pass_through() {
+        let out = normalize(argv(&[
+            "prog", "@topo", "a.top", "@pbc", "r", "--traj", "a.trc",
+        ]));
+        assert_eq!(
+            out.unwrap(),
+            argv(&["prog", "--topo", "a.top", "--pbc", "r", "--traj", "a.trc"])
+        );
+    }
+
+    #[test]
+    fn argfile_is_expanded_with_comments_stripped() {
+        let dir = std::env::temp_dir().join("gromos_normalize_argfile");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("args.arg");
+        std::fs::write(
+            &path,
+            "@topo a.top   # the topology\n\n# only a comment\n@pbc r\n",
+        )
+        .unwrap();
+
+        let out = normalize(argv(&[
+            "prog",
+            "@f",
+            path.to_str().unwrap(),
+            "@traj",
+            "a.trc",
+        ]));
+        assert_eq!(
+            out.unwrap(),
+            argv(&["prog", "--topo", "a.top", "--pbc", "r", "--traj", "a.trc"])
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_missing_argfile_is_an_error_not_an_exit() {
+        let err = normalize(argv(&["prog", "@f", "/nonexistent/args.arg"])).unwrap_err();
+        assert!(err.contains("cannot read argfile"), "{err}");
+
+        let err = normalize(argv(&["prog", "@f"])).unwrap_err();
+        assert!(err.contains("@f requires a filename"), "{err}");
+    }
+
+    #[test]
+    fn an_empty_argv_does_not_panic() {
+        assert_eq!(normalize(Vec::new()).unwrap(), vec![String::new()]);
+    }
 }

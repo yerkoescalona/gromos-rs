@@ -96,6 +96,87 @@ pub fn fail(err: &str) -> ! {
     std::process::exit(1)
 }
 
+/// How faithful a program is to the gromos++ program of the same name.
+///
+/// The audit tables in the crates' `CONTEXT.md` as data: a caller (Python included) can see what
+/// they are calling. Porting a stand-in changes its status, not its API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// A reference test compares our output with gromos++'s.
+    Verified,
+    /// Ported from gromos++, no reference test yet.
+    Ported,
+    /// Same name, simplified or different semantics — a utility, not a port.
+    StandIn,
+    /// Recognised and parsed, does not do the work yet.
+    Stub,
+    /// No gromos++ program of this name.
+    NoCounterpart,
+}
+
+impl Status {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Status::Verified => "verified",
+            Status::Ported => "ported",
+            Status::StandIn => "stand_in",
+            Status::Stub => "stub",
+            Status::NoCounterpart => "no_counterpart",
+        }
+    }
+}
+
+/// One gromos++-style program, callable in process.
+///
+/// The body lives in its crate's library (`<crate>::programs::<name>`), so the binary and the
+/// Python binding run the same code: `run` takes an already-[`crate::normalize`]d argv and writes
+/// what the program prints to `out`. It never exits and never touches the process stdout.
+pub struct Program {
+    pub name: &'static str,
+    /// The `@key`s the program accepts, for `Arguments::from_vec` and for the registry.
+    pub known: &'static [&'static str],
+    pub usage: &'static str,
+    pub status: Status,
+    pub run: fn(&[String], &mut dyn std::io::Write) -> Result<(), String>,
+}
+
+impl std::fmt::Debug for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Program")
+            .field("name", &self.name)
+            .field("known", &self.known)
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Run `program` as a command-line binary: the whole `fn main` of every program binary.
+///
+/// The one place allowed to read the process arguments, lock stdout and exit — everything a
+/// `Program`'s `run` must not do.
+pub fn run_main(program: &Program) -> ! {
+    use std::io::Write;
+
+    let argv = match crate::normalize(std::env::args().collect()) {
+        Ok(a) => a,
+        Err(e) => fail(&e),
+    };
+
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+    let result = (program.run)(&argv, &mut out);
+    let flushed = out.flush();
+    drop(out);
+
+    match result {
+        Ok(()) => match flushed {
+            Ok(()) => std::process::exit(0),
+            Err(e) => fail(&format!("{}: cannot write output: {e}", program.name)),
+        },
+        Err(e) => fail(&e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

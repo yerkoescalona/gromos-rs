@@ -256,7 +256,11 @@ pub fn format_g96(title: &str, atoms: &[G96Atom], box_dims: Option<Vec3>) -> Str
 pub fn read_g96_labeled<P: AsRef<Path>>(path: P) -> Result<LabeledCoordinateData, IoError> {
     let reader = crate::gz::open_text(path.as_ref())
         .map_err(|_| IoError::FileNotFound(path.as_ref().display().to_string()))?;
+    parse_g96_labeled(reader)
+}
 
+/// [`read_g96_labeled`] over an already-open reader — for callers holding the text, not a path.
+pub fn parse_g96_labeled(reader: impl BufRead) -> Result<LabeledCoordinateData, IoError> {
     let mut atoms = Vec::new();
     let mut box_dims = Vec3::ZERO;
     let mut box_type: i32 = -1;
