@@ -1,5 +1,5 @@
 """
-The run recipe — PLAN.md 3.9 steps 2 and 3.
+The run recipe — 3.9 steps 2 and 3.
 
 Step 2: a `Simulation` exposes the effective recipe (TOML), the algorithm plan (JSON, one
 fully resolved entry per algorithm) and the parser diagnostics.

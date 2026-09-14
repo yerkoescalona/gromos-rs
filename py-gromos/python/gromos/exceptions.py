@@ -10,8 +10,17 @@ All subclass the builtin exception the binding raised before they existed, so ex
 - ``PlanError(ValueError)``         — an algorithm plan violates the GROMOS step-order invariants
 - ``MissingFeatureError(RuntimeError)`` — a term needs a cargo feature this build lacks (``ml``)
 - ``RunError(RuntimeError)``        — the engine failed to initialise or to take a step
+- ``ProgramError(RuntimeError)``    — a ``gromos.tools`` program failed; ``.stdout`` carries what
+                                      it had written by then (``check_top`` prints its whole
+                                      report before failing)
 """
 
-from .gromos import MissingFeatureError, PlanError, RecipeError, RunError
+from .gromos import MissingFeatureError, PlanError, ProgramError, RecipeError, RunError
 
-__all__ = ["RecipeError", "PlanError", "MissingFeatureError", "RunError"]
+__all__ = [
+    "RecipeError",
+    "PlanError",
+    "MissingFeatureError",
+    "RunError",
+    "ProgramError",
+]

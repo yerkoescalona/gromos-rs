@@ -1,6 +1,6 @@
 //! `AlgorithmSequence` — a deprecation shim (one release) over `recipe.plan(system)`.
 //!
-//! PLAN.md 3.9 step 4 deleted the descriptor path: the twelve `Forcefield`/`LeapFrog…`
+//! 3.9 step 4 deleted the descriptor path: the twelve `Forcefield`/`LeapFrog…`
 //! pyclasses, the `AlgorithmDescriptor` enum and `resolve_algorithm_sequence` — the second
 //! IMD→sequence builder. The MD step is `gromos.Plan`, built by `gromos-run` from a recipe;
 //! this file builds nothing. What survives, warning, are the preset names, each returning that

@@ -4,7 +4,7 @@
 //! through the same `gromos-run` functions the `md` binary calls (`prepare_system` →
 //! `build_plan` → `validate_plan` → `instantiate` → `start`), so the gromosXX reference suite
 //! (which drives the binary) and the Python suite guard one code path from two sides
-//! (PLAN.md 3.9). This file contains **no run assembly of its own**.
+//! (3.9). This file contains **no run assembly of its own**.
 //!
 //! # Example (Python)
 //!
@@ -12,7 +12,7 @@
 //! from gromos import Recipe, Simulation, System
 //!
 //! system = System.from_files("system.topo", "initial.cnf")
-//! recipe = Recipe.from_imd("run.imd")                     # or Recipe.nvt(0.002, 1000, 300.0)
+//! recipe = Recipe.from_imd("run.imd") # or Recipe.nvt(0.002, 1000, 300.0)
 //! sim = Simulation(system, recipe)
 //! sim.step(100)
 //! print(sim.energies, sim.positions)

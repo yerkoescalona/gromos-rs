@@ -4,7 +4,9 @@ use numpy::PyArray1;
 use pyo3::prelude::*;
 
 use gromos_core::{units::PhysicalConstants, Topology};
-use gromos_io::topology::{build_topology, read_topology_file};
+use gromos_io::topology::{
+    build_topology, parse_topology, read_topology_file, write_parsed_topology, ParsedTopology,
+};
 
 /// Molecular topology loaded from a GROMOS topology file.
 ///
@@ -26,6 +28,10 @@ use gromos_io::topology::{build_topology, read_topology_file};
 pub struct PyTopology {
     pub(crate) inner: Topology,
     pub(crate) physical_constants: PhysicalConstants,
+    /// The topology as its file blocks, kept beside the built form: `gromos.tools` works at block
+    /// level (`com_top`, `red_top`, `ion` all take a `ParsedTopology`) and `build_topology`
+    /// consumes it with no way back.
+    pub(crate) parsed: ParsedTopology,
 }
 
 #[pymethods]
@@ -48,11 +54,35 @@ impl PyTopology {
                 topo_file, e
             ))
         })?;
-        let physical_constants = parsed.physical_constants;
-        let topo = build_topology(parsed);
-        Ok(Self {
-            inner: topo,
-            physical_constants,
+        Ok(Self::from_parsed(parsed))
+    }
+
+    /// Read a topology from the text of a GROMOS topology file.
+    ///
+    /// What `str(topology)` writes, this reads — so a topology a program printed needs no file.
+    #[staticmethod]
+    pub fn from_string(text: &str) -> PyResult<Self> {
+        let parsed = parse_topology(text.as_bytes()).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to parse topology: {e}"
+            ))
+        })?;
+        Ok(Self::from_parsed(parsed))
+    }
+
+    /// The topology as a GROMOS topology file (gromos++ `OutTopology` layout).
+    fn __str__(&self) -> String {
+        write_parsed_topology(&self.parsed, "gromos-rs")
+    }
+
+    /// Write the topology to a GROMOS topology file.
+    fn write(&self, path: &str, title: Option<&str>) -> PyResult<()> {
+        std::fs::write(
+            path,
+            write_parsed_topology(&self.parsed, title.unwrap_or("gromos-rs")),
+        )
+        .map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to write '{path}': {e}"))
         })
     }
 
@@ -133,6 +163,19 @@ impl PyTopology {
 
     fn __len__(&self) -> usize {
         self.inner.num_atoms()
+    }
+}
+
+impl PyTopology {
+    /// Wrap a parsed topology, keeping both forms (`gromos.tools` produces these).
+    pub(crate) fn from_parsed(parsed: ParsedTopology) -> Self {
+        let physical_constants = parsed.physical_constants;
+        let inner = build_topology(parsed.clone());
+        Self {
+            inner,
+            physical_constants,
+            parsed,
+        }
     }
 }
 

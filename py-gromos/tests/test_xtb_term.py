@@ -1,5 +1,5 @@
 """
-The first new term through the new door — PLAN.md 3.9 step 5.
+The first new term through the new door — 3.9 step 5.
 
 `Term("xtb", coupling="delta", ...)` runs a real GFN-xTB subprocess over a region, additively on
 top of the classical force field, registered like any other term: a `TermSpec` variant, its
@@ -10,7 +10,7 @@ the Python side, the counterpart of `crates/gromos-md/tests/xtb_orchestrator_seq
   region at step 0 — `E(recipe + term) - E(recipe) == E_xtb(region)`;
 * the term's forces conserve energy through the real step loop (NVE drift, same thresholds as the
   Rust oracle: fluctuation < 0.5 % of the mean, first/second-half drift < 0.2 %);
-* `coupling="replace"` is rejected with the PLAN.md 2.8 message; a barostat is rejected (no
+* `coupling="replace"` is rejected with the 2.8 message; a barostat is rejected (no
   virial); a region the `elements` table does not cover is a `RecipeError`; an `xtb` call that
   exceeds `timeout_s` is a `RunError`, not a hang.
 

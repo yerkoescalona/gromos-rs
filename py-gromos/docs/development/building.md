@@ -33,7 +33,7 @@ crates/pyo3-gromos/src/
     system.rs                 ← System
     topology.rs               ← Topology
     py_conf.rs                ← Configuration
-    recipe.rs                 ← Recipe / Term / Algorithm / Plan, registries, exceptions (PLAN.md 3.9)
+    recipe.rs                 ← Recipe / Term / Algorithm / Plan, registries, exceptions (3.9)
     parameters.rs             ← InputParameters + factories (deprecated shims)
     simulation.rs             ← Simulation (one entry: prepare → plan → instantiate → start)
     algorithm_sequence.rs     ← AlgorithmSequence + building blocks (deprecated; step 4 deletes it)

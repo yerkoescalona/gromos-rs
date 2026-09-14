@@ -12,7 +12,8 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
 - `python/gromos/` — importable Python package
   - `__init__.py` — top-level API surface
   - `md_runners.py` — high-level simulation runner wrappers
-  - `analysis.py` — Python-side analysis helpers (calls gromos-analysis via pyo3)
+  - `tools/` — the gromos++ system-preparation programs, in process (3.10)
+  - `analysis.py` — the old subprocess stub; `gromos.analysis` replaces it in 3.10 step 6
   - `gromos.pyi` — type stubs for IDE support
 - `notebooks/` — Jupyter notebooks (education + demonstration)
 - `tests/` — Python-level integration tests
@@ -34,21 +35,21 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   reference systems except the 2 explicitly-deferred FEP ones (was missing 18, all real Python-API
   defects in `pyo3-gromos`, not test gaps — see that crate's CONTEXT.md). 121 tests (118 passed, 2
   documented `POSITION_MISMATCH_SYSTEMS` skips for a pre-existing Rust-side `.trc` divergence).
-- **PLAN.md 3.9 step 0 ✓ (2026-08-29)** — `tests/test_front_end_parity.py`: every reference system
+- **3.9 step 0 ✓ (2026-08-29)** — `tests/test_front_end_parity.py`: every reference system
   through `Simulation(...)` and through `AlgorithmSequence.from_parameters` → `np.array_equal`
   (never `allclose`), plus a `same_path_twice` determinism baseline. 27/37 systems are bit-identical
   between the two builders; the 10 divergences are `xfail(strict=True)` entries in
   `EXPECTED_DIVERGENCE`, each naming the feature path C lacks — they must be *deleted* when the shared
   builder lands, never left to rot. `test_gromosXX_references.py` gained `EXPECTED_ENGINE_FAILURES`
   (`water_216_nve_nobath`, the absent-MULTIBATH parser bug) and `REFERENCE_PARAMS`.
-- **PLAN.md 3.9 step 1 ✓ (2026-08-29)** — `Simulation` is built by the `md` binary's own code
+- **3.9 step 1 ✓ (2026-08-29)** — `Simulation` is built by the `md` binary's own code
   (`gromos-run`); `Topology.apply_perturbation(path)` brings FEP to Python (`ch4_water_fep` in
   `REFERENCE_SYSTEMS`, passing; `aladip_vacuum_fep` strict xfail). Full suite: 208 passed, 16 skipped,
   18 xfailed (10 descriptor-path divergences + 2 FEP-on-path-C + nobath ×3 + aladip_vacuum_fep ×3).
-- **PLAN.md 3.9 step 2 ✓ (2026-08-29)** — `water_216_nve_nobath` passes (parser defaults fixed; xfail
+- **3.9 step 2 ✓ (2026-08-29)** — `water_216_nve_nobath` passes (parser defaults fixed; xfail
   removed); `tests/test_recipe.py` pins `Simulation.recipe_toml` / `.plan_json` / `.diagnostics`.
   Suite: 211 + 4 passed, 16 skipped, 15 xfailed.
-- **PLAN.md 3.9 step 3 ✓ (2026-08-29)** — `Recipe`/`Term`/`Algorithm`/`Plan`, `gromos.terms()`/
+- **3.9 step 3 ✓ (2026-08-29)** — `Recipe`/`Term`/`Algorithm`/`Plan`, `gromos.terms()`/
   `algorithms()`/`build_info()`, `gromos.exceptions`. `test_gromosXX_references.py` builds every
   reference through `Simulation(system, Recipe.from_imd(...).with_inputs(...))`;
   `test_front_end_parity.py` adds path B (Recipe) and path D (Recipe + its own Plan) against path A,
@@ -59,18 +60,26 @@ simulation runners, analysis helpers, notebooks, and examples. Built with `matur
   stubtest_allowlist_no_ml.txt` (pyo3 classes are `@final` and construct through `__new__`; slot
   methods take positional-only arguments). Deprecated forms warn (`pytest.warns`; the pytest config
   ignores `DeprecationWarning` otherwise). Suite: 308 passed, 16 skipped, 15 xfailed.
-- **PLAN.md 3.9 step 4 ✓ (2026-08-29)** — the descriptor path is gone from the package surface:
+- **3.9 step 4 ✓ (2026-08-29)** — the descriptor path is gone from the package surface:
   no `Forcefield`/`LeapFrog…`/`BerendsenThermostat`… classes, no `md_runners`, `analysis` only by
   explicit import; `AlgorithmSequence.*` presets return a `Plan` (deprecated), `Simulation.from_sequence`
   takes one. `test_front_end_parity.py`: paths A/B/D + the `from_sequence` shim, no xfail table.
   `Vec3`/`Frame`/`rmsd`/`rdf` are f64. Suite: 300 passed, 8 skipped, 3 xfailed.
-- **PLAN.md 3.9 step 5 ✓ (2026-08-29)** — `tests/test_xtb_term.py` is the physics oracle for
+- **3.9 step 5 ✓ (2026-08-29)** — `tests/test_xtb_term.py` is the physics oracle for
   `Term("xtb", …)` (water-dimer fixture from `gromos-forces/tests/gromosXX_qmmm_references`; skips
   without `xtb`): exact additivity against `XtbPotential`, per-term visibility
   (`sim.term_energies`), NVE drift, and the named rejections. Pattern for the next term: no Python
   change beyond the `_TermKind` literal and a test. Suite: 306 passed, 8 skipped, 3 xfailed.
+- **3.10 steps 0–5 ✓ (0.0.49)** — `gromos.tools`: `run(name, **kwargs)` over all 33
+  gromos-tools programs in process (the same Rust code the binaries run), `programs()` with each
+  program's keys/usage/status, typed wrappers for the preparation chain (`make_top`, `com_top`,
+  `red_top`, `pdb2g96`, `sim_box`, `build_box`, `ion`, `check_top`) taking and returning
+  `Topology`/`Configuration`/`CheckReport`, and `System.solvate()`/`.add_ions()`/`.check()` over
+  the same verbs. `gromos.ProgramError` carries the program's partial stdout. `tests/test_tools.py`
+  (26) pins text ↔ object agreement across the boundary; the Rust side pins library ↔ binary.
 - Remaining P3 items:
-  - [ ] `analysis.py` expose gromos-analysis to Python
+  - [ ] `gromos.analysis` over the 82 analysis programs — 3.10 steps 6–8. The stub
+        `analysis.py` (subprocess, mostly `NotImplementedError`) is deleted in step 6.
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
 
 ## Key files
@@ -79,10 +88,12 @@ python/gromos/__init__.py        — top-level API (the module contract; System/
 python/gromos/gromos.pyi         — type stubs (stubtest-clean; `_AlgorithmKind`/`_TermKind` literals)
 python/gromos/exceptions.py      — RecipeError / PlanError / MissingFeatureError / RunError
 python/gromos/timeseries.py      — EnergyTimeseries over run()'s array
-python/gromos/analysis.py        — analysis helpers (explicit import only)
+python/gromos/tools/             — the gromos++ programs: run()/programs() + the typed prep chain
+python/gromos/analysis.py        — the old subprocess stub; replaced by gromos/analysis/ in 3.10 step 6
 python/gromos/system_builder.py  — P3 design sketch: ForceField→BuildingBlock→Topology algebra
 stubtest_allowlist_no_ml.txt     — the ml-only names, for stubtest on a default build
-tests/test_gromosXX_references.py, test_front_end_parity.py, test_recipe.py, test_xtb_term.py
+tests/test_gromosXX_references.py, test_front_end_parity.py, test_recipe.py, test_xtb_term.py,
+                                 test_tools.py (gromos.tools: text ↔ object, the prep chain)
 docs/                            — mkdocs (user-guide/recipe.md is the concept page)
 notebooks/                       — 01 load & inspect, 02 short MD (on Recipe); 00 is a superseded mockup
 pyproject.toml                   — package metadata (maturin)
@@ -107,7 +118,7 @@ Three documented design shapes in system_builder.py:
 Motivation: vsomm_modeler required manual tracking of atom counts, binary
 paths as plain strings, and `input_xxx` dicts per step — all encapsulated now.
 
-- **Composition model (2026-08-29): PLAN.md 3.8/3.9.** The Python API should build a `Recipe`
+- **Composition model (2026-08-29): 3.8/3.9.** The Python API should build a `Recipe`
   (run control ⟂ forcefield+terms ⟂ constraints ⟂ ensemble) that the engine consumes; IMD files are
   the serialisation of the same recipe. `test_basic.py`/`test_advanced_features.py` are placeholders
   for a past API (eleven skipped classes reference non-existent types) — replace, don't extend.

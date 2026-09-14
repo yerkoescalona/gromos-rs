@@ -32,7 +32,7 @@ from .gromos import (
     Frame,
     InputParameters,  # deprecated: Recipe.from_imd / Recipe.nve|nvt|npt|minimize
     Plan,
-    # The run as data (PLAN.md 3.9)
+    # The run as data (3.9)
     Recipe,
     Simulation,
     # Simulation objects
@@ -62,8 +62,11 @@ except ImportError:
     _HAS_ML = False
 
 # ── Exceptions (subclasses of the builtins the binding raised before) ─────────
-from . import exceptions
-from .exceptions import MissingFeatureError, PlanError, RecipeError, RunError
+# ── The gromos++ system-preparation programs, in process ───────
+# `tools.run(name, **kwargs)` for any of the 33; typed wrappers for the preparation chain
+# (`make_top`, `pdb2g96`, `sim_box`, `ion`, `check_top`, …) that take and return objects.
+from . import exceptions, tools
+from .exceptions import MissingFeatureError, PlanError, ProgramError, RecipeError, RunError
 
 # `gromos.analysis` (subprocess wrappers around gromos++ programs, mostly stubs) and
 # `gromos.system_builder` (design sketch) stay importable explicitly — `import gromos.analysis` —
@@ -103,6 +106,9 @@ __all__ = [
     "PlanError",
     "MissingFeatureError",
     "RunError",
+    "ProgramError",
+    # The gromos++ programs
+    "tools",
     # Simulation
     "System",
     "Simulation",

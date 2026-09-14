@@ -1,12 +1,12 @@
 """
-Front-end parity — PLAN.md 3.9, drift guard G2.
+Front-end parity — 3.9, drift guard G2.
 
 The reference suite (`test_gromosXX_references.py`) guards the Python front-end against gromosXX;
-this file guards the front-ends against *each other* — the trap FUTURE.md named when it parked the
+this file guards the front-ends against *each other* — the trap named when the composition redesign was parked (see `.claude/architecture.md`), which parked the
 builder unification. Every path below must be **exactly** equal (``np.array_equal``, never
 ``allclose``) on every reference system: per-step energy rows, final positions, final forces.
 Same builder, same kernels, same order — any difference is a defect, never a tolerance question
-(PLAN.md 3.9 A1/A3).
+(3.9 A1/A3).
 
   path A — ``Simulation(topo, conf, InputParameters, **restraint_kwargs)``   (deprecated shim)
   path B — ``Simulation(system, Recipe.from_imd(...).with_inputs(...))``      (the front-end)
@@ -186,8 +186,8 @@ def test_plan_front_end_parity(system_name):
 # case and named in the stubs. An exemption below must say which step removes it.
 # ---------------------------------------------------------------------------------------------
 UNCOVERED_KINDS: dict[str, str] = {
-    "orchestrator": "needs a Term (xtb/schnet); no gromosXX reference has one — PLAN.md 3.9 step 5",
-    "rottrans": "no gromosXX reference system has a ROTTRANS block yet — PLAN.md 1.5c",
+    "orchestrator": "needs a Term (xtb/schnet); no gromosXX reference has one — 3.9 step 5",
+    "rottrans": "no gromosXX reference system has a ROTTRANS block yet — 1.5c",
 }
 
 PYI = Path(__file__).resolve().parents[1] / "python" / "gromos" / "gromos.pyi"

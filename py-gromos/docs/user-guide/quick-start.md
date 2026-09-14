@@ -260,7 +260,7 @@ print(sim.total_energy)           # classical potential + terms + kinetic
 ```
 
 Rules the plan enforces before anything runs: `coupling="replace"` is not available
-yet (`PlanError` naming PLAN.md 2.8), a term without a virial cannot meet a barostat,
+yet (`PlanError` naming 2.8), a term without a virial cannot meet a barostat,
 and two terms of one kind report as `xtb:0` / `xtb:1` (each with its own work directory).
 
 ## Free-energy perturbation from Python

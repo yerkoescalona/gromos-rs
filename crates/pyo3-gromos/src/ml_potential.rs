@@ -1,4 +1,4 @@
-//! Python binding for ML potentials (PLAN.md P3.7) — connecting a trained model to a
+//! Python binding for ML potentials (P3.7) — connecting a trained model to a
 //! `Simulation`'s zone definition by name, not by hand-counted atom index.
 //!
 //! `SchNetPotential` is deliberately a *recipe*, not an eagerly-loaded model: the real

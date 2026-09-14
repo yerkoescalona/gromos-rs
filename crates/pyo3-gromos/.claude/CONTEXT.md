@@ -10,12 +10,12 @@ All Rust crates.
 Python-callable API for running simulations and analysing trajectories.
 
 ## Status
-- `System`, `Recipe`/`Term`/`Algorithm`/`Plan`, `Simulation(system, recipe[, plan=])` ✓ (PLAN.md 3.9,
+- `System`, `Recipe`/`Term`/`Algorithm`/`Plan`, `Simulation(system, recipe[, plan=])` ✓ (3.9,
   2026-08-29); `InputParameters` and the `AlgorithmSequence.*` presets are deprecation shims
 - `sim.run(steps, ene_freq)` → numpy array; energy decomposition (bond/angle/dihedral/improper/lj/coulomb) ✓ (P3.3)
 - Python tests: 121 (118 passed, 2 documented position-mismatch skips) ✓ (`py-gromos/tests/`)
 - `.pyi` stubs ✓
-- **PLAN.md 3.6 ✓ done** — `build_simulation()` (`simulation.rs`) now dispatches every gromosXX
+- **3.6 ✓ done** — `build_simulation()` (`simulation.rs`) now dispatches every gromosXX
   feature that was already implemented lower in the stack but silently unwired from Python: NTIVEL=1
   velocity generation, SETTLE/LINCS (`ConstraintSelection::from_imd`), Nosé-Hoover (+chain)
   thermostat (`push_thermostat()`), distance/position restraints (`distrest=`/`posresspec=`/
@@ -25,7 +25,7 @@ Python-callable API for running simulations and analysing trajectories.
   divergence:** `gromos-rs`'s own `.trc` position output disagrees with gromosXX for
   triclinic/EM-shift-frame systems (pre-existing, Rust-side, not a Python binding bug) — see
   `POSITION_MISMATCH_SYSTEMS` in the test file.
-- **PLAN.md 3.5 ✓ done (M1, M2, SD)**:
+- **3.5 ✓ done (M1, M2, SD)**:
   - **M1**: `InputParameters.nve/nvt/npt` take `constraints="none"|"hbonds"|"allbonds"` (default
     `"none"`) → `ntc=1|2|3` (`ntc_from_constraints()`, `gromos-io/imd.rs`); readable `.constraints`
     getter. No builder change needed — the existing `shake_enabled = imd.ntc > 1 || …` guard picks it
@@ -51,18 +51,18 @@ Python-callable API for running simulations and analysing trajectories.
 - Remaining P3 items:
   - [ ] Expose ForceField evaluation (single-point energy/force)
   - [ ] Rich `__repr__` / `_repr_html_` for Jupyter (Topology, Configuration, Energy)
-  - [x] PLAN.md 3.7 — ML potential binding: `PySchNetPotential` (`--features ml`, libtorch via the
+  - [x] 3.7 — ML potential binding: `PySchNetPotential` (`--features ml`, libtorch via the
     venv's torch — INSTALL.md §5); the ML term is `Term("schnet", ...)` on the recipe since 3.9 step 3.
-- The July 2026 "two builders / scattered defaults" audit is done by PLAN.md 3.9 (steps 0–4): one
+- The July 2026 "two builders / scattered defaults" audit is done by 3.9 (steps 0–4): one
   builder in `gromos-run`, defaults derived from `ImdParameters::default()`, the recipe as the one
   entry point.
 
-- **Composition audit + target model (2026-08-29): PLAN.md 3.8/3.9.** Three IMD→sequence builders
+- **Composition audit + target model (2026-08-29): 3.8/3.9.** Three IMD→sequence builders
   existed (`md.rs`, `build_simulation`, `resolve_algorithm_sequence`), the descriptor enum is closed,
   and force terms arrive as `Simulation` kwargs. Target: one `RunRecipe` in `gromos-run`, one
   builder, IMD and Python objects as front-ends, providers as `terms`. Do not add new kwargs to
   `Simulation` or new `AlgorithmDescriptor` variants without reading 3.9 first.
-- **PLAN.md 3.9 step 1 ✓ (2026-08-29).** `simulation.rs::build_simulation` contains no algorithm
+- **3.9 step 1 ✓ (2026-08-29).** `simulation.rs::build_simulation` contains no algorithm
   construction: it calls `gromos_run::{prepare_system, build_sequence_from_imd, start}` (the `md`
   binary's code), inserts the optional ML term after `Forcefield` via `AlgorithmSequence::insert`,
   and maps `RunError` onto the builtin exceptions the binding always raised (`run_err`). Python now
@@ -70,12 +70,12 @@ Python-callable API for running simulations and analysing trajectories.
   parallel-kernel policy. FEP: `Topology.apply_perturbation(path)` (no `Simulation` kwarg).
   `resolve_algorithm_sequence` (the descriptor path) survives until steps 3–4 with the same
   parallel policy/`four_pi_eps_i` so `test_front_end_parity.py` stays exact.
-- **PLAN.md 3.9 step 2 ✓ (2026-08-29).** `build_simulation` goes through the recipe path
+- **3.9 step 2 ✓ (2026-08-29).** `build_simulation` goes through the recipe path
   (`gromos_run::build_sequence_from_imd`, strict passthrough policy: no unmodelled block reaches
   Python silently); `Simulation.recipe_toml`, `.plan_json`, `.diagnostics` expose the effective
   recipe, the resolved plan and the parser notes (`None`/empty on the descriptor path). Step 3 turns
   the recipe into `gromos.Recipe`/`Term`/`Algorithm` and retires `InputParameters` + the kwargs.
-- **PLAN.md 3.9 step 3 ✓ (2026-08-29).** `src/recipe.rs` binds the `gromos-run` types as
+- **3.9 step 3 ✓ (2026-08-29).** `src/recipe.rs` binds the `gromos-run` types as
   `Recipe`/`Term`/`Algorithm`/`Plan` through `pythonize` (serde ↔ Python; dict/TOML/JSON/pickle
   round trips, `update(**groups)` deep-merges through `serde_json::Value` and re-deserialises with
   `deny_unknown_fields`, so a typo is a `RecipeError`). `simulation.rs` has one entry
@@ -89,7 +89,7 @@ Python-callable API for running simulations and analysing trajectories.
   `recipe.plan(system)` rather than `AlgorithmSequence.from_recipe`; provenance (model checksum)
   and the per-term energy slot (G10) are not done. The descriptor path
   (`algorithm_sequence.rs`) is now dead weight — step 4 deletes it.
-- **PLAN.md 3.9 step 4 ✓ (2026-08-29).** The descriptor path is gone: `algorithm_sequence.rs`
+- **3.9 step 4 ✓ (2026-08-29).** The descriptor path is gone: `algorithm_sequence.rs`
   (1473 → ~100 lines) keeps only the deprecated `AlgorithmSequence.nve/nvt/npt/minimize/
   from_parameters` names, each returning the `Plan` of the parameters (`gromos_run::build_plan` on
   the topology); `Simulation.from_sequence` takes that `Plan`. `Simulation.recipe`/`.plan` are
@@ -98,7 +98,7 @@ Python-callable API for running simulations and analysing trajectories.
   `gromos_run::read_imd` only. **The recipe is the only entry point**: `simulation.rs` has one
   constructor path (`build_from_recipe`), and `just lint` (G6) fails on any `AlgorithmSequence::new()`
   / `.push(Box::new(` / `read_imd_file(` outside `gromos-run`.
-- **PLAN.md 3.9 step 5 ✓ (2026-08-29).** `Term("xtb", …)` needed **no change in this crate** — the
+- **3.9 step 5 ✓ (2026-08-29).** `Term("xtb", …)` needed **no change in this crate** — the
   proof of the door. `Simulation.term_energies` (dict, registry name → kJ/mol, from
   `Energy.term_energies`) is the G10 slot; `potential_energy` stays the classical force field.
 

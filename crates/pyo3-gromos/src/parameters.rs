@@ -1,4 +1,4 @@
-//! `InputParameters` — the deprecated, pre-recipe front-end (PLAN.md 3.9 step 3; removed next
+//! `InputParameters` — the deprecated, pre-recipe front-end (3.9 step 3; removed next
 //! release). Every constructor warns and names its `Recipe` replacement; `Simulation` translates
 //! an `InputParameters` into a recipe (`RunRecipe::from_imd_with`), so it is not a second path.
 
@@ -26,7 +26,7 @@ pub struct PyInputParameters {
     pub(crate) inner: ImdParameters,
 }
 
-/// `InputParameters` is the pre-recipe front-end (PLAN.md 3.9 step 3): every constructor
+/// `InputParameters` is the pre-recipe front-end (3.9 step 3): every constructor
 /// warns once per call and names its `Recipe` replacement. One deprecation cycle (A9).
 pub(crate) fn deprecated(py: Python<'_>, what: &str, instead: &str) -> PyResult<()> {
     PyErr::warn_bound(

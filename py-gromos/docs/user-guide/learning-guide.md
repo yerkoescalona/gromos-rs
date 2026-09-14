@@ -9,7 +9,7 @@ it imports only what actually works from the Rust extension. Everything that
 raises `NotImplementedError` or shells out to a binary lives in sub-modules
 (`analysis`, `system_builder`), importable explicitly (`import gromos.analysis`) but not
 in the default namespace. The legacy `md_runners` subprocess wrappers were removed in
-PLAN.md 3.9 step 4 — `Simulation` is the way to run MD from Python.
+3.9 step 4 — `Simulation` is the way to run MD from Python.
 
 | Name | Backed by | Status |
 |------|-----------|--------|
@@ -106,7 +106,7 @@ Two gaps found while writing the P3.4 notebooks, both closed:
 
 ### FUTURE — System builder algebra
 
-The full design is in `FUTURE.md`. Key idea: replace the traditional 8-binary
+The full design is in `system_builder.py`'s module docs. Key idea: replace the traditional 8-binary
 gromos++ pipeline with a composable Python API:
 
 ```python
@@ -115,7 +115,7 @@ system = molecule("ALA", ff) * 10 + solvent("SPC", n=2000)
 system.neutralize(ion="CL")
 ```
 
-Open decisions (tracked in `FUTURE.md` and `system_builder.py` comments) include:
+Open decisions (tracked on the board and in `system_builder.py` comments) include:
 native topology building vs. subprocess `make_top`, the `.solvate()` / `.pack()`
 coordinate pipeline, and the `+` / `*` assembly algebra.
 
@@ -124,7 +124,7 @@ coordinate pipeline, and the `+` / `*` assembly algebra.
 The Rust core stores atoms as `Vec<Vec3>` (array-of-structs). A migration to
 structure-of-arrays (`struct Soa { x: Vec<f64>, y: Vec<f64>, z: Vec<f64> }`)
 would allow true zero-copy NumPy sharing and cleaner SIMD in the nonbonded loop.
-Tracked in `FUTURE.md` §Dimension 1.
+Board card V1.
 
 ## References
 

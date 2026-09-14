@@ -18,7 +18,7 @@
 //!
 //! Every `Simulation` is built by `gromos-run` from a `Recipe` (`recipe.rs` binds the run-as-data
 //! types; `simulation.rs` has one constructor path). This crate assembles no run of its own
-//! (PLAN.md 3.9). `parameters.rs` and `algorithm_sequence.rs` are deprecation shims.
+//! (3.9). `parameters.rs` and `algorithm_sequence.rs` are deprecation shims.
 
 use gromos_core::math::Vec3;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
@@ -29,6 +29,7 @@ pub mod energy_traj;
 #[cfg(feature = "ml")]
 pub mod ml_potential;
 pub mod parameters;
+pub mod programs;
 pub mod py_conf;
 pub mod qm_potential;
 pub mod recipe;
@@ -366,7 +367,7 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFrame>()?;
     m.add_function(wrap_pyfunction!(rmsd, m)?)?;
     m.add_function(wrap_pyfunction!(rdf, m)?)?;
-    // .tre/.trg read through the energy library, with its shape kept (PLAN.md 2.10)
+    // .tre/.trg read through the energy library, with its shape kept (2.10)
     energy_traj::register_energy_traj(m)?;
     // Interactive simulation API
     simulation::register_simulation(m)?;
@@ -378,8 +379,10 @@ pub fn register_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     system::register_system(m)?;
     // Algorithm sequence API (descriptor path — deprecated in favour of Recipe/Plan)
     algorithm_sequence::register_algorithm_sequence(m)?;
-    // The recipe model: Recipe / Term / Algorithm / Plan, registries, exceptions (PLAN.md 3.9)
+    // The recipe model: Recipe / Term / Algorithm / Plan, registries, exceptions (3.9)
     recipe::register_recipe(m)?;
+    // The gromos++-style programs, in process
+    programs::register_programs(m)?;
     // ML potential API (feature-gated)
     #[cfg(feature = "ml")]
     ml_potential::register_ml_potential(m)?;

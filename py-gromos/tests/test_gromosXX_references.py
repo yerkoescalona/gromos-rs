@@ -177,7 +177,7 @@ def _recipe_for(system_dir):
 
 def _create_simulation(system_dir):
     """Create a Simulation from a reference system directory: `Simulation(system, recipe)`,
-    the front-end PLAN.md 3.9 step 3 makes canonical (the same `gromos-run` path the `md`
+    the front-end 3.9 step 3 makes canonical (the same `gromos-run` path the `md`
     binary takes)."""
     inputs = _parse_input_toml(system_dir)
     system = System.from_files(
@@ -256,7 +256,7 @@ REFERENCE_SYSTEMS = [
     "aladip_solvated_em_shake",
     "aladip_solvated_em_posres",
     "aladip_solvated_em",
-    # Free-energy perturbation (Topology.apply_perturbation + NTG != 0), PLAN.md 3.9 step 1
+    # Free-energy perturbation (Topology.apply_perturbation + NTG != 0), 3.9 step 1
     "ch4_water_fep",
     "ch4_water_fep_l000",
     "ch4_water_fep_l025",
@@ -286,11 +286,11 @@ POSITION_MISMATCH_SYSTEMS = {"aladip_trunc_oct", "aladip_vacuum_em"}
 # defect, not a binding gap. `strict=True` so the fix is noticed and the entry removed.
 # `water_216_nve_nobath`: the IMD has no MULTIBATH block; gromosXX then runs no temperature
 # coupling, but `read_imd_file` keeps `TempBathParameters::default()` (Berendsen, 300 K,
-# tau 0.1) and every gromos-rs path silently thermostats (PLAN.md 3.9 A18, fixed by step 2).
+# tau 0.1) and every gromos-rs path silently thermostats (3.9 A18, fixed by step 2).
 EXPECTED_ENGINE_FAILURES = {
-    # `water_216_nve_nobath` (absent MULTIBATH) passed here until PLAN.md 3.9 step 2 fixed the
+    # `water_216_nve_nobath` (absent MULTIBATH) passed here until 3.9 step 2 fixed the
     # parser defaults; it now runs as a regular reference system.
-    # Same known FEP mismatch the Rust suite `ignore`s (PLAN.md Reference Test Status).
+    # Same known FEP mismatch the Rust suite `ignore`s (Reference Test Status).
 }
 
 REFERENCE_PARAMS = [
@@ -382,7 +382,7 @@ def test_reference_energies(system_name):
 def test_reference_positions(system_name):
     """Compare positions from gromos.Simulation against gromosXX reference."""
     if system_name in POSITION_MISMATCH_SYSTEMS:
-        pytest.skip(f"{system_name}: known pre-existing position-output mismatch, see PLAN.md")
+        pytest.skip(f"{system_name}: known pre-existing position-output mismatch")
 
     system_dir = REF_DIR / system_name
     if not system_dir.exists():
@@ -525,7 +525,7 @@ def test_factory_nvt_properties():
 
 
 def test_factory_constraints_knob():
-    """PLAN.md P3.5 M1: nve/nvt/npt accept constraints="none"/"hbonds"/"allbonds".
+    """3.5 M1: nve/nvt/npt accept constraints="none"/"hbonds"/"allbonds".
 
     Default stays "none" (NTC=1, GROMOS-faithful, backward compatible).
     """
@@ -577,7 +577,7 @@ def test_constrained_system_stable_with_factory_params():
 
 
 def test_steepest_descent_via_simulation():
-    """PLAN.md P3.5: steepest-descent EM must actually run through Simulation.
+    """3.5: steepest-descent EM must actually run through Simulation.
 
     Previously `build_simulation` never checked `ntem`/`steepest_descent()` and
     silently ran plain leap-frog with dt=0 (a no-op) instead of minimizing.
@@ -632,7 +632,7 @@ def test_steepest_descent_via_algorithm_sequence():
     assert np.all(np.isfinite(potential))
     assert potential[-1] < potential[0]
 
-    # Names agreeing is not parity (FUTURE.md's trap, PLAN.md 3.9 step 0): the composable
+    # Names agreeing is not parity ('s trap, 3.9 step 0): the composable
     # path must produce the *same numbers* as the direct path, exactly.
     sim_direct = Simulation(system, params)
     frames_direct = sim_direct.run(30, ene_freq=1)

@@ -126,7 +126,7 @@ fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>>
 ```
 
 The returned array is a copy of the Rust data. True zero-copy would require a
-structure-of-arrays (SoA) memory layout — tracked in `FUTURE.md` §Dimension 1.
+structure-of-arrays (SoA) memory layout — board card V1.
 
 ## Optional arguments
 

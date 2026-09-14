@@ -102,13 +102,13 @@ Term("schnet", model="model.pt", cutoff=0.5, elements=[...], region="1:a", buffe
 `region` uses the gromos-rs atom-specifier syntax (`1:a` = molecule 1, all atoms; `s:a` = all
 solvent; `1-3,7` = global atom numbers). `elements` is one atomic number per global atom index.
 The plan enforces what the physics needs: `coupling="replace"` waits for the zone-aware force
-field (PLAN.md 2.8) and is rejected by name; a term without a virial cannot meet a barostat; a
+field (2.8) and is rejected by name; a term without a virial cannot meet a barostat; a
 term whose cargo feature this build lacks constructs (`Term(...).available == False`) but
 `Simulation` raises `MissingFeatureError`. Each term's energy is visible on its own,
 `sim.term_energies`, so two terms cannot hide a compensating error.
 
 Adding a term kind to the engine is three Rust files (`TermSpec` variant, registry arms, one
-`instantiate` arm) — measured with `xtb` in PLAN.md 3.9 step 5. Nothing in the binding changes.
+`instantiate` arm) — measured with `xtb` in 3.9 step 5. Nothing in the binding changes.
 
 ## Reading a simulation back
 

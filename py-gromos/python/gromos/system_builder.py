@@ -1,12 +1,12 @@
 # PROTOTYPE — design sketch only. Nothing here is implemented or stable.
 # Open decisions tracked in py-gromos/notebooks/00_api_design_mockup.ipynb
-# and FUTURE.md ("Compositional topology construction in py-gromos").
+# and ("Compositional topology construction in py-gromos").
 # Do not use in production code; do not import in tests.
 
 """
 gromos.system_builder — System building algebra for GROMOS.
 
-Design target (from PLAN.md §P3):
+Design target (3.x, the py-gromos API thread):
     ForceField → BuildingBlock → Topology as an algebra;
     Python expresses verbs; Rust core owns every invariant.
 

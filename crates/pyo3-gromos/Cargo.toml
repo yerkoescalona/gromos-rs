@@ -16,7 +16,9 @@ gromos-forces = { workspace = true }
 gromos-integrators = { workspace = true }
 gromos-io = { workspace = true }
 gromos-analysis = { workspace = true }
-# The one run builder shared with the md binary (PLAN.md 3.9)
+# The gromos++-style programs as library functions (3.10)
+gromos-tools = { workspace = true }
+# The one run builder shared with the md binary (3.9)
 gromos-run = { workspace = true }
 
 # Python bindings

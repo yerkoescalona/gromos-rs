@@ -47,8 +47,10 @@ impl PySystem {
             topology: PyTopology {
                 inner: topo_ref.inner.clone(),
                 physical_constants: topo_ref.physical_constants,
+                parsed: topo_ref.parsed.clone(),
             },
             configuration: PyConfiguration {
+                labels: conf_ref.labels.clone(),
                 pos_data: conf_ref.pos_data.clone(),
                 vel_data: conf_ref.vel_data.clone(),
                 box_dims: conf_ref.box_dims,
@@ -107,6 +109,7 @@ impl PySystem {
         PyTopology {
             inner: self.topology.inner.clone(),
             physical_constants: self.topology.physical_constants,
+            parsed: self.topology.parsed.clone(),
         }
     }
 
@@ -114,6 +117,7 @@ impl PySystem {
     #[getter]
     fn configuration(&self) -> PyConfiguration {
         PyConfiguration {
+            labels: self.configuration.labels.clone(),
             pos_data: self.configuration.pos_data.clone(),
             vel_data: self.configuration.vel_data.clone(),
             box_dims: self.configuration.box_dims,
@@ -142,6 +146,123 @@ impl PySystem {
             Some(&self.topology.inner),
         )
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)
+    }
+
+    // ── Preparation verbs ───────────────────────────────────────────
+    //
+    // Sugar over `gromos.tools`: each calls the same `gromos_tools::programs` verb the module
+    // function calls, and returns a *new* System — an input system is never mutated, so a
+    // preparation chain is re-runnable.
+
+    /// Solvate this system in a box of pre-equilibrated solvent (`gromos.tools.sim_box`).
+    ///
+    /// The topology follows the coordinates: it is extended by the solvent molecules that were
+    /// kept, so the result is a System, not a loose configuration.
+    #[pyo3(signature = (solvent, *, minwall = None, thresh = 0.23, boxsize = false))]
+    fn solvate(
+        &self,
+        solvent: &PyConfiguration,
+        minwall: Option<Vec<f64>>,
+        thresh: f64,
+        boxsize: bool,
+    ) -> PyResult<Self> {
+        use gromos_tools::programs::sim_box;
+
+        let opts = sim_box::SimBoxOptions {
+            minwall: minwall.unwrap_or_default(),
+            thresh,
+            use_boxsize: boxsize,
+        };
+        let solute_box = (self.configuration.box_dims != gromos_core::math::Vec3::ZERO)
+            .then_some(self.configuration.box_dims);
+        let result = sim_box::solvate(
+            &self.configuration.atoms_or_placeholders(),
+            &self.topology.parsed.masses,
+            solute_box,
+            &solvent.atoms_or_placeholders(),
+            solvent.box_dims,
+            &opts,
+        )
+        .map_err(crate::programs::ProgramError::new_err)?;
+
+        let mut topology = PyTopology::from_parsed(self.topology.parsed.clone());
+        topology.inner.solvate(result.n_solvent_molecules);
+        Ok(Self {
+            topology,
+            configuration: PyConfiguration::from_atoms(result.atoms, result.box_dims),
+        })
+    }
+
+    /// Replace solvent molecules by counter-ions (`gromos.tools.ion`), topology included.
+    ///
+    /// gromos++'s `ion` changes only the coordinates and leaves the topology to the caller; this
+    /// does both halves — it builds each ion's topology from `forcefield` (an `(mtb, ifp)` pair,
+    /// the same files `make_top` takes) and combines it with the solute's, so the result is a
+    /// System whose two halves agree.
+    #[pyo3(signature = (*, forcefield, positive = None, negative = None, potential = None, mindist = 0.0))]
+    fn add_ions(
+        &self,
+        forcefield: (String, String),
+        positive: Option<(usize, String)>,
+        negative: Option<(usize, String)>,
+        potential: Option<f64>,
+        mindist: f64,
+    ) -> PyResult<Self> {
+        use gromos_tools::programs::{com_top, ion, make_top};
+        let err = crate::programs::ProgramError::new_err;
+
+        let opts = ion::IonOptions {
+            positive: positive.clone(),
+            negative: negative.clone(),
+            potential,
+            mindist,
+        };
+        let data = gromos_io::LabeledCoordinateData {
+            atoms: self.configuration.atoms_or_placeholders(),
+            box_dims: self.configuration.box_dims,
+            box_type: 1,
+        };
+        let result = ion::add_ions(&self.topology.parsed, &data, &opts).map_err(err)?;
+
+        // Each ion needs its own topology entry, in the order `ion` placed them: positive first.
+        let (mtb_path, ifp_path) = forcefield;
+        let bb = gromos_io::mtb::read_mtb_file(&mtb_path)
+            .map_err(|e| err(format!("Error reading MTB file '{mtb_path}': {e:?}")))?;
+        let ffp = gromos_io::ifp::read_ifp_file(&ifp_path)
+            .map_err(|e| err(format!("Error reading IFP file '{ifp_path}': {e:?}")))?;
+
+        let mut ion_tops = Vec::new();
+        for (count, name) in [positive, negative].into_iter().flatten() {
+            if count == 0 {
+                continue;
+            }
+            let built = make_top::make_top(&bb, &ffp, std::slice::from_ref(&name), None)
+                .map_err(|e| err(format!("building the topology of '{name}': {e}")))?;
+            ion_tops.push((count, built.topology));
+        }
+
+        let mut parts: Vec<(usize, &gromos_io::topology::ParsedTopology)> =
+            vec![(1, &self.topology.parsed)];
+        parts.extend(ion_tops.iter().map(|(n, t)| (*n, t)));
+        let combined = com_top::com_top(&parts, 1, 1).map_err(err)?;
+
+        let mut topology = PyTopology::from_parsed(combined);
+        let n_solvent_atoms = result.atoms.len() - topology.inner.num_solute_atoms();
+        let per = topology.parsed.solvent_atoms.len().max(1);
+        topology.inner.solvate(n_solvent_atoms / per);
+        Ok(Self {
+            topology,
+            configuration: PyConfiguration::from_atoms(result.atoms, result.box_dims),
+        })
+    }
+
+    /// Run every consistency check over this system's topology (`gromos.tools.check_top`).
+    ///
+    /// Returns `(errors, warnings, report)`; `gromos.tools.check_top` wraps it as a
+    /// `CheckReport`.
+    fn check(&self) -> (Vec<String>, Vec<String>, String) {
+        let report = gromos_tools::programs::check_top::check_top(&self.topology.inner);
+        (report.errors, report.warnings, report.text)
     }
 
     fn __repr__(&self) -> String {

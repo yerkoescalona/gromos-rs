@@ -173,6 +173,17 @@ class Topology:
     def __new__(cls, topo_file: str) -> Self: ...
     @staticmethod
     def from_file(topo_file: str) -> Topology: ...
+    @staticmethod
+    def from_string(text: str) -> Topology:
+        """Read a topology from the text of a GROMOS topology file — what ``str(topology)``
+        writes, this reads."""
+        ...
+    def write(self, path: str, title: str | None = None) -> None:
+        """Write the topology to a GROMOS topology file."""
+        ...
+    def __str__(self) -> str:
+        """The topology as a GROMOS topology file (gromos++ ``OutTopology`` layout)."""
+        ...
     @property
     def n_atoms(self) -> int: ...
     @property
@@ -204,6 +215,17 @@ class Configuration:
     def __new__(cls, conf_file: str) -> Self: ...
     @staticmethod
     def from_file(conf_file: str) -> Configuration: ...
+    @staticmethod
+    def from_string(text: str) -> Configuration:
+        """Read coordinates from the text of a GROMOS96 file. Velocities are not part of the
+        POSITION block and come back empty."""
+        ...
+    def to_g96(self, title: str | None = None) -> str:
+        """The configuration as GROMOS96 text, with an optional TITLE."""
+        ...
+    def __str__(self) -> str:
+        """The configuration as a GROMOS96 coordinate file."""
+        ...
     @property
     def n_atoms(self) -> int: ...
     @property
@@ -302,6 +324,12 @@ class MissingFeatureError(RuntimeError):
 
 class RunError(RuntimeError):
     """The engine failed to initialise or to take a step."""
+
+class ProgramError(RuntimeError):
+    """A ``gromos.tools`` program failed. ``stdout`` carries whatever it had written before
+    failing — for ``check_top`` that is the report itself."""
+
+    stdout: str
 
 @final
 class Term:
@@ -643,6 +671,36 @@ class System:
     def __new__(cls, topology: Topology, configuration: Configuration) -> Self: ...
     @staticmethod
     def from_files(topo_file: str, conf_file: str) -> System: ...
+    def solvate(
+        self,
+        solvent: Configuration,
+        *,
+        minwall: list[float] | None = None,
+        thresh: float = 0.23,
+        boxsize: bool = False,
+    ) -> System:
+        """Solvate this system in a box of pre-equilibrated solvent (`gromos.tools.sim_box`).
+
+        Returns a new System — the topology follows the coordinates, so both halves agree."""
+        ...
+    def add_ions(
+        self,
+        *,
+        forcefield: tuple[str, str],
+        positive: tuple[int, str] | None = None,
+        negative: tuple[int, str] | None = None,
+        potential: float | None = None,
+        mindist: float = 0.0,
+    ) -> System:
+        """Replace solvent molecules by counter-ions (`gromos.tools.ion`), topology included.
+
+        `forcefield` is the `(mtb, ifp)` pair `make_top` takes; each ion's topology is built from
+        it and combined with the solute's, which gromos++'s `ion` leaves to the caller."""
+        ...
+    def check(self) -> tuple[list[str], list[str], str]:
+        """Run every consistency check over this system's topology; `gromos.tools.check_top`
+        wraps the result as a `CheckReport`."""
+        ...
     @property
     def n_atoms(self) -> int: ...
     @property
@@ -663,6 +721,48 @@ class System:
 # Free functions
 # =============================================================================
 
+# =============================================================================
+# The gromos++-style programs (PLAN.md 3.10) — wrapped by `gromos.tools`
+# =============================================================================
+
+def _run_program(name: str, argv: list[str]) -> str:
+    """Run the program `name` with an already-`@key`-form argument list; returns its stdout."""
+    ...
+
+def _programs() -> list[dict[str, Any]]:
+    """Every program this build provides: name, known keys, usage, status."""
+    ...
+
+def _sim_box(
+    topology: Topology,
+    solute: Configuration,
+    solvent: Configuration,
+    *,
+    minwall: list[float] | None = None,
+    thresh: float = 0.23,
+    boxsize: bool = False,
+) -> Configuration: ...
+def _ion(
+    topology: Topology,
+    system: Configuration,
+    *,
+    positive: tuple[int, str] | None = None,
+    negative: tuple[int, str] | None = None,
+    potential: float | None = None,
+    mindist: float = 0.0,
+) -> Configuration: ...
+def _build_box(
+    topology: Topology, molecule: Configuration, *, nsm: int, dens: float
+) -> Configuration: ...
+def _com_top(parts: list[tuple[int, Topology]], *, param: int = 1, solv: int = 1) -> Topology: ...
+def _red_top(topology: Topology, *, first: int, last: int) -> Topology: ...
+def _pdb2g96(
+    topology: Topology, pdb: str, *, lib: str | None = None, gch: bool = False
+) -> tuple[Configuration, int]: ...
+def _make_top(
+    *, build: list[str], param: str, seq: list[str], solv: str | None = None
+) -> Topology: ...
+def _check_top(topology: Topology) -> tuple[list[str], list[str], str]: ...
 def rmsd(
     positions: npt.NDArray[np.float32],
     reference: npt.NDArray[np.float32],

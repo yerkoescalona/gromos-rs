@@ -308,7 +308,7 @@ print(sim.plan.kinds)
 ## AlgorithmSequence (deprecated)
 
 The descriptor path (`Forcefield`, `LeapFrogIntegrator`, `BerendsenThermostat`, … building
-blocks and a second builder) was removed in PLAN.md 3.9 step 4. The preset names survive one
+blocks and a second builder) was removed in 3.9 step 4. The preset names survive one
 release: each returns the `Plan` of `params` (what `Recipe.from_imd(...).plan(system)`
 builds) and warns. `AlgorithmSequence` itself cannot be instantiated.
 
@@ -476,7 +476,7 @@ r_vals, g_vals = rdf(
 
 ### FUTURE — System builder algebra
 
-Design rationale in `FUTURE.md`. Nothing below is implemented.
+Design rationale in `system_builder.py`. Nothing below is implemented.
 
 ```python
 from gromos import ForceField

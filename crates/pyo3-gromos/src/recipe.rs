@@ -1,9 +1,9 @@
-//! The recipe model from Python — `Recipe`, `Term`, `Algorithm`, `Plan` (PLAN.md 3.9 step 3).
+//! The recipe model from Python — `Recipe`, `Term`, `Algorithm`, `Plan` (3.9 step 3).
 //!
 //! These classes hold the **Rust data types** (`RunRecipe`, `TermSpec`, `AlgorithmSpec`); the
 //! bridge is serde through `pythonize`, so a new field or variant on the Rust side is accepted
 //! from Python with no binding code, and a typo'd key is an error naming it
-//! (`deny_unknown_fields`). Nothing here holds physics or defaults — PLAN.md 3.9 A12/G7.
+//! (`deny_unknown_fields`). Nothing here holds physics or defaults — 3.9 A12/G7.
 //!
 //! ```python
 //! recipe = Recipe.nvt(dt=0.002, steps=1000, temperature=300.0, constraints="hbonds")

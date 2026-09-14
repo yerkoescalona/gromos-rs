@@ -1,4 +1,4 @@
-"""ML potential binding (PLAN.md P3.7): `resolve_zone_partition` and
+"""ML potential binding (3.7): `resolve_zone_partition` and
 `Simulation(..., ml_potential=, ml_region=, ml_buffer=)`.
 
 Skips gracefully (not a failure) if:
@@ -49,7 +49,7 @@ def _toy_model_path(tmp_path: Path) -> Path:
 
 @requires_ml
 def test_resolve_zone_partition_matches_real_t06_solute_zone():
-    """Part A — the exit criterion PLAN.md specifies: zone *indices* from a selector string
+    """Part A — the exit criterion 3.7 specifies: zone *indices* from a selector string
     must match the real fixture `zone_partition_reference.rs` already validates.
 
     `t_06`'s real inner zone (the BuRNN QM zone, `QMZONE` in `md_burnn/meoh.qmm`) is exactly the
