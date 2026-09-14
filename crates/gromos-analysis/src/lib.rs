@@ -28,6 +28,9 @@ pub mod rdf;
 pub mod rmsd;
 pub mod time;
 
+pub mod programs;
+pub use programs::{find, PROGRAMS};
+
 // Re-export main functions
 pub use diffusion::{calculate_diffusion_coefficient, calculate_msd};
 pub use gyration::calculate_gyration_radius;
