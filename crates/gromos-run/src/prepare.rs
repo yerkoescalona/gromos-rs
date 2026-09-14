@@ -1,7 +1,7 @@
 //! Everything that happens *before* the algorithm sequence — lifted from `md.rs` so the
 //! Python binding does it the same way (it did not: NSM came from the parameter file instead
 //! of the coordinate file, validation was skipped, the topology's PHYSICALCONSTANTS were
-//! ignored — PLAN.md 3.8 §2).
+//! ignored — 3.8 §2).
 //!
 //! GROMOS order (`in_topology` → `in_configuration` → `check_configuration`), kept:
 //! perturbation topology → truncated-octahedron transform → NSM from the coordinates and

@@ -6,7 +6,7 @@
 //!
 //! Before this crate, three copies of this computation existed and none counted the solute
 //! constraints (`md.rs` carried a `TODO`); they also subtracted the solvent constraints whenever
-//! *any* constraint algorithm was on, even one acting on the solute only. PLAN.md 3.9 A11.
+//! *any* constraint algorithm was on, even one acting on the solute only. 3.9 A11.
 
 use gromos_core::Topology;
 use gromos_integrators::constraints::{NtcMode, ShakeBuffers};

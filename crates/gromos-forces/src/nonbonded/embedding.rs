@@ -1,9 +1,9 @@
 //! `ElectrostaticEmbedding` — the QM↔MM Coulomb coupling term, with forces on **both** sides.
 //!
-//! **PLAN.md P2.7 Step 3.** This is the concrete answer to "how do forces get back onto MM
+//! ** P2.7 Step 3.** This is the concrete answer to "how do forces get back onto MM
 //! atoms": the QM zone carries charges (derived by whatever engine owns it), the environment
 //! carries the force field's partial charges, and the Coulomb interaction between them produces
-//! energy plus equal-and-opposite forces on both sets. FUTURE.md P5 called for a provider that
+//! energy plus equal-and-opposite forces on both sets. P5 called for a provider that
 //! contributes to an *arbitrary* atom subset rather than only its own region — this is the first
 //! provider that actually does so, putting forces on MM atoms outside `region`.
 //!
@@ -46,7 +46,7 @@
 //!   the MM atoms, but not vice versa."
 //! - **No link atoms.** The tutorial system has `QMLI=0` throughout (no bond crosses the
 //!   boundary), and Poliak states boundary charge redistribution is unimplemented in gromosXX
-//!   too — see PLAN.md P2.7 A4.
+//! too — see P2.7 A4.
 
 use gromos_core::configuration::Configuration;
 use gromos_core::math::{Mat3, Vec3};
@@ -104,13 +104,13 @@ impl PotentialProvider for ElectrostaticEmbedding {
         let positions = &conf.current().pos;
         let four_pi_eps_i = gromos_core::units::four_pi_eps_i;
 
-        // Sparse force accumulator over *all* touched atoms — QM and MM alike (FUTURE.md P5).
+        // Sparse force accumulator over *all* touched atoms — QM and MM alike (P5).
         let mut force_acc: Vec<Vec3> = vec![Vec3::ZERO; n_atoms];
         let mut touched = vec![false; n_atoms];
         let mut energy = 0.0;
         // Atomic pairwise virial, same convention as `ForceStorage::virial` in
         // `nonbonded/innerloops.rs`: `W[a][b] = sum_pairs r[a] * f[b]`, `r = r_qm - r_mm`,
-        // `f = f_qm` (force on the QM atom). PLAN.md P2.8-3.
+        // `f = f_qm` (force on the QM atom). P2.8-3.
         let mut virial = Mat3::ZERO;
 
         for (lo, hi, shift) in neigh.neighbor_pairs(region, self.cutoff) {
@@ -254,7 +254,7 @@ mod tests {
         );
     }
 
-    /// **PLAN.md P2.8-3, closed-form half.** For a pure `q_qm*q_mm/r` pair (Coulomb, no cutoff
+    /// ** P2.8-3, closed-form half.** For a pure `q_qm*q_mm/r` pair (Coulomb, no cutoff
     /// switching), Euler's theorem for a homogeneous degree-(-1) potential gives
     /// `r · dE/dr = -E`, and the atomic pairwise virial's trace is exactly `r_vec · f_qm`
     /// (`f_qm = -dE/dr_vec`, so `r_vec · f_qm = -r·dE/dr = E`). So `trace(virial) == energy`
@@ -283,7 +283,7 @@ mod tests {
         );
     }
 
-    /// **PLAN.md P2.8-3, finite-difference half.** Scaling both atoms' positions away from a
+    /// ** P2.8-3, finite-difference half.** Scaling both atoms' positions away from a
     /// fixed center by `s` is the vacuum analogue of isotropic volume scaling (`dV/V = 3 ds/s`
     /// at `s=1`) — the standard virial-pressure relation `P ~ -dE/dV` reduces, for this one pair,
     /// to `trace(virial) = r_vec · f_qm = -dE/ds|_{s=1}` (verified analytically above; checked

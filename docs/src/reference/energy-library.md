@@ -31,7 +31,7 @@ The profile therefore states:
 | §3 Reader tiers and refusals | implemented (0.0.47): `EnergyTraj::bind`; the LiveCoMS tutorial's stale library is refused at open with the diff |
 | §4 Official library from `gromos-io` | implemented (0.0.47): `crates/gromos-io/data/ene_ana.md++.lib`, generated from the layout in code, `ene_ana` uses it without `@library`, `@print_library` prints it |
 
-Implementation is tracked in `PLAN.md` §2.10.
+Implementation landed in 0.0.47 (item 2.10; see CHANGELOG.md).
 
 ## 1. The grammar — unchanged from gromos++
 

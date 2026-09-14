@@ -39,7 +39,7 @@
 //!
 //! The implementation deliberately avoids `num_solute_atoms()` as a role boundary.
 //! All molecule-level operations route through `topology.molecules` ranges; `s:` is
-//! simply shorthand for `molecules[1..]` (Dim 10: when role attributes land, swap
+//! simply shorthand for `molecules[1..]` (when role attributes land, swap
 //! the lookup without changing the grammar).
 
 use crate::topology::Topology;
@@ -321,7 +321,7 @@ fn resolve_mol_prefix(
         "s" => {
             // s:N — Nth solvent molecule (role == Solvent), 1-based.
             // s:a — all solvent molecules.
-            // Routes through role attribute (Dim 10); falls back to molecules[1..].
+            // Routes through the instancing role attribute; falls back to molecules[1..].
             use crate::topology::Role;
             let solvent_mol_indices: Vec<usize> = if !topology.instances.is_empty() {
                 topology
@@ -343,7 +343,7 @@ fn resolve_mol_prefix(
                 .collect())
         },
         "m" => {
-            // m:N — Nth solute molecule (role == Solute), 1-based.  Dim 10 role-based facade:
+            // m:N — Nth solute molecule (role == Solute), 1-based. Role-based facade:
             // `m:1` = first solute molecule, mirrors `s:1` = first solvent molecule.
             // Falls back to molecules[0..] when instances are not populated.
             use crate::topology::Role;

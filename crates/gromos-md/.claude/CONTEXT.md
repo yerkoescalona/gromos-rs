@@ -22,23 +22,22 @@ matching gromosXX to reference tolerances.
 - Force trajectory output (@trf) ✓: FREEFORCERED + CONSFORCERED, atom-by-atom tolerance 1e-6
 - **37/40 reference tests passing** (3 ignored: `aladip_vacuum_fep` known FEP mismatch,
   `aladip_vacuum_em` EM frame-count off-by-one, `water_216_nve_nobath` — a *correct* reference the
-  engine fails because the IMD parser turns an absent MULTIBATH block into a Berendsen bath, PLAN.md
-  3.9 A18 — see PLAN.md Reference Test Status for the full matrix)
-- `PairlistAlgorithm::from_imd(imd.algorithm, …)` dispatches Standard/CellList here (PLAN.md 9a-0/
+  engine fails because the IMD parser turns an absent MULTIBATH block into a Berendsen bath, 3.9 A18 — the full matrix is below)
+- `PairlistAlgorithm::from_imd(imd.algorithm, …)` dispatches Standard/CellList here (9a-0/
   9a-1); CellList only activates on explicit `ALGORITHM grid_cell`, never via a size heuristic — all
   37 active reference systems still use `standard`.
 - `test_provider_reference.rs` / `test_orchestrator_reference.rs` — gromosXX-reference tests for the
-  `PotentialProvider`/`ProviderOrchestrator` seam (PLAN.md 2.6/P2.8-2), not the main `md` binary path.
+  `PotentialProvider`/`ProviderOrchestrator` seam (2.6/P2.8-2), not the main `md` binary path.
   `schnet_nve_loop.rs` (feature `ml`) — real leapfrog loop driving `SchNetInteraction`;
   `xtb_orchestrator_sequence.rs` — `ProviderOrchestratorAlgorithm` inside a real `AlgorithmSequence`
-  (PLAN.md P2.8-6 ✓). Neither is wired into the `md` CLI yet.
-- **PLAN.md 3.9 step 1 ✓ (2026-08-29): the run assembly left this crate.** `md.rs` (2060 → 1359
+  (2.8-6 ✓). Neither is wired into the `md` CLI yet.
+- **3.9 step 1 ✓ (2026-08-29): the run assembly left this crate.** `md.rs` (2060 → 1359
   lines) now calls `gromos_run::{prepare_system, build_sequence_from_imd, start}` — the same functions
   `pyo3-gromos` calls — and only keeps CLI parsing, printing (from `PrepareNote`/`BuildSummary`),
   writers, and the GaMD/EDS in-loop application (still applied *after* `run_step`, still parsed
-  out-of-band; PLAN.md 3.9 A6). Do not add algorithm construction back here, and do not add a
+  out-of-band; 3.9 A6). Do not add algorithm construction back here, and do not add a
   second IMD reader.
-- **PLAN.md 3.9 step 2 ✓ (2026-08-29).** The binary now runs from a `RunRecipe`
+- **3.9 step 2 ✓ (2026-08-29).** The binary now runs from a `RunRecipe`
   (`gromos_run::build_sequence_from_imd` = `from_imd` → `build_plan` → `validate_plan` →
   `instantiate`); it allows `GAMD`/`EDS` blocks to pass through the recipe because it applies them
   itself, and rejects any other unmodelled block. `md @dump` prints recipe + plan as JSON and exits;
@@ -46,7 +45,7 @@ matching gromosXX to reference tolerances.
   `mdout.mdp`). The absent-MULTIBATH hazard is fixed at the parser defaults: `water_216_nve_nobath`
   is a regular passing reference (38/40, 2 ignored).
 
-- **PLAN.md 3.9 steps 2–4 ✓ (2026-08-29): the recipe is the only entry point.** `md.rs` reads the
+- **3.9 steps 2–4 ✓ (2026-08-29): the recipe is the only entry point.** `md.rs` reads the
   `.imd` through `gromos_run::read_imd`, builds a `RunRecipe` (`GAMD`/`EDS` allowed through as
   passthrough blocks, applied out-of-band), and runs `prepare_system → build_plan → validate_plan →
   instantiate → start` — the same calls `py-gromos`'s `Simulation` makes. `md @dump` prints recipe
@@ -71,6 +70,11 @@ tests/schnet_nve_loop.rs                    — SchNetInteraction + LeapFrog NVE
 - **All simulation parameters from `@input` .imd/.in file** (not CLI flags).
 - **CLI:** clap `#[derive(Parser)]` with `gromos_args()` pre-processor (`@key → --key`, `@f argfile` expansion). No custom arg parsers.
 - **Tolerances:** force_abs=1e-6, energy_rel=1e-8, position_abs=1e-9.
+
+## Reference systems
+
+The per-system status matrix — which of the 45 levels pass and what each isolates — lives with the
+systems themselves: `tests/gromosXX_references/README.md`.
 
 ## How to add a reference test
 1. Create `tests/gromosXX_references/<name>/` with the `.imd` and an `input.toml` (copy a sibling's;

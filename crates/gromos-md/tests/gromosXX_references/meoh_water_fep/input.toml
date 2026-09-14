@@ -4,7 +4,7 @@
 # SHAKE on all bonds. Built with gromos++ make_top (54a7.mtb CH3OH + H2O) and the project's
 # sim_box (1000-SPC reference box, minwall 1.45 nm), then gromosXX EM (500 steps) + 10 ps NVT.
 # Ten steps, NTWE=NTWX=NTWF=NTWG=1 so energies, positions, forces and dH/dlambda are compared per step.
-# Why it exists (PLAN.md 1.7 note): ch4_water_fep has zero charge on the perturbed atom, so the
+# Why it exists (1.7 note): ch4_water_fep has zero charge on the perturbed atom, so the
 # perturbed reaction-field (self / excluded-pair) terms were never validated; methanol is charged.
 
 [system]

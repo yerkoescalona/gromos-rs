@@ -6,7 +6,7 @@ name = "aladip_trunc_oct"
 description = "Level 4: Aladip + 20 SPC, truncated octahedron box (NTB=-1)"
 level = 4
 natoms = 72
-isolates = "triclinic/truncoct nearest_image (PLAN 1.4, FUTURE Dim 11 #1)"
+isolates = "triclinic/truncoct nearest_image (the gromosXX audit's finding #1)"
 
 [input]
 topology = "../shared/aladip.topo"

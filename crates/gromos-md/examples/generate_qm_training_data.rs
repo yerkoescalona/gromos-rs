@@ -8,7 +8,7 @@
 //! needed), and records every step's energy/forces/positions to a training dataset file.
 //!
 //! **Training target is deliberately the *isolated* QM-zone energy** (`Embedding::None`), not an
-//! electrostatically-embedded one — see `PLAN.md` P2.9 for why: `SchNetInteraction`'s architecture
+//! electrostatically-embedded one. `SchNetInteraction`'s architecture
 //! has no environment/charge input channel, so training on embedded energies would bake in one
 //! specific environment's contribution into a model that structurally can't represent it (same
 //! reasoning as the BuRNN training target in `zones.rs`'s docs).

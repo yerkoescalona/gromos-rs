@@ -7,7 +7,7 @@
 //! time, and wants the literal geometric neighbor graph, not GROMOS's electrostatic
 //! exclusions. `SpatialIndex` is therefore a separate, atom-level distance query, not a
 //! wrapper around the pairlist's internals (see `architecture.md` "Supporting shapes" and
-//! `FUTURE.md` Dim 12.5 point 3 / P3: one query-based service meant to serve the MD
+//! P3 (`gromos-forces/.claude/CONTEXT.md`): one query-based service meant to serve the MD
 //! pairlist, an ML radial graph, and the QM-zone gather from the same shared positions).
 
 use crate::configuration::Configuration;
@@ -16,7 +16,7 @@ use crate::selection::AtomSelection;
 
 /// Query-based neighbor service: "give me atom pairs within `r` of this selection."
 ///
-/// Pairs-only for now; graph/triplet queries (FUTURE.md P3) are additive extensions of
+/// Pairs-only for now; graph/triplet queries (P3) are additive extensions of
 /// this trait later, not a redesign.
 pub trait SpatialIndex {
     /// Atom-index pairs `(i, j)` with `i < j`, where at least one of `i, j` is in `atoms`

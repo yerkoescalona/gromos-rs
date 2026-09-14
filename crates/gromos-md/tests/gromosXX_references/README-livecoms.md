@@ -25,7 +25,7 @@ Two more followed as the tutorials were worked through:
 | system | what it covers |
 |---|---|
 | `aladip_harmonic_covalent` | `COVALENTFORM 1 1 0` — harmonic bonds and harmonic angles instead of the quartic and cosine-harmonic forms. Both were implemented all along; nothing selected between them until 0.0.45, and the block was refused, which is what blocked the GaMD tutorial |
-| `aladip_gamd` | a `GAMD` block (dual boost, production mode) with its `@gamd` file. `#[ignore]`d: the classical part matches gromosXX exactly, the boost does not — it is the specification for the GaMD work in PLAN.md 1.9 |
+| `aladip_gamd` | a `GAMD` block (dual boost, production mode) with its `@gamd` file. `#[ignore]`d: the classical part matches gromosXX exactly, the boost does not — it is the specification for the GaMD work in 1.9 |
 
 `aladip_wrapped` also writes a velocity trajectory (`WRITETRAJ` NTWV), so `@trv` — accepted and
 ignored until 0.0.44 — is exercised by a reference.

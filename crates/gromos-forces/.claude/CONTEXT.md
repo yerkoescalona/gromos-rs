@@ -9,7 +9,7 @@ Single source of physics — both MD engine and analysis facade call this layer.
 
 ## Outputs (public API)
 Bonded + nonbonded force/energy; pairlist; restraint forces; `single_point_energy()`;
-`PotentialProvider` trait + implementors (QM/MM/ML seam, PLAN.md P2.6-P2.8).
+`PotentialProvider` trait + implementors (QM/MM/ML seam, 2.6-P2.8).
 
 ## Status
 - LJ + CRF nonbonded ✓; 1-4 interactions ✓; twin-range (RCUTP/RCUTL) ✓
@@ -19,7 +19,7 @@ Bonded + nonbonded force/energy; pairlist; restraint forces; `single_point_energ
 - `energy.rs` ✓ — `single_point_energy(topo, positions, box_dims, params)` — used by `ener` analysis binary
 - ⚠️ Perturbed RF self-term needs second-sourcing from GROMOS book (`perturbed_nonbonded_term.cc:596,749,1444`)
 - Dihedral restraints: **not yet** — next after CellList wiring (P1.6)
-- **QM/MM + ML seam (PLAN.md P2.6-P2.8), pieces built and reference-tested, not yet wired into an
+- **QM/MM + ML seam (2.6-P2.8), pieces built and reference-tested, not yet wired into an
   MD binary:**
   - `PotentialProvider` trait (`provider.rs`) — `contribute(region, topo, conf, neigh) ->
     Contribution` (scattered energy+forces+virial), plus `Embedding {None, Mechanical,
@@ -69,7 +69,7 @@ Bonded + nonbonded force/energy; pairlist; restraint forces; `single_point_energ
     not apt-installable here); everything else in that dataset needing dynamic QM charges stays
     out of reach for the same reason `xtb`/`libtorch` do.
 
-- **PLAN.md 3.9 step 5 (2026-08-29).** `ProviderOrchestrator::register_labelled` /
+- **3.9 step 5 (2026-08-29).** `ProviderOrchestrator::register_labelled` /
   `evaluate_with_terms` report every provider's energy under a label (the run's registry name for
   the term) into `Energy.term_energies` — the per-term view the summed `Contribution` erases (G10).
   `XtbInteraction::with_timeout` + `qm_subprocess::run_subprocess_with_timeout` bound every xtb
@@ -111,3 +111,48 @@ tests/                — QM/MM seam reference tests against the real BuRNN tuto
   from `conf`, not from whatever `Periodicity`/`SpatialIndex` the caller built separately, so a
   mismatch here silently uses unwrapped distances for cross-boundary pairs (caught building the
   P2.8-1 exit test: ~0.5% energy discrepancy from exactly this).
+
+## The provider constraints P1–P9
+
+The nine problems a QM/MM/ML provider has to solve, written before any of it was built and used as
+the specification the seam was designed against. **They are cited by number from the code**
+(`provider.rs`, `orchestrator.rs`, `spatial_index.rs`, the QM/ML reference tests) — a comment saying
+"P5" means the constraint below, so keep the numbering stable. The design they describe is built,
+so this is the record of *why* the shapes are what they are, not a plan.
+
+- **(P1) The abstraction is data-in/data-out, not file-in/file-out.** The inverse of gromosXX, whose
+  `QM_Worker` base class is shaped around `write_input`/`run_calculation`/`process_output` — the
+  abstraction itself assumes "format a text file → fork/exec → parse text". Our trait takes arrays
+  (positions, charges, region) and returns energy + gradients; a file-based external engine is *one
+  implementation* that formats and parses internally. The file dance must never leak into the trait
+  shape. This inversion is the whole ballgame.
+- **(P2) The model-export boundary.** Most trained potentials live in PyTorch. The on-ramp is train
+  in Python → export → load in Rust, but not every architecture exports cleanly: equivariant
+  message-passing models (NequIP/Allegro/MACE, on `e3nn`) use custom ops and dynamic neighbour
+  graphs that may not lower to ONNX. TorchScript via `tch` is more permissive and heavier. Which
+  models are first-class follows from this choice.
+- **(P3) Multiple, differently-parameterised neighbour structures.** The MD pairlist, an ML model's
+  radial graph (different cutoff, edge lists, sometimes triplets) and the QM-zone gather (MM charges
+  within cutoff of the QM region, rebuilt every step) are *three different spatial queries*. Hence
+  `SpatialIndex` is a general query service, not an MD pairlist — see `gromos-core/src/spatial_index.rs`.
+- **(P4) Units and conventions, typed.** QM works in Hartree/Bohr, ML models in eV/Å or kcal/mol,
+  GROMOS in kJ/mol·nm. gromosXX manages this with `print_unit_factors` and discipline. A unit
+  mismatch must be a compile- or return-time error, not a silent 23×/27.2× force bug — a classic and
+  brutal ML-MD failure mode.
+- **(P5) Forces flow onto MM atoms too.** Electrostatic embedding means the QM density polarises and
+  the MM point charges feel a force, so a provider returns gradients on **both** the QM region and
+  the embedding MM atoms — contributions on an *arbitrary atom subset*, not "the QM region only".
+  The accumulator interface accepts partial, scattered contributions, which is also what the
+  classical providers want.
+- **(P6) Stateful, iterative coupling.** Polarisable embedding is an SCF loop (mutual QM↔MM
+  polarisation) and QM workers reuse the previous wavefunction as an initial guess, so the trait
+  takes `&mut self` and cannot assume pure functions.
+- **(P7) Uncertainty / committee / active learning.** gromosXX's `nn_worker` already loads validation
+  models. Ensemble disagreement → uncertainty → trigger a DFT recompute is where ML-MD is going, so a
+  provider may return uncertainty alongside energy and forces (`ProviderExtra`), leaving room for a
+  scheduler to escalate ML → DFT at runtime.
+- **(P8) Determinism boundary.** QM and ML paths are not bit-deterministic, so they sit in a
+  *separate test tier* from the classical bit-for-bit suite: validated against reference energies and
+  forces within a stated tolerance. Cited by every QM/ML reference test to say which tier it is in.
+- **(P9) Process lifecycle and failure** for external engines: crashes, timeouts, NaNs. `Result` plus
+  a supervised subprocess and a fallback.

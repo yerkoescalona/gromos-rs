@@ -485,7 +485,7 @@ fn run_reference(system: &str) {
         // The *values* are not compared yet: velocities are half-step quantities in leap-frog and
         // gromosXX's frame 0 is the input velocities, while ours is one half-step further on — the
         // residual from frame 1 onwards is ~1e-4 nm/ps, the size of one thermostat scaling. Which
-        // half-step each frame carries is an open item (PLAN.md 1.5b).
+        // half-step each frame carries is an open item (1.5b).
         assert_eq!(
             ours.len(),
             theirs.len(),
@@ -648,7 +648,7 @@ macro_rules! ref_test {
     };
     (ignore: $name:ident, $sys:literal) => {
         #[test]
-        #[ignore = "known mismatch — see PLAN.md"]
+        #[ignore = "known mismatch — see "]
         fn $name() {
             run_reference($sys);
         }
@@ -695,7 +695,7 @@ ref_test!(water_1000_spc_gridcell, "water_1000_spc_gridcell");
 // ── Level 3: bulk water ──────────────────────────────────────────────────────
 ref_test!(water_216_box, "water_216_box");
 // Same system with the MULTIBATH block *absent*: gromosXX runs no temperature coupling. Until
-// PLAN.md 3.9 step 2 the parser turned the absent block into a Berendsen bath (A18); the
+// 3.9 step 2 the parser turned the absent block into a Berendsen bath (A18); the
 // defaults now mean "absent", and this guards that they keep meaning it.
 ref_test!(water_216_nve_nobath, "water_216_nve_nobath");
 ref_test!(water_216_box_com, "water_216_box_com");
@@ -751,9 +751,9 @@ ref_test!(aladip_harmonic_covalent, "aladip_harmonic_covalent");
 // dihedral and total forces of every acceleration group during the force calculation and scales
 // them by k·(V−E), recording ΔV = k(V−E)²/2 in the special energy — on this system ΔV ≈ 1.23
 // kJ/mol, which our run neither applies the same way nor reports. The reference stays here as the
-// specification for that work (PLAN.md 1.9).
+// specification for that work (1.9).
 ref_test!(
     ignore: aladip_gamd,
     "aladip_gamd",
-    "GaMD boost unvalidated: gromosXX's per-acceleration-group force scaling and its ΔV in the special energy are not reproduced (PLAN.md 1.9)"
+    "GaMD boost unvalidated: gromosXX's per-acceleration-group force scaling and its ΔV in the special energy are not reproduced (1.9)"
 );

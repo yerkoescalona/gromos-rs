@@ -1,4 +1,4 @@
-//! Behaviours that the lift (PLAN.md 3.9 step 1) made shared — each one used to exist in only
+//! Behaviours that the lift (3.9 step 1) made shared — each one used to exist in only
 //! one of the two builders, or in neither. Fixtures are the gromosXX reference systems.
 
 use std::path::{Path, PathBuf};

@@ -112,7 +112,7 @@ Each assumption says what it silently affects and how to verify it. Tick the box
 
 - [ ] **A11 — Rust thread parallelism covers only part of the step.** Confirmed in code: the LJ/CRF innerloop (`innerloops.rs`) splits charge-group pair groups across Rayon (`par_chunks`) **only when there are ≥ 64 groups** — tiny systems (`aladip_solvated`, 72 atoms) run serially regardless of thread count. `ParallelPairlistAlgorithm` exists but whether `md` selects it is unverified. Bonded terms, constraints, integration, thermostats: serial. *Verify:* `grep -rn "par_iter\|par_chunks" crates/*/src` and check which are reachable from `md.rs`; expect Amdahl-limited scaling.
 - [ ] **A12 — gromosXX OpenMP parallelism is also nonbonded-centric.** `omp_nonbonded_interaction.cc` plus a few `#pragma omp` in constraints/integration (54 pragmas total). Comparable scope to A11 — good for a fair threads-vs-threads comparison, but only after an `--enable-openmp` rebuild.
-- [ ] **A13 — MPI in both codebases is a *nonbonded master/worker* design, not domain decomposition.** gromosXX `mpi_nonbonded_master.cc` broadcasts positions and reduces forces every step; the Rust port mirrors it. Expect communication to dominate on one node for small systems; MPI is only worth measuring on ≥ 3000-atom systems. `FUTURE.md` Dim 8 already ranks MPI "deliberately last".
+- [ ] **A13 — MPI in both codebases is a *nonbonded master/worker* design, not domain decomposition.** gromosXX `mpi_nonbonded_master.cc` broadcasts positions and reduces forces every step; the Rust port mirrors it. Expect communication to dominate on one node for small systems; MPI is only worth measuring on ≥ 3000-atom systems. MPI is deliberately ranked last (board card V8).
 
 ### D. The systems
 
@@ -222,7 +222,7 @@ protocol, which is why it — and only it — is quoted in "Where it stands".
 
 A note on an early misreading: the first `water_1000` breakdown showed the LJ/CRF kernel at
 parity and the whole deficit in the pairlist, and this document briefly concluded that
-`FUTURE.md`'s SIMD priority was misplaced. That comparison was flattered by the charge-group-
+The early SIMD priority was misplaced (board card V3). That comparison was flattered by the charge-group-
 grouped kernel (one `nearest_image` per CG pair) that `water_1000`'s large box enables and
 `water_216`'s does not; on `water_216` the same kernel was 2× slower than gromosXX's. Both
 readings were "right" for their system, and both the pairlist and the kernel needed work.
@@ -613,11 +613,11 @@ threads: 1.13× → 1.25× → 1.29× → 1.38×. 8-core speedup 4.1× (E = 0.52
 3.4× (E = 0.42) for gromosXX; the serial remainder in both is SHAKE, integration and the
 thermostat, plus per-step memory traffic on 24 000 atoms.
 
-### Kernel determinism (PLAN.md 3.9 step 0, 2026-08-29)
+### Kernel determinism (3.9 step 0, 2026-08-29)
 
 Measured with `scripts/kernel_determinism.py` (release `md`, `RAYON_NUM_THREADS` = 1 and 8,
 **n = 3 runs per thread count**, every ENERTRJ column over every step compared exactly). Question
-(PLAN.md 3.9 A2/A3): the parallel nonbonded kernels reduce through rayon `fold/reduce`
+(3.9 A2/A3): the parallel nonbonded kernels reduce through rayon `fold/reduce`
 (`innerloops.rs`) — is the result reproducible run-to-run, and is it thread-count independent?
 
 | system | comparison | n pairs | bit-identical | worst column | max abs Δ (kJ/mol) | max rel Δ |
@@ -633,9 +633,8 @@ Reading: at a fixed thread count the reduction tree is stable in practice (`par_
 `len / threads` chunks merged by `reduce`), so results are reproducible; across thread counts the
 chunking — hence the summation order — changes, and the difference sits in the last printed digit
 (~1e-13 relative, five orders below the 1e-8 reference tolerance). Consequence for the front-end
-parity tests (PLAN.md 3.9 G2): pinning the thread count is sufficient for exact (`==`) same-build
-comparisons; `execution.parallel = Serial` remains the documented, stronger setting. Since PLAN.md
-3.9 step 1 the Python path uses the binary's own policy (`execution.parallel = auto`: parallel
+parity tests (3.9 G2): pinning the thread count is sufficient for exact (`==`) same-build
+comparisons; `execution.parallel = Serial` remains the documented, stronger setting. Since 3.9 step 1 the Python path uses the binary's own policy (`execution.parallel = auto`: parallel
 above 100 atoms); `same_path_twice` in `py-gromos/tests/test_front_end_parity.py` is bit-identical
 on all 40 reference systems, and the front-ends (`InputParameters` shim, `Recipe`, `Recipe` + `Plan`)
 agree exactly under that same policy.

@@ -1,8 +1,8 @@
-//! **PLAN.md P2.8-2, scoped to NN/MM** — `SchNetInteraction` driving an actual MD step loop,
+//! ** P2.8-2, scoped to NN/MM** — `SchNetInteraction` driving an actual MD step loop,
 //! not just single-point force evaluation.
 //!
 //! Every test so far has called `SchNetInteraction::contribute` once per assertion — proving
-//! the model loads and its forces are self-consistent (FUTURE.md P8), but never proving it can
+//! the model loads and its forces are self-consistent (P8), but never proving it can
 //! actually *evolve a system through time*. This wires it to `gromos-integrators::LeapFrog` and
 //! runs real NVE (constant energy) dynamics.
 //!
@@ -15,7 +15,7 @@
 //! isolated call. This is the standard way any new force field is checked when wired into an
 //! MD engine — reference systems like `water_216_box` in the classical suite are validated the
 //! same way (bulk NVE), just against a real gromosXX oracle instead of a self-consistency check
-//! (there is none available for an untrained model — FUTURE.md P8).
+//! (there is none available for an untrained model — P8).
 //!
 //! Feature-gated (`ml`); skips gracefully if no model is available, matching every other `ml`
 //! test in this workspace.
@@ -37,7 +37,7 @@ fn model_path() -> String {
 
 /// A real (if small) methanol-fragment-shaped molecule: C, O, H, H — not the QM zone of a
 /// solvated system (that would need embedding, which `SchNetInteraction` doesn't support yet —
-/// PLAN.md P2.7), just a plain vacuum molecule with real atomic numbers and real masses.
+/// P2.7), just a plain vacuum molecule with real atomic numbers and real masses.
 fn toy_molecule() -> Topology {
     let mut topo = Topology::new();
     let elements = [6u8, 8, 1, 1]; // C, O, H, H
@@ -113,7 +113,7 @@ fn schnet_driven_nve_conserves_energy_over_a_trajectory() {
     // dt chosen empirically (not GROMOS's usual 0.002 ps, which assumes a fitted force field):
     // scanned 1e-4..2e-3 and picked the largest step that still produces real kinetic energy
     // (E_kin: 0 -> 0.08 kJ/mol from a standing start) with tight conservation (<0.005% max
-    // deviation) — see PLAN.md P2.8-2. Too small and the atoms barely move (a weak test of the
+    // deviation) — see P2.8-2. Too small and the atoms barely move (a weak test of the
     // loop); too large and a symplectic integrator's bounded-oscillation guarantee erodes.
     let dt = 1e-3;
     let n_steps = 500;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Does gromosXX accept what gromos-rs writes? (PLAN.md 3.9 assumption A7, guard G3)
+"""Does gromosXX accept what gromos-rs writes? (3.9 assumption A7, guard G3)
 
 For every reference system: read its `.in` with gromos-rs, write it back with `write_imd`
 (`cargo run -p gromos-io --example imd_roundtrip`), run the *real* gromosXX on the rewritten

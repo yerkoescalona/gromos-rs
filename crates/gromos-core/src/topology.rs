@@ -5,11 +5,13 @@
 //! - md++/src/topology/solute.h
 //! - md++/src/topology/solvent.h
 //!
-//! # Dimension 10 — instancing model (Phase 1)
+//! # The instancing model (Phase 1)
+//!
+//! Why it is shaped this way: `.claude/CONTEXT.md` §"The instancing model".
 //!
 //! The legacy `Solute` / `Vec<Solvent>` fields remain the authoritative source
 //! for bonded interactions during the transition.  The new fields alongside them
-//! implement the *representation* half of Dim 10:
+//! implement the *representation* half of it:
 //!
 //! - `MoleculeType` stores per-atom parameters **once** per unique molecule type.
 //! - `MoleculeInstance` places one copy at an `atom_offset` in the flat arrays
@@ -31,7 +33,7 @@
 
 use crate::math::Vec3;
 
-// ─── Dim 10: instancing model ────────────────────────────────────────────────
+// ─── instancing model ───────────────────────────────────────────────────────
 
 /// Semantic role of a molecule instance in the simulation.
 ///
@@ -645,7 +647,7 @@ pub struct PerturbedDistanceRestraintSpec {
 /// Main topology structure containing all molecular information
 #[derive(Debug, Clone)]
 pub struct Topology {
-    // Dim 10: Solute is now a shell (atoms in moltypes[0]).
+    // Solute is now a shell (atoms in moltypes[0]).
     // Phase 2e: Vec<Solvent> removed — solvent info lives in moltypes + instances.
     /// Legacy solute placeholder (Phase 2e: will be removed; use `moltypes[0]` directly).
     pub solute: Solute,
@@ -701,7 +703,7 @@ pub struct Topology {
     /// Per-molecule atom ranges; `molecules[m]` is `start..end` for molecule m.
     pub molecules: Vec<std::ops::Range<usize>>,
 
-    // ── Dim 10 instancing model ──────────────────────────────────────────────
+    // ── instancing model ─────────────────────────────────────────────────────
     // Populated by init_solute_moltype() + solvate().
     // instances[k] corresponds 1-to-1 with molecules[k].
     // Empty until those methods are called (e.g. in raw test topologies).
@@ -914,7 +916,7 @@ impl Topology {
         self.atom_to_energy_group[i]
     }
 
-    // ── Dim 10 accessors ─────────────────────────────────────────────────────
+    // ── instancing accessors ─────────────────────────────────────────────────
 
     /// Look up the MolTypeAtom for global atom index `i` via instances.
     pub fn moltype_atom(&self, i: usize) -> Option<&MolTypeAtom> {
@@ -944,7 +946,7 @@ impl Topology {
 
     /// Change the role of molecule instance `mol_idx` to `Role::Solute`.
     ///
-    /// This is the "promote one solvent molecule to solute" operation from Dim 10.
+    /// This is the "promote one solvent molecule to solute" operation.
     /// Phase 2 will add CG/exclusion renumbering; for now it's a label flip.
     pub fn promote(&mut self, mol_idx: usize) -> Result<(), String> {
         match self.instances.get_mut(mol_idx) {
@@ -1003,7 +1005,7 @@ impl Topology {
 
     /// Atom name for atom `i` (covers solute + all expanded solvent). Returns `None` if out of range.
     ///
-    /// Prefers the Dim 10 moltype path when instances are populated; falls back to
+    /// Prefers the moltype path when instances are populated; falls back to
     /// the legacy `solute.atoms` + `solvent_atom_template` approach.
     pub fn atom_name(&self, i: usize) -> Option<&str> {
         self.moltype_atom(i).map(|a| a.name.as_str())
@@ -1200,7 +1202,7 @@ impl Topology {
 
     /// Rebuild `iac`, `mass`, `charge` flat caches from `moltypes` + `instances`.
     ///
-    /// This is the Dim 10 Phase 2a step: the flat arrays are no longer expanded
+    /// This is the Phase 2a step: the flat arrays are no longer expanded
     /// manually in `solvate()` — they are derived from the instance registry.
     /// Calling this after adding/removing instances keeps the caches coherent.
     pub fn rebuild_flat_arrays(&mut self) {
@@ -1319,7 +1321,7 @@ impl Topology {
         let atoms_per_solvent = self.solvent_atom_template.len();
         let n_solute = self.num_solute_atoms();
 
-        // Dim 10: ensure solute moltype + instance are initialised before we add solvent.
+        // Ensure the solute moltype + instance are initialised before we add solvent.
         self.init_solute_moltype();
 
         // Add solute as one molecule (if it has atoms)
@@ -1379,7 +1381,7 @@ impl Topology {
             self.exclusions[i].sort_unstable();
         }
 
-        // Dim 10: add solvent MoleculeType (stored once) + one Instance per molecule.
+        // Add the solvent MoleculeType (stored once) + one Instance per molecule.
         {
             let sv_name = "SOLV".to_string();
 

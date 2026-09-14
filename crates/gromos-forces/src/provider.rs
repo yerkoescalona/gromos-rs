@@ -3,12 +3,12 @@
 //! Classical LJ+CRF, bonded terms, and (eventually) QM/MM and ML potentials all implement
 //! this one trait. If classical terms are *already* providers, QM/MM and ML potentials are
 //! just more providers later — additive, touching no existing physics (`architecture.md`
-//! "the provider pattern"; `FUTURE.md` Dim 12.5).
+//! "the provider pattern"; the P1–P9 constraints in this crate's CONTEXT.md).
 //!
 //! This module intentionally does **not** hand a provider `&mut Configuration`: that would
 //! give any provider — including a future external QM/ML one — unchecked mutable access to
 //! every atom's force/position/velocity, defeating the "contributes to an arbitrary but
-//! *scoped* atom subset" invariant (FUTURE.md P5). Instead a provider reads state and
+//! *scoped* atom subset" invariant (P5). Instead a provider reads state and
 //! returns a scattered [`Contribution`]; the caller (which owns `Configuration`/`Energy`)
 //! accumulates it and can validate which indices were touched before doing so.
 
@@ -22,7 +22,8 @@ use gromos_core::topology::Topology;
 ///
 /// Classical terms and future QM/MM/ML engines are all implementors. The shape — data in,
 /// scattered contribution out, stateful, fallible — is what must be right early; see
-/// `FUTURE.md` Dim 12.5 for the P1-P9 constraints this is designed against. Deliberately not
+/// This crate's CONTEXT.md §"The provider constraints P1–P9" for what this is designed
+/// against. Deliberately not
 /// solved yet (see the plan this landed from): async/cancellable evaluation for slow or
 /// external providers, and a shared typed-units boundary (each provider currently owns its
 /// own unit conversion).
@@ -44,7 +45,7 @@ pub trait PotentialProvider {
     /// Human-readable name for logging/diagnostics (e.g. `"LJ+CRF"`, `"MACE-OFF"`).
     fn name(&self) -> &str;
 
-    /// How this provider treats atoms **outside** `region` (PLAN.md P2.7 Step 2).
+    /// How this provider treats atoms **outside** `region` (P2.7 Step 2).
     ///
     /// [`SpatialIndex::neighbor_pairs`] deliberately returns pairs with only one endpoint in
     /// `region`, so every provider has to decide what to do with the environment. Declaring it
@@ -61,7 +62,7 @@ pub trait PotentialProvider {
 /// Grounded in the schemes GROMOS actually implements (Poliak et al. 2025, *J. Comput. Chem.*
 /// 46:e70053), not invented: mechanical embedding sees only environment *geometry*, while
 /// electrostatic embedding hands the environment's point charges to the engine so they polarize
-/// it. See PLAN.md P2.7 for which of these are implemented.
+/// it. See P2.7 for which of these are implemented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Embedding {
     /// Environment is ignored entirely; cross-boundary neighbor pairs are dropped.
@@ -73,7 +74,7 @@ pub enum Embedding {
     /// Environment geometry participates, but its charges do not polarize the region.
     Mechanical,
     /// Environment point charges polarize the region, and forces flow back onto them
-    /// (FUTURE.md P5). Note GROMOS's own EE polarizes the QM zone by the MM atoms but
+    /// (P5). Note GROMOS's own EE polarizes the QM zone by the MM atoms but
     /// **not** vice versa — mutual polarization is a separate, harder scheme.
     Electrostatic,
 }
@@ -110,7 +111,7 @@ impl Contribution {
 
 /// Extensible extra return data alongside energy/forces.
 ///
-/// `uncertainty` is a placeholder for the ensemble/active-learning hook (FUTURE.md P7:
+/// `uncertainty` is a placeholder for the ensemble/active-learning hook (P7:
 /// disagreement across a committee of models triggers a DFT recompute or flags the step for
 /// active learning). A single `f64` cannot represent a committee's per-model spread — this
 /// field is expected to widen (e.g. to `Vec<f64>`) when the first ML provider needing it

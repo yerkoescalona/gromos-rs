@@ -1,4 +1,4 @@
-//! **PLAN.md P2.7 Step 1** — falsify or confirm assumption **A1**: does today's
+//! ** P2.7 Step 1** — falsify or confirm assumption **A1**: does today's
 //! [`PotentialProvider`] signature already carry everything classic electrostatic embedding
 //! needs, without a trait change?
 //!
@@ -156,13 +156,13 @@ fn a1_electrostatic_embedding_inputs_are_reachable_from_todays_trait() {
     );
 }
 
-/// **PLAN.md P2.7 Step 3 at scale.** The unit tests in `nonbonded/embedding.rs` validate
+/// ** P2.7 Step 3 at scale.** The unit tests in `nonbonded/embedding.rs` validate
 /// [`ElectrostaticEmbedding`] against a closed-form two-charge oracle; this runs the same
 /// provider on the real solvated BuRNN system — a 6-atom QM zone embedded in ~1.4k MM point
 /// charges across a periodic box — and finite-difference-checks a force on a real **MM** atom.
 ///
 /// That combination is the actual Step 3 exit criterion: forces reaching atoms *outside* the
-/// region (FUTURE.md P5), on real data, under periodic boundary conditions.
+/// region (P5), on real data, under periodic boundary conditions.
 #[test]
 fn embedding_forces_on_real_mm_atoms_match_finite_differences() {
     use gromos_core::math::Vec3;
@@ -206,7 +206,7 @@ fn embedding_forces_on_real_mm_atoms_match_finite_differences() {
 
     assert!(contribution.energy.is_finite());
 
-    // **PLAN.md P2.8-3, real-data half.** `trace(virial) == energy` is an *exact* per-pair
+    // ** P2.8-3, real-data half.** `trace(virial) == energy` is an *exact* per-pair
     // identity for a `1/r` potential (`nonbonded/embedding.rs`'s
     // `virial_trace_equals_energy_for_a_pure_coulomb_pair` proves it on one pair; summed over
     // pairs it's still exact by linearity). Checking it here — thousands of pairs, real periodic

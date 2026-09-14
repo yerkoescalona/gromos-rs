@@ -1,7 +1,9 @@
 # Architecture guidelines — how to shape code
 
 These are the durable shapes every refactor should honor. They are *guidelines, not tasks* — the
-"why" lives in `FUTURE.md` (Dimensions 1, 2, 9, 10, 12, 14). When a change would violate one of
+"why" lives beside the code it explains: the instancing model in `gromos-core/.claude/CONTEXT.md`, the
+provider constraints P1–P9 in `gromos-forces/.claude/CONTEXT.md`, and "Why one core" below. When a
+change would violate one of
 these, that's a signal to stop and reconsider, not a rule to route around quietly.
 
 ## The one principle everything else serves
@@ -30,7 +32,7 @@ Think in layers; keep them from leaking into each other.
   The MD side of this layer is the `gromos-run` crate: a run is described once as data
   (`RunRecipe`, the content of a `.imd` grouped by concern), turned into a plan (`Vec<AlgorithmSpec>`,
   validated against the GROMOS step-order rules) and only then instantiated. There is exactly one
-  such builder; the `md` binary and py-gromos both call it (PLAN.md 3.9).
+  such builder; the `md` binary and py-gromos both call it (3.9).
 - **L4 — Facade & bindings.** The gromos++-style analysis API and py-gromos are thin over L0–L3 and
   contain **zero physics** — and, since 3.9, zero run assembly: `gromos.Recipe`/`Plan`/`Term` *are*
   the L3 data types (serde ↔ Python), and `Simulation` hands them to `gromos-run`.
@@ -41,7 +43,7 @@ is one L0 service. The ~79k lines gromos++ spent re-implementing physics simply 
 ## The "lock now" invariants
 
 Settle these on paper before the refactor; they cost almost nothing now and are very expensive to
-retrofit (see FUTURE.md Dim 12.5 / 14.5):
+retrofit (see the P1–P9 constraints in `gromos-forces/.claude/CONTEXT.md`):
 
 1. **One owned `(Topology, State)` core — never grow a second `System`/`gcore`.** This is the single
    thing gromos++ got wrong.
@@ -74,7 +76,7 @@ more providers — additive, touching no existing physics. That is the whole poi
 
 - **Spatial index is a *service*, not an MD pairlist.** Give it a query API ("neighbors of these
   atoms within r, as pairs / as a graph") so one structure serves the MD pairlist, an ML model's
-  radial graph, and the QM-zone gather. (FUTURE Dim 9e.)
+  radial graph, and the QM-zone gather. (Board card `9e`.)
 - **Typed units boundary.** GROMOS works in kJ/mol·nm; QM in Hartree/Bohr; ML in eV/Å. Make unit
   conversions explicit/typed so mismatches are caught, not silent force bugs.
 - **Representation vs role are orthogonal.** Instancing answers "stored once or many?"; role/attributes
@@ -96,3 +98,22 @@ The failure mode is **partial sharing drifting into two cores** — reusing some
 re-implementing others "just for this program." That is exactly how gromos++ began. When adding an
 analysis or tool, the default is to consume L0/L1; re-implementing is the exception that needs a
 reason.
+
+
+## Why one core, stated once
+
+The origin of GROMOS's 190k + 79k LOC duplication is that **gromosXX and gromos++ are two
+architectures that do not share a core**:
+
+- *gromosXX* is a pipeline of mutating algorithms over a shared state triad — `Topology` (fixed
+  parameters), `Configuration` (mutable state, `current()`/`old()` for leapfrog history),
+  `Simulation` (run parameters) — threaded through an ordered `Algorithm_Sequence` that
+  `create_md_sequence.cc` pushes back in order.
+- *gromos++* could not link that engine's internals cleanly, so it re-implemented geometry, PBC,
+  topology reading and energy evaluation for the analysis tools.
+
+Everything in this document follows from refusing that split: one core, the analysis and tool
+programs as a façade over it (they are library functions in their crate, not binaries with inlined
+physics), and one builder turning "what to run" into an algorithm sequence. Partial sharing that
+drifts into two cores is the failure mode to watch for, because it is the one that already happened
+once in C++.

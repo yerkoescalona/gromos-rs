@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Run assembly for GROMOS-RS: RunRecipe (a .imd as data) + topology + coordinates -> plan -> AlgorithmSequence. The one builder shared by the md binary and py-gromos (PLAN.md 3.9)."
+description = "Run assembly for GROMOS-RS: RunRecipe (a .imd as data) + topology + coordinates -> plan -> AlgorithmSequence. The one builder shared by the md binary and py-gromos (3.9)."
 
 [dependencies]
 gromos-core = { workspace = true }
@@ -12,7 +12,7 @@ gromos-forces = { workspace = true }
 gromos-integrators = { workspace = true }
 gromos-io = { workspace = true }
 
-# The recipe and the plan are plain data: serde is the Rust<->Python bridge (PLAN.md 3.9 A12),
+# The recipe and the plan are plain data: serde is the Rust<->Python bridge (3.9 A12),
 # TOML the human-readable echo (`<run>.recipe.toml`), JSON the machine dump (`md @dump`).
 serde = { workspace = true }
 serde_json = { workspace = true }

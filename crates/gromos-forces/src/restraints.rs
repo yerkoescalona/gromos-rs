@@ -804,9 +804,9 @@ mod tests {
         //
         // Parameters: K=1000.0, r_linear=0.3, mode=2 (NTDIR=2), lambda=0.125
         // Atom positions from aladip.conf:
-        //   atom 5 → 0-indexed 4: (2.506319188, 0.858753474, 1.635829769)
-        //   atom 9 → 0-indexed 8: (2.722961726, 1.075330732, 1.724773551)
-        //   atom12 → 0-indexed11: (3.001529656, 0.996657605, 1.693520228)
+        // atom 5 → 0-indexed 4: (2.506319188, 0.858753474, 1.635829769)
+        // atom 9 → 0-indexed 8: (2.722961726, 1.075330732, 1.724773551)
+        // atom12 → 0-indexed11: (3.001529656, 0.996657605, 1.693520228)
         let n_atoms = 12;
         let mut conf = Configuration::new(n_atoms, 1, 1);
         conf.current_mut().pos[4] = Vec3::new(2.506319188, 0.858753474, 1.635829769);

@@ -3,7 +3,7 @@
 `cargo run -p gromos-md --example generate_qm_training_data`, and export it
 to TorchScript for `nonbonded/schnet.rs`'s `SchNetInteraction` to load.
 
-This is the "train" step of the QM/MM -> ML/MM pipeline (PLAN.md P2.9):
+This is the "train" step of the QM/MM -> ML/MM pipeline (2.9):
 1. QM/MM (real `XtbInteraction`, `Embedding::None`) generates training data
    — see the example's own docs for why the target is deliberately the
    *isolated* QM-zone energy, not an electrostatically-embedded one.

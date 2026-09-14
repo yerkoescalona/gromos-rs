@@ -4,7 +4,7 @@
 L3 orchestration, as a library: the **one** place that turns "what to run" (today: an
 `ImdParameters` + topology + coordinates + auxiliary inputs) into a running `AlgorithmSequence`.
 The `md` binary (`gromos-md`) and the Python binding (`pyo3-gromos`) both call it — that is the
-structural fix for the three drifting builders PLAN.md 3.8 found (drift guard G1 of PLAN.md 3.9).
+structural fix for the three drifting builders 3.8 found (drift guard G1 of 3.9).
 
 ## Inputs (consumes from)
 gromos-core, gromos-forces, gromos-integrators, gromos-io. No clap/log/env_logger, no MPI/CUDA.
@@ -31,15 +31,15 @@ RunError                                                                 -> ever
   `Forcefield::pair_partition` on the built sequence; the caller installs the reducer
   (`sequence.find_mut::<Forcefield>()`). `tests/pair_partition.rs` checks that rank shares sum to
   the full pair terms without MPI.
-- **PLAN.md 3.9 step 1 ✓ (2026-08-29)** — assembly lifted verbatim from `md.rs:414-572` and
+- **3.9 step 1 ✓ (2026-08-29)** — assembly lifted verbatim from `md.rs:414-572` and
   `md.rs:987-1298`; the binary's `println!`/`process::exit` sites became `RunError` variants and
   `PrepareNote`s / `BuildSummary` that the binary prints. Divergences resolved *toward the binary*
-  (PLAN.md 3.9 A10/A11): `four_pi_eps_i` from the topology's PHYSICALCONSTANTS, NSM from the
+  (3.9 A10/A11): `four_pi_eps_i` from the topology's PHYSICALCONSTANTS, NSM from the
   coordinate file, `ParallelPolicy::Auto` (= `n_atoms > 100`) for both callers, one DOF formula
   that now also counts solute constraints (no reference combines NTC>1 with a live thermostat, so
   no reference moved). FEP reaches Python through `Topology::apply_perturbation` (gromos-core) +
   `RunInputs.pttopo` (binary).
-- **PLAN.md 3.9 step 2 ✓ (2026-08-29)** — the recipe is in front of the builder:
+- **3.9 step 2 ✓ (2026-08-29)** — the recipe is in front of the builder:
   `recipe.rs` (`RunRecipe`, lossless for every modelled `.imd` block, serde with
   `deny_unknown_fields`, `version`, `passthrough` allowlist, `Diagnostics`), `plan.rs`
   (`AlgorithmSpec` fully resolved, `build_plan`, `validate_plan` with per-kind `KindRules`,
@@ -51,7 +51,7 @@ RunError                                                                 -> ever
   `legacy_builder.rs` (`cfg(test)`) is the frozen step-1 builder: `build::tests::
   plan_matches_legacy_builder_bit_for_bit` proves the recipe path identical on all 41 references.
 - Step 3 (next): Python `Recipe`/`Term`/`Algorithm` over this data (pythonize), shims for the
-  factories/kwargs/presets, `gromos.exceptions`. See PLAN.md 3.9.
+  factories/kwargs/presets, `gromos.exceptions`. See 3.9.
 
 ## Key files
 ```
@@ -71,13 +71,13 @@ src/error.rs        — RunError
 - **No second builder, no second IMD reader.** Callers that need a different sequence edit the
   plan (`build_plan` → `Plan` → `build_sequence_from_plan`); they never push algorithms
   themselves, and they read parameter files only through `read_imd` / `RunRecipe::from_imd`.
-  `just lint` (G6, PLAN.md 3.9 step 4) greps for violations.
+  `just lint` (G6, 3.9 step 4) greps for violations.
 - **Behaviour is defined by the reference suite from both sides:** `cargo test -p gromos-md
   --test test_gromosXX_references` (drives the binary) and `py-gromos/tests/` (drives the binding)
   must both stay green; `py-gromos/tests/test_front_end_parity.py` compares the Python front-ends
   with `np.array_equal`.
-- Defaults are derived from `ImdParameters::default()` (PLAN.md 3.9 G7, step 2) — no second table.
-- **Adding a term** (PLAN.md 3.9 step 5, measured with `xtb`): a `TermSpec` variant in `recipe.rs`,
+- Defaults are derived from `ImdParameters::default()` (3.9 G7, step 2) — no second table.
+- **Adding a term** (3.9 step 5, measured with `xtb`): a `TermSpec` variant in `recipe.rs`,
   its registry arms in `plan.rs` (`KINDS`, `name`, `examples`, `feature`, `provides_virial`,
   `coupling`) and one arm in `build.rs::instantiate_orchestrator`, registered with
   `register_labelled(<registry name>, …)` so `Energy.term_energies` reports it by name (G10).

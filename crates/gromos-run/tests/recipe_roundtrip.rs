@@ -1,4 +1,4 @@
-//! `RunRecipe` round trips (PLAN.md 3.9 G3/G7, step 2): `.imd` → recipe → `.imd` → recipe is
+//! `RunRecipe` round trips (3.9 G3/G7, step 2): `.imd` → recipe → `.imd` → recipe is
 //! the identity on every reference input; the recipe survives TOML and JSON; the defaults are
 //! gromosXX's absent-block behaviour; unmodelled blocks are refused unless allowed.
 

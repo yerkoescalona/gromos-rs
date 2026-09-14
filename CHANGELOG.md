@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [0.0.49] (2026-09-14)
+
+**The 33 gromos-tools programs are library functions, and Python can call them.** `gromos.tools`
+runs any of them in process — the same Rust code the command-line binary runs, so there is no
+binary to find, nothing to ship beside the wheel, and no way for the two to disagree (3.10 steps 0–5).
+
+### Added
+
+- **`gromos.tools`** — the gromos++ system-preparation programs from Python.
+  `tools.run("sim_box", topo=…, pbc="r", minwall=[1.0])` returns exactly what the binary prints;
+  keywords are the program's own `@key` names (a list is a multi-valued key, `True` a flag,
+  `None`/`False` "not given"). `tools.programs()` lists all 33 with their accepted keys, usage and
+  **status** — `verified` / `ported` / `stand_in` / `stub` / `no_counterpart`, so a caller can see
+  whether they are calling a port of gromos++'s program or a utility that shares its name.
+  A failure raises `gromos.ProgramError`, whose `stdout` carries whatever the program had written:
+  `check_top` prints its whole report and *then* fails, and that report is the answer.
+- **Typed wrappers for the preparation chain**: `make_top`, `com_top`, `red_top`, `pdb2g96`,
+  `sim_box`, `build_box`, `ion`, `check_top` take and return `Topology` / `Configuration` /
+  `CheckReport` objects, so a workflow needs no file between steps. Any input that names a file
+  accepts a path *or* the object. `Topology.from_string` / `Configuration.from_string` /
+  `str(obj)` / `.to_g96()` / `.write()` make the object and its file text interchangeable.
+- **`System.solvate()` / `System.add_ions()` / `System.check()`** — the same verbs as methods,
+  returning a *new* System (an input system is never mutated). `add_ions` does what gromos++'s
+  `ion` leaves to the caller: it builds each ion's topology from the `(mtb, ifp)` pair and
+  combines it with the solute's, so both halves of the result agree.
+- **A program registry** (`gromos_io::args::Program`, `gromos_tools::PROGRAMS`): name, accepted
+  keys, usage, status and the `run` function. `gromos_io::run_main` is every binary's whole `main`.
+- `gromos_io::normalize(argv)` — `gromos_args()` without the process: `@key` → `--key` and `@f`
+  expansion returning a `Result`, so the command line and an in-process caller expand argument
+  files identically. `gromos_io::topology::parse_topology` and `coordinate::parse_g96_labeled`
+  read from any reader, not only a path.
+
+### Changed
+
+- **25 gromos-analysis programs moved into the crate library too**
+  (`src/programs/<category>/<name>.rs`, the same four-part shape and the same category mirroring as
+  gromos-tools): the 18 that already parsed with `Arguments`, and the 7 that read `gromos_args()`
+  and walked the vector by hand — `atominfo`, `bar`, `ener`, `ext_ti_ana`, `ext_ti_merge`,
+  `frameout`, `nhoparam` — whose parsers became `Arguments` in the move. Those 7 now reject an
+  unknown `@key`, report a bad value instead of silently substituting a default, and answer
+  `--help` with their registered usage; none of them calls `process::exit` any more. The 18
+  gromos++ reference tests pass untouched, and `tests/library_parity.rs` holds the library run to
+  the binary's stdout for all 25. **The other 57 analysis binaries still have their compute in
+  `main()`.**
+- **Every gromos-tools program's body moved into the crate library**
+  (`src/programs/<category>/<name>.rs`: `pub fn run(argv, out)` plus a `pub const PROGRAM`); each
+  `src/bin/<category>/<name>.rs` file is now a one-line `run_main(&PROGRAM)`. The two trees carry
+  the same four categories — `topology`, `box`, `conversion`, `utilities` — and
+  `program_and_bin_agree_on_category` fails if a body and its shim are filed under different ones.
+  `programs/mod.rs` re-exports every program flat, so a caller still writes `programs::make_top`.
+  A program no longer reads the process arguments, writes to the process stdout, or exits —
+  `just lint` greps for all three (G11).
+- **Hand-rolled `env::args()` parsers replaced by `gromos_io::args::Arguments`** in the 22 tools
+  that still had them, so they accept `@f` argument files like the rest (T1 for gromos-tools). **Unknown `@key`s are now rejected** where those parsers silently ignored them.
+- `make_top` checked for a missing solvent building block *half-way through printing a topology*
+  and exited; the check now runs before any output, so a failure never yields a truncated file.
+- `ion` took the solvent molecule size from a hard-coded 3 (SPC water); it now reads it from the
+  topology's SOLVENTATOM block.
+- `Topology` keeps its parsed blocks beside the built form, and `Configuration` keeps residue and
+  atom names — the preparation tools work at that level.
+
+### Fixed
+
+- **`atominfo` was built by two crates** (a stub in gromos-tools, the real gromos++ port in
+  gromos-analysis), which made `cargo test --workspace` alternate between passing and failing to
+  build. The stub is gone; `atominfo` is one program (2.4).
+
+### Tests
+
+- `crates/gromos-tools/tests/library_parity.rs` — for all 33 programs, `run(argv, &mut Vec<u8>)`
+  from the library equals the compiled binary's stdout **byte for byte**, and fails exactly when
+  the binary exits non-zero, on real input, on `--help` and on the failure paths.
+- `crates/gromos-tools/tests/typed_verbs.rs` — each typed verb's result, serialised with the
+  program's own writer, equals what `run` writes; `make_top`'s topology reads back from its own
+  text; a failed `make_top` writes nothing; `check_top`'s report survives its failure.
+- `py-gromos/tests/test_tools.py` — 26 tests carrying those guarantees across the Python boundary,
+  including the preparation chain with no files between steps.
+- The 13 gromos++ reference tests are untouched and still pass.
+
 ## [0.0.48] (2026-09-04)
 
 **LiveCoMS tutorial 2 (double decoupling: ASA in water and bound to PLA2) started.** Its
@@ -930,7 +1009,7 @@ output; the nonbonded kernels are bit-identical per pair to the previous scalar 
 - **gromos-core:** `spatial_index::tests` — vacuum and periodic (minimum-image + shift-vector) neighbor queries
 - **gromos-forces:** `nonbonded::interaction::tests::wrapper_transparency_matches_direct_call` — `LjCrfInteraction` vs. a direct `lj_crf_innerloop_novirial` call, bit-identical (transparency check, not independent oracle coverage on its own)
 - **gromos-forces:** `nonbonded::interaction::tests::cross_checks_against_single_point_energy_oracle` — cross-checked against `single_point_energy`'s already reference-suite-validated LJ+CRF total on a 4-atom fixture (no exclusions/1-4, so the only reconciliation needed is gromosXX's unconditional per-atom RF self-energy term, which this pairlist-only provider deliberately excludes) — a genuine second computation path, since `single_point_energy` builds its pairlist via the existing chargegroup-aware `StandardPairlistAlgorithm`, independent of the new `ConfigurationSpatialIndex`
-- **gromos-forces:** `nonbonded::schnet::tests::model_forces_match_finite_differences` (feature `ml`) — there is no GROMOS oracle for a neural-network potential (FUTURE.md P8), so this is the tolerance-based second test tier the plan called for: central finite differences on the energy surface vs. the model's own forces, agreeing to `<5e-3` absolute (widened from `1e-3`; the real SchNetPack interaction block has more float32-accumulating layers than the old hand-rolled one — verified per-component that the ~1.4e-3 gap is noise, not a bug, before loosening)
+- **gromos-forces:** `nonbonded::schnet::tests::model_forces_match_finite_differences` (feature `ml`) — there is no GROMOS oracle for a neural-network potential (P8), so this is the tolerance-based second test tier the plan called for: central finite differences on the energy surface vs. the model's own forces, agreeing to `<5e-3` absolute (widened from `1e-3`; the real SchNetPack interaction block has more float32-accumulating layers than the old hand-rolled one — verified per-component that the ~1.4e-3 gap is noise, not a bug, before loosening)
 - **gromos-md:** `tests/test_provider_reference.rs::lj_crf_interaction_matches_real_gromosxx_energy` — a real gromosXX-reference test, not another internal cross-check: loads the `pair_lj` reference system directly via `gromos-io` readers, runs `LjCrfInteraction` in-process, and matches the actual gromosXX-produced `expected/energies.tre` to the standard `1e-8` relative tolerance. `pair_lj` was picked because it fits this provider's current scope exactly (solute-only, zero charge, no exclusions)
 - **gromos-forces:** `tests/schnet_burnn_reference.rs::schnet_provider_on_real_burnn_methanol_qm_zone` (feature `ml`) — runs `SchNetInteraction` on the real BuRNN tutorial's actual equilibrated, solvated methanol configuration (`eq/eq_meoh_5.cnf`), using the real `QMZONE` atom selection/atomic numbers and `RCUTQM` cutoff read directly off the tutorial's own `.qmm`/`.imd` files, not a synthetic fixture. **Caught a real bug**: `SchNetInteraction` assumed every neighbor pair had both endpoints inside the region, which panicked the instant a real region-inside-a-solvated-system geometry was used (`SpatialIndex::neighbor_pairs` deliberately also returns pairs reaching outside the selection, for FUTURE.md P5's future embedding case). Fixed by skipping out-of-region pairs, documented as a current limitation (no electrostatic embedding support yet) rather than silently worked around
 - `cargo test -p gromos-md --test test_gromosXX_references` reconfirmed 37/37 unchanged after both the classical and the `ml`-feature work — none of it touches any existing call site
@@ -938,7 +1017,7 @@ output; the nonbonded kernels are bit-identical per pair to the previous scalar 
 ### Features (P2.7 — electrostatic embedding onto MM atoms)
 
 - **gromos-forces:** `Embedding {None, Mechanical, Electrostatic}` + a defaulted `PotentialProvider::embedding()` — how a provider treats atoms *outside* its region is now a declared property rather than an accident. `SchNetInteraction` declares `None` (its `Dict[str,Tensor]` contract has no environment channel) and **rejects** an unsupported scheme with a clear error instead of silently ignoring it — the P2.6 cross-boundary bug was exactly an unstated assumption here
-- **gromos-forces:** `ElectrostaticEmbedding` (`nonbonded/embedding.rs`) — the QM↔MM Coulomb coupling term, and the **first provider to put forces on atoms outside its own region** (FUTURE.md P5). Implements Poliak et al. 2025's path (c) (QM charges + pairwise Coulomb computed in the MD code; their paths (a)/(b) are adapters over a QM engine's output, not new physics). Validated against a **closed-form two-point-charge oracle** (exact analytic energy *and* force), plus finite differences on an MM atom in both a toy and the real solvated `t_06` system
+- **gromos-forces:** `ElectrostaticEmbedding` (`nonbonded/embedding.rs`) — the QM↔MM Coulomb coupling term, and the **first provider to put forces on atoms outside its own region** (P5). Implements Poliak et al. 2025's path (c) (QM charges + pairwise Coulomb computed in the MD code; their paths (a)/(b) are adapters over a QM engine's output, not new physics). Validated against a **closed-form two-point-charge oracle** (exact analytic energy *and* force), plus finite differences on an MM atom in both a toy and the real solvated `t_06` system
 - **gromos-forces:** `zones.rs` — `Zone {Inner, Buffer, Outer}` / `PairOwner {Provider, Classical, Embedding}` / `ZonePartition::owner()`: the six-pair-class ownership table that prevents double-counting, derived term-by-term from the BuRNN training target rather than assumed. Deliberately an *orchestration* type, not logic hidden inside a provider; degrades to plain QM/MM without a buffer and to fully-classical without zones
 
 ### Testing (P2.7)
@@ -949,7 +1028,7 @@ output; the nonbonded kernels are bit-identical per pair to the previous scalar 
 
 ### Features + Testing (P2.8-2a — NN/MM wired into a real step loop)
 
-- **gromos-md:** `ml` feature (forwards to `gromos-forces/ml`) + `tests/schnet_nve_loop.rs` — `SchNetInteraction` driving actual leapfrog dynamics via `gromos-integrators::LeapFrog`, not another single-point evaluation. 500-step NVE trajectory on a small vacuum molecule: kinetic energy goes from a standing start (0) to 0.081 kJ/mol, total energy stays within 0.0047% of its mean. Chose NVE conservation because it's architecture-blind to whether the (still untrained) potential is chemically meaningful while genuinely testing the loop — force eval → integrate → force eval again — the same way the classical suite validates bulk NVE systems like `water_216_box`, just against a self-consistency bound instead of a gromosXX oracle (none exists for an untrained NN, FUTURE.md P8)
+- **gromos-md:** `ml` feature (forwards to `gromos-forces/ml`) + `tests/schnet_nve_loop.rs` — `SchNetInteraction` driving actual leapfrog dynamics via `gromos-integrators::LeapFrog`, not another single-point evaluation. 500-step NVE trajectory on a small vacuum molecule: kinetic energy goes from a standing start (0) to 0.081 kJ/mol, total energy stays within 0.0047% of its mean. Chose NVE conservation because it's architecture-blind to whether the (still untrained) potential is chemically meaningful while genuinely testing the loop — force eval → integrate → force eval again — the same way the classical suite validates bulk NVE systems like `water_216_box`, just against a self-consistency bound instead of a gromosXX oracle (none exists for an untrained NN, P8)
 - `dt=1e-3` was picked by scanning `1e-4..2e-3` and taking the largest step still producing real dynamics with tight conservation — not guessed; tolerances set at ~100x the measured margin
 
 ### Notes
@@ -1219,7 +1298,7 @@ output; the nonbonded kernels are bit-identical per pair to the previous scalar 
 
 ### Features
 
-- **gromos-core:** add `CellListPairlistAlgorithm` (FUTURE.md Dim 9a) — a charge-group-aware
+- **gromos-core:** add `CellListPairlistAlgorithm` (the cell-list pairlist) — a charge-group-aware
   linked-cell pairlist, drop-in via the existing `update<BC>()` interface
   - Bins each chargegroup's reference position (solute CG → COG, solvent CG → first-atom
     position, matching `StandardPairlistAlgorithm`'s own distance conventions) into a grid that
@@ -1509,3 +1588,45 @@ output; the nonbonded kernels are bit-identical per pair to the previous scalar 
 ### Initial
 
 - initial commit ([c0a551c](https://github.com/yerkoescalona/gromos-rs/commit/c0a551cfcac12b0a60daaad908d151f689395732))
+
+## Item index — the stable IDs the code cites
+
+Code comments, tests and older entries above cite work by a stable id (`1.5`, `2.8`, `3.9 A16`,
+`P2.1` — the `P` prefix is the same id in an older notation, so `P2.1` is `2.1`).
+
+- **Open work** carries its id as the board card's title (`3.10 step 6` is a card name).
+- **Finished work** is the table below, and the version entry above it in this file.
+
+| id | what it was | state |
+|---|---|---|
+| `1.1` | Reproducibility & correctness | ✓ complete |
+| `1.2` | Constraints | ✓ complete |
+| `1.3` | Thermostat | ✓ complete |
+| `1.4` | Boundary | ✓ complete |
+| `1.5b` | Real-input compatibility | ✓ 0.0.42–0.0.46 |
+| `1.5c` | Tutorial 2 opened | ✓ 0.0.48 |
+| `1.7` | FEP / TI | ✓ complete for fixed λ |
+| `2.0` | Instancing model, phases 1–2e | ✓ |
+| `2.1` | Atom selection | ✓ complete |
+| `2.2` | Shared analysis infra | ✓ complete |
+| `2.3` | Real program implementations | ✓ complete |
+| `2.3b` | Free-energy estimators | core done |
+| `2.4` | Code quality | done 2026-08-30 |
+| `2.4b` | gromos-tools audit | done 2026-08-30 |
+| `2.5` | Stub cleanup | the real implementations landed; the remaining stubs are open |
+| `2.6` | The provider seam (QM/MM/ML) | ✓ landed 2026-08-13 |
+| `2.7` | Electrostatic embedding onto MM atoms (QM/MM + BuRNN) | ✓ Steps 1–5 |
+| `2.8` | Wiring: from "the pieces exist" to "a QM/MM run happens" | ✓ done except 4b and the zone-aware Forcefield |
+| `2.9` | The QM/MM → ML/MM pipeline: generate, train, compare | ✓ ran end to end |
+| `2.10` | Energy library profile: same grammar, stricter rules, versioned | ✓ implemented 0.0.47 |
+| `3.0` | Approach | ✓ |
+| `3.1` | System.from_files() | ✓ done — System = Topology + Configuration, atom-count |
+| `3.2` | Run a System with native parameters | ✓ done — ImdParameters::default |
+| `3.3` | Reporters (energy out without files) | ✓ done — angle/dihedral/improper wired |
+| `3.4` | Notebooks | ✓ done — replaced 3 stale notebooks referencing phantom APIs with |
+| `3.5` | M1/M2/SD convenience-path fixes | ✓ done |
+| `3.6` | Rust↔Python reference-test parity gap | ✓ done, FEP deferred |
+| `3.7` | ML potential binding for py-gromos: name zones, don't count atoms | ✓ done |
+| `3.8` | py-gromos composition audit | ✓ 2026-08-29 |
+| `3.9` | The composition model: one recipe, one builder, three front-ends | ✓ steps 0–5 done |
+| `4` | Benchmarking | ✓ Phases 0–4 done |

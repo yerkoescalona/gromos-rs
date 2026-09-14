@@ -200,7 +200,7 @@ fn combined_qmmm_shows_real_bidirectional_coupling_on_a_real_system() {
     );
 
     // Sanity bounds, not an external oracle (none exists for this xtb-based combination —
-    // FUTURE.md P8, same tier as every other real-QM-engine test here): the QM zone's own energy
+    // P8, same tier as every other real-QM-engine test here): the QM zone's own energy
     // for two waters' worth of electrons should be a real, large negative number, and the
     // embedding term should be nonzero given real nonzero charges on both sides.
     assert!(

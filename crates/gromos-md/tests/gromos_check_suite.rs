@@ -2,7 +2,7 @@
 //! aladip_special}.t.cc` hard-code per-term energies for the alanine dipeptide in 20 SPC waters
 //! (`shared/check/`, byte-identical inputs). Each term is evaluated on its own at the starting
 //! configuration — independent of the `md` binary's trajectory comparison, and a *second source*
-//! for the bonded, perturbed, soft-core and reaction-field terms (PLAN.md, cross-cutting).
+//! for the bonded, perturbed, soft-core and reaction-field terms (, cross-cutting).
 //!
 //! What the C++ does (`check_forcefield.cc`): for every interaction term, zero the energies,
 //! call the term alone, compare `potential_total + special_total` to the hard-coded value
@@ -14,7 +14,7 @@
 //!
 //! Not portable here: `lambdas.t.cc` (per-group LAMBDAS block, not modelled), `scaling.t.cc`,
 //! `aladip_ls.t.cc` (lattice sum), the CG function, and the dihedral / angle / X-ray / local
-//! elevation / order-parameter restraints (PLAN.md 1.6 — parked or next).
+//! elevation / order-parameter restraints (1.6 — parked or next).
 
 use std::path::{Path, PathBuf};
 
@@ -338,7 +338,7 @@ fn aladip_unperturbed_atomic_cutoff_matches_the_check_suite() {
 #[test]
 fn aladip_distance_restraints_match_the_check_suite() {
     // aladip_distres.in = aladip_special.in without the restraint blocks gromos-rs does not
-    // model (angle, dihedral, X-ray, local elevation, order parameter — PLAN.md 1.6).
+    // model (angle, dihedral, X-ray, local elevation, order parameter — 1.6).
     // `check_interaction` evaluates the unperturbed (257.189539) and the perturbed
     // (195.899012) distance restraints separately; here they land in one total.
     let sys = load("aladip_distres.in", true, true);
@@ -352,7 +352,7 @@ fn aladip_distance_restraints_match_the_check_suite() {
 }
 
 #[test]
-#[ignore = "dihedral restraints are not implemented (PLAN.md 1.6 — next); check value 2127.910749"]
+#[ignore = "dihedral restraints are not implemented (1.6 — next); check value 2127.910749"]
 fn aladip_dihedral_restraints_match_the_check_suite() {
     let sys = load("aladip_special.in", false, false);
     let e = step0_energies(&sys, None, None);

@@ -1,14 +1,14 @@
 //! `SchNetInteraction` on a real molecule from GROMOS's own NN(QM)/MM tutorial.
 //!
 //! Not a GROMOS oracle test — there is no gromosXX-produced reference to match against for
-//! an ML potential (FUTURE.md P8), and this pass's model is architecturally real (SchNetPack
+//! an ML potential (P8), and this pass's model is architecturally real (SchNetPack
 //! 2) but untrained (see `nonbonded/schnet.rs` module docs). What this *does* check, that the
 //! synthetic 3-atom unit test in `schnet.rs` doesn't: the seam holds up on a real molecule, a
 //! real periodic box, and the real QM-zone/cutoff convention from GROMOS's own tutorial —
 //! `#![cfg(feature = "ml")]`.
 //!
 //! Fixture: `.local/gromos_tutorial_livecoms/tutorial_files/t_06` (Tutorial 6, "BuRNN"),
-//! cloned per `PLAN.md` P2.6 — gitignored, not checked into this repo, so this test skips
+//! cloned into `.local/` — gitignored, not checked into this repo, so this test skips
 //! gracefully if it isn't present locally (matches how the `ml`-feature model path is
 //! already handled). The real `md_burnn/meoh.qmm` `QMZONE` block defines the QM region as
 //! atoms 1-6 of the system — CA(C), OB(O), HA1/HA2/HA3(H), HB1(H), `QMZ` = `[6,8,1,1,1,1]` —
@@ -88,7 +88,7 @@ fn schnet_provider_on_real_burnn_methanol_qm_zone() {
         assert!(f.x.is_finite() && f.y.is_finite() && f.z.is_finite());
     }
 
-    // Same validation tier as the synthetic-fixture test in schnet.rs (FUTURE.md P8: no
+    // Same validation tier as the synthetic-fixture test in schnet.rs (P8: no
     // GROMOS oracle for an ML potential), just on the real geometry instead of a toy one.
     let mut energy_at = |positions: &[Vec3]| -> f64 {
         let mut conf = Configuration::new(n_atoms, 1, 1);

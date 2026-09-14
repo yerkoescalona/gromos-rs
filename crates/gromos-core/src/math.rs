@@ -114,7 +114,7 @@ impl BoundaryCondition for Triclinic {
     ///
     /// This is *not* equivalent to the textbook fractional-coordinate
     /// `frac - frac.round()` reduction for strongly triclinic cells (e.g.
-    /// truncated octahedron) - see PLAN.md P1.4 / FUTURE.md Dim 11 #1.
+    /// truncated octahedron) — see the gromosXX audit's finding #1 (`.claude/porting.md`).
     #[inline(always)]
     fn nearest_image(&self, ri: Vec3, rj: Vec3) -> Vec3 {
         let a = self.box_matrix.x_axis;
@@ -178,7 +178,7 @@ pub fn truncoct_triclinic_rotmat(forward: bool) -> Mat3 {
     // `forward=true` (GROMOS's `rot` = `M`, untransposed) the applied
     // rotation is `M^T`; for `forward=false` (GROMOS transposes `rot` to
     // `M^T`, then `product` transposes again) the applied rotation is `M`.
-    // See PLAN.md P1.4 derivation.
+    // See P1.4 derivation.
     let rot = Mat3::from_cols(
         Vec3::new(sq3i, sq3i, sq3i),
         Vec3::new(-2.0 * sq2i * sq3i, sq3i * sq2i, sq2i * sq3i),
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_triclinic_truncoct_tie_boundary_diverges_from_frac_round() {
-        // FUTURE.md Dim 11 finding #1 / PLAN.md P1.4: the textbook
+        // The gromosXX audit's finding #1 (`.claude/porting.md`): the textbook
         // `frac - frac.round()` reduction and GROMOS's while-loop z->y->x
         // reduction are NOT equivalent for strongly triclinic cells. At an
         // exact half-lattice-vector displacement they land on opposite sides

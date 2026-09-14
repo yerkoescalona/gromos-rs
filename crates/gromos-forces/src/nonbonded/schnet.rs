@@ -2,7 +2,7 @@
 //!
 //! Feature-gated (`ml`): loads a TorchScript module (see `scripts/export_toy_schnet.py`)
 //! via `tch` (libtorch bindings) and runs it **in-process** — no Python subprocess, no
-//! embedded interpreter, unlike gromosXX's `nn_worker` (FUTURE.md Dim 12.1).
+//! embedded interpreter, unlike gromosXX's `nn_worker`, which drives SchNetPack through CPython.
 //!
 //! **Version pinning is load-bearing, not incidental.** `tch`'s C++ glue (`torch-sys`) is
 //! generated against one specific libtorch version; a mismatch is a build/link-time
@@ -31,7 +31,7 @@
 //! (SchNetPack v1 — see `.local/gromos_tutorial_livecoms/tutorial_files/t_06`) fails to
 //! `torch.jit.script` outright: `schnetpack/nn/neighbors.py` has a Python-style
 //! conditionally-typed return TorchScript's static type system rejects. That's a genuine
-//! instance of FUTURE.md P2 ("not every architecture exports cleanly") — but it turned out
+//! instance of P2 ("not every architecture exports cleanly") — but it turned out
 //! to be a **v1 library problem, not an inherent SchNet problem**: verified directly that
 //! **SchNetPack 2.x's `schnetpack.model.NeuralNetworkPotential` (real `SchNet`
 //! representation + a `Forces` output module) scripts cleanly**, once `Forces(calc_forces=
@@ -54,7 +54,7 @@
 //!
 //! Critically, `schnetpack.atomistic.PairwiseDistances` does **not** compute its own
 //! neighbor list — it expects `_idx_i`/`_idx_j`/`_offsets` as input. That's exactly the
-//! [`SpatialIndex`] design this codebase already committed to (FUTURE.md P3: one spatial
+//! [`SpatialIndex`] design this codebase already committed to (P3: one spatial
 //! service, host-supplied, serving the MD pairlist and an ML radial graph alike) — `_offsets`
 //! is literally the same periodic-image shift `SpatialIndex::neighbor_pairs` already
 //! returns, not a coincidence discovered after the fact.
@@ -111,7 +111,7 @@ impl SchNetInteraction {
     /// Declare a non-default embedding scheme.
     ///
     /// [`Embedding::Electrostatic`] is accepted here but rejected at `contribute()` time with a
-    /// clear error rather than silently ignored — see PLAN.md P2.7 Step 3, which implements the
+    /// clear error rather than silently ignored — see P2.7 Step 3, which implements the
     /// point-charge input and the force path back onto MM atoms.
     pub fn with_embedding(mut self, embedding: Embedding) -> Self {
         self.embedding = embedding;
@@ -164,8 +164,8 @@ impl PotentialProvider for SchNetInteraction {
         // module docs for the offset-sign derivation against `SpatialIndex`'s shift convention.
         //
         // `SpatialIndex::neighbor_pairs` returns pairs where *either* endpoint is in `region`
-        // (by design — FUTURE.md P5's embedding case needs that), so cross-boundary pairs must
-        // be handled per this provider's declared `Embedding` policy (PLAN.md P2.7 Step 2).
+        // (by design — P5's embedding case needs that), so cross-boundary pairs must
+        // be handled per this provider's declared `Embedding` policy (P2.7 Step 2).
         // They are dropped below under `Embedding::None`, which is what this model's input
         // contract actually supports.
         match self.embedding {
@@ -174,7 +174,7 @@ impl PotentialProvider for SchNetInteraction {
                 return Err(ProviderError::ComputationFailed(format!(
                     "{:?} embedding is not implemented for SchNetInteraction — a SchNetPack \
                      NeuralNetworkPotential has no environment/point-charge input channel \
-                     (see PLAN.md P2.7 Step 3)",
+                     (see 2.7 Step 3)",
                     self.embedding
                 )))
             },
@@ -297,7 +297,7 @@ mod tests {
         std::env::var("TOY_SCHNET_MODEL").unwrap_or_else(|_| "/tmp/toy_schnet.pt".to_string())
     }
 
-    /// PLAN.md P2.7 Step 2: an unsupported embedding scheme must fail loudly, not be
+    /// P2.7 Step 2: an unsupported embedding scheme must fail loudly, not be
     /// silently ignored. Before this, cross-boundary neighbors were dropped unconditionally
     /// with no way for a caller to learn the environment was being ignored.
     #[test]
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(PotentialProvider::embedding(&interaction), Embedding::None);
     }
 
-    /// The seam's actual validation tier (FUTURE.md P8): no GROMOS oracle exists for an
+    /// The seam's actual validation tier (P8): no GROMOS oracle exists for an
     /// ML potential, so instead check the model's own (internally autograd-computed)
     /// forces are self-consistent with its energy surface via central finite differences —
     /// the standard way any force provider is validated when there's no independent

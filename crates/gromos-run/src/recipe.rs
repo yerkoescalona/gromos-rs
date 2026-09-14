@@ -1,7 +1,7 @@
 //! `RunRecipe` — the one description of "what to run", as plain data.
 //!
 //! The GROMOS `.imd` file and the Python objects are both *front-ends* to this struct
-//! (PLAN.md 3.9): `RunRecipe::from_imd` parses one, `to_imd`/`to_imd_string` write one back,
+//! (3.9): `RunRecipe::from_imd` parses one, `to_imd`/`to_imd_string` write one back,
 //! serde makes it a dict/JSON/TOML. Groups are orthogonal concerns; field names stay close to
 //! GROMOS where the semantics are GROMOS's (this is recipe version 1 — renames are a version
 //! bump, not a silent change).
@@ -11,7 +11,7 @@
 //!   `from_imd(to_imd(from_imd(x))) == from_imd(x)` and gromosXX accepts what `to_imd` writes.
 //! - **Absent means absent.** A missing optional block is what gromosXX does without it (no
 //!   bath, no COM removal, no pressure coupling …) — never a "default" value smuggled in; the
-//!   parameter defaults in `gromos-io` were aligned to that (PLAN.md 3.9 A18).
+//! parameter defaults in `gromos-io` were aligned to that (3.9 A18).
 //!
 //! Blocks the recipe does not model (GAMD, EDS, QMMM, …) are refused unless the caller lists
 //! them in a [`PassthroughPolicy`]; allowed ones ride along verbatim in `passthrough`.
@@ -262,7 +262,7 @@ pub enum Coupling {
     #[default]
     Delta,
     /// Replaces the classical treatment of the term's own pairs — needs a zone-aware
-    /// `Forcefield` (PLAN.md 2.8) and is rejected at instantiation until then.
+    /// `Forcefield` (2.8) and is rejected at instantiation until then.
     Replace,
 }
 
@@ -562,7 +562,7 @@ pub struct Outputs {
     pub energy_special: bool,
 }
 
-/// Not physics, not in the `.imd` (PLAN.md 3.9 A15): how the run executes.
+/// Not physics, not in the `.imd` (3.9 A15): how the run executes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct Execution {
@@ -589,13 +589,13 @@ pub struct RunRecipe {
     pub outputs: Outputs,
     pub execution: Execution,
     /// Auxiliary input files (perturbation topology, restraint specifications) — part of the run
-    /// description, so a recipe built in memory is self-describing (PLAN.md 3.9 A5).
+    /// description, so a recipe built in memory is self-describing (3.9 A5).
     pub inputs: RunInputs,
     /// Unmodelled blocks the caller allowed through, verbatim.
     pub passthrough: BTreeMap<String, Vec<String>>,
 }
 
-// Group defaults are *derived* from `ImdParameters::default()` (one table, PLAN.md 3.9 G7);
+// Group defaults are *derived* from `ImdParameters::default` (one table, 3.9 G7);
 // the `Default` impls below exist for serde's `default` and go through that single source.
 macro_rules! default_from_imd {
     ($($ty:ident => $field:ident),* $(,)?) => {

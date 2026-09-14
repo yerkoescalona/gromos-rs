@@ -172,7 +172,7 @@ print(sim.total_energy, sim.term_energies)
 ```
 
 The plan — the ordered algorithms of one MD step — is data too: `recipe.plan(system)` returns it,
-editable and re-validated. Design and drift guards: [PLAN.md §3.9](PLAN.md); user guide:
+editable and re-validated. Design and drift guards: item 3.9 in [CHANGELOG.md](CHANGELOG.md); user guide:
 [py-gromos/docs/user-guide/recipe.md](py-gromos/docs/user-guide/recipe.md).
 
 #### CI/CD and Testing
@@ -210,7 +210,9 @@ We use comprehensive developer tooling inspired by Polars:
 
 See our documentation:
 - [INSTALL.md](INSTALL.md) - **Full dependency list** (Rust/Python, C++ reference sources, QM engines, ML stack)
-- [PLAN.md](PLAN.md) - Roadmap, reference-test status, and the design record of the run/recipe model (§3.9)
+- [CHANGELOG.md](CHANGELOG.md) - Release history and the item index that resolves the ids code comments cite
+- Work queue: a private project board (`Icebox` → `Ready` → `Doing` → `Done`)
+- Reference-test status: `crates/gromos-md/.claude/CONTEXT.md`
 - [py-gromos/docs/](py-gromos/docs/) - Python user guide (quick start, the recipe model, API reference); `mkdocs serve` in `py-gromos/`
 - [BENCHMARKING.md](BENCHMARKING.md) - Engine-vs-gromosXX benchmarks, kernel determinism
 - [CONTRIBUTING.md](CONTRIBUTING.md) - How to build, test and contribute; [CHANGELOG.md](CHANGELOG.md) - What changed, per version

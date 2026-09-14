@@ -470,7 +470,7 @@ impl StandardPairlistAlgorithm {
 }
 
 /// Charge-group-aware linked-cell pairlist algorithm — an O(N) alternative
-/// to [`StandardPairlistAlgorithm`] for rectangular boxes (FUTURE.md Dim 9a).
+/// to [`StandardPairlistAlgorithm`] for rectangular boxes (the cell-list pairlist).
 ///
 /// Bins chargegroup reference positions into a grid that exactly tiles the box,
 /// with a spacing taken from the IMD `PAIRLIST` `SIZE` field (`auto` = half the
@@ -1270,7 +1270,7 @@ mod tests {
     }
 
     /// Assert that two pairlist containers contain the same pair *sets* in
-    /// all four categories (FUTURE.md Dim 9a validation requirement).
+    /// all four categories (the cell-list validation requirement).
     fn assert_pairlists_match(standard: &PairlistContainer, cell: &PairlistContainer) {
         assert_eq!(
             normalize_pairs(&standard.solute_short),

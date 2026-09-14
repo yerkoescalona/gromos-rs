@@ -1,5 +1,5 @@
 //! Stages 2 and 3 of the builder: `instantiate` turns a validated plan into runnable
-//! algorithms, `start` primes the run (PLAN.md 3.9).
+//! algorithms, `start` primes the run (3.9).
 //!
 //! ```text
 //! RunRecipe ── build_plan ──▶ Vec<AlgorithmSpec> ── validate_plan ── instantiate ──▶ AlgorithmSequence ── start
@@ -301,7 +301,7 @@ fn instantiate_forcefield(
 
 /// The `orchestrator` entry: one provider per term, each over its own region. Adding a term
 /// kind = a `TermSpec` variant (recipe.rs), its registry lines (plan.rs) and one arm here
-/// (PLAN.md 3.9 step 5).
+/// (3.9 step 5).
 fn instantiate_orchestrator(
     terms: &[TermSpec],
     topo: &Topology,
@@ -727,7 +727,7 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     //! The recipe path must be **bit-identical** to the step-1 builder it replaced, on every
-    //! reference system (the Rust-side A/B PLAN.md 3.9 step 2 promised).
+    //! reference system (the Rust-side A/B 3.9 step 2 promised).
 
     use std::path::{Path, PathBuf};
 

@@ -2,9 +2,9 @@
 //!
 //! L3 orchestration (see `.claude/architecture.md`). Before this crate existed, the `md` binary
 //! and the Python binding each carried their own copy of the IMD → algorithm-sequence assembly and
-//! had drifted (PLAN.md 3.8). Both now call the functions here, so the gromosXX reference suite
+//! had drifted (3.8). Both now call the functions here, so the gromosXX reference suite
 //! (which drives the binary) and the Python suite (which drives the binding) exercise the same
-//! code from two sides — PLAN.md 3.9, complete 2026-08-29.
+//! code from two sides — 3.9, complete 2026-08-29.
 //!
 //! The description of a run is plain data, [`RunRecipe`]: the content of a GROMOS `.imd` grouped
 //! by concern, plus additive force [`TermSpec`]s and auxiliary [`RunInputs`]. A `.imd` file and a

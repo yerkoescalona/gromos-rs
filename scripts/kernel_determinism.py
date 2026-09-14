@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure run-to-run and thread-count determinism of the gromos-rs `md` binary.
 
-PLAN.md 3.9 step 0 / assumption A2–A3: the parallel nonbonded kernels reduce through rayon
+3.9 step 0 / assumption A2–A3: the parallel nonbonded kernels reduce through rayon
 `fold/reduce`, whose merge tree depends on work-stealing, so results may differ (a) between
 thread counts and (b) between two runs at the *same* thread count. This script measures both
 on reference systems and prints a Markdown table (n, max |Δ| and max relative Δ per energy

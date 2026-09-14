@@ -1,6 +1,6 @@
 //! Auxiliary run inputs and execution options.
 //!
-//! An `.imd` file describes a run only together with its auxiliary files (PLAN.md 3.9 A5);
+//! An `.imd` file describes a run only together with its auxiliary files (3.9 A5);
 //! [`RunInputs`] carries those. [`RunOptions`] carries what is *not* physics and therefore has
 //! no IMD field (A15, `execution` group of the future recipe): the parallel policy.
 
@@ -59,7 +59,7 @@ pub struct RunOptions {
     /// MPI pair decomposition `(rank, size)` for the force field (`md` under `mpirun`); the
     /// caller installs the reduction on the built `Forcefield`. `None`: single process.
     pub pair_partition: Option<(usize, usize)>,
-    /// Unmodelled `.imd` blocks this caller accepts as passthrough (PLAN.md 3.9 A17). The
+    /// Unmodelled `.imd` blocks this caller accepts as passthrough (3.9 A17). The
     /// binary allows `GAMD`/`EDS` because it applies them itself; the Python binding allows none.
     pub passthrough: crate::recipe::PassthroughPolicy,
 }

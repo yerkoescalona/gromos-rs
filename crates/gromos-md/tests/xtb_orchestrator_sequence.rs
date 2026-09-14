@@ -15,7 +15,7 @@
 //! the potential energy. Deliberately narrower than "both nonzero simultaneously" (same
 //! incremental-proof discipline `schnet_nve_loop.rs` used); what's new here is the *pipeline*,
 //! not a second nonzero force source. Validated by NVE energy conservation (no gromosXX oracle
-//! exists for this combination — FUTURE.md P8), reading `conf.old().energies.total()` after each
+//! exists for this combination — P8), reading `conf.old.energies.total` after each
 //! `run_step()` — the GROMOS convention this codebase's own `EnergyCalculation`/
 //! `TemperatureCalculation` already use (results land in `old()` after the leapfrog position
 //! step's internal state exchange).

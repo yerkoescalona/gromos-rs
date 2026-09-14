@@ -12,7 +12,7 @@
 /// ## Usage
 /// ```bash
 /// eds @topo system.top @conf initial.g96 @states 3 @s 0.5 \
-///     @offsets 0.0,10.0,20.0 @temp 300 @steps 100000 @dt 0.002
+/// @offsets 0.0,10.0,20.0 @temp 300 @steps 100000 @dt 0.002
 /// ```
 use gromos::{
     algorithm::constraints::ShakeParameters,

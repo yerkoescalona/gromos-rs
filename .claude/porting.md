@@ -2,8 +2,8 @@
 
 How to translate gromosXX/gromos++ into gromos-rs so the result is *both* faithful (matches GROMOS
 where it should) and *correct* (doesn't inherit 30 years of accreted C++ defects). These are
-guidelines, not tasks — the live findings and roadmap live in `PLAN.md`; the rationale in
-`FUTURE.md` Dim 11.
+guidelines, not tasks — the live work is on the project board, and the A/B/C classification below is
+the discipline itself, not a summary of it.
 
 ## The bit-for-bit invariant
 
@@ -27,7 +27,7 @@ EDS/GaMD, lattice-sum/PME) is un-audited surface where two failure modes hide:
 - **Silent divergence** — your "cleaner" reimplementation disagrees with GROMOS and nothing notices
   until the feature is wired.
 
-(A live example already in the tree: the triclinic nearest-image — see PLAN.md P1.4.)
+(A live example already in the tree: the triclinic nearest-image — see 1.4.)
 
 So the standing rule: **write the gromosXX reference test *before* wiring an unwired path, not
 after.** The test is what converts un-audited surface into oracle-covered surface.
@@ -41,7 +41,7 @@ after.** The test is what converts un-audited surface into oracle-covered surfac
 2. **Classify every suspicious thing you find** into one of three buckets, and treat each differently:
    - **(A) Genuine bug** → do *not* port it; note it so a future reader knows it was deliberate.
    - **(B) Intentional GROMOS quirk** → reproduce it *exactly* and **document it as a deliberate
-     decision** (in the style of PLAN.md's "BONDANGLETYPE intentionally unsupported" entries), so it
+     decision** (in the style of CHANGELOG's "BONDANGLETYPE intentionally unsupported" entries), so it
      is never later mistaken for a porting mistake.
    - **(C) Latent divergence** (our code already differs, nothing tests it yet) → write the reference
      test, then reconcile.

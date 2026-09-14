@@ -593,7 +593,7 @@ fn main() {
     println!();
 
     // The binary applies GAMD/EDS itself (out-of-band, after each step), so those blocks may
-    // pass through the recipe; anything else unmodelled is an error (PLAN.md 3.9 A17).
+    // pass through the recipe; anything else unmodelled is an error (3.9 A17).
     let options = RunOptions {
         // INNERLOOP selects which inner-loop kernel gromosXX uses (special solvent loops, CUDA
         // device); it carries no physics, so it rides along instead of stopping the run.
@@ -621,7 +621,7 @@ fn main() {
         println!("  NOTE: {}", note);
     }
 
-    // @dump: the recipe and the plan as data, nothing else — the Rust-side A/B (PLAN.md 3.9).
+    // @dump: the recipe and the plan as data, nothing else — the Rust-side A/B (3.9).
     if md_args.dump {
         match (recipe.to_json(), plan_to_json(&plan)) {
             (Ok(r), Ok(p)) => {
@@ -1302,7 +1302,7 @@ fn main() {
                 // FREEFORCERED/CONSFORCERED back into the original (cube)
                 // frame via truncoct_triclinic_rotmat(false) when
                 // boundary_type==truncoct (no ROTTRANS block here, so
-                // rmat(phi,theta,psi)=identity). PLAN.md P1.4.
+                // rmat(phi,theta,psi)=identity). P1.4.
                 if conf.current().box_config.box_type == BoxType::TruncatedOctahedral {
                     let rot = truncoct_triclinic_rotmat(false);
                     let rotated_forces: Vec<Vec3> = forces.iter().map(|f| rot * *f).collect();

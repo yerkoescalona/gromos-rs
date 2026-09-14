@@ -1,7 +1,7 @@
 //! The step-1 builder, frozen as a **test oracle**: `build_sequence_from_imd` must produce a
 //! sequence whose energies, forces and positions are bit-identical to this one on every
 //! reference system (`build::tests::plan_matches_legacy_builder`). Compiled only under
-//! `cfg(test)`; deleted in PLAN.md 3.9 step 4 once the recipe path has carried the suites for a
+//! `cfg(test)`; deleted in 3.9 step 4 once the recipe path has carried the suites for a
 //! release.
 #![allow(dead_code, unused_imports)]
 

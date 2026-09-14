@@ -170,7 +170,7 @@ fn patch_pairlist_algorithm(input: &str, new_algorithm: &str) -> String {
 /// over the full 100-step water_216_box trajectory.
 ///
 /// Asserts the margin is below 1e-8 (the reference-test tolerance).
-/// If this fails, apply canonical-order sort to CellList output (see PLAN.md §9a-1).
+/// If this fails, apply canonical-order sort to CellList output (see §9a-1).
 #[test]
 fn celllist_vs_standard_margin_water_216() {
     let system = "water_216_box";
@@ -225,7 +225,7 @@ fn celllist_vs_standard_margin_water_216() {
         max_rel < 1e-8,
         "CellList/Standard margin {:.3e} exceeds 1e-8 at step {} \
          (ΔE_abs={:.3e} kJ/mol). \
-         Apply canonical-order sort to CellList output per PLAN.md §9a-1.",
+         Apply canonical-order sort to CellList output per item 9a-1.",
         max_rel,
         max_step,
         max_abs

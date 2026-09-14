@@ -1,4 +1,4 @@
-//! `AlgorithmSpec` — the MD step as data (stage 1 of the builder, PLAN.md 3.9).
+//! `AlgorithmSpec` — the MD step as data (stage 1 of the builder, 3.9).
 //!
 //! `build_plan` turns a [`RunRecipe`] into the ordered list of algorithms the GROMOS step runs,
 //! with **every value resolved** (degrees of freedom, virial kind, `four_pi_eps_i`, restraint
@@ -867,14 +867,14 @@ pub fn validate_plan(plan: &[AlgorithmSpec]) -> Result<(), RunError> {
         }
     }
     // Terms: a barostat needs every provider to report a virial; `Replace` coupling needs a
-    // zone-aware Forcefield (PLAN.md 2.8) — declared, never silently additive.
+    // zone-aware Forcefield (2.8) — declared, never silently additive.
     for spec in plan {
         if let AlgorithmSpec::Orchestrator { terms } = spec {
             for term in terms {
                 if term.coupling() == Coupling::Replace {
                     return err(format!(
                         "term {} with coupling=replace requires the zone-aware Forcefield \
-                         (PLAN.md 2.8); only coupling=delta is available",
+                         (2.8); only coupling=delta is available",
                         term.name()
                     ));
                 }

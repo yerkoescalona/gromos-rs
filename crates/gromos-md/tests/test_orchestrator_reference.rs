@@ -1,6 +1,6 @@
 //! `ProviderOrchestrator` against real gromosXX references — the P2.8-2 exit criterion.
 //!
-//! PLAN.md P2.8-2 originally called for "classical-only configuration reproduces today's 37/37
+//! P2.8-2 originally called for "classical-only configuration reproduces today's 37/37
 //! bit-for-bit." That premise doesn't survive contact with P2.6's own documented scope limit:
 //! `LjCrfInteraction` is solute-solute atom-level only (no exclusions, no solvent charge-group
 //! pairlist shape — see its module docs), so 33 of the 37 reference systems (anything with

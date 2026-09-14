@@ -1,5 +1,5 @@
 //! A *null* perturbation must be a no-op — the invariance that pinned every FEP defect of
-//! 2026-08-29/30 (PLAN.md 1.7). gromosXX has it by construction; here it is explicit.
+//! 2026-08-29/30 (1.7). gromosXX has it by construction; here it is explicit.
 //!
 //! A `.ptp` whose atoms have identical A and B states and zero soft-core parameters describes
 //! the unperturbed system: energies and forces must be bit-identical to a run without any

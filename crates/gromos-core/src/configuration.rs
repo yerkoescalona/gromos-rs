@@ -73,7 +73,7 @@ impl Box {
     /// Create a truncated-octahedron box from its (lower-triangular)
     /// triclinic box vectors, as produced by
     /// `math::truncoct_triclinic_box(cubic, true)` from the legacy NTB=-1
-    /// "cube edge length" BOX block (PLAN.md P1.4).
+    /// "cube edge length" BOX block (P1.4).
     pub fn truncated_octahedral(vectors: Mat3) -> Self {
         Self {
             box_type: BoxType::TruncatedOctahedral,
@@ -135,7 +135,7 @@ pub struct Energy {
     /// Energy of each additive term of the run (`Term("xtb", …)`, `Term("schnet", …)`), keyed by
     /// the term's registry name (`xtb`, or `xtb:1` when a kind occurs more than once), in plan
     /// order. Their sum is booked in `special_total`; this keeps them visible one by one
-    /// (PLAN.md 3.9 G10) so a compensating error between two terms cannot hide.
+    /// (3.9 G10) so a compensating error between two terms cannot hide.
     pub term_energies: Vec<(String, f64)>,
     /// Sum of distance-restraint energies.
     pub distanceres_total: f64,

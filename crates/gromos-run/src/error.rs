@@ -2,7 +2,7 @@
 //!
 //! Every failure the `md` binary used to report with `eprintln!` + `process::exit(1)` is a
 //! variant here, so the binary and the Python binding render the same condition the same way
-//! (PLAN.md 3.9 C10). Python maps variants onto builtin exception types in `pyo3-gromos`.
+//! (3.9 C10). Python maps variants onto builtin exception types in `pyo3-gromos`.
 
 use std::fmt;
 
@@ -31,7 +31,7 @@ pub enum RunError {
     /// Inputs contradict each other (e.g. a perturbed topology with `NTG=0`).
     Inconsistent(String),
     /// The parameter file carries a block the recipe does not model and the caller did not
-    /// allow to pass through (PLAN.md 3.9 A17: a physics-bearing block must never be ignored).
+    /// allow to pass through (3.9 A17: a physics-bearing block must never be ignored).
     UnknownBlock { block: String },
     /// A value the recipe cannot represent (e.g. an unknown NTB code, several temperature baths).
     Recipe(String),

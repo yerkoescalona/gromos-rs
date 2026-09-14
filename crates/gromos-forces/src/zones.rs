@@ -1,6 +1,6 @@
 //! Zone partitioning and **interaction ownership** — who computes which atom pair.
 //!
-//! **PLAN.md P2.7 Step 4.** In a partitioned QM/MM or BuRNN system, more than one provider can
+//! ** P2.7 Step 4.** In a partitioned QM/MM or BuRNN system, more than one provider can
 //! plausibly claim the same atom pair, and nothing detects that at runtime: two independently
 //! written providers share no contract (assumption **A5**). Double-counting is therefore
 //! prevented by an *explicit, static* ownership table applied by the orchestrator — not by
@@ -27,7 +27,7 @@
 //! Everything the network does not carry must therefore still be computed classically, which
 //! fixes the ownership of all six pair classes ([`PairOwner`]).
 //!
-//! # Van der Waals across the QM boundary (PLAN.md P2.8-4, resolved)
+//! # Van der Waals across the QM boundary (P2.8-4, resolved)
 //!
 //! Originally left undecided here — the tutorial's `md.imd` `QMMM` block lists seven field names
 //! against six values, so `QMLJ`'s position was ambiguous from the tutorial alone. Resolved by
@@ -127,7 +127,7 @@ impl ZonePartition {
     /// Build from selector strings (the `AtomSelection::from_string` grammar — `1:res(LIG:a)`,
     /// name lists, `not()`/`minus()`) instead of hand-counted index lists — the "renumber the
     /// ligand every time the topology changes" ergonomics problem `AtomSelection::from_string`
-    /// already solved for atom selection generally, applied here to zones (PLAN.md P3.7).
+    /// already solved for atom selection generally, applied here to zones (P3.7).
     /// `buffer = None` gives a plain inner/outer QM/MM split, no buffer zone.
     pub fn from_selections(
         topo: &Topology,
@@ -215,7 +215,7 @@ impl ZonePartition {
         embedding == Embedding::Electrostatic && self.owner(i, j) == PairOwner::Embedding
     }
 
-    /// **The LJ ownership table (PLAN.md P2.8-4).** Distinct from [`Self::owner`] — sourced from
+    /// **The LJ ownership table (P2.8-4).** Distinct from [`Self::owner`] — sourced from
     /// gromosXX's real `QMMM_Interaction::modify_exclusions` (see module docs), not derived from
     /// the BuRNN energy decomposition the way [`Self::owner`] is (the NN's *own* training target
     /// says nothing about the classical field's LJ bookkeeping).
@@ -422,7 +422,7 @@ mod tests {
         assert_eq!(p.atoms_in(Zone::Outer).len(), 4);
     }
 
-    /// **PLAN.md P2.8-4's central finding, as a test.** `owner()` and `lj_owner()` must diverge
+    /// ** P2.8-4's central finding, as a test.** `owner` and `lj_owner` must diverge
     /// on inner-outer pairs specifically: `owner()` says `Embedding` (electrostatics moves to the
     /// embedding term) but `lj_owner()` says `Classical` (LJ stays classical unconditionally,
     /// per gromosXX's real `modify_exclusions` — see module docs). Getting this backwards is

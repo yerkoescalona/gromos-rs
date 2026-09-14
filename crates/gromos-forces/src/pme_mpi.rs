@@ -50,7 +50,7 @@
 //!     64, 64, 64,  // Grid size
 //!     4,            // B-spline order
 //!     1.0,          // Ewald alpha
-//!     5.0, 5.0, 5.0 // Box size
+//! 5.0, 5.0, 5.0 // Box size
 //! );
 //!
 //! // Calculate PME forces

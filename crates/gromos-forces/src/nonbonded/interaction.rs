@@ -1,7 +1,7 @@
 //! `LjCrfInteraction` — the classical LJ+CRF nonbonded term as a [`PotentialProvider`].
 //!
 //! Named `*Interaction`, not `*Provider`: gromosXX's own C++ base class for force terms is
-//! `Interaction` (`Nonbonded_Interaction`, `QMMM_Interaction` — see `FUTURE.md` Dim 12.1).
+//! `Interaction` (`Nonbonded_Interaction`, `QMMM_Interaction` — gromosXX shapes QM/MM as one too).
 //! `PotentialProvider` stays the trait name (already fixed in `architecture.md`'s
 //! five-contract taxonomy); concrete implementations read as GROMOS terms.
 //!
@@ -37,7 +37,7 @@ pub struct LjCrfInteraction {
     pub rf_epsilon: f64,
     /// Reaction-field inverse Debye screening length (nm^-1).
     pub rf_kappa: f64,
-    /// **PLAN.md P2.8-1.** When set, pairs whose [`ZonePartition::classical_should_evaluate`]
+    /// ** P2.8-1.** When set, pairs whose [`ZonePartition::classical_should_evaluate`]
     /// is `false` (owned by a QM/ML provider or by electrostatic embedding, see
     /// [`crate::zones`]) are skipped here — the double-counting contract `zones.rs` states but
     /// nothing previously consulted. `None` means "no partitioning" (every pair is classical),
@@ -58,7 +58,7 @@ impl LjCrfInteraction {
         }
     }
 
-    /// Skip pairs owned by a QM/ML provider or by electrostatic embedding (PLAN.md P2.8-1).
+    /// Skip pairs owned by a QM/ML provider or by electrostatic embedding (P2.8-1).
     pub fn with_zone_partition(mut self, partition: ZonePartition) -> Self {
         self.zone_partition = Some(partition);
         self
@@ -128,7 +128,7 @@ impl PotentialProvider for LjCrfInteraction {
             );
         }
 
-        // **PLAN.md P2.8-4.** Pairs whose combined LJ+CRF pass was skipped above
+        // ** P2.8-4.** Pairs whose combined LJ+CRF pass was skipped above
         // (`classical_should_evaluate` false — Provider- or Embedding-owned) but whose LJ term
         // gromosXX still computes classically (`ZonePartition::lj_owner`, sourced from the real
         // `QMMM_Interaction::modify_exclusions`): inner-outer pairs always qualify; inner-inner /
@@ -324,7 +324,7 @@ mod tests {
         assert!((contribution.energy - (oracle.lj + oracle.crf - self_energy)).abs() < 1e-10);
     }
 
-    /// **PLAN.md P2.8-1 exit criterion, isolated.** Partition the 4-atom fixture into inner
+    /// ** P2.8-1 exit criterion, isolated.** Partition the 4-atom fixture into inner
     /// {0,1} / outer {2,3}: pair (2,3) is the only [`crate::zones::PairOwner::Classical`] pair,
     /// the rest are Provider- or Embedding-owned and must be skipped. The partitioned energy
     /// must equal exactly the direct-call energy of the single surviving pair — proving the
@@ -348,7 +348,7 @@ mod tests {
             .contribute(&region, &topo, &conf, &index)
             .unwrap();
 
-        // Hand-built oracle matching PLAN.md P2.8-4's two-pass rule: (2,3) is outer-outer, full
+        // Hand-built oracle matching P2.8-4's two-pass rule: (2,3) is outer-outer, full
         // classical LJ+CRF; (0,2)/(0,3)/(1,2)/(1,3) are inner-outer, LJ-only (CRF always
         // classical-owned but zeroed here per gromosXX's real modify_exclusions rule — this
         // provider computes it as a supplement, see the module's contribute() comment); (0,1) is

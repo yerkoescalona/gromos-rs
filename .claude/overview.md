@@ -2,9 +2,13 @@
 
 gromos-rs ports **gromosXX/md++** (MD engine) + **gromosPlsPls/gromos++** (analysis + tools) into
 one Rust workspace with a single shared core. The architectural invariants live in `architecture.md`.
-The porting discipline lives in `porting.md`. The long-horizon bets live in `FUTURE.md`. The live
-roadmap and reference test matrix live in `PLAN.md` (finished items condensed there; their full
-working notes — traps, oracle numbers, rejected alternatives — are verbatim in `PLAN_ARCHIVE.md`).
+The porting discipline lives in `porting.md`.
+
+**Work is tracked on the project board** (`Icebox` → `Ready` → `Doing` → `Done`): a card is a
+deliverable, its checklist is the steps, and no card reaches `Ready` without a **Gate** — the
+objective, checkable condition for calling it done. `Icebox` holds the un-gated ideas, including the
+long-horizon architectural bets. **History lives in `CHANGELOG.md`**, whose item index resolves the
+stable ids (`1.5`, `2.8`, `3.9 A16`) that code comments cite.
 
 ## When working in a crate, read its stage contract
 
@@ -65,8 +69,15 @@ hand if `just` is not installed).
 - **f64 everywhere** (not f32)
 - **gromosXX `@` CLI convention:** `@topo @conf @input @fin @trc @tre @trf @trv @verb ...`
 - **Tolerances:** force_abs=1e-6, energy_rel=1e-8, position_abs=1e-9
-- **CLI arg parsing:** clap `#[derive(Parser)]` with `gromos_args()` pre-processor (`@key → --key`, `@f argfile` expansion). No custom arg parsers.
-- **One run description (PLAN.md 3.9, done 2026-08-29):** `gromos_run::RunRecipe` is the only
+- **CLI arg parsing:** `gromos_io::args::Arguments` (the gromos++ reader: multi-valued `@key`s,
+  absent/flag/valued distinguished) or clap `#[derive(Parser)]`, both over argv already put through
+  `gromos_io::normalize` (`@key → --key`, `@f argfile` expansion). No third parser, and no
+  hand-rolled `env::args()` loop.
+- **A program's body is a library function (3.10):** `<crate>::programs::<name>::run(argv,
+  out)` with a `Program` record in the crate's registry; `src/bin/**` is `fn main() {
+  gromos_io::run_main(&PROGRAM) }` and nothing else. A program never reads the process arguments,
+  never writes to the process stdout and never exits — `just lint` greps for all three (G11).
+- **One run description (3.9, done 2026-08-29):** `gromos_run::RunRecipe` is the only
   description of a run; `.imd` files and `py-gromos` objects are front-ends to it, both built by
   `gromos-run` (`prepare_system → build_plan → validate_plan → instantiate → start`). No second
   IMD→algorithm builder, no second IMD reader — `just lint` greps for both (G6). Adding a force term

@@ -1,4 +1,4 @@
-//! **PLAN.md P2.7 Step 5 (revised)** — the double-counting contract, checked on the real system.
+//! ** P2.7 Step 5 (revised)** — the double-counting contract, checked on the real system.
 //!
 //! # Why this replaces the originally-planned oracle
 //!
@@ -15,7 +15,7 @@
 //!   are hand-supplied through the constructor instead.
 //!
 //! So there is no MM baseline to reproduce, and inventing one would have manufactured a
-//! false-confidence test. PLAN.md P2.7 Step 5 explicitly said to drop it in this case.
+//! false-confidence test. P2.7 Step 5 explicitly said to drop it in this case.
 //!
 //! # What is actually checkable, and is checked here
 //!

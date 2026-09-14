@@ -1,4 +1,4 @@
-//! Run bundles — a run on disk (PLAN.md 3.9 A5).
+//! Run bundles — a run on disk (3.9 A5).
 //!
 //! An `.imd` describes a run only together with its topology, coordinates and auxiliary files.
 //! The reference systems already carry that as `input.toml`:

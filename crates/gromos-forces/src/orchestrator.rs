@@ -1,6 +1,6 @@
 //! `ProviderOrchestrator` — sums `Vec<Box<dyn PotentialProvider>>` into one [`Contribution`].
 //!
-//! **PLAN.md P2.8-2.** Every piece up to here (`provider.rs`, `zones.rs`, `LjCrfInteraction`,
+//! ** P2.8-2.** Every piece up to here (`provider.rs`, `zones.rs`, `LjCrfInteraction`,
 //! `ElectrostaticEmbedding`, `SchNetInteraction`) was validated in isolation; nothing iterated
 //! more than one provider. This is that missing piece: register `(region, provider)` pairs,
 //! evaluate all of them against the same shared `Topology`/`Configuration`/`SpatialIndex`, and
@@ -11,7 +11,7 @@
 //!
 //! `Contribution` is a scattered accumulator rather than `&mut Configuration` specifically so a
 //! caller *can* check which indices a provider touched before trusting them (`provider.rs`
-//! module docs, FUTURE.md P5). This module is that caller. A provider that declares
+//! module docs, P5). This module is that caller. A provider that declares
 //! [`Embedding::None`] (`provider.rs`) is asserting "I only touch atoms in my own region" — the
 //! orchestrator enforces that assertion instead of trusting it, exactly the failure mode the
 //! scattered-`Contribution` design was chosen to make checkable. A provider with
@@ -54,7 +54,7 @@ impl ProviderOrchestrator {
     }
 
     /// `register`, reporting the provider's energy under `label` (a run's registry name for the
-    /// term — PLAN.md 3.9 G10) instead of the provider's own `name()`.
+    /// term — 3.9 G10) instead of the provider's own `name`.
     pub fn register_labelled(
         &mut self,
         label: impl Into<String>,
@@ -92,7 +92,7 @@ impl ProviderOrchestrator {
     }
 
     /// `evaluate`, also returning every provider's own energy under its label, in evaluation
-    /// order — the per-term view the summed `Contribution` erases (PLAN.md 3.9 G10).
+    /// order — the per-term view the summed `Contribution` erases (3.9 G10).
     pub fn evaluate_with_terms(
         &mut self,
         topo: &Topology,

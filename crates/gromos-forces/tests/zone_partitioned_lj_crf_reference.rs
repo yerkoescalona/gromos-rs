@@ -1,4 +1,4 @@
-//! **PLAN.md P2.8-1 exit criterion, updated for P2.8-4.** `zones.rs` (P2.7 Step 4) states the
+//! ** P2.8-1 exit criterion, updated for P2.8-4.** `zones.rs` (P2.7 Step 4) states the
 //! double-counting contract; `zone_partition_reference.rs` (P2.7 Step 5) proves the ownership
 //! table itself partitions real pairs with no gaps or overlaps. Neither, until P2.8-1, proved
 //! anything about `LjCrfInteraction` — the double-counting contract was a table nothing consulted.

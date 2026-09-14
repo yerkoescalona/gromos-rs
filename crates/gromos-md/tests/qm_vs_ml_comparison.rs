@@ -1,4 +1,4 @@
-//! QM/MM vs ML/MM — the comparison step of the pipeline `PLAN.md` P2.9 documents.
+//! QM/MM vs ML/MM — the comparison step of the generate/train/compare pipeline.
 //!
 //! Runs real `XtbInteraction` (`Embedding::None`) and a *trained* `SchNetInteraction` (loaded
 //! from `/tmp/trained_water_schnet.pt`, produced by `scripts/train_qmmm_schnet.py` on data from
