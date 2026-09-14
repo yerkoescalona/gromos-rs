@@ -41,21 +41,51 @@ placement with other argument models), `mk_script` (needs `@template`).
 **No gromos++ counterpart:** `traj2pdb`, `top2build`, `prep_posres`, `prep_xray` (gromos++'s
 needs clipper), `mpi_scaling`.
 
-Conventions: `make_top`, `com_top`, `check_top`, `pdb2g96`, `ion`, `build_box`, `prep_posres` take
-`--flag` (clap) *and* `@flag` (via `gromos_args`); the others take `@flag` only.
+Conventions: `make_top`, `com_top`, `check_top`, `pdb2g96`, `ion`, `build_box`, `prep_posres` parse
+with clap, the rest with `gromos_io::args::Arguments`; both see argv already normalised by
+`gromos_io::normalize` (`@flag` → `--flag`, `@f` expanded), so every program takes either form and
+every program accepts `@f`. An unknown `@key` is an error (0.0.49; the hand-rolled parsers used to
+ignore them).
 
 Adding a reference test: put gromos++'s output under `tests/data/<tool>/` with a README that records
 the exact command, and compare in a `tests/*_references.rs` (`read_topology_file` for topologies —
 formatting-independent — or the `parse` helper of `box_tool_references.rs` for coordinates).
 
+## Shape (3.10, 0.0.49)
+Every program's body is `src/programs/<category>/<name>.rs`: `pub const PROGRAM` (name, accepted
+`@key`s, usage, status, `run`) and `pub fn run(argv, out) -> Result<(), String>`. `src/bin/**` is a
+one-line `gromos_io::run_main(&PROGRAM)`. The four categories — `topology`, `box`, `conversion`,
+`utilities` — are the same on both sides and in the `[[bin]]` sections of `Cargo.toml`; the module
+is `r#box`, `box` being a keyword. `programs/mod.rs` re-exports every program flat, so a caller
+writes `programs::make_top`, not `programs::topology::make_top`, and `super::` inside a body is the
+category, so shared helpers are `crate::programs::{io_err, parse_clap}`. The preparation chain adds
+a typed verb beside `run` — `make_top`, `com_top::com_top`, `red_top::reduce`, `pdb2g96`,
+`sim_box::solvate`, `build_box::build_box`, `ion::add_ions`, `check_top::check_top` — returning
+`ParsedTopology` / `LabeledCoordinateData` / a report, with `run` = parse args + read files + verb
++ serialise.
+`PROGRAMS` is the registry `pyo3-gromos` binds as `gromos.tools`.
+
 ## Key files
 ```
-src/bin/topology/   — make_top, com_top, check_top, etc.
-src/bin/box/        — sim_box, build_box, ion, etc.
+src/lib.rs          — the registry (`PROGRAMS`, `find`)
+src/programs/<cat>/ — one module per program: PROGRAM, run(argv, out), and the typed verb
+src/programs/mod.rs — the four categories, the flat re-exports, PROGRAMS, io_err, parse_clap
+src/bin/<cat>/      — one-line `run_main(&PROGRAM)` shims; nothing else belongs here
+tests/library_parity.rs — library run == binary stdout, byte for byte, for every program
+tests/typed_verbs.rs    — the typed verb's result, serialised, == what run writes
 tests/              — reference tests against gromos++ output (`tests/data/<tool>/README.md`)
 ```
 
 ## Crate-specific rules
-- **Refactor make_top / com_top into library functions** (not binary-only `main`s) so pyo3-gromos can call them — P3 target.
+- **Every program is a library function** (not a binary-only `main`): `src/programs/<category>/<name>.rs`
+  holds `pub const PROGRAM` + `pub fn run(argv, out)`, the prep chain adds a typed verb, and
+  `src/bin/<category>/<name>.rs` is a one-line `run_main(&PROGRAM)` — 3.10. Do not add a new binary
+  with its compute in `main()`.
+- **A new program lands in four places, all in the same category:** the body under
+  `src/programs/<category>/`, a `pub mod` in that category's `mod.rs` and the flat re-export plus a
+  `PROGRAMS` entry in `src/programs/mod.rs`, the shim under `src/bin/<category>/`, and a `[[bin]]`
+  in `Cargo.toml`. `every_program_is_a_bin` catches a missing `[[bin]]` and
+  `program_and_bin_agree_on_category` catches a body and its shim filed under different categories
+  — the drift that put a flat `programs/` next to a grouped `bin/`.
 - **File parsing always delegates to gromos-io.** Never duplicate format code in tool binaries.
 - **AtomSpecifier:** build the gromos++ grammar as a facade over gromos-core primitives (P2.1), not as a standalone reimplementation.

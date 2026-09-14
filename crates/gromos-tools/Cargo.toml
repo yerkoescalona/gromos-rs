@@ -22,10 +22,6 @@ env_logger = { workspace = true }
 # CLI
 clap = { workspace = true }
 
-# Random number generation
-rand = { workspace = true }
-rand_distr = { workspace = true }
-
 # ── Topology construction ──────────────────────────────────────────
 
 [[bin]]
@@ -141,12 +137,6 @@ path = "src/bin/conversion/amber2gromos.rs"
 [[bin]]
 name = "mk_script"
 path = "src/bin/utilities/mk_script.rs"
-
-# TODO: remove this stub — real atominfo lives in gromos-analysis/src/bin/structural/atominfo.rs
-[[bin]]
-name = "atominfo"
-path = "src/bin/utilities/atominfo.rs"
-doc = false
 
 [[bin]]
 name = "gch"
